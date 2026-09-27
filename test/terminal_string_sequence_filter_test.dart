@@ -11,6 +11,15 @@ void main() {
       expect(filter.process(input), input);
     });
 
+    test('output without ESC passes through as the same string', () {
+      final filter = TerminalStringSequenceFilter();
+      const plain = 'build ok\r\nnext line ✓\r\n';
+      expect(identical(filter.process(plain), plain), isTrue);
+      // Also right after a stripped sequence ended.
+      expect(filter.process('a${esc}P+q$esc\\b'), 'ab');
+      expect(identical(filter.process(plain), plain), isTrue);
+    });
+
     test('strips the vim XTGETTCAP DCS probe (+q4D73) entirely', () {
       final filter = TerminalStringSequenceFilter();
       const input =
