@@ -34,6 +34,7 @@ const { execFile } = require('child_process')
 const sm = require('./summarize')
 const pricing = require('./pricing')
 const { resolveProject, localDate } = require('./usage')
+const { isTestCommand, errorSignature, commandLabel, hash: activityHash } = require('./activity')
 
 const SCHEMA = 1
 const MODEL = 'haiku'
@@ -299,8 +300,9 @@ function textOf (content) {
 // The last TAIL_BYTES of a transcript: tokens and cost of the assistant
 // messages from `since` on, and the last replies and prompts (text only,
 // main thread only) from `repliesSince` on.
-function readTail (file, { since, repliesSince = since, maxBytes = TAIL_BYTES } = {}) {
-  const out = { tokens: null, costUsd: null, replies: [], prompts: [], lastReply: null, partial: false }
+function readTail (file, { since, repliesSince = since, runsSince = since, maxBytes = TAIL_BYTES } = {}) {
+  const out = { tokens: null, costUsd: null, replies: [], prompts: [], lastReply: null, runs: [], apiError: null, first: null, partial: false }
+  const uses = new Map()
   let fd
   try { fd = fs.openSync(file, 'r') } catch { return out }
   try {
@@ -323,7 +325,7 @@ function readTail (file, { since, repliesSince = since, maxBytes = TAIL_BYTES } 
       try { d = JSON.parse(line) } catch { continue }
       const t = Date.parse(d.timestamp)
       if (!Number.isFinite(t)) continue
-      if (first === null) first = t
+      if (first === null) first = out.first = t
       const m = d.message
       if (!m || typeof m !== 'object') continue
       if (d.type === 'assistant' && m.usage && t >= since && m.model !== '<synthetic>') {
@@ -332,6 +334,26 @@ function readTail (file, { since, repliesSince = since, maxBytes = TAIL_BYTES } 
         const u = m.usage
         const row = { model: m.model, input: u.input_tokens || 0, output: u.output_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0, cacheRead: u.cache_read_input_tokens || 0 }
         if (!prev || row.output > prev.output) seen.set(key, row)
+      }
+      // Tool calls and their results (subagents' too), for machines without
+      // the PostToolUseFailure hook; an API error the turn ended on, for
+      // machines without StopFailure.
+      if (Array.isArray(m.content)) {
+        for (const b of m.content) {
+          if (!b || typeof b !== 'object') continue
+          if (b.type === 'tool_use' && b.id) {
+            uses.set(b.id, { name: b.name || 'tool', command: b.name === 'Bash' && b.input && typeof b.input.command === 'string' ? b.input.command : null })
+            if (uses.size > 2000) uses.delete(uses.keys().next().value)
+          } else if (b.type === 'tool_result' && uses.has(b.tool_use_id) && t >= runsSince) {
+            const u = uses.get(b.tool_use_id)
+            const text = typeof b.content === 'string' ? b.content : textOf(b.content)
+            if (b.is_error === true || u.command) out.runs.push({ at: t, ok: b.is_error !== true, command: u.command, what: u.command || u.name, error: b.is_error === true ? errorSignature(text) : null })
+          }
+        }
+      }
+      if (!d.isSidechain && !d.isMeta) {
+        if (d.type === 'assistant' && d.isApiErrorMessage === true) out.apiError = { at: t, type: apiErrorType(textOf(m.content)) }
+        else if (d.type === 'user' && typeof m.content === 'string' && m.content.trim() && !m.content.startsWith('<')) out.apiError = null
       }
       if (d.isSidechain || d.isMeta) continue
       if (d.type === 'assistant') {
@@ -364,6 +386,47 @@ function readTail (file, { since, repliesSince = since, maxBytes = TAIL_BYTES } 
     try { fs.closeSync(fd) } catch {}
   }
   return out
+}
+
+// "API Error: 529 {…overloaded…}" -> overloaded; StopFailure's names.
+function apiErrorType (text) {
+  const s = String(text || '').toLowerCase()
+  if (/rate.?limit|\b429\b|usage limit/.test(s)) return 'rate_limit'
+  if (/overload|\b529\b/.test(s)) return 'overloaded'
+  if (/auth|\b401\b|\b403\b|log ?in/.test(s)) return 'authentication_failed'
+  if (/\b5\d\d\b/.test(s)) return 'server_error'
+  return 'unknown'
+}
+
+// The agent's log with what the missing hooks would have added, read from
+// the transcript tail: without PostToolUseFailure the command entries
+// ('c', 'f') from the tail's start on are rebuilt from the tool calls and
+// results in it; without StopFailure an API error the last turn ended on
+// becomes an 'x' entry. Returns a copy; the log itself is untouched.
+function withTranscriptFacts (act, tail, hooks) {
+  if (!tail || (hooks.failures && hooks.stopFailure)) return act
+  const base = act || { ev: [], files: [], labels: {}, state: null, meta: null, dropped: 0, since: null }
+  const out = { ...base, ev: base.ev.slice(), labels: { ...base.labels } }
+  if (!hooks.failures && tail.first !== null) {
+    out.ev = out.ev.filter(e => !((e[1] === 'c' || e[1] === 'f') && e[0] >= tail.first))
+    for (const r of tail.runs) {
+      const h = hashLabel(out.labels, r.what)
+      const test = r.command && isTestCommand(r.command) ? 1 : 0
+      out.ev.push(r.ok ? [r.at, 'c', h, test] : [r.at, 'f', h, test, hashLabel(out.labels, r.error || 'error')])
+    }
+  }
+  if (!hooks.stopFailure && tail.apiError && !out.ev.some(e => e[1] === 'x' && e[0] >= tail.apiError.at)) {
+    out.ev.push([tail.apiError.at, 'x', tail.apiError.type])
+  }
+  out.ev.sort((a, b) => a[0] - b[0])
+  if (out.since === null && out.ev.length) out.since = out.ev[0][0]
+  return out
+}
+
+function hashLabel (labels, text) {
+  const h = activityHash(text)
+  if (!(h in labels)) labels[h] = commandLabel(text)
+  return h
 }
 
 // --- store --------------------------------------------------------------------
@@ -584,6 +647,8 @@ async function digest (opts) {
   const since = Number.isFinite(opts.since) ? opts.since : now - DEFAULT_SINCE_MS
   const t = { ...THRESHOLDS, ...(opts.thresholds || {}) }
   const { status, activity, source, hasActivity } = opts.data
+  // Which newer hooks feed the log (else the transcript stands in).
+  const hooks = { failures: true, stopFailure: true, ...(opts.hooks || {}) }
   const home = (opts.env && opts.env.HOME) || os.homedir()
   const projects = new Map()
   const projectOf = cwd => {
@@ -600,15 +665,16 @@ async function digest (opts) {
     const last = lastActivityAt(agent, act)
     // Agents that ended before the window and were quiet since are history.
     if (agent.state === 'ended' && last < since) continue
-    const facts = countFacts(act, since, now, (act && act.state) || STATE_CODES[agent.state])
     // Tokens and the replies for a summary: only agents active in the window.
     let tail = null
     if (last >= since && typeof agent.transcriptPath === 'string' && path.isAbsolute(agent.transcriptPath) && agent.transcriptPath.endsWith('.jsonl')) {
       const prev = store.agents[sid]
-      tail = readTail(agent.transcriptPath, { since, repliesSince: prev && prev.basis ? Math.min(prev.basis, now) : since })
+      tail = readTail(agent.transcriptPath, { since, repliesSince: prev && prev.basis ? Math.min(prev.basis, now) : since, runsSince: Math.min(since, now - t.windowMin * 60000) })
       tails.set(sid, tail)
-      if (tail.partial) facts.partial = true
     }
+    const log = withTranscriptFacts(act, tail, hooks)
+    const facts = countFacts(log, since, now, (act && act.state) || STATE_CODES[agent.state])
+    if (tail && tail.partial) facts.partial = true
     facts.tokens = tail ? tail.tokens : null
     facts.costUsd = tail ? tail.costUsd : null
     // Claude Code's idle notification replaces the last reply in `status`.
@@ -629,7 +695,7 @@ async function digest (opts) {
       lastError: agent.lastError || null,
       pending: (agent.pending || []).map(p => ({ id: p.id, toolName: p.toolName, summary: p.summary, createdAt: p.createdAt, ...(p.risk ? { risk: p.risk } : {}), ...(p.batchable ? { batchable: true } : {}) })),
       facts,
-      stuck: stuckFlags(live ? agent : null, act, now, t),
+      stuck: stuckFlags(live ? agent : null, log, now, t),
       summary: null,
       summaryPending: false
     }
@@ -683,6 +749,8 @@ async function digest (opts) {
     since,
     source,
     activity: !!hasActivity,
+    // Where failures and API errors came from: the hooks, or the transcripts.
+    sources: { failures: hooks.failures ? 'hooks' : 'transcript', apiErrors: hooks.stopFailure ? 'hooks' : 'transcript' },
     thresholds: t,
     counts,
     agents: entries,
@@ -765,6 +833,8 @@ module.exports = {
   stuckFlags,
   attentionOf,
   readTail,
+  withTranscriptFacts,
+  apiErrorType,
   applyGitLines,
   agentInput,
   buildPrompt,

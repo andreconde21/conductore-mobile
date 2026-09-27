@@ -24,6 +24,8 @@ printf 'main\t2\t%s\t/work/t\tfixer\t4242\n' "$6"
 `, { mode: 0o755 })
 // A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9.
 // It also logs which Herdr server (HERDR_SOCKET_PATH) each call went to.
+// A fake claude: `install` registers the newer hooks for this version.
+fs.writeFileSync(path.join(fakeBin, 'claude'), '#!/bin/sh\necho "2.1.280 (Claude Code)"\n', { mode: 0o755 })
 const herdrLog = path.join(fakeBin, 'herdr.log')
 const herdrSocketLog = path.join(fakeBin, 'herdr-sockets.log')
 fs.writeFileSync(path.join(fakeBin, 'herdr'), `#!/bin/sh

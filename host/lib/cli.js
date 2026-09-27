@@ -630,11 +630,16 @@ async function digestCmd (args) {
   try {
     paths.ensureDirs()
     const data = await digestData()
+    // The newer hooks this machine has registered; without them failures
+    // and API errors are read from the transcripts.
+    let registered = []
+    try { registered = settingsMod().installed(settingsMod().readSettings()) } catch {}
     return out({
       version: paths.VERSION,
       ...await dm.digest({
         ...opts,
         data,
+        hooks: { failures: registered.includes('PostToolUseFailure'), stopFailure: registered.includes('StopFailure') },
         storeFile: paths.digestPath(),
         lockFile: path.join(paths.homeDir(), 'digest.lock'),
         onChild: c => { child = c }
@@ -725,6 +730,20 @@ function recordNodePath () {
   fs.writeFileSync(file, process.execPath + '\n', { mode: 0o600 })
 }
 
+// The local Claude Code's version, for the hooks only newer versions
+// know: { bin, version } or null (not found, no answer in 5 s, unreadable).
+function claudeVersion () {
+  const bin = summarizeMod().findClaude()
+  if (!bin) return null
+  const env = { ...process.env }
+  delete env.CLAUDECODE
+  try {
+    const text = require('child_process').execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], env })
+    const version = settingsMod().parseVersion(text)
+    return version ? { bin, version: version.join('.') } : null
+  } catch { return null }
+}
+
 function install () {
   const settings = settingsMod()
   const statusline = statuslineMod()
@@ -737,7 +756,11 @@ function install () {
   // Replaces every earlier conductore handler (any path, the Node hook of
   // 0.3 and older) and moves a `conductore-hostd statusline` line to the sh
   // statusline, keeping the command it wraps.
-  const merged = settings.merge(current, hookBin)
+  // The newer events only where this Claude Code knows them; a merge also
+  // takes ours off optional events a downgraded one would not know.
+  const claude = claudeVersion()
+  const { events, skipped } = settings.eventsFor(claude && claude.version)
+  const merged = settings.merge(current, hookBin, events)
   const sl = statusline.merge(merged, slBin)
   const before = JSON.stringify(current)
   if (JSON.stringify(sl.settings) !== before) {
@@ -745,7 +768,7 @@ function install () {
   }
   paths.ensureDirs()
   try { recordNodePath() } catch (err) { return fail(`cannot write ${paths.nodePathFile()}: ${err.message}`) }
-  return out({ ok: true, settings: file, hook: hookBin, statusline: slBin, events: settings.EVENTS, statusLine: sl.action })
+  return out({ ok: true, settings: file, hook: hookBin, statusline: slBin, events, skipped, claudeVersion: claude ? claude.version : null, statusLine: sl.action })
 }
 
 async function uninstall () {
@@ -815,6 +838,15 @@ async function doctor () {
   const present = settings.installed(cfg)
   const missing = settings.EVENTS.filter(e => !present.includes(e))
   add('hooks registered', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : `${present.length} events`)
+  const local = claudeVersion()
+  const { skipped } = settings.eventsFor(local && local.version)
+  const optionalOn = settings.OPTIONAL_EVENTS.map(o => o.event).filter(e => present.includes(e))
+  add('optional hooks', true, [
+    optionalOn.length ? `registered: ${optionalOn.join(', ')}` : 'none registered',
+    ...skipped.map(x => `${x.event} skipped (${x.reason})`),
+    ...skipped.filter(x => present.includes(x.event)).map(x => `${x.event} is registered but this Claude Code may not know it: run install`),
+    local ? `Claude Code ${local.version}` : 'Claude Code not found'
+  ].join('; '))
   const sl = statusline.describe(cfg)
   add('statusline (usage)', sl.wired, sl.detail)
   try {

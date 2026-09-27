@@ -14,10 +14,11 @@ const path = require('path')
 const { execFile, execFileSync } = require('child_process')
 const { Activity, isTestCommand, lineDelta, errorSignature, MAX_ENTRIES, MAX_AGENTS, KEEP_MS } = require('../lib/activity')
 const dg = require('../lib/digest')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-digest-'))
+const root = tempDir('cnd-digest-')
 const binDir = path.join(root, 'bin')
 const home = path.join(root, 'home')
 const state = path.join(root, 'state')
@@ -77,6 +78,8 @@ const promptOf = call => {
   assert.equal(lines[i + 2], lines[i].replace('<', '</'))
   return JSON.parse(lines[i + 1])
 }
+
+test.after(() => cleanup())
 
 const T0 = Date.parse('2026-09-27T08:00:00Z')
 const min = n => n * 60000
@@ -417,7 +420,7 @@ test('bad flags answer an error line, exit 0', async () => {
 // --- through a real daemon ----------------------------------------------------
 
 test('a real daemon counts hook events into activity.json and serves digest', async () => {
-  const dhome = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-dg-'))
+  const dhome = tempDir('cnd-dg-')
   const denv = { ...env, CONDUCTORE_HOME: dhome, CONDUCTORE_SOCKET: path.join(dhome, 'hostd.sock'), CONDUCTORE_IDLE_EXIT_S: '60' }
   const hook = (event, body) => execFileSync(HOOK, [event], { env: denv, input: JSON.stringify({ session_id: 'd1', hook_event_name: event, cwd: dhome, ...body }) })
   const run = args => new Promise((resolve, reject) => execFile(process.execPath, [HOSTD, ...args], { env: denv, timeout: 30000 }, (err, stdout) => {
@@ -448,6 +451,8 @@ test('a real daemon counts hook events into activity.json and serves digest', as
     assert.equal(a.facts.testsFailed, 1)
     assert.deepEqual(a.stuck.map(s => s.rule), ['error'])
     await run(['stop'])
+    // The daemon writes the log as it shuts down, just after answering.
+    for (let i = 0; i < 100 && (!fs.existsSync(path.join(dhome, 'activity.json')) || fs.existsSync(path.join(dhome, 'hostd.pid')) || fs.existsSync(path.join(dhome, 'hostd.sock'))); i++) await new Promise(resolve => setTimeout(resolve, 50))
     const saved = JSON.parse(fs.readFileSync(path.join(dhome, 'activity.json'), 'utf8'))
     assert.equal(fs.statSync(path.join(dhome, 'activity.json')).mode & 0o777, 0o600)
     assert.ok(saved.agents.d1.ev.some(e => e[1] === 'x'))
@@ -477,4 +482,63 @@ test('the headline skips Claude Code\'s idle notice for the last reply', async (
   const { json } = await cli(['digest', '--since', String(NOW - min(90))])
   assert.equal(json.agents[0].headline, 'Deployed to staging.')
   assert.equal(json.agents[0].attention, null)
+})
+
+// --- without the newer hooks -------------------------------------------------
+
+const toolUse = (t, id, command, uid) => ({ type: 'assistant', timestamp: new Date(t).toISOString(), requestId: `r${uid}`, message: { id: `m${uid}`, role: 'assistant', model: 'claude-opus-4-1', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } })
+const toolResult = (t, id, error) => ({ type: 'user', timestamp: new Date(t).toISOString(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: !!error, content: error || 'ok' }] } })
+
+function failingWorld () {
+  const entries = [user(NOW - min(40), 'fix the build')]
+  for (let i = 0; i < 3; i++) {
+    entries.push(toolUse(NOW - min(30) + i * 1000, `t${i}`, 'npm test', `f${i}`))
+    entries.push(toolResult(NOW - min(30) + i * 1000 + 500, `t${i}`, `Exit code 1\nFAIL src/a.test.js (${i})`))
+  }
+  entries.push(toolUse(NOW - min(20), 'ok1', 'git status', 'ok1'), toolResult(NOW - min(20) + 100, 'ok1', null))
+  entries.push({ type: 'assistant', timestamp: new Date(NOW - min(10)).toISOString(), isApiErrorMessage: true, message: { id: 'err', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'API Error: 529 {"type":"overloaded_error"}' }] } })
+  const tr = transcript('fail', entries)
+  const act = new Activity()
+  feed(act, 'f1', [[NOW - min(40), { hook_event_name: 'UserPromptSubmit' }], [NOW - min(10), { hook_event_name: 'Stop' }]])
+  writeWorld([agentRecord('f1', 'builder', { transcriptPath: tr })], act.toJSON())
+}
+
+test('without PostToolUseFailure and StopFailure, the transcript gives failures and API errors', async () => {
+  try { fs.unlinkSync(path.join(state, 'digest.json')) } catch {}
+  failingWorld()
+  const { json } = await cli(['digest', '--since', String(NOW - min(90))])
+  assert.deepEqual(json.sources, { failures: 'transcript', apiErrors: 'transcript' })
+  const a = json.agents[0]
+  assert.equal(a.facts.testRuns, 3)
+  assert.equal(a.facts.testsFailed, 3)
+  assert.equal(a.facts.failedCommands, 3)
+  assert.equal(a.facts.commands, 1)
+  assert.deepEqual(a.stuck.map(s => s.rule), ['same-failure', 'error'])
+  assert.equal(a.stuck[0].reason, '`npm test` failed 3 times')
+  assert.equal(a.stuck[1].reason, 'Stopped on an API error (overloaded)')
+})
+
+test('with the hooks registered, the activity log is used as it is', async () => {
+  try { fs.unlinkSync(path.join(state, 'digest.json')) } catch {}
+  failingWorld()
+  const settingsFile = path.join(root, 'claude-settings.json')
+  const hook = { type: 'command', command: "'/x/conductore-hook' PostToolUseFailure", async: true }
+  fs.writeFileSync(settingsFile, JSON.stringify({ hooks: {
+    PostToolUseFailure: [{ matcher: '', hooks: [hook] }],
+    StopFailure: [{ matcher: '', hooks: [{ ...hook, command: "'/x/conductore-hook' StopFailure" }] }]
+  } }))
+  const { json } = await cli(['digest', '--since', String(NOW - min(90))], { CONDUCTORE_CLAUDE_SETTINGS: settingsFile })
+  assert.deepEqual(json.sources, { failures: 'hooks', apiErrors: 'hooks' })
+  assert.equal(json.agents[0].facts.testRuns, 0)
+  assert.deepEqual(json.agents[0].stuck, [])
+})
+
+test('an API error followed by a new prompt is not an error stop', () => {
+  const tr = transcript('apierr', [
+    { type: 'assistant', timestamp: new Date(NOW - min(5)).toISOString(), isApiErrorMessage: true, message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: Rate limit reached' }] } },
+    user(NOW - min(4), 'try again')
+  ])
+  assert.equal(dg.readTail(tr, { since: 0 }).apiError, null)
+  const tr2 = transcript('apierr2', [{ type: 'assistant', timestamp: new Date(NOW - min(5)).toISOString(), isApiErrorMessage: true, message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: Rate limit reached' }] } }])
+  assert.equal(dg.readTail(tr2, { since: 0 }).apiError.type, 'rate_limit')
 })

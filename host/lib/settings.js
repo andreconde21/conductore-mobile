@@ -15,14 +15,58 @@ const EVENTS = [
   'UserPromptSubmit',
   'PreToolUse',
   'PostToolUse',
-  'PostToolUseFailure',
   'PermissionRequest',
   'Notification',
   'Stop',
-  'StopFailure',
   'SubagentStop',
   'SessionEnd'
 ]
+
+// Newer events `digest` uses, registered only when the local Claude Code
+// knows them: before 2.1.101 one unknown hook event name made Claude Code
+// ignore the whole settings.json (its changelog: "an unrecognized hook
+// event name in settings.json no longer causes the entire file to be
+// ignored"). StopFailure came in 2.1.78; PostToolUseFailure is first named
+// in 2.1.119, the version used here (the earliest one we can vouch for).
+// Unknown or unreadable version: not registered.
+const OPTIONAL_EVENTS = [
+  { event: 'PostToolUseFailure', minVersion: '2.1.119' },
+  { event: 'StopFailure', minVersion: '2.1.78' }
+]
+const ALL_EVENTS = [...EVENTS, ...OPTIONAL_EVENTS.map(o => o.event)]
+
+// "2.1.280 (Claude Code)" -> [2, 1, 280], or null.
+function parseVersion (text) {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(text || ''))
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+function atLeast (version, min) {
+  const v = parseVersion(version)
+  const w = parseVersion(min)
+  if (!v || !w) return false
+  for (let i = 0; i < 3; i++) if (v[i] !== w[i]) return v[i] > w[i]
+  return true
+}
+
+// Which optional events a Claude Code version supports:
+// { events: [...EVENTS, supported optional ones], skipped: [{event, reason}] }.
+function eventsFor (claudeVersion) {
+  const events = [...EVENTS]
+  const skipped = []
+  for (const { event, minVersion } of OPTIONAL_EVENTS) {
+    if (atLeast(claudeVersion, minVersion)) events.push(event)
+    else {
+      skipped.push({
+        event,
+        reason: parseVersion(claudeVersion)
+          ? `needs Claude Code ${minVersion}, found ${parseVersion(claudeVersion).join('.')}`
+          : 'Claude Code version unknown'
+      })
+    }
+  }
+  return { events, skipped }
+}
 
 // Events whose hooks must return quickly / block Claude: everything but
 // PermissionRequest is async so a slow daemon never stalls the agent.
@@ -58,18 +102,23 @@ function buildHandler (hookBin, event) {
   return h
 }
 
-// Returns a new settings object with our hooks present exactly once per event.
-function merge (settings, hookBin) {
+// Returns a new settings object with our hooks present exactly once per
+// event of `events` (default: the base ones), and removed from the
+// optional events not in it (a downgraded Claude Code).
+function merge (settings, hookBin, events = EVENTS) {
   const out = clone(settings || {})
   out.hooks = out.hooks && typeof out.hooks === 'object' ? out.hooks : {}
-  for (const event of EVENTS) {
+  for (const event of ALL_EVENTS) {
+    const wanted = events.includes(event)
+    if (!wanted && !Array.isArray(out.hooks[event])) continue
     const groups = Array.isArray(out.hooks[event]) ? out.hooks[event] : []
     // Drop any previous conductore handler, keep everything else.
     const kept = groups
       .map(g => ({ ...g, hooks: (g.hooks || []).filter(h => !isOurs(h)) }))
       .filter(g => g.hooks.length > 0)
-    kept.push({ matcher: '', hooks: [buildHandler(hookBin, event)] })
-    out.hooks[event] = kept
+    if (wanted) kept.push({ matcher: '', hooks: [buildHandler(hookBin, event)] })
+    if (kept.length) out.hooks[event] = kept
+    else delete out.hooks[event]
   }
   return out
 }
@@ -92,7 +141,7 @@ function unmerge (settings) {
 function installed (settings) {
   const hooks = (settings && settings.hooks) || {}
   const present = []
-  for (const event of EVENTS) {
+  for (const event of ALL_EVENTS) {
     const groups = Array.isArray(hooks[event]) ? hooks[event] : []
     if (groups.some(g => (g.hooks || []).some(isOurs))) present.push(event)
   }
@@ -130,4 +179,4 @@ function clone (v) {
   return JSON.parse(JSON.stringify(v))
 }
 
-module.exports = { EVENTS, settingsPath, merge, unmerge, installed, isOurs, readSettings, writeSettings, hookCommand }
+module.exports = { EVENTS, OPTIONAL_EVENTS, ALL_EVENTS, eventsFor, parseVersion, atLeast, settingsPath, merge, unmerge, installed, isOurs, readSettings, writeSettings, hookCommand }

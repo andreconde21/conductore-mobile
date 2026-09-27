@@ -33,8 +33,9 @@ host/install.sh --link   # dev: link ~/.local/bin straight at this checkout
 host/install.sh --uninstall
 ```
 
-`install.sh` ends by running `conductore-hostd install`, which merges eleven
-hook handlers into `~/.claude/settings.json` (backup in `settings.json.bak`),
+`install.sh` ends by running `conductore-hostd install`, which merges nine
+hook handlers (eleven on a Claude Code that knows the two newer events, see
+How it works) into `~/.claude/settings.json` (backup in `settings.json.bak`),
 wires the statusline (see Usage below) and records the path of `node` for
 the sh clients (`~/.conductore/node`: hooks may run with a PATH without node).
 Existing hooks are left untouched; running it again changes nothing and does
@@ -100,7 +101,16 @@ SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure,
 PermissionRequest, Notification, Stop, StopFailure, SubagentStop and
 SessionEnd, all with an empty matcher. PostToolUseFailure (a failed tool
 call, e.g. a command that exited non-zero) and StopFailure (a turn that
-ended on an API error) feed `digest`; they are Claude Code 2.1 events.
+ended on an API error) feed `digest`, and are registered only when
+`claude --version` says the local Claude Code knows them: 2.1.119 or newer
+for PostToolUseFailure (the first release its changelog names it in),
+2.1.78 for StopFailure. Before 2.1.101 Claude Code ignored the whole
+settings.json over one unknown hook event name, so with no `claude`, no
+answer in 5 s or an unreadable version neither is registered. Running
+`install` again after a Claude Code update (or downgrade) adds (or takes
+off) them; `install` prints them in `skipped` with the reason, `doctor`
+reports them as `optional hooks`, `uninstall` removes them. Without them
+`digest` reads failures and API errors from the transcripts instead.
 Every handler except PermissionRequest is `async: true`, so it can never stall
 Claude Code; SessionEnd gets a 5 s timeout because Claude Code only waits
 briefly on exit.
@@ -734,6 +744,12 @@ Facts (free; no Claude):
   error (also on `status`).
 * Agents that ended before `--since` and were quiet since are left out.
   `counts`: needsYou (attention), stuck, working, done (the rest).
+* `sources`: where failures and API errors come from: `hooks`, or
+  `transcript` when PostToolUseFailure / StopFailure are not registered.
+  Then the Bash calls and failed tool calls in the transcript tail (the
+  last 2 MB, `partial` when the window starts before it) replace the log's
+  command entries, and an API error message the last turn ended on (with
+  no prompt after it) counts as an error stop.
 * `activity: false`: the daemon predates `digest` (only `status` facts).
   `source` as in `status`.
 
