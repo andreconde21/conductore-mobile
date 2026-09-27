@@ -33,7 +33,10 @@ import UIKit
           return
         }
         let root = UIApplication.shared.connectedScenes
-          .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }
+          .compactMap { scene -> UIViewController? in
+            // keyWindow on a scene needs iOS 15; the app supports iOS 13.
+            (scene as? UIWindowScene)?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+          }
           .first
         guard var top = root else {
           result(FlutterError(code: "no_window", message: "Nothing to share from", details: nil))
