@@ -150,13 +150,16 @@ class SftpBrowserController extends ChangeNotifier {
     _errorMessage = null;
     _securityKeyMessage = null;
     await _securityKeySubscription?.cancel();
-    _securityKeySubscription = SecurityKeyInteraction.instance.messages.listen((
-      message,
-    ) {
-      if (_status != SftpBrowserStatus.connecting) return;
-      _securityKeyMessage = message;
-      _safeNotify();
-    });
+    _securityKeySubscription = null;
+    // App-wide prompts: only a hardware-key sign-in can be their source.
+    if (host.authMethod == SshAuthMethod.hardwareKey) {
+      _securityKeySubscription = SecurityKeyInteraction.instance.messages
+          .listen((message) {
+            if (_status != SftpBrowserStatus.connecting) return;
+            _securityKeyMessage = message;
+            _safeNotify();
+          });
+    }
     _safeNotify();
     try {
       final session = await repository.connect(host);

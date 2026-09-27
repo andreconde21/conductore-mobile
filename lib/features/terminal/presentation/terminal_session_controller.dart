@@ -232,9 +232,12 @@ class TerminalSessionController extends ChangeNotifier {
 
     StreamSubscription<String>? securityKeySubscription;
     try {
-      securityKeySubscription = SecurityKeyInteraction.instance.messages.listen(
-        (message) => terminal.write('$message\r\n'),
-      );
+      // The key's prompts ("touch your key") are app-wide; only a session
+      // signing in with a hardware key can be the one they are about.
+      if (host.authMethod == SshAuthMethod.hardwareKey) {
+        securityKeySubscription = SecurityKeyInteraction.instance.messages
+            .listen((message) => terminal.write('$message\r\n'));
+      }
       final session = await repository.connect(
         host,
         columns: terminal.viewWidth,
