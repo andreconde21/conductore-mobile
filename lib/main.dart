@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
@@ -835,13 +836,16 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
             // covers every route, so locking again after the app was away
             // hides a terminal or dialog left open.
             return _wrapShareTargetScope(
-              AppLockGate(
-                controller: widget.lockController,
-                lockPage: (_) => LockPage(
+              DesktopEscapeToPop(
+                navigatorKey: widget.navigatorKey,
+                child: AppLockGate(
                   controller: widget.lockController,
-                  themeController: widget.themeController,
+                  lockPage: (_) => LockPage(
+                    controller: widget.lockController,
+                    themeController: widget.themeController,
+                  ),
+                  child: content,
                 ),
-                child: content,
               ),
             );
           },

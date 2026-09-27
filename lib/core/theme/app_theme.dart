@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:flutter/material.dart';
@@ -115,6 +116,7 @@ class AppTheme {
       subtle: subtle,
     );
     final mono = monoFontFamily;
+    final desktop = PlatformFeatures.isDesktop;
 
     return ThemeData(
       useMaterial3: true,
@@ -123,10 +125,11 @@ class AppTheme {
       extensions: [AppPaletteTheme(palette)],
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
-      splashFactory: InkRipple.splashFactory,
+      // A mouse click shows no ripple on desktop, and hover is visible.
+      splashFactory: desktop ? NoSplash.splashFactory : InkRipple.splashFactory,
       highlightColor: foreground.withValues(alpha: 0.08),
       splashColor: foreground.withValues(alpha: 0.08),
-      hoverColor: foreground.withValues(alpha: 0.04),
+      hoverColor: foreground.withValues(alpha: desktop ? 0.08 : 0.04),
       focusColor: accent.withValues(alpha: 0.18),
       textTheme: textTheme,
       primaryTextTheme: textTheme,
@@ -422,11 +425,33 @@ class AppTheme {
         linearTrackColor: hairline,
         circularTrackColor: hairline,
       ),
-      scrollbarTheme: ScrollbarThemeData(
-        thumbColor: WidgetStateProperty.all(hairline),
-        thickness: WidgetStateProperty.all(3),
-        radius: Radius.zero,
-      ),
+      scrollbarTheme: desktop
+          // Wide enough to see and grab with a mouse; wider under it.
+          ? ScrollbarThemeData(
+              thumbColor: WidgetStateProperty.resolveWith(
+                (states) => muted.withValues(
+                  alpha:
+                      states.contains(WidgetState.dragged) ||
+                          states.contains(WidgetState.hovered)
+                      ? 0.55
+                      : 0.3,
+                ),
+              ),
+              thickness: WidgetStateProperty.resolveWith(
+                (states) =>
+                    states.contains(WidgetState.dragged) ||
+                        states.contains(WidgetState.hovered)
+                    ? 9
+                    : 6,
+              ),
+              radius: const Radius.circular(4),
+              interactive: true,
+            )
+          : ScrollbarThemeData(
+              thumbColor: WidgetStateProperty.all(hairline),
+              thickness: WidgetStateProperty.all(3),
+              radius: Radius.zero,
+            ),
     );
   }
 
