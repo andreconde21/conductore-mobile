@@ -71,6 +71,7 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
 import 'package:flutter/material.dart';
@@ -688,7 +689,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         _openAgentsDashboard();
       case HomeLaunchRequest.usage:
         if (UsageScope.maybeOf(context) case final usage?) {
-          unawaited(showUsageSheet(context, usage));
+          unawaited(openUsageExplorer(context, usage));
         }
       case null:
         break;
