@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/diff_view/domain/git_diff_source.dart';
 import 'package:conduit/features/diff_view/domain/unified_diff.dart';
@@ -599,10 +600,53 @@ class _LineRow extends StatelessWidget {
     );
     final tap = onTap;
     if (tap == null) return row;
+    if (PlatformFeatures.isDesktop) {
+      return _ClickableLine(onTap: tap, child: row);
+    }
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: tap,
       child: row,
+    );
+  }
+}
+
+/// A tappable diff line on desktop: the click cursor and a faint tint
+/// under the mouse, so the line reads as clickable (to comment on it).
+class _ClickableLine extends StatefulWidget {
+  const _ClickableLine({required this.onTap, required this.child});
+
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  State<_ClickableLine> createState() => _ClickableLineState();
+}
+
+class _ClickableLineState extends State<_ClickableLine> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = Theme.of(
+      context,
+    ).colorScheme.onSurface.withValues(alpha: 0.06);
+    return MouseRegion(
+      key: const ValueKey('diff-line-clickable'),
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            color: _hovered ? tint : Colors.transparent,
+          ),
+          child: widget.child,
+        ),
+      ),
     );
   }
 }
