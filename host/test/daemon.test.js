@@ -5,18 +5,18 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { spawn, execFile } = require('child_process')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
 
 // Short socket path: unix sockets are limited to ~100 bytes.
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-'))
+const home = tempDir('cnd-')
 // A fake tmux on PATH (the daemon inherits it from the hook that starts it):
 // logs its arguments, answers display-message like tmux would.
-const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-bin-'))
+const fakeBin = tempDir('cnd-bin-')
 const tmuxLog = path.join(fakeBin, 'tmux.log')
 fs.writeFileSync(path.join(fakeBin, 'tmux'), `#!/bin/sh
 printf '%s\n' "$*" >> '${tmuxLog}'
@@ -45,7 +45,7 @@ const env = {
 }
 // Even a tmux call without -S (the fake on PATH aside) can only reach a
 // private "default" server, never the real one.
-env.TMUX_TMPDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tmux-'))
+env.TMUX_TMPDIR = tempDir('cnd-tmux-')
 for (const k of Object.keys(env)) if (/^(TMUX$|TMUX_PANE$|HERDR_)/.test(k)) delete env[k]
 for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_AGENT_NAME']) delete env[k]
 
@@ -422,7 +422,7 @@ test('an oversized PermissionRequest is answered at once, leaving the prompt to 
 })
 
 test('a PermissionRequest with no daemon that can start gives up after 5 s, printing nothing', async () => {
-  const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lone-'))
+  const lone = tempDir('cnd-lone-')
   fs.writeFileSync(path.join(lone, 'node'), '/bin/false\n')
   const t0 = Date.now()
   const r = await hook(ev('x1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } }),
@@ -439,8 +439,5 @@ test('a PermissionRequest with no daemon that can start gives up after 5 s, prin
 
 test.after(async () => {
   await cli('stop').catch(() => {})
-  await sleep(200)
-  fs.rmSync(home, { recursive: true, force: true })
-  fs.rmSync(fakeBin, { recursive: true, force: true })
-  fs.rmSync(env.TMUX_TMPDIR, { recursive: true, force: true })
+  await cleanup()
 })

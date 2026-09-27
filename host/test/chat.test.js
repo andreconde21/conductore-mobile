@@ -10,12 +10,12 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { execFile } = require('child_process')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-chat-'))
+const home = tempDir('cnd-chat-')
 const binDir = path.join(home, 'bin')
 const callLog = path.join(home, 'calls.jsonl')
 fs.mkdirSync(binDir)
@@ -60,7 +60,7 @@ const env = {
 }
 // Even a tmux call without -S (the fake on PATH aside) can only reach a
 // private "default" server, never the real one.
-env.TMUX_TMPDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tmux-'))
+env.TMUX_TMPDIR = tempDir('cnd-tmux-')
 for (const k of Object.keys(env)) if (/^(TMUX$|TMUX_PANE$|HERDR_)/.test(k)) delete env[k]
 
 function cli (args, { input, extraEnv } = {}) {
@@ -315,4 +315,4 @@ test('focus checks the pane and selects it on the agent\'s own tmux server', asy
   ])
 })
 
-test.after(() => fs.rmSync(env.TMUX_TMPDIR, { recursive: true, force: true }))
+test.after(() => cleanup())
