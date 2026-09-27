@@ -720,8 +720,8 @@ Facts (free; no Claude):
   (`partial: true` when the window starts before that, or before the
   activity log's oldest entry). Only for agents active in the window.
 * `attention`: `permission` (a pending request or a terminal prompt),
-  `question` (it asked something: AskUserQuestion, ExitPlanMode, a
-  notification) or null. `headline`: the first line of the last assistant
+  `question` (it asked something: AskUserQuestion, ExitPlanMode, or its
+  last reply ends with a question mark) or null (working, done, idle). `headline`: the first line of the last assistant
   message (markdown stripped, 160 characters). `live: false`: the agent
   is only in the activity log (it ended and was pruned); nothing can be
   sent to it. `lastError`: `{type, at}` when the last turn ended on an API

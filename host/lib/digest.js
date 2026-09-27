@@ -77,13 +77,19 @@ const firstLine = text => {
 
 const STATE_OF = { w: 'working', i: 'waiting_input', n: 'needs_permission', e: 'ended' }
 const STATE_CODES = { working: 'w', waiting_input: 'i', needs_permission: 'n', ended: 'e' }
-const QUESTION_EVENTS = new Set(['PreToolUse', 'Notification'])
+const QUESTION_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+const GENERIC_NOTICE = /^Claude (is waiting for your input|needs your (permission|attention))/i
 
-// What the agent waits for: a permission decision, an answer to a question
-// it asked, or nothing.
+// What the agent waits for: a permission decision, an answer (it asked
+// with AskUserQuestion or ExitPlanMode, or its last reply ends in a
+// question), or nothing (done, idle). Claude Code's idle notification
+// alone is not a question.
 function attentionOf (agent) {
   if (agent.state === 'needs_permission') return 'permission'
-  if (agent.state === 'waiting_input' && QUESTION_EVENTS.has(agent.lastEvent)) return 'question'
+  if (agent.state !== 'waiting_input') return null
+  if (QUESTION_TOOLS.has(agent.lastToolName) && agent.lastEvent !== 'Stop' && agent.lastEvent !== 'SessionStart') return 'question'
+  const last = typeof agent.lastMessage === 'string' ? agent.lastMessage.trim().split('\n').filter(l => l.trim()).pop() : null
+  if (last && /\?[\s*_)"'`]*$/.test(last)) return 'question'
   return null
 }
 
@@ -294,7 +300,7 @@ function textOf (content) {
 // messages from `since` on, and the last replies and prompts (text only,
 // main thread only) from `repliesSince` on.
 function readTail (file, { since, repliesSince = since, maxBytes = TAIL_BYTES } = {}) {
-  const out = { tokens: null, costUsd: null, replies: [], prompts: [], partial: false }
+  const out = { tokens: null, costUsd: null, replies: [], prompts: [], lastReply: null, partial: false }
   let fd
   try { fd = fs.openSync(file, 'r') } catch { return out }
   try {
@@ -327,11 +333,14 @@ function readTail (file, { since, repliesSince = since, maxBytes = TAIL_BYTES } 
         const row = { model: m.model, input: u.input_tokens || 0, output: u.output_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0, cacheRead: u.cache_read_input_tokens || 0 }
         if (!prev || row.output > prev.output) seen.set(key, row)
       }
-      if (d.isSidechain || d.isMeta || t < repliesSince) continue
+      if (d.isSidechain || d.isMeta) continue
       if (d.type === 'assistant') {
         const s = textOf(m.content).trim()
-        if (s) out.replies.push({ at: t, text: s })
-      } else if (d.type === 'user' && !d.isCompactSummary) {
+        if (s) out.lastReply = s
+        if (s && t >= repliesSince) out.replies.push({ at: t, text: s })
+      }
+      if (t < repliesSince) continue
+      if (d.type === 'user' && !d.isCompactSummary) {
         const s = textOf(m.content).trim()
         if (s && !s.startsWith('<')) out.prompts.push({ at: t, text: s })
       }
@@ -592,6 +601,18 @@ async function digest (opts) {
     // Agents that ended before the window and were quiet since are history.
     if (agent.state === 'ended' && last < since) continue
     const facts = countFacts(act, since, now, (act && act.state) || STATE_CODES[agent.state])
+    // Tokens and the replies for a summary: only agents active in the window.
+    let tail = null
+    if (last >= since && typeof agent.transcriptPath === 'string' && path.isAbsolute(agent.transcriptPath) && agent.transcriptPath.endsWith('.jsonl')) {
+      const prev = store.agents[sid]
+      tail = readTail(agent.transcriptPath, { since, repliesSince: prev && prev.basis ? Math.min(prev.basis, now) : since })
+      tails.set(sid, tail)
+      if (tail.partial) facts.partial = true
+    }
+    facts.tokens = tail ? tail.tokens : null
+    facts.costUsd = tail ? tail.costUsd : null
+    // Claude Code's idle notification replaces the last reply in `status`.
+    const lastText = agent.lastMessage && !GENERIC_NOTICE.test(agent.lastMessage) ? agent.lastMessage : ((tail && tail.lastReply) || agent.lastMessage)
     const entry = {
       sessionId: sid,
       name: agent.name || null,
@@ -599,30 +620,18 @@ async function digest (opts) {
       project: projectOf(agent.cwd),
       cwd: agent.cwd || null,
       state: agent.state,
-      attention: attentionOf(agent),
+      attention: attentionOf({ ...agent, lastMessage: lastText }),
       live,
       startedAt: agent.startedAt || null,
       endedAt: agent.endedAt || null,
       lastActivityAt: last,
-      headline: firstLine(agent.lastMessage),
+      headline: firstLine(lastText),
       lastError: agent.lastError || null,
       pending: (agent.pending || []).map(p => ({ id: p.id, toolName: p.toolName, summary: p.summary, createdAt: p.createdAt, ...(p.risk ? { risk: p.risk } : {}), ...(p.batchable ? { batchable: true } : {}) })),
       facts,
       stuck: stuckFlags(live ? agent : null, act, now, t),
       summary: null,
       summaryPending: false
-    }
-    // Tokens and the replies for a summary: only agents active in the window.
-    if (last >= since && typeof agent.transcriptPath === 'string' && path.isAbsolute(agent.transcriptPath) && agent.transcriptPath.endsWith('.jsonl')) {
-      const prev = store.agents[sid]
-      const tail = readTail(agent.transcriptPath, { since, repliesSince: prev && prev.basis ? Math.min(prev.basis, now) : since })
-      tails.set(sid, tail)
-      facts.tokens = tail.tokens
-      facts.costUsd = tail.costUsd
-      if (tail.partial) facts.partial = true
-    } else {
-      facts.tokens = null
-      facts.costUsd = null
     }
     const cached = store.agents[sid]
     if (cached && cached.text) entry.summary = { text: cached.text, at: cached.at, fresh: cached.basis >= last }

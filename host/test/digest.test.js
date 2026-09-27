@@ -459,3 +459,22 @@ test('a real daemon counts hook events into activity.json and serves digest', as
     try { await run(['stop']) } catch {}
   }
 })
+
+test('attention: permission, questions asked, and plain idle', () => {
+  assert.equal(dg.attentionOf({ state: 'needs_permission' }), 'permission')
+  assert.equal(dg.attentionOf({ state: 'waiting_input', lastEvent: 'PreToolUse', lastToolName: 'AskUserQuestion' }), 'question')
+  assert.equal(dg.attentionOf({ state: 'waiting_input', lastEvent: 'Notification', lastToolName: 'AskUserQuestion' }), 'question')
+  assert.equal(dg.attentionOf({ state: 'waiting_input', lastEvent: 'Stop', lastToolName: 'Bash', lastMessage: 'Done.\n\nShould I push the branch?' }), 'question')
+  assert.equal(dg.attentionOf({ state: 'waiting_input', lastEvent: 'Notification', lastToolName: 'Bash', lastMessage: 'Claude is waiting for your input' }), null)
+  assert.equal(dg.attentionOf({ state: 'waiting_input', lastEvent: 'Stop', lastToolName: 'Edit', lastMessage: 'All tests pass.' }), null)
+  assert.equal(dg.attentionOf({ state: 'working', lastMessage: 'Why?' }), null)
+})
+
+test('the headline skips Claude Code\'s idle notice for the last reply', async () => {
+  try { fs.unlinkSync(path.join(state, 'digest.json')) } catch {}
+  const tr = transcript('idle', [assistant(NOW - min(20), 'Deployed to staging.\nDetails follow.', 'idle-1')])
+  writeWorld([agentRecord('idle1', 'idler', { transcriptPath: tr, lastEvent: 'Notification', lastMessage: 'Claude is waiting for your input' })], { v: 1, agents: {} })
+  const { json } = await cli(['digest', '--since', String(NOW - min(90))])
+  assert.equal(json.agents[0].headline, 'Deployed to staging.')
+  assert.equal(json.agents[0].attention, null)
+})
