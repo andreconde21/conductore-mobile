@@ -6,6 +6,7 @@ import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_notification_settings.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_settings.dart';
@@ -435,6 +436,18 @@ class SettingsSectionBody extends StatelessWidget {
                       '${level.label}: ${level.description}',
                   ].join('\n'),
                 ),
+                if (attention != null &&
+                    PlatformFeatures.agentNotifications) ...[
+                  const SizedBox(height: 10),
+                  const SettingsNote(
+                    'One notification per agent, updated in place with '
+                    'what it needs now. It alerts only when an agent newly '
+                    'needs you, and goes away once everything is answered. '
+                    'This device only.',
+                  ),
+                  const SizedBox(height: 6),
+                  AgentNotificationSettingsCard(controller: attention),
+                ],
               ],
             );
           },

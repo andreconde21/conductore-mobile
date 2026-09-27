@@ -18,6 +18,7 @@ import 'package:conduit/features/agent_attention/data/conductore_host_attention_
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/platform_agent_notifier.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
@@ -181,6 +182,9 @@ void main() {
     provider: const HerdrAttentionProvider(),
     companionProvider: const ConductoreHostAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
+    notificationPreferences: const SecureAgentNotificationPreferencesStore(
+      secureStorage,
+    ),
     persistMonitoringEnabled: (savedHostId) async {
       final host = hostsController.findById(savedHostId);
       if (host != null && !host.agentAttentionEnabled) {
@@ -236,6 +240,8 @@ void main() {
           : WidgetsBinding.instance.platformDispatcher.locale.languageCode;
     },
   );
+  // An agent's expanded notification ends with its dashboard line.
+  agentAttention.notificationDetail = digest.cachedLineFor;
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
   addTelemetryTerms(() => usage.summary.accountTerms);

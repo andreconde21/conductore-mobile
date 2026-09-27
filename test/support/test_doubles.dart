@@ -7,6 +7,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/app_lock/domain/app_authenticator.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
@@ -499,17 +500,34 @@ class ScriptedAgentCommandRunner implements AgentCommandRunner {
 }
 
 class RecordingAgentNotifier implements AgentAttentionNotifier {
+  /// Plain notifications as (id, title, body).
   final List<(String, String, String)> shown = [];
 
-  /// Where each shown notification's tap leads, by id.
+  /// Where each plain notification's tap leads, by id.
   final Map<String, AgentOpenTarget?> openTargets = {};
-
-  /// Permission notifications as (id, title, body, hostId, requestId).
-  final List<(String, String, String, String, String)> permissionsShown = [];
   final List<String> cancelled = [];
 
-  /// Ids currently showing (shown or permission-shown, minus cancelled).
+  /// Every agent notification posted, in order (including updates).
+  final List<AgentNotification> agentPosts = [];
+
+  /// Agent notification keys removed, in order.
+  final List<String> agentCancelled = [];
+
+  /// Agent notifications currently showing, by key.
+  final Map<String, AgentNotification> agents = {};
+
+  /// Plain ids currently showing (shown minus cancelled).
   final Set<String> active = {};
+
+  /// Posts that alerted.
+  List<AgentNotification> get alerts => [
+    for (final post in agentPosts)
+      if (post.alert) post,
+  ];
+
+  /// The showing notification of [agentId] on [hostId].
+  AgentNotification? agent(String hostId, String agentId) =>
+      agents[agentNotificationKey(hostId, agentId)];
 
   @override
   Future<void> show({
@@ -524,23 +542,38 @@ class RecordingAgentNotifier implements AgentAttentionNotifier {
   }
 
   @override
-  Future<void> showPermissionRequest({
-    required String id,
-    required String title,
-    required String body,
-    required String hostId,
-    required String requestId,
-    AgentOpenTarget? open,
-  }) async {
-    permissionsShown.add((id, title, body, hostId, requestId));
-    openTargets[id] = open;
-    active.add(id);
-  }
-
-  @override
   Future<void> cancel({required String id}) async {
     cancelled.add(id);
     active.remove(id);
+  }
+
+  @override
+  Future<void> showAgents({
+    required String hostId,
+    required List<AgentNotification> notifications,
+  }) async {
+    final keys = {for (final n in notifications) n.key};
+    for (final key in agents.keys.toList()) {
+      if (agents[key]!.hostId == hostId && !keys.contains(key)) {
+        agents.remove(key);
+        agentCancelled.add(key);
+      }
+    }
+    for (final notification in notifications) {
+      await showAgent(notification);
+    }
+  }
+
+  @override
+  Future<void> showAgent(AgentNotification notification) async {
+    agentPosts.add(notification);
+    agents[notification.key] = notification;
+  }
+
+  @override
+  Future<void> cancelAgent({required String key}) async {
+    agents.remove(key);
+    agentCancelled.add(key);
   }
 }
 

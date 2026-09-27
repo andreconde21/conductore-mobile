@@ -373,10 +373,16 @@ void main() {
           _status([_highRm], []),
         ],
       }, notifier: notifier);
-      final (_, title, body, _, _) = notifier.permissionsShown.single;
-      expect(title, 'Claude needs permission: Bash · High risk');
-      expect(body, contains('rm -rf build'));
-      expect(body, contains('Deletes recursively (rm -rf): build'));
+      final notification = notifier.agents.values.single;
+      expect(notification.title, endsWith('needs you'));
+      expect(notification.text, 'Approve Bash: rm -rf build · High risk');
+      expect(notification.lines, [
+        'Approve Bash: rm -rf build · High risk',
+        '  Deletes recursively (rm -rf): build',
+      ]);
+      // High risk always asks: no Always button.
+      expect(notification.action?.requestId, 'req-high');
+      expect(notification.action?.allowAlways, isFalse);
     });
   });
 

@@ -204,6 +204,28 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
       _openSince ?? _preferences.window.since(_clock(), _preferences.lastSeen);
 
   /// Every machine's agents in sections.
+  /// The cached summary (else headline) of [agentId] on [hostId] from the
+  /// companion's digest, for the agent's notification; null when the
+  /// digest has not answered for it (the live-status fallback does not
+  /// count: it only repeats the agent's message).
+  String? cachedLineFor(String hostId, String agentId) {
+    final base = baseHostId(hostId);
+    for (final machine in machines) {
+      final report = machine.report;
+      if (report == null || report.fromStatus) {
+        continue;
+      }
+      for (final agent in report.agents) {
+        if (agent.sessionId == agentId &&
+            !agent.fromStatus &&
+            baseHostId(agent.hostId) == base) {
+          return agent.summary ?? agent.headline;
+        }
+      }
+    }
+    return null;
+  }
+
   DigestOverview get overview => DigestOverview([
     for (final machine in machines) ...?machine.report?.agents,
   ], since: since);
