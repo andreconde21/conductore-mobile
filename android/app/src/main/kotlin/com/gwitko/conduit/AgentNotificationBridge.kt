@@ -215,6 +215,16 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         /** The last tapped notification's agent, until Dart consumes it. */
         @Volatile
         private var pendingOpen: AgentNotificationStore.OpenTarget? = null
+
+        /**
+         * Opens [target] the way a notification body tap does (the home-screen
+         * widget's agent lines, which checked their token first): Dart
+         * consumes it once its listener runs, after the app lock.
+         */
+        fun deliverOpen(target: AgentNotificationStore.OpenTarget) {
+            pendingOpen = target
+            active?.channel?.invokeMethod("openAgentAvailable", null)
+        }
     }
 }
 

@@ -1,6 +1,5 @@
 package com.gwitko.conduit
 
-import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -8,10 +7,11 @@ import android.service.quicksettings.TileService
 import java.lang.ref.WeakReference
 
 /**
- * Quick-settings tile: active while at least one agent needs input, with
- * the attention count in the subtitle, else Claude's 5-hour and weekly
- * limits ("5h 42% · wk 18%", and as rings in the icon). Tapping opens the app on the agent
- * attention sheet.
+ * Quick-settings tile: active while an agent needs the user or is stuck,
+ * with the dashboard's counts in the subtitle ("2 need you · 1 stuck"),
+ * else Claude's 5-hour and weekly limits ("5h 42% · wk 18%"). The icon is
+ * the limits as rings whenever they are known. Tapping opens the app on
+ * the agents dashboard.
  *
  * The tile reads the stored snapshot whenever it becomes visible; while it
  * is visible, a push from Dart refreshes it through [refresh].
@@ -31,13 +31,9 @@ class AgentStatusTileService : TileService() {
     override fun onClick() {
         super.onClick()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startActivityAndCollapse(AgentStatusWidgetProvider.openAgentsIntent(this))
+            startActivityAndCollapse(AgentStatusWidgetProvider.openDashboardIntent(this))
         } else {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                action = AgentStatusStore.ACTION_OPEN_AGENTS
-                putExtra(AgentStatusStore.EXTRA_LAUNCH_TARGET, AgentStatusStore.LAUNCH_TARGET_AGENTS)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
+            val intent = AgentStatusWidgetProvider.dashboardIntent(this)
             @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
         }
@@ -47,7 +43,7 @@ class AgentStatusTileService : TileService() {
         val tile = qsTile ?: return
         val snapshot = AgentStatusStore.load(this)
         val live = snapshot != null && snapshot.monitoring
-        val count = snapshot?.attentionCount ?: 0
+        val dashboard = snapshot?.dashboard
         val now = System.currentTimeMillis()
         val fiveHour = snapshot?.limit("5h")
         val week = snapshot?.limit("7d")
@@ -59,7 +55,8 @@ class AgentStatusTileService : TileService() {
         } else {
             Icon.createWithResource(this, R.drawable.ic_agent_tile)
         }
-        tile.state = if (live && count > 0) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        val news = live && dashboard != null && dashboard.hasNews
+        tile.state = if (news) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         val limits = if (fiveHour != null || week != null) {
             getString(
                 R.string.agent_tile_limits,
@@ -69,10 +66,9 @@ class AgentStatusTileService : TileService() {
         } else {
             null
         }
-        // Agents needing input come first; otherwise the limits.
+        // Who needs the user and who is stuck come first; otherwise the limits.
         val subtitle = when {
-            live && count == 1 -> getString(R.string.agent_tile_one_needs_input)
-            live && count > 1 -> getString(R.string.agent_tile_needs_input, count)
+            news && dashboard != null -> AgentWidgetText.newsLine(resources, dashboard)
             limits != null -> limits
             !live -> getString(R.string.agent_tile_not_monitoring)
             else -> getString(R.string.agent_widget_all_clear)

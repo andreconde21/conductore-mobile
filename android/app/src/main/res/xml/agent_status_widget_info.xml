@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Resizable from 2x1 (count + top agent) up to 4x2 (four agents + time). -->
+<!-- Resizable from 2x1 (the needs-you count and the 5-hour ring) up to 4x2
+     (the dashboard counts, the top lines and both rings). -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/agent_widget_description"
-    android:initialLayout="@layout/widget_agent_status"
+    android:initialLayout="@layout/widget_agent_large"
     android:minWidth="110dp"
     android:minHeight="40dp"
     android:minResizeWidth="110dp"
     android:minResizeHeight="40dp"
     android:targetCellWidth="4"
     android:targetCellHeight="2"
-    android:previewLayout="@layout/widget_agent_status"
+    android:previewLayout="@layout/widget_agent_large"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />
