@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: a daemon could run with no `hostd.pid`. The hook and the CLI often start a daemon at the same moment; the loser could read the winner's lock while it was still empty (created, pid not yet written), take it for stale, replace it and then, finding the socket served, remove it. The lock is now published whole (a hard link of a temp file holding the pid), and a stale one is replaced by rename, never removed first, by the one starter that creates `hostd.pid.takeover`; the others see the new holder and exit. A stale lock with a live foreign pid still never blocks the daemon (M17).
+
 ## 0.8.0 (2026-09-27)
 
 - feat: `guide [--timeout-ms 15000]`: the phone's voice guide. `{utterance, context}` JSON on stdin (32 KB max; short ids and labels of machines, projects, agents, pending requests and the screen, never transcripts), one action out of a closed list on stdout (`open`, `chat`, `terminal`, `approve`, `deny`, `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`) with a short sentence to speak, or `error` (claude-missing, not-logged-in, timeout, busy, failed); exit 0.
