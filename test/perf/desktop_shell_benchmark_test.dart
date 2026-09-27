@@ -74,6 +74,10 @@ void main() {
         'top': probe.top(8).replaceAll(' ', ','),
         'top_paints': probe.topPaints(40).replaceAll(' ', ','),
       });
+      // Output stays inside the busy terminal: before the terminal was a
+      // relayout and repaint boundary, every line repainted ~640 render
+      // objects of the shell around it.
+      expect(probe.paints, lessThan(frames * 20));
       await tearDownShell(tester);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.linux),
