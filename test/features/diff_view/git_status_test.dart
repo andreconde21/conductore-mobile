@@ -18,7 +18,9 @@ void main() {
   });
 
   test('reports a detached head', () {
-    final status = GitStatus.parse('# branch.oid abc\n# branch.head (detached)\n');
+    final status = GitStatus.parse(
+      '# branch.oid abc\n# branch.head (detached)\n',
+    );
     expect(status.branch, isNull);
     expect(status.detached, isTrue);
   });
