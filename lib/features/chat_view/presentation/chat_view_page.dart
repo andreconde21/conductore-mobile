@@ -19,6 +19,8 @@ import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_it
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/talk_panel.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
@@ -171,6 +173,7 @@ class _ChatViewPageState extends State<ChatViewPage>
       ..track(const TelemetryEvent.chatModeOpened());
     _chat.setVisible(true);
     _chat.addListener(_stickToBottom);
+    _chat.addListener(_watchTurnEnd);
     if (widget.dictation == null) {
       final recognizer =
           widget.speechRecognizer ??
@@ -254,6 +257,71 @@ class _ChatViewPageState extends State<ChatViewPage>
   }
 
   ThemeController? get _settings => VoiceSettingsScope.maybeOf(context);
+
+  // --- Review -------------------------------------------------------------------
+
+  /// The monitored machine this chat is on.
+  SavedHost? get _reviewHost {
+    final attention = widget.attention;
+    final hostId = widget.hostId;
+    if (attention == null || hostId == null) return null;
+    return attention.monitoredHosts.where((h) => h.id == hostId).firstOrNull;
+  }
+
+  /// The monitor's record of this agent (Review needs its cwd and name).
+  AgentInfo? get _reviewAgent => widget.attention
+      ?.statusFor(widget.hostId ?? '')
+      ?.agents
+      .where((a) => a.id == _chat.sessionId)
+      .firstOrNull;
+
+  bool get _canReview {
+    final host = _reviewHost;
+    return host != null &&
+        _reviewAgent != null &&
+        reviewAvailable(widget.attention!, host);
+  }
+
+  bool _reviewOpen = false;
+
+  Future<void> _openReview() async {
+    final host = _reviewHost;
+    final agent = _reviewAgent;
+    if (host == null || agent == null || _reviewOpen) return;
+    _reviewOpen = true;
+    try {
+      await openReview(
+        context: context,
+        attention: widget.attention!,
+        host: host,
+        agent: agent,
+        // Through the chat, so the prompt shows as a bubble here too.
+        send: (text) => _chat.send(text),
+        dictation: _dictation,
+      );
+    } finally {
+      _reviewOpen = false;
+    }
+  }
+
+  String? _lastTurnState;
+
+  /// "Review changes: after each turn": a turn that ends (Stop) while this
+  /// chat is on screen opens Review, on machines that snapshot turns.
+  void _watchTurnEnd() {
+    final agent = _chat.agent;
+    final state = agent?.state;
+    final previous = _lastTurnState;
+    _lastTurnState = state;
+    if (previous != 'working' || state != 'waiting_input') return;
+    if (agent?.lastEvent != 'Stop') return;
+    final voice = _settings?.voice ?? VoicePreferences.defaults;
+    if (voice.reviewOpens != ReviewOpens.afterEachTurn) return;
+    final host = _reviewHost;
+    if (host == null || !widget.attention!.supportsSnapshots(host.id)) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    unawaited(_openReview());
+  }
 
   /// Hands every new poll to the reader; the first loaded thread only
   /// marks what is already there as read.
@@ -462,6 +530,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     WidgetsBinding.instance.removeObserver(this);
     _chat.removeListener(_feedReadAloud);
     _chat.removeListener(_stickToBottom);
+    _chat.removeListener(_watchTurnEnd);
     _dictation?.removeListener(_syncDictation);
     _talk
       ?..removeListener(_onTalkChanged)
@@ -756,6 +825,13 @@ class _ChatViewPageState extends State<ChatViewPage>
                 _ReadAloudToggle(
                   controller: readAloud,
                   onPressed: _toggleReadAloud,
+                ),
+              if (_canReview)
+                IconButton(
+                  key: const ValueKey('chat-review'),
+                  tooltip: 'Review changes',
+                  onPressed: _openReview,
+                  icon: const Icon(Icons.rate_review_outlined),
                 ),
               _ChatMenu(
                 readAloudLength: _readAloud == null ? null : _readAloudLength,

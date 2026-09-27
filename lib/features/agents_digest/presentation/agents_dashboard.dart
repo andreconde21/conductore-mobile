@@ -10,6 +10,7 @@ import 'package:conduit/features/agents_digest/presentation/digest_controller.da
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:flutter/material.dart';
@@ -219,6 +220,28 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     }
   }
 
+  /// Review of the agent's last turn, when its machine can show one and it
+  /// is not in the middle of a turn.
+  VoidCallback? _reviewAction(DigestAgent agent) {
+    final host = _host(agent.hostId);
+    final live = _live(agent);
+    if (host == null ||
+        live == null ||
+        !agentCanBeReviewed(live) ||
+        !reviewAvailable(widget.attention, host) ||
+        (agent.facts.filesEdited == 0 && agent.facts.turns == 0)) {
+      return null;
+    }
+    return () => unawaited(
+      openReview(
+        context: context,
+        attention: widget.attention,
+        host: host,
+        agent: live,
+      ),
+    );
+  }
+
   Future<void> _tell(DigestAgent agent, {required bool answer}) async {
     final host = _host(agent.hostId);
     if (host == null) return;
@@ -335,6 +358,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
                       onOpen: () => _open(agent),
                       onChat: () => _open(agent, chat: true),
                       onTerminal: () => _open(agent, chat: false),
+                      onReview: _reviewAction(agent),
                       onTell: (answer) =>
                           unawaited(_tell(agent, answer: answer)),
                       onDecide: (request, verdict) =>
@@ -603,10 +627,14 @@ class DigestAgentCard extends StatelessWidget {
     this.summarizing = false,
     this.isDeciding,
     this.now,
+    this.onReview,
     super.key,
   });
 
   final DigestAgent agent;
+
+  /// Opens Review of its last turn; null hides the button.
+  final VoidCallback? onReview;
 
   /// The monitor's record of it (its requests, with their full input);
   /// null when the monitor does not know it (ended, another machine).
@@ -791,6 +819,16 @@ class DigestAgentCard extends StatelessWidget {
                               ? 'Answer'
                               : 'Tell it…',
                         ),
+                      ),
+                    if (onReview case final review?)
+                      TextButton.icon(
+                        key: ValueKey('digest-review-${agent.sessionId}'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: review,
+                        icon: const Icon(Icons.rate_review_outlined, size: 18),
+                        label: const Text('Review'),
                       ),
                     TextButton.icon(
                       key: ValueKey('digest-chat-${agent.sessionId}'),
