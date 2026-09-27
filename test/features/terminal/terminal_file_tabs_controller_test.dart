@@ -29,6 +29,37 @@ class FlakySftpRepository implements SftpRepository {
   }
 }
 
+/// A session whose connection can drop: every call then fails.
+class _DroppableSftpSession extends FakeSftpSession {
+  _DroppableSftpSession() : super(home: '/home/user', tree: {}) {
+    files['/etc/hosts'] = 'hello'.codeUnits;
+  }
+
+  bool dropped = false;
+
+  @override
+  Future<Uint8List> read(
+    String path, {
+    void Function(int bytesRead, int? total)? onProgress,
+    int? maxBytes,
+  }) {
+    if (dropped) throw StateError('Transport is closed');
+    return super.read(path, onProgress: onProgress, maxBytes: maxBytes);
+  }
+}
+
+/// Hands out a new [_DroppableSftpSession] per connection.
+class _ReconnectingSftpRepository implements SftpRepository {
+  final sessions = <_DroppableSftpSession>[];
+
+  @override
+  Future<SftpSession> connect(SavedHost host) async {
+    final session = _DroppableSftpSession();
+    sessions.add(session);
+    return session;
+  }
+}
+
 void main() {
   late FakeSftpSession session;
   late FakeSftpRepository repository;
@@ -146,6 +177,27 @@ void main() {
 
     expect(String.fromCharCodes(bytes), 'hello');
     expect(flaky.connectCalls, 2);
+  });
+
+  test('a session that dies after connecting is dropped and closed', () async {
+    final reconnecting = _ReconnectingSftpRepository();
+    final tabs = TerminalFileTabsController(reconnecting);
+    addTearDown(tabs.dispose);
+    final tab = tabs.open(hostA, '/etc/hosts');
+    final other = tabs.open(hostA, '/etc/other');
+
+    await tabs.read(tab, null);
+    // A network change kills the pooled session.
+    reconnecting.sessions.single.dropped = true;
+    await expectLater(tabs.read(tab, null), throwsA(isA<StateError>()));
+    expect(reconnecting.sessions.single.closeCalls, 1);
+
+    // The next read, from any of the host's tabs, reconnects.
+    await tabs.read(other, null);
+    expect(reconnecting.sessions, hasLength(2));
+    final bytes = await tabs.read(tab, null);
+    expect(String.fromCharCodes(bytes), 'hello');
+    expect(reconnecting.sessions, hasLength(2));
   });
 
   test('dispose closes every pooled session', () async {
