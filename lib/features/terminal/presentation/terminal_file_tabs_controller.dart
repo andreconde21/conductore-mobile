@@ -117,9 +117,10 @@ class TerminalFileTabsController extends ChangeNotifier {
     );
   });
 
-  Future<void> write(TerminalFileTab tab, Uint8List bytes) =>
-      _withSession(tab, (session, path) {
-        return session.write(path, Stream.value(bytes), bytes.length);
+  /// Saves [tab]'s file; completes with the save's notice for the user.
+  Future<String?> write(TerminalFileTab tab, Uint8List bytes) =>
+      _withSession(tab, (session, path) async {
+        return (await session.save(path, bytes)).notice;
       });
 
   /// Runs [action] on [tab]'s pooled session. When it fails the session is

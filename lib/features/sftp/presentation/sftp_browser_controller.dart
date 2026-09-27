@@ -443,12 +443,13 @@ class SftpBrowserController extends ChangeNotifier {
     );
   }
 
-  Future<void> writeFile(String path, Uint8List bytes) async {
+  /// Saves an edited file; completes with the save's notice for the user.
+  Future<String?> writeFile(String path, Uint8List bytes) async {
     final session = _session;
     if (session == null) {
       throw const AppFailure('Not connected.');
     }
-    await session.write(path, Stream.value(bytes), bytes.length);
+    return (await session.save(path, bytes)).notice;
   }
 
   Future<void> _mutate(Future<void> Function() action) async {

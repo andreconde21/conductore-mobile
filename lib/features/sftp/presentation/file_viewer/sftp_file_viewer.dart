@@ -14,7 +14,10 @@ import 'package:re_editor/re_editor.dart';
 
 typedef SftpFileRead =
     Future<Uint8List> Function(void Function(int read, int? total)? onProgress);
-typedef SftpFileWrite = Future<void> Function(Uint8List bytes);
+
+/// Saves [bytes]; completes with a note on how the file was saved for the
+/// user, or null.
+typedef SftpFileWrite = Future<String?> Function(Uint8List bytes);
 
 enum _ViewerStatus { loading, failed, ready }
 
@@ -155,7 +158,7 @@ class SftpFileViewerState extends State<SftpFileViewer> {
     final text = editor.text;
     setState(() => _saving = true);
     try {
-      await write(Uint8List.fromList(utf8.encode(text)));
+      final notice = await write(Uint8List.fromList(utf8.encode(text)));
       if (!mounted) return;
       _loadedText = text;
       setState(() {
@@ -163,7 +166,10 @@ class SftpFileViewerState extends State<SftpFileViewer> {
         _saving = false;
         _hasSaved = true;
       });
-      _showSnack('Saved $_fileName');
+      _showSnack(
+        notice == null ? 'Saved $_fileName' : 'Saved $_fileName. $notice',
+        long: notice != null,
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -179,10 +185,15 @@ class SftpFileViewerState extends State<SftpFileViewer> {
     await _load();
   }
 
-  void _showSnack(String message) {
+  void _showSnack(String message, {bool long = false}) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: Duration(seconds: long ? 8 : 4),
+        ),
+      );
   }
 
   @override

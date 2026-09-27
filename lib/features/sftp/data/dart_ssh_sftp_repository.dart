@@ -2,8 +2,11 @@ import 'dart:typed_data';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sftp/data/safe_remote_saver.dart';
+import 'package:conduit/features/sftp/data/sftp_client_save_file_system.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_save_result.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/ssh_error_formatter.dart';
@@ -47,6 +50,7 @@ class DartSshSftpSession implements SftpSession {
 
   final SSHClient client;
   final SftpClient sftp;
+  late final _saver = SafeRemoteSaver(SftpClientSaveFileSystem(sftp));
   bool _closed = false;
 
   @override
@@ -145,6 +149,10 @@ class DartSshSftpSession implements SftpSession {
       await file.close();
     }
   }
+
+  @override
+  Future<SftpSaveResult> save(String path, Uint8List bytes) =>
+      _saver.save(path, bytes);
 
   @override
   Future<void> makeDirectory(String path) => sftp.mkdir(path);
