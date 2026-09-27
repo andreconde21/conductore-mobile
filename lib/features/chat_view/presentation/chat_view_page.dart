@@ -6,6 +6,8 @@ import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
@@ -31,6 +33,7 @@ import 'package:conduit/features/voice/presentation/talk_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// A native chat over one live Claude Code session: the transcript as
@@ -52,6 +55,8 @@ class ChatViewPage extends StatefulWidget {
     this.imageAttacher,
     this.pasteImages = true,
     this.clipboardHasImage = PlatformPromptImageSource.clipboardHasImage,
+    this.attention,
+    this.hostId,
     super.key,
   });
 
@@ -83,7 +88,8 @@ class ChatViewPage extends StatefulWidget {
   final Future<void> Function()? onEnableMonitoring;
 
   /// Speaks replies when "Read replies aloud" is on; defaults to the
-  /// on-device engine on Android and to none elsewhere (tests inject one).
+  /// on-device engine on Android and iOS and to none elsewhere (tests
+  /// inject one).
   final TextToSpeech? textToSpeech;
 
   /// A small widget pinned above the composer (the "Preview ready" chip).
@@ -101,6 +107,12 @@ class ChatViewPage extends StatefulWidget {
 
   /// Whether the clipboard holds an image (offers "Paste image").
   final Future<bool> Function() clipboardHasImage;
+
+  /// The agent monitor and this chat's host: when the host's companion
+  /// keeps approval rules, approval cards offer "Trust…" and "Always"
+  /// saves a companion rule (see [answerPermissionRequest]).
+  final AgentAttentionController? attention;
+  final String? hostId;
 
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
@@ -309,8 +321,12 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (readAloud == null) return;
     if (!readAloud.isAvailable) {
       _tell(
-        'Reading aloud needs a text-to-speech engine. Install or turn one '
-        'on in Android Settings › Accessibility › Text-to-speech output.',
+        defaultTargetPlatform == TargetPlatform.iOS
+            ? 'Reading aloud needs a voice. Download one in Settings › '
+                  'Accessibility › Spoken Content › Voices.'
+            : 'Reading aloud needs a text-to-speech engine. Install or turn '
+                  'one on in Android Settings › Accessibility › '
+                  'Text-to-speech output.',
       );
       // It may have been installed since the chat opened.
       unawaited(readAloud.checkAvailability());
@@ -492,11 +508,41 @@ class _ChatViewPageState extends State<ChatViewPage>
     );
   }
 
+  bool get _smartApprovals {
+    final attention = widget.attention;
+    final hostId = widget.hostId;
+    return attention != null &&
+        hostId != null &&
+        attention.supportsSmartApprovals(hostId);
+  }
+
+  Future<void> _trust(PendingPermissionRequest request) async {
+    _quiet();
+    await trustPermissionRequest(
+      context,
+      controller: widget.attention!,
+      hostId: widget.hostId!,
+      request: request,
+    );
+    if (mounted) unawaited(_chat.refresh());
+  }
+
   Future<void> _decide(
     PendingPermissionRequest request,
     PermissionVerdict verdict,
   ) async {
     _quiet();
+    if (verdict == PermissionVerdict.always && _smartApprovals) {
+      await answerPermissionRequest(
+        context,
+        controller: widget.attention!,
+        hostId: widget.hostId!,
+        request: request,
+        verdict: verdict,
+      );
+      if (mounted) unawaited(_chat.refresh());
+      return;
+    }
     final messenger = ScaffoldMessenger.maybeOf(context);
     try {
       await _chat.decide(request, verdict);
@@ -858,8 +904,11 @@ class _ChatViewPageState extends State<ChatViewPage>
         ChatApprovalCard(
           key: ValueKey('approval-${request.id}'),
           request: request,
-          busy: _chat.isDeciding(request.id),
+          busy:
+              _chat.isDeciding(request.id) ||
+              (widget.attention?.isDeciding(request.id) ?? false),
           onDecide: (verdict) => _decide(request, verdict),
+          onTrust: _smartApprovals ? () => _trust(request) : null,
         ),
       for (final entry in ChatToolActivity.arrange(
         items.sublist(0, shownCount),

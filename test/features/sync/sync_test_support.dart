@@ -6,6 +6,7 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/session_snapshot.dart';
 import 'package:conduit/features/sync/data/app_local_sync_store.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:flutter/material.dart';
 
 import '../../support/test_doubles.dart';
@@ -79,9 +80,17 @@ class LocalDevice {
       themeMode: ThemeMode.dark,
       palette: AppPalette.catppuccin,
     ),
+    bool desktop = false,
   }) async {
     final hostsRepository = FakeHostsRepository()..persisted = List.of(hosts);
-    final hostsController = HostsController(hostsRepository);
+    final hostsController = HostsController(
+      hostsRepository,
+      thisComputerStore: desktop
+          ? InMemoryThisComputerStore(
+              ThisComputerSettings(host: SavedHost.thisComputer()),
+            )
+          : null,
+    );
     await hostsController.load();
     final theme = ThemeController(InMemoryThemePreferences(preferences));
     await theme.load();

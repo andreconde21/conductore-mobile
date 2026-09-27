@@ -263,13 +263,16 @@ test('CLI: conductore-hostd usage prints the report', async () => {
   const chome = path.join(t.root, 'chome')
   const run = args => new Promise(resolve => {
     execFile(process.execPath, [HOSTD, 'usage', ...args], {
-      env: { ...process.env, HOME: t.home, CONDUCTORE_HOME: chome, CLAUDE_CONFIG_DIR: '', CODEX_HOME: '' }
+      env: { ...process.env, HOME: t.home, CONDUCTORE_HOME: chome, CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', CONDUCTORE_CSWAP: '' }
     }, (err, stdout) => resolve({ code: err ? err.code : 0, json: JSON.parse(stdout) }))
   })
   const ok = await run(['--days', '3'])
   assert.equal(ok.code, 0)
   assert.equal(ok.json.version, '0.7.0')
   assert.equal(ok.json.claude.today.output, 42)
+  // No cswap: no accounts field at all.
+  assert.equal(ok.json.claude.accounts, undefined)
+  assert.equal(ok.json.claude.cswap, undefined)
   assert.ok(fs.existsSync(path.join(chome, 'usage-cache.json')))
   const bad = await run(['--days', 'x'])
   assert.equal(bad.code, 1)

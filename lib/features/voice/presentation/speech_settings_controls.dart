@@ -7,6 +7,7 @@ import 'package:conduit/features/voice/domain/speech_languages.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/voice_services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Settings → Speech: dictation (language, continuous listening and its
@@ -22,7 +23,7 @@ class SpeechSettingsControls extends StatefulWidget {
   final ThemeController controller;
 
   /// Lists voices and plays the sample; defaults to the on-device engine
-  /// on Android. Without one the read-aloud settings are hidden.
+  /// on Android and iOS. Without one the read-aloud settings are hidden.
   final TextToSpeech? textToSpeech;
 
   @override
@@ -193,20 +194,21 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                     (v) => v.copyWith(dictationMaxMinutes: value.round()),
                   ),
                 ),
-                SwitchListTile(
-                  secondary: const Icon(Icons.notifications_off_outlined),
-                  title: const Text('Silence beeps between phrases'),
-                  subtitle: Text(
-                    'Experimental. Mutes media, notification and system '
-                    'sounds while dictating so restarts are quiet. Restored '
-                    'when you stop, or on the next start if the app was '
-                    'closed while muted.',
-                    style: muted,
+                if (PlatformFeatures.muteRestartBeeps)
+                  SwitchListTile(
+                    secondary: const Icon(Icons.notifications_off_outlined),
+                    title: const Text('Silence beeps between phrases'),
+                    subtitle: Text(
+                      'Experimental. Mutes media, notification and system '
+                      'sounds while dictating so restarts are quiet. Restored '
+                      'when you stop, or on the next start if the app was '
+                      'closed while muted.',
+                      style: muted,
+                    ),
+                    value: voice.muteRestartBeeps,
+                    onChanged: (value) =>
+                        _update((v) => v.copyWith(muteRestartBeeps: value)),
                   ),
-                  value: voice.muteRestartBeeps,
-                  onChanged: (value) =>
-                      _update((v) => v.copyWith(muteRestartBeeps: value)),
-                ),
               ],
             ]),
             if (_tts != null) ...[
@@ -469,9 +471,9 @@ class _VoiceDialogState extends State<_VoiceDialog> {
       content: SizedBox(
         width: double.maxFinite,
         child: widget.voices.isEmpty
-            ? const Text(
+            ? Text(
                 'No offline voice is installed for this language. Install '
-                'one in Android Settings → Text-to-speech output.',
+                'one in ${defaultTargetPlatform == TargetPlatform.iOS ? 'Settings → Accessibility → Spoken Content → Voices' : 'Android Settings → Text-to-speech output'}.',
               )
             : ListView(
                 shrinkWrap: true,

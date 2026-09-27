@@ -32,6 +32,7 @@ class AppBackupService {
     required HostKeyVerifier hostKeyVerifier,
     LocalSyncStore? localStore,
     LocalDataChanges? changes,
+    String? Function()? syncHubHostId,
     SyncCrypto crypto = const SyncCrypto(),
     AppBackupCrypto legacyCrypto = const AppBackupCrypto(),
     DateTime Function()? now,
@@ -50,11 +51,14 @@ class AppBackupService {
              changes: changes,
            ),
        _changes = changes,
+       _syncHubHostId = syncHubHostId ?? _noHub,
        _crypto = crypto,
        _legacyCrypto = legacyCrypto,
        _now = now ?? DateTime.now;
 
   static const fileExtension = 'conductore-backup.json';
+
+  static String? _noHub() => null;
 
   final HostsController _hostsController;
   final ThemeController _themeController;
@@ -64,6 +68,11 @@ class AppBackupService {
   /// Announced after a legacy import (bundle imports go through the local
   /// store, which announces its own writes).
   final LocalDataChanges? _changes;
+
+  /// The saved machine device sync goes through, when sync is on. Its
+  /// login is this device's own (a device key the hub can revoke), so
+  /// backups neither carry it nor overwrite it, as sync does.
+  final String? Function() _syncHubHostId;
   final SyncCrypto _crypto;
   final AppBackupCrypto _legacyCrypto;
   final DateTime Function() _now;
@@ -84,6 +93,7 @@ class AppBackupService {
           (category) => includeSecrets || category != SyncCategory.credentials,
         ),
       },
+      hubHostId: _syncHubHostId(),
       includeHardwareKeys: includeSecrets,
     );
     final values = await _localStore.snapshot(options);
@@ -153,8 +163,9 @@ class AppBackupService {
     await _localStore.apply(
       values,
       values.keys.toSet(),
-      const LocalSyncOptions(
-        categories: {...SyncCategory.values},
+      LocalSyncOptions(
+        categories: const {...SyncCategory.values},
+        hubHostId: _syncHubHostId(),
         includeHardwareKeys: true,
       ),
       replace: false,
@@ -175,7 +186,22 @@ class AppBackupService {
   ) async {
     final document = _decodeDocument(bytes);
     final payload = _extractPayload(document, password: password);
-    final hosts = _parseHosts(payload['hosts']);
+    final hub = _hostsController.hosts
+        .where((host) => host.id == _syncHubHostId())
+        .firstOrNull;
+    final hosts = [
+      for (final host in _parseHosts(payload['hosts']))
+        hub != null && host.id == hub.id
+            ? host.copyWith(
+                authMethod: hub.authMethod,
+                password: hub.password,
+                privateKey: hub.privateKey,
+                passphrase: hub.passphrase,
+                hardwareKeys: hub.hardwareKeys,
+                externalAuthOfferKey: hub.externalAuthOfferKey,
+              )
+            : host,
+    ];
     final sortMode = _parseSortMode(payload['hostSortMode']);
     final manualOrder = _parseStringList(payload['hostManualOrder']);
     final trustedKeys = _parseTrustedKeys(payload['trustedHostKeys']);

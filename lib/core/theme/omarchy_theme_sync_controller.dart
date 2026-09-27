@@ -32,6 +32,7 @@ class OmarchyThemeSyncController extends ChangeNotifier
     required this._theme,
     required this._hosts,
     required this._runnerFactory,
+    this._findHost,
     this._clock = DateTime.now,
     this.minInterval = const Duration(seconds: 60),
     this.timeout = const Duration(seconds: 12),
@@ -40,6 +41,11 @@ class OmarchyThemeSyncController extends ChangeNotifier
   final ThemeController _theme;
   final Future<List<SavedHost>> Function() _hosts;
   final AgentCommandRunner Function(SavedHost host) _runnerFactory;
+
+  /// Finds the followed machine by id; defaults to a lookup in [_hosts].
+  /// On a desktop it also finds the synced machine that is this device,
+  /// which is folded into "This computer" and not listed.
+  final Future<SavedHost?> Function(String id)? _findHost;
   final DateTime Function() _clock;
   final Duration minInterval;
   final Duration timeout;
@@ -47,6 +53,7 @@ class OmarchyThemeSyncController extends ChangeNotifier
   OmarchySyncState _state = OmarchySyncState.idle;
   String _message = '';
   Future<void>? _inFlight;
+  String? _inFlightHostId;
   DateTime? _lastAttempt;
   bool _started = false;
   bool _disposed = false;
@@ -92,7 +99,8 @@ class OmarchyThemeSyncController extends ChangeNotifier
 
   /// Reads the followed machine's theme. Automatic calls are throttled to
   /// [minInterval] and skip security-key machines; [explicit] (a tap on
-  /// "Sync now") always runs. Concurrent calls share one run.
+  /// "Sync now") always runs. Concurrent calls for the same machine share
+  /// one run.
   Future<void> refresh({bool explicit = false}) {
     final hostId = _theme.omarchySyncHostId;
     if (hostId == null) {
@@ -100,7 +108,10 @@ class OmarchyThemeSyncController extends ChangeNotifier
     }
     final running = _inFlight;
     if (running != null) {
-      return running;
+      if (_inFlightHostId == hostId) return running;
+      // Another machine is still being read (its result is dropped):
+      // read this one after it.
+      return running.then((_) => refresh(explicit: explicit));
     }
     final last = _lastAttempt;
     if (!explicit && last != null && _clock().difference(last) < minInterval) {
@@ -108,14 +119,19 @@ class OmarchyThemeSyncController extends ChangeNotifier
     }
     final future = _sync(hostId, explicit: explicit).whenComplete(() {
       _inFlight = null;
+      _inFlightHostId = null;
     });
     _inFlight = future;
+    _inFlightHostId = hostId;
     return future;
   }
 
   Future<void> _sync(String hostId, {required bool explicit}) async {
     _lastAttempt = _clock();
-    final host = (await _hosts()).where((h) => h.id == hostId).firstOrNull;
+    final findHost = _findHost;
+    final host = findHost != null
+        ? await findHost(hostId)
+        : (await _hosts()).where((h) => h.id == hostId).firstOrNull;
     if (host == null) {
       _set(OmarchySyncState.failed, 'That machine is no longer saved.');
       return;

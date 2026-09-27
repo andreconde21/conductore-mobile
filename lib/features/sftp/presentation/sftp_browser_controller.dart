@@ -139,6 +139,13 @@ class SftpBrowserController extends ChangeNotifier {
   }
 
   Future<void> connect() async {
+    // Retry after a failure: the session that connected but could not
+    // list is closed, not leaked.
+    final previous = _session;
+    _session = null;
+    if (previous != null) {
+      unawaited(previous.close().catchError((Object _) {}));
+    }
     _status = SftpBrowserStatus.connecting;
     _errorMessage = null;
     _securityKeyMessage = null;
@@ -202,6 +209,17 @@ class SftpBrowserController extends ChangeNotifier {
     await _mutate(() => _session!.delete(entry));
   }
 
+  /// Largest download, a single file or a folder's archive. It is built
+  /// in memory and handed to the platform's save dialog as bytes (a
+  /// second copy), so a bigger one would run the phone out of memory.
+  static const downloadMaxBytes = 256 * 1024 * 1024;
+
+  static AppFailure _tooLargeToDownload(String name) => AppFailure(
+    '$name is larger than ${downloadMaxBytes ~/ (1024 * 1024)} MB, the '
+    'most the app can download. Copy it with scp or rsync from a computer '
+    'instead.',
+  );
+
   Future<String?> download(SftpEntry entry) async {
     final session = _session;
     if (session == null) {
@@ -209,6 +227,9 @@ class SftpBrowserController extends ChangeNotifier {
     }
     if (entry.isDirectory) {
       return _downloadDirectory(session, entry);
+    }
+    if ((entry.size ?? 0) > downloadMaxBytes) {
+      throw _tooLargeToDownload(entry.name);
     }
     _transfer = SftpTransfer(
       name: entry.name,
@@ -218,18 +239,28 @@ class SftpBrowserController extends ChangeNotifier {
     );
     _safeNotify();
     try {
-      final bytes = await session.read(
-        entry.path,
-        onProgress: (read, total) {
-          _transfer = SftpTransfer(
-            name: entry.name,
-            isUpload: false,
-            done: read,
-            total: total ?? entry.size,
-          );
-          _safeNotify();
-        },
-      );
+      var lastRead = 0;
+      final Uint8List bytes;
+      try {
+        bytes = await session.read(
+          entry.path,
+          maxBytes: downloadMaxBytes,
+          onProgress: (read, total) {
+            lastRead = read;
+            _transfer = SftpTransfer(
+              name: entry.name,
+              isUpload: false,
+              done: read,
+              total: total ?? entry.size,
+            );
+            _safeNotify();
+          },
+        );
+      } on AppFailure {
+        // The listing's size was stale (a growing file).
+        if (lastRead > downloadMaxBytes) throw _tooLargeToDownload(entry.name);
+        rethrow;
+      }
       return await fileExport.save(entry.name, bytes);
     } finally {
       _transfer = null;
@@ -246,12 +277,16 @@ class SftpBrowserController extends ChangeNotifier {
     _safeNotify();
     try {
       var bytesRead = 0;
+      var archived = 0;
       final archive = TarArchiveBuilder();
       await _addDirectoryToArchive(
         session: session,
         archive: archive,
         entry: entry,
         archivePath: _safeArchiveSegment(entry.name),
+        remaining: () => downloadMaxBytes - archived,
+        onArchived: (size) => archived += size,
+        tooLarge: () => _tooLargeToDownload('${entry.name} (as $archiveName)'),
         onBytesRead: (read) {
           bytesRead += read;
           _transfer = SftpTransfer(
@@ -274,6 +309,9 @@ class SftpBrowserController extends ChangeNotifier {
     required TarArchiveBuilder archive,
     required SftpEntry entry,
     required String archivePath,
+    required int Function() remaining,
+    required ValueChanged<int> onArchived,
+    required AppFailure Function() tooLarge,
     required ValueChanged<int> onBytesRead,
   }) async {
     archive.addDirectory(archivePath, entry.modifiedAt);
@@ -288,17 +326,31 @@ class SftpBrowserController extends ChangeNotifier {
           archive: archive,
           entry: child,
           archivePath: childArchivePath,
+          remaining: remaining,
+          onArchived: onArchived,
+          tooLarge: tooLarge,
           onBytesRead: onBytesRead,
         );
       } else if (!child.isSymlink) {
+        final left = remaining();
+        if ((child.size ?? 0) > left) throw tooLarge();
         var lastRead = 0;
-        final bytes = await session.read(
-          child.path,
-          onProgress: (read, _) {
-            onBytesRead(read - lastRead);
-            lastRead = read;
-          },
-        );
+        final Uint8List bytes;
+        try {
+          bytes = await session.read(
+            child.path,
+            maxBytes: left,
+            onProgress: (read, _) {
+              onBytesRead(read - lastRead);
+              lastRead = read;
+            },
+          );
+        } on AppFailure {
+          if (lastRead > left) throw tooLarge();
+          rethrow;
+        }
+        final size = child.size ?? 0;
+        onArchived(bytes.length > size ? bytes.length : size);
         archive.addFile(childArchivePath, bytes, child.modifiedAt);
       }
     }

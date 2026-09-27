@@ -259,12 +259,19 @@ Future<void> showSpeechUnavailableDialog(
       key: const ValueKey('speech-unavailable-dialog'),
       icon: const Icon(Icons.mic_off_rounded),
       title: const Text('No speech recognizer'),
-      content: const Text(
-        'This device has no speech recognition service, so the mic cannot '
-        'dictate yet.\n\n'
-        'Install or enable Google speech services (the Google app, or '
-        '"Speech Recognition and Synthesis from Google"), or pick a voice '
-        'input app in Android settings. Then tap the mic again.',
+      content: Text(
+        android
+            ? 'This device has no speech recognition service, so the mic '
+                  'cannot dictate yet.\n\n'
+                  'Install or enable Google speech services (the Google '
+                  'app, or "Speech Recognition and Synthesis from Google"), '
+                  'or pick a voice input app in Android settings. Then tap '
+                  'the mic again.'
+            : 'Speech recognition is not available on this device, so the '
+                  'mic cannot dictate yet.\n\n'
+                  'Turn on Dictation in Settings › General › Keyboard, and '
+                  'check that your dictation language is supported. Then tap '
+                  'the mic again.',
       ),
       actions: [
         TextButton(

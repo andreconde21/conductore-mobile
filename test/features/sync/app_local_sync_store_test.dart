@@ -93,7 +93,10 @@ void main() {
       );
       final values = await source.store.snapshot(_defaults);
 
-      await target.store.apply(values, values.keys.toSet(), _defaults);
+      await target.store.apply(values, {
+        ...values.keys,
+        'host:gone',
+      }, _defaults);
 
       final hosts = {for (final h in target.hosts.hosts) h.id: h};
       expect(hosts.keys, containsAll(['a', 'b', 'local']));
@@ -102,6 +105,33 @@ void main() {
       expect(hosts['a']!.password, 'local-password');
     },
   );
+
+  test('applying leaves machines and snippets outside the changed keys as '
+      'they are now', () async {
+    final source = await LocalDevice.create(
+      hosts: [machine('a'), machine('b')],
+    );
+    await source.theme.setTerminalSnippets(const [
+      TerminalSnippet(id: 'x', label: 'deploy', text: 'make deploy'),
+    ]);
+    final values = await source.store.snapshot(_defaults);
+    final target = await LocalDevice.create(
+      hosts: [
+        machine('a', name: 'Old'),
+        machine('b', name: 'Edited here'),
+      ],
+    );
+    await target.theme.setTerminalSnippets(const [
+      TerminalSnippet(id: 'new', label: 'new', text: 'uptime'),
+    ]);
+
+    await target.store.apply(values, {'host:a', 'snippet:x'}, _defaults);
+
+    final hosts = {for (final h in target.hosts.hosts) h.id: h};
+    expect(hosts['a']!.name, 'Machine a');
+    expect(hosts['b']!.name, 'Edited here b');
+    expect(target.theme.terminalSnippets.map((s) => s.id), ['x', 'new']);
+  });
 
   test('credentials apply when that category is on', () async {
     final source = await LocalDevice.create(
@@ -136,6 +166,7 @@ void main() {
 
   test('settings, trusted keys, connect memory and sessions travel', () async {
     final source = await LocalDevice.create(
+      hosts: [machine('a')],
       trustedKeys: [
         HostKeyRecord(
           host: 'a.example.com',
@@ -177,5 +208,108 @@ void main() {
     expect(target.connect.values['a'], {'rememberChoice': true});
     expect(target.recentDirs.values['a'], ['~/src']);
     expect(target.sessions.stored.entries.single.hostId, 'a');
+  });
+
+  test('connect memory of a machine that is no longer saved stops '
+      'syncing', () async {
+    final device = await LocalDevice.create(hosts: [machine('a')]);
+    device.connect.values = {
+      'a': {'rememberChoice': true},
+      'a#tmux:work': {'rememberChoice': true},
+      'gone': {'rememberChoice': true},
+    };
+    device.recentDirs.values = {
+      'a': ['~/src'],
+      'gone': ['~/old'],
+    };
+
+    final values = await device.store.snapshot(_defaults);
+    expect(
+      values.keys.where((k) => k.startsWith('connect:')),
+      unorderedEquals(['connect:a', 'connect:a#tmux:work']),
+    );
+    expect(values.keys.where((k) => k.startsWith('recentDirs:')), [
+      'recentDirs:a',
+    ]);
+
+    // Without machines syncing, the saved list says nothing about ids.
+    final connectionsOnly = await device.store.snapshot(
+      const LocalSyncOptions(categories: {SyncCategory.connections}),
+    );
+    expect(connectionsOnly.keys, contains('connect:gone'));
+  });
+
+  test('renaming machine ids moves their connect memory and theme '
+      'follow', () async {
+    final device = await LocalDevice.create(hosts: [machine('new')]);
+    device.connect.values = {
+      'old': {'rememberChoice': true},
+      'old#tmux:work': {'rememberChoice': false},
+      'other': {'rememberChoice': true},
+    };
+    device.recentDirs.values = {
+      'old': ['~/src'],
+    };
+    await device.theme.setOmarchySyncHost('old');
+
+    await device.store.renameHosts({'old': 'new'});
+
+    expect(
+      device.connect.values.keys,
+      unorderedEquals(['new', 'new#tmux:work', 'other']),
+    );
+    expect(device.recentDirs.values, {
+      'new': ['~/src'],
+    });
+    expect(device.theme.omarchySyncHostId, 'new');
+  });
+
+  group('the followed Omarchy machine', () {
+    const follow = 'setting:omarchySyncHostId';
+    const appearance = LocalSyncOptions(categories: {SyncCategory.appearance});
+
+    test('"This computer" syncs as the saved machine that is this desktop, '
+        'or not at all', () async {
+      final desktop = await LocalDevice.create(
+        hosts: [machine('omarchy')],
+        desktop: true,
+      );
+      await desktop.theme.setOmarchySyncHost(thisComputerHostId);
+
+      expect(
+        (await desktop.store.snapshot(appearance)).containsKey(follow),
+        isFalse,
+      );
+
+      desktop.hosts.setSelfMachineId('omarchy');
+      expect((await desktop.store.snapshot(appearance))[follow], 'omarchy');
+    });
+
+    test('following the machine that is this desktop follows "This '
+        'computer" there', () async {
+      final desktop = await LocalDevice.create(
+        hosts: [machine('omarchy')],
+        desktop: true,
+      );
+      desktop.hosts.setSelfMachineId('omarchy');
+
+      await desktop.store.apply({follow: 'omarchy'}, {follow}, appearance);
+
+      expect(desktop.theme.omarchySyncHostId, thisComputerHostId);
+      expect((await desktop.store.snapshot(appearance))[follow], 'omarchy');
+    });
+
+    test('a device-local id from another device is ignored', () async {
+      final phone = await LocalDevice.create(hosts: [machine('omarchy')]);
+      await phone.theme.setOmarchySyncHost('omarchy');
+
+      await phone.store.apply(
+        {follow: thisComputerHostId},
+        {follow},
+        appearance,
+      );
+
+      expect(phone.theme.omarchySyncHostId, 'omarchy');
+    });
   });
 }

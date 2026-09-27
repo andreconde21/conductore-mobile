@@ -238,6 +238,62 @@ void main() {
       expect(sync.message, 'Gruvbox, JetBrainsMono Nerd Font');
     });
 
+    test('follows a synced machine that is this desktop through '
+        'findHost, though the machine list leaves it out', () async {
+      final read = <String>[];
+      final sync = OmarchyThemeSyncController(
+        theme: theme,
+        hosts: () async => hosts,
+        findHost: (id) async => id == 'self'
+            ? SavedHost.thisComputer(name: 'This computer · omarchy')
+            : null,
+        runnerFactory: (host) {
+          read.add(host.id);
+          return runner;
+        },
+        clock: () => now,
+      );
+
+      await sync.follow('self');
+
+      expect(read, [thisComputerHostId]);
+      expect(sync.state, OmarchySyncState.synced);
+      expect(theme.palette, AppPalette.gruvbox);
+    });
+
+    test('picking another machine while one is still being read reads '
+        'the new one', () async {
+      final slow = Completer<String>();
+      final replies = <FutureOr<String> Function()>[
+        () => slow.future,
+        () => _probeOutput(name: 'nord'),
+      ];
+      runner.reply = () => replies.removeAt(0)();
+      final read = <String>[];
+      final sync = OmarchyThemeSyncController(
+        theme: theme,
+        hosts: () async => hosts,
+        runnerFactory: (host) {
+          read.add(host.id);
+          return runner;
+        },
+        clock: () => now,
+      );
+
+      final first = sync.follow('a');
+      await pumpEventQueue();
+      final second = sync.follow('b');
+      await pumpEventQueue();
+      slow.complete(_probeOutput(name: 'gruvbox'));
+      await first;
+      await second;
+
+      expect(read, ['a', 'b']);
+      expect(theme.omarchySyncHostId, 'b');
+      expect(theme.palette, AppPalette.nord);
+      expect(sync.state, OmarchySyncState.synced);
+    });
+
     test('a custom theme and an unbundled font', () async {
       runner.reply = () => _probeOutput(
         name: 'my-dusk',

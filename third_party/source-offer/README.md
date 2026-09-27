@@ -1,5 +1,11 @@
 # Corresponding source for generated local-shell binaries
 
+This directory comes from Conduit, which Conductore is based on. For Conductore
+builds that include these binaries, the written offer in
+[`../../THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) applies, and the
+corresponding source is published with Conductore's repository,
+<https://github.com/andreconde21/conductore-mobile>.
+
 Conduit release builds generate Android/aarch64 binaries in
 `android/app/src/main/jniLibs/arm64-v8a/` for the optional on-device local Arch
 Linux shell. This directory records the corresponding-source information for

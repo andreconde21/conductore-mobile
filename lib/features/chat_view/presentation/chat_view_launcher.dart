@@ -8,6 +8,7 @@ import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/chat_view/data/attention_host_runner.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
@@ -406,7 +407,9 @@ Future<void> openChatView({
   PromptImageAttacher? imageAttacher,
   bool pasteImages = true,
 }) async {
-  final (runner, :owned) = attention.runnerFor(host);
+  // Resolved per command: the monitor's connection is replaced when the
+  // session reconnects, and the chat may stay open across that.
+  final runner = AttentionHostRunner(attention, host);
   final changes = _AgentChangeSignal(attention, host.id, agent.id);
   Future<void> decide(
     PendingPermissionRequest request,
@@ -433,7 +436,7 @@ Future<void> openChatView({
 
   final controller = ChatViewController(
     runner: runner,
-    ownsRunner: owned,
+    ownsRunner: true,
     sessionId: agent.id,
     fallbackName: agent.name,
     decide: decide,
@@ -454,6 +457,7 @@ Future<void> openChatView({
         initialDraft: initialDraft,
         imageAttacher: imageAttacher,
         pasteImages: pasteImages,
+        attention: attention,
         onSetUpCompanion: companion == null || !context.mounted
             ? null
             : () => showCompanionSetup(context, host),
@@ -481,6 +485,8 @@ Future<void> openChatView({
         initialDraft: initialDraft,
         imageAttacher: imageAttacher,
         pasteImages: pasteImages,
+        attention: attention,
+        hostId: host.id,
         onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
             ? null
             : () => showCompanionSetup(routeContext, host),

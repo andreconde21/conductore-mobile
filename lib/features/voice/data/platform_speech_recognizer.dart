@@ -2,10 +2,11 @@ import 'package:conduit/features/voice/domain/speech_event.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
 import 'package:flutter/services.dart';
 
-/// Android implementation over the `conduit/speech` method channel and the
-/// `conduit/speech_events` event channel (see SpeechRecognitionBridge.kt).
+/// Android and iOS implementation over the `conduit/speech` method channel
+/// and the `conduit/speech_events` event channel (see
+/// SpeechRecognitionBridge.kt and ios/Runner/SpeechRecognitionBridge.swift).
 ///
-/// Without a native handler (iOS, tests) the recognizer reports itself as
+/// Without a native handler (desktops, tests) the recognizer reports itself as
 /// unavailable and every call is a harmless no-op.
 class PlatformSpeechRecognizer implements SpeechRecognizer {
   PlatformSpeechRecognizer({MethodChannel? methods, EventChannel? events})

@@ -88,7 +88,7 @@ class TerminalSessionController extends ChangeNotifier {
   TerminalEnterSequence _enterSequence = TerminalEnterSequence.cr;
   int _connectionGeneration = 0;
   int? _lastIosEnterOutputMs;
-  String _terminalTitle = '';
+  final _terminalTitle = ValueNotifier<String>('');
   final _remoteClipboardWrites = StreamController<String>.broadcast();
   final _workingDirectoryReports = StreamController<String>.broadcast();
   String? _workingDirectory;
@@ -128,7 +128,12 @@ class TerminalSessionController extends ChangeNotifier {
 
   /// The window title the remote application last set (OSC 0/2), empty
   /// until one arrives. Herdr and tmux both keep it current.
-  String get terminalTitle => _terminalTitle;
+  String get terminalTitle => _terminalTitle.value;
+
+  /// Notifies each change of [terminalTitle]. Kept apart from this
+  /// controller's own notifications: a TUI that animates its title (a
+  /// spinner) would otherwise rebuild everything listening to the session.
+  ValueListenable<String> get terminalTitleListenable => _terminalTitle;
 
   /// Text the remote asked to put on the clipboard with OSC 52 (vim, tmux
   /// `set-clipboard on`, Claude Code's copy). Already decoded, capped at
@@ -203,6 +208,9 @@ class TerminalSessionController extends ChangeNotifier {
       return;
     }
 
+    // A session that ended on its own (shell exit, stream error) is
+    // already closed; this only catches one that somehow was not.
+    _teardownSession();
     final generation = ++_connectionGeneration;
     _exitCode = null;
     _outputFilter.reset();
@@ -281,6 +289,7 @@ class TerminalSessionController extends ChangeNotifier {
                 (true, null) => '\r\nShell exited.\r\n',
                 (false, null) => '\r\nConnection closed.\r\n',
               });
+              _teardownSession(drainOutput: true);
               notifyListeners();
             }
           }, onError: _handleStreamError);
@@ -695,11 +704,10 @@ class TerminalSessionController extends ChangeNotifier {
     };
     terminal.onOutput = _sendTerminalOutput;
     terminal.onTitleChange = (title) {
-      if (title == _terminalTitle || _disposed) {
+      if (_disposed) {
         return;
       }
-      _terminalTitle = title;
-      notifyListeners();
+      _terminalTitle.value = title;
     };
     terminal.onPrivateOSC = _handlePrivateOsc;
   }
@@ -916,7 +924,42 @@ class TerminalSessionController extends ChangeNotifier {
     }
     terminal.write('\r\n$error\r\n');
     _status = TerminalConnectionStatus.failed;
+    _teardownSession();
     notifyListeners();
+  }
+
+  /// Drops the current session after it ended on its own: its listeners
+  /// stop (so nothing it still emits reaches the next session's screen)
+  /// and its transport closes (the SSH client and its keepalive, the
+  /// Mosh UDP socket), which a later Reconnect would otherwise leak.
+  ///
+  /// With [drainOutput] (the shell exited) stdout and stderr keep writing
+  /// until the next [connect] or [dispose]: the shell's last lines can
+  /// arrive after its exit is reported.
+  void _teardownSession({bool drainOutput = false}) {
+    final session = _session;
+    _session = null;
+    _resizeTimer?.cancel();
+    _resizeTimer = null;
+    _resizePending = false;
+    _redrawTimer?.cancel();
+    _redrawTimer = null;
+    if (!drainOutput) {
+      unawaited(_stdoutSubscription?.cancel());
+      unawaited(_stderrSubscription?.cancel());
+      _stdoutSubscription = null;
+      _stderrSubscription = null;
+    }
+    unawaited(_doneSubscription?.cancel());
+    unawaited(_connectivitySubscription?.cancel());
+    unawaited(_echoAckSubscription?.cancel());
+    _doneSubscription = null;
+    _connectivitySubscription = null;
+    _echoAckSubscription = null;
+    _predictiveEcho.reset();
+    if (session != null) {
+      unawaited(session.close().catchError((Object _) {}));
+    }
   }
 
   /// Says why connecting failed: the shared headline and advice for an
@@ -972,6 +1015,7 @@ class TerminalSessionController extends ChangeNotifier {
     }
     keyboard.dispose();
     _terminalPaintNotifier.dispose();
+    _terminalTitle.dispose();
     unawaited(_remoteClipboardWrites.close());
     unawaited(_workingDirectoryReports.close());
     super.dispose();

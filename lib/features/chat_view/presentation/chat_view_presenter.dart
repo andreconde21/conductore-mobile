@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
@@ -20,6 +21,7 @@ class ChatViewRequest {
     this.pasteImages = true,
     this.onSetUpCompanion,
     this.onEnableMonitoring,
+    this.attention,
   });
 
   final SavedHost host;
@@ -35,6 +37,9 @@ class ChatViewRequest {
   final bool pasteImages;
   final VoidCallback? onSetUpCompanion;
   final Future<void> Function()? onEnableMonitoring;
+
+  /// For the approval cards' "Trust…" and rule-saving "Always".
+  final AgentAttentionController? attention;
 
   bool _disposed = false;
 

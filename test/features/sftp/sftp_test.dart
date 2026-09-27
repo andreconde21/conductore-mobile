@@ -1,6 +1,10 @@
 import 'dart:io';
 
+import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
+import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/sftp/presentation/sftp_browser_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../support/test_doubles.dart';
@@ -106,6 +110,46 @@ void main() {
       );
     });
 
+    test('download refuses a file too large to hold in memory', () async {
+      const huge = SftpEntry(
+        name: 'disk.img',
+        path: '/home/user/disk.img',
+        kind: SftpEntryKind.file,
+        size: SftpBrowserController.downloadMaxBytes + 1,
+      );
+      await controller.connect();
+      await expectLater(
+        controller.download(huge),
+        throwsA(
+          isA<AppFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('the most the app can download'),
+          ),
+        ),
+      );
+      expect(session.readCalls, isEmpty);
+      expect(export.saved, isEmpty);
+      expect(controller.transfer, isNull);
+    });
+
+    test('download refuses a folder whose files add up past the cap', () async {
+      const half = SftpBrowserController.downloadMaxBytes ~/ 2 + 1;
+      session.tree['/home/user/docs'] = [
+        for (final name in ['a.bin', 'b.bin'])
+          SftpEntry(
+            name: name,
+            path: '/home/user/docs/$name',
+            kind: SftpEntryKind.file,
+            size: half,
+          ),
+      ];
+      session.files['/home/user/docs/a.bin'] = List.filled(16, 0);
+      await controller.connect();
+      await expectLater(controller.download(dir), throwsA(isA<AppFailure>()));
+      expect(export.saved, isEmpty);
+    });
+
     test('makeDirectory issues the join under the current path', () async {
       await controller.connect();
       await controller.makeDirectory('new');
@@ -188,5 +232,37 @@ void main() {
       expect(failing.status, SftpBrowserStatus.failed);
       expect(failing.errorMessage, isNotNull);
     });
+
+    test('Retry closes the session that could not list', () async {
+      // Connects, but listing the home directory fails.
+      final sessions = <FakeSftpSession>[];
+      final retrying = SftpBrowserController(
+        host: buildHost('files'),
+        repository: _NewSessionSftpRepository(sessions),
+        fileExport: export,
+      );
+      addTearDown(retrying.dispose);
+      await retrying.connect();
+      expect(retrying.status, SftpBrowserStatus.failed);
+
+      await retrying.connect();
+      expect(sessions, hasLength(2));
+      expect(sessions.first.closeCalls, 1);
+      expect(sessions.last.closeCalls, 0);
+    });
   });
+}
+
+/// A new session per connection, with nothing to list.
+class _NewSessionSftpRepository implements SftpRepository {
+  _NewSessionSftpRepository(this.sessions);
+
+  final List<FakeSftpSession> sessions;
+
+  @override
+  Future<SftpSession> connect(SavedHost host) async {
+    final session = FakeSftpSession(home: '/home/user', tree: {});
+    sessions.add(session);
+    return session;
+  }
 }

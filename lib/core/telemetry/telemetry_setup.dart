@@ -12,8 +12,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Replaces the inert [Telemetry.instance] with the app's, routes the
 /// error log into it and starts it. Crash reports are scrubbed of every
-/// saved machine's names, addresses, users and secrets, read at report
-/// time.
+/// saved machine's names, addresses, users and secrets, and of the terms
+/// features add at run time ([addTelemetryTerms]), read at report time.
 void startTelemetry({
   required FlutterSecureStorage storage,
   required HostsController hosts,
@@ -27,6 +27,8 @@ void startTelemetry({
         // Every saved machine, one hidden as "This computer" included.
         ...savedHostTerms([?hosts.thisComputer, ...hosts.hosts]),
         ...deviceTerms(),
+        // Claude account labels (cswap), among others.
+        ...runtimeTerms(),
         for (final snippet in theme.terminalSnippets) ...[
           snippet.label,
           snippet.text,

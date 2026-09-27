@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
 import 'package:flutter/material.dart';
 
 /// Which agent CLI a row belongs to, from the provider's free-form kind.
@@ -412,19 +413,23 @@ class AgentInboxRow extends StatelessWidget {
   }
 }
 
-/// One pending permission request: what the agent wants to run, the full
-/// tool input on demand, and the three answers.
+/// One pending permission request: what the agent wants to run, its risk
+/// label, the full tool input on demand, and the answers. With [onTrust]
+/// (a companion that keeps rules), a "Trust" button saves a time-boxed
+/// rule; high-risk requests get neither Trust nor Always.
 class PendingRequestCard extends StatefulWidget {
   const PendingRequestCard({
     required this.request,
     required this.busy,
     required this.onDecide,
+    this.onTrust,
     super.key,
   });
 
   final PendingPermissionRequest request;
   final bool busy;
   final ValueChanged<PermissionVerdict> onDecide;
+  final VoidCallback? onTrust;
 
   @override
   State<PendingRequestCard> createState() => _PendingRequestCardState();
@@ -438,6 +443,8 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
     final theme = Theme.of(context);
     final request = widget.request;
     final hasInput = request.toolInput.trim().isNotEmpty;
+    final high = request.risk?.level == PermissionRiskLevel.high;
+    final onTrust = request.trustable ? widget.onTrust : null;
     return Container(
       color: theme.colorScheme.errorContainer.withValues(alpha: 0.25),
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
@@ -480,6 +487,10 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
             ),
             maxLines: _expanded ? null : 3,
           ),
+          if (request.risk case final risk?) ...[
+            const SizedBox(height: 6),
+            RiskLine(risk: risk),
+          ],
           if (_expanded && hasInput) ...[
             const SizedBox(height: 8),
             Container(
@@ -510,15 +521,28 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
                   child: Text(PermissionVerdict.deny.label),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.tonal(
-                  onPressed: widget.busy
-                      ? null
-                      : () => widget.onDecide(PermissionVerdict.always),
-                  child: Text(PermissionVerdict.always.label),
+              if (onTrust != null) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonal(
+                    key: ValueKey('trust-${request.id}'),
+                    onPressed: widget.busy ? null : onTrust,
+                    child: const Text('Trust…'),
+                  ),
                 ),
-              ),
+              ],
+              // High risk always asks: no rule, from here or Claude Code.
+              if (!(high && widget.onTrust != null)) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonal(
+                    onPressed: widget.busy
+                        ? null
+                        : () => widget.onDecide(PermissionVerdict.always),
+                    child: Text(PermissionVerdict.always.label),
+                  ),
+                ),
+              ],
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton(

@@ -68,6 +68,87 @@ void main() {
       expect(records['setting:palette'], AppPalette.catppuccin.name);
     });
 
+    group('the sync hub\'s login stays on each device', () {
+      SavedHost hub(String key) => const SavedHost(
+        id: 'hub',
+        name: 'Workstation',
+        host: 'ws.example.com',
+        port: 22,
+        username: 'andre',
+        authMethod: SshAuthMethod.privateKey,
+      ).copyWith(privateKey: key);
+
+      AppBackupService serviceFor(LocalDevice device, {String? hubId}) =>
+          AppBackupService(
+            hostsController: device.hosts,
+            themeController: device.theme,
+            hostKeyVerifier: device.verifier,
+            localStore: device.store,
+            syncHubHostId: () => hubId,
+            crypto: _crypto,
+          );
+
+      test('an export leaves out the hub\'s device key', () async {
+        final a = await LocalDevice.create(
+          hosts: [
+            hub('KEY-OF-A'),
+            machine('a', password: 'pw'),
+          ],
+        );
+        final bytes = await serviceFor(
+          a,
+          hubId: 'hub',
+        ).exportBackup(includeSecrets: true, password: password);
+
+        final records = await openRecords(bytes);
+        expect(records.containsKey('secret:host:hub'), isFalse);
+        expect(records['secret:host:a'], containsPair('password', 'pw'));
+        expect(records['host:hub'], containsPair('host', 'ws.example.com'));
+      });
+
+      test('an import keeps this device\'s hub login', () async {
+        final a = await LocalDevice.create(hosts: [hub('KEY-OF-A')]);
+        // A backup from before, or from a device without sync.
+        final bytes = await serviceFor(
+          a,
+        ).exportBackup(includeSecrets: true, password: password);
+        final b = await LocalDevice.create(hosts: [hub('KEY-OF-B')]);
+
+        await serviceFor(
+          b,
+          hubId: 'hub',
+        ).importBackup(bytes, password: password);
+
+        final imported = b.hosts.hosts.single;
+        expect(imported.privateKey, 'KEY-OF-B');
+        expect(imported.authMethod, SshAuthMethod.privateKey);
+      });
+
+      test('a version 1 import keeps this device\'s hub login', () async {
+        final payload = {
+          'format': 'conduit.backup',
+          'version': 1,
+          'encrypted': false,
+          'payload': {
+            'hosts': [hub('KEY-OF-A').copyWith(name: 'Renamed').toJson()],
+            'hostSortMode': 'name',
+            'hostManualOrder': <String>[],
+            'trustedHostKeys': <Object?>[],
+          },
+        };
+        final b = await LocalDevice.create(hosts: [hub('KEY-OF-B')]);
+
+        await serviceFor(
+          b,
+          hubId: 'hub',
+        ).importBackup(Uint8List.fromList(utf8.encode(jsonEncode(payload))));
+
+        final imported = b.hosts.hosts.single;
+        expect(imported.name, 'Renamed');
+        expect(imported.privateKey, 'KEY-OF-B');
+      });
+    });
+
     test('refuses a weak password', () async {
       final fixture = await _Fixture.create();
       await expectLater(

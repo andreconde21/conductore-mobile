@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +36,21 @@ void main() {
 
     final socket = await TcpSshSocket.connect('localhost', server.port);
     expect(socket.remoteAddress?.address, '127.0.0.1');
+
+    socket.destroy();
+    await server.close();
+  });
+
+  test('turns off Nagle so keystrokes are sent at once', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((client) => client.close());
+
+    final socket = await TcpSshSocket.connect('127.0.0.1', server.port);
+    // IPPROTO_TCP / TCP_NODELAY on Linux and macOS.
+    final value = socket.socketForTesting.getRawOption(
+      RawSocketOption(6, 1, Uint8List(4)),
+    );
+    expect(value.any((byte) => byte != 0), isTrue);
 
     socket.destroy();
     await server.close();

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/sync/data/sync_crypto.dart';
 import 'package:conduit/features/sync/data/sync_setup.dart';
 import 'package:conduit/features/sync/data/sync_state_store.dart';
@@ -161,6 +162,32 @@ void main() {
     expect(a.sync.status, SyncStatus.idle);
   });
 
+  test('a machine that takes the hub\'s id keeps its connect memory', () async {
+    final a = await _Device.create(
+      server,
+      hosts: [_hub(), machine('a')],
+      trustedKeys: [_hubKey()],
+    );
+    await a.sync.setUp(hub: a.host('hub'), passphrase: _passphrase);
+    final b = await _Device.create(
+      server,
+      hosts: [_hub(id: 'my-hub')],
+      trustedKeys: [_hubKey()],
+    );
+    b.local.connect.values = {
+      'my-hub': {'rememberChoice': true},
+    };
+    b.local.recentDirs.values = {
+      'my-hub': ['~/src'],
+    };
+    _tick();
+
+    await b.sync.setUp(hub: b.host('my-hub'), passphrase: _passphrase);
+
+    expect(b.local.connect.values.keys, ['hub']);
+    expect(b.local.recentDirs.values['hub'], ['~/src']);
+  });
+
   test('a wrong passphrase cannot join an existing hub', () async {
     await twoDevices();
     final c = await _Device.create(server, hosts: [_hub()]);
@@ -201,6 +228,32 @@ void main() {
     await pumpEventQueue();
 
     expect(server.metaReads, reads);
+  });
+
+  test('a notification without a real change does not backdate the next '
+      'edit', () async {
+    final (a, b) = await twoDevices();
+    await a.sync.syncNow();
+    await b.sync.syncNow();
+
+    // T0: a no-op notification on A (like markConnected).
+    a.local.theme.notifyListeners();
+    a.timers.fireDelays(const Duration(seconds: 5));
+    await pumpEventQueue();
+    // T0+30m: B edits the machine.
+    _tick(const Duration(minutes: 30));
+    await b.rename('a', 'B at +30m');
+    await b.sync.syncNow();
+    // T0+60m: A edits it; the later edit must win.
+    _tick(const Duration(minutes: 30));
+    await a.rename('a', 'A at +60m');
+    await a.sync.syncNow();
+
+    expect(a.host('a').name, 'A at +60m');
+    expect(
+      (await _hubRecords(server))['host:a']!.value,
+      containsPair('name', 'A at +60m'),
+    );
   });
 
   test(
@@ -261,6 +314,71 @@ void main() {
     expect(a.host('a').name, 'Older edit on B');
   });
 
+  group('edits made while a sync runs', () {
+    /// A renamed 'a' and synced; B's next sync downloads that change, and
+    /// [edit] runs on B during the download.
+    Future<(_Device, _Device)> editDuringDownload(
+      Future<void> Function(_Device b) edit,
+    ) async {
+      final (a, b) = await twoDevices();
+      await a.sync.syncNow();
+      _tick();
+      await a.rename('a', 'Renamed on A');
+      await a.sync.syncNow();
+      _tick();
+      server.duringNextBundleRead = () => edit(b);
+      await b.sync.syncNow();
+      return (a, b);
+    }
+
+    test('a machine saved during the download is kept and pushed', () async {
+      final (a, b) = await editDuringDownload(
+        (b) => b.local.hosts.upsert(machine('new', password: 'pw')),
+      );
+
+      expect(b.local.hosts.hosts.map((h) => h.id), contains('new'));
+      expect(b.host('new').password, 'pw');
+      expect(b.host('a').name, 'Renamed on A');
+      expect((await _hubRecords(server)).keys, contains('host:new'));
+      await a.sync.syncNow();
+      expect(a.local.hosts.hosts.map((h) => h.id), contains('new'));
+    });
+
+    test('a machine deleted during the download stays deleted', () async {
+      final (_, b) = await editDuringDownload(
+        (b) => b.local.hosts.remove(b.host('b')),
+      );
+
+      expect(b.local.hosts.hosts.map((h) => h.id), isNot(contains('b')));
+      expect((await _hubRecords(server))['host:b']!.deleted, isTrue);
+    });
+
+    test('a machine edited during the download keeps the edit', () async {
+      final (_, b) = await editDuringDownload(
+        (b) => b.rename('b', 'Edited on B'),
+      );
+
+      expect(b.host('b').name, 'Edited on B');
+      expect(b.host('a').name, 'Renamed on A');
+      expect(
+        (await _hubRecords(server))['host:b']!.value,
+        containsPair('name', 'Edited on B'),
+      );
+    });
+
+    test('a snippet added during the download is kept and pushed', () async {
+      final (_, b) = await editDuringDownload(
+        (b) => b.local.theme.setTerminalSnippets([
+          ...b.local.theme.terminalSnippets,
+          const TerminalSnippet(id: 'late', label: 'Late', text: 'uptime'),
+        ]),
+      );
+
+      expect(b.local.theme.terminalSnippets.map((s) => s.id), contains('late'));
+      expect((await _hubRecords(server)).keys, contains('snippet:late'));
+    });
+  });
+
   test('a push that loses the race merges and retries', () async {
     final (a, b) = await twoDevices();
     await a.sync.syncNow();
@@ -276,6 +394,59 @@ void main() {
     expect(records['host:a']!.value, containsPair('name', 'From A'));
     expect(records['host:b']!.value, containsPair('name', 'From B'));
     expect(a.host('b').name, 'From B');
+  });
+
+  group('turning a category back on', () {
+    test('keeps an edit made here while it was off', () async {
+      final (a, b) = await twoDevices();
+      await a.sync.syncNow();
+      await a.sync.setCategory(SyncCategory.appearance, false);
+      await a.sync.syncNow();
+
+      _tick();
+      await a.local.theme.setTerminalFontSize(19);
+      _tick();
+      await a.sync.setCategory(SyncCategory.appearance, true);
+      await a.sync.syncNow();
+
+      expect(a.local.theme.terminalFontSize, 19);
+      expect(
+        (await _hubRecords(server))['setting:terminalFontSize']!.value,
+        19,
+      );
+      await b.sync.syncNow();
+      expect(b.local.theme.terminalFontSize, 19);
+    });
+
+    test('when another device changed it too, takes the hub\'s version and '
+        'keeps this one restorable', () async {
+      final (a, b) = await twoDevices();
+      await a.sync.syncNow();
+      await b.sync.syncNow();
+      await a.sync.setCategory(SyncCategory.appearance, false);
+      await a.sync.syncNow();
+
+      _tick();
+      await a.local.theme.setTerminalFontSize(19);
+      _tick();
+      await b.local.theme.setTerminalFontSize(15);
+      await b.sync.syncNow();
+      _tick();
+      await a.sync.setCategory(SyncCategory.appearance, true);
+      await a.sync.syncNow();
+
+      expect(a.local.theme.terminalFontSize, 15);
+      final conflict = a.sync.activity.firstWhere(
+        (e) => e.kind == SyncActivityKind.conflict,
+      );
+      expect(conflict.key, 'setting:terminalFontSize');
+      expect(conflict.canRestore, isTrue);
+      expect(conflict.lostValue, 19);
+
+      _tick();
+      await a.sync.keepMine(conflict);
+      expect(a.local.theme.terminalFontSize, 19);
+    });
   });
 
   test('credentials sync only when turned on', () async {
