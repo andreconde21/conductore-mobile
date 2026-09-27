@@ -21,12 +21,22 @@ function assertSocketOwner (sock) {
   if (!st.isSocket()) throw new Error(`${sock} is not a socket`)
 }
 
-function connect (sock = paths.socketPath()) {
+function connectTo (sock) {
   return new Promise((resolve, reject) => {
     try { assertSocketOwner(sock) } catch (err) { return reject(err) }
     const c = net.createConnection(sock)
     c.once('connect', () => resolve(c))
     c.once('error', reject)
+  })
+}
+
+// The daemon's socket, else one a daemon from before 0.8 still serves.
+function connect (sock) {
+  if (sock) return connectTo(sock)
+  return connectTo(paths.socketPath()).catch(err => {
+    const legacy = paths.legacySocketPaths().filter(p => fs.existsSync(p))
+    return legacy.reduce((prev, p) => prev.catch(() => connectTo(p)), Promise.reject(err))
+      .catch(() => { throw err })
   })
 }
 

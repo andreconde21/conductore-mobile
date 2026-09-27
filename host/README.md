@@ -56,7 +56,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 
 | Path | Purpose |
 | --- | --- |
-| `$XDG_RUNTIME_DIR/conductore/hostd.sock` (else `~/.conductore/hostd.sock`) | socket, mode 0600 |
+| `~/.conductore/hostd.sock` | socket, mode 0600 (up to 0.7 it was `$XDG_RUNTIME_DIR/conductore/hostd.sock` when the starter had that variable; the CLI still finds a daemon running there) |
 | `~/.conductore/spool/` | events and statusline reports waiting for the daemon |
 | `~/.conductore/tmp/` | staging files of the sh clients, FIFOs of waiting permission prompts |
 | `~/.conductore/usage/` | statusline holds and parked reports (see Usage) |
@@ -75,9 +75,9 @@ phone, default 120, read by the hook), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
 exit, default 21600 = 6 h, 0 = never), `CONDUCTORE_USAGE_THROTTLE_MS`
 (default 10000, see Usage), `CONDUCTORE_LOG=debug` (log every state change),
 `CONDUCTORE_HOME`, `CONDUCTORE_SOCKET`, `CONDUCTORE_CLAUDE_SETTINGS`
-(overrides, mainly for tests; with `CONDUCTORE_HOME` set the socket defaults
-to `<home>/hostd.sock`). The daemon reads its environment when it starts, from
-whichever client started it.
+(overrides, mainly for tests; the socket defaults to `<home>/hostd.sock`).
+The daemon reads its environment when it starts, from whichever client
+started it.
 
 ### PATH for the phone's SSH shell
 
