@@ -41,6 +41,82 @@ class _PublicKeySheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final desktop = useDesktopModals(context);
+    List<Widget> children() => [
+      Row(
+        children: [
+          Text(
+            freshlyGenerated ? 'Key created' : 'Public key',
+            style: theme.textTheme.headlineSmall,
+          ),
+          const Spacer(),
+          const ConduitGlyph(size: 24),
+        ],
+      ),
+      const SizedBox(height: 6),
+      Text(
+        freshlyGenerated
+            ? 'A new ${details.algorithm.label} key is saved on this '
+                  'device. Add the public key below to the server, then '
+                  'connect.'
+            : 'Add this line to ~/.ssh/authorized_keys on the host you '
+                  'want to reach.',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: colorScheme.onSurfaceVariant,
+          height: 1.3,
+        ),
+      ),
+      const SizedBox(height: 16),
+      _PublicKeyBox(publicKey: details.publicKeyOpenSsh),
+      const SizedBox(height: 10),
+      Text(
+        details.fingerprintSha256,
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontFamily: 'monospace',
+          color: colorScheme.onSurfaceVariant,
+        ),
+      ),
+      const SizedBox(height: 16),
+      Row(
+        children: [
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: () => _copy(context),
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: const Text('Copy'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () => _save(context),
+              icon: const Icon(Icons.save_alt_rounded, size: 18),
+              label: const Text('Save .pub'),
+            ),
+          ),
+        ],
+      ),
+      if (freshlyGenerated) ...[const SizedBox(height: 16), _PrivateKeyNote()],
+      // Desktop has no sheet to swipe away: a Done button closes it.
+      if (desktop) ...[
+        const SizedBox(height: 20),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.tonal(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Done'),
+          ),
+        ),
+      ],
+    ];
+    if (desktop) {
+      // A dialog sized to the content, with nothing to drag.
+      return ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
+        children: children(),
+      );
+    }
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.62,
@@ -52,65 +128,7 @@ class _PublicKeySheet extends StatelessWidget {
           child: ListView(
             controller: scrollController,
             padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
-            children: [
-              Row(
-                children: [
-                  Text(
-                    freshlyGenerated ? 'Key created' : 'Public key',
-                    style: theme.textTheme.headlineSmall,
-                  ),
-                  const Spacer(),
-                  const ConduitGlyph(size: 24),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                freshlyGenerated
-                    ? 'A new ${details.algorithm.label} key is saved on this '
-                          'device. Add the public key below to the server, then '
-                          'connect.'
-                    : 'Add this line to ~/.ssh/authorized_keys on the host you '
-                          'want to reach.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                  height: 1.3,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _PublicKeyBox(publicKey: details.publicKeyOpenSsh),
-              const SizedBox(height: 10),
-              Text(
-                details.fingerprintSha256,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontFamily: 'monospace',
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () => _copy(context),
-                      icon: const Icon(Icons.copy_rounded, size: 18),
-                      label: const Text('Copy'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _save(context),
-                      icon: const Icon(Icons.save_alt_rounded, size: 18),
-                      label: const Text('Save .pub'),
-                    ),
-                  ),
-                ],
-              ),
-              if (freshlyGenerated) ...[
-                const SizedBox(height: 16),
-                _PrivateKeyNote(),
-              ],
-            ],
+            children: children(),
           ),
         );
       },
