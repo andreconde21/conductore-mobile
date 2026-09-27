@@ -63,3 +63,42 @@ abstract class GuideAccounts {
   /// its targets.
   Future<List<GuideAccountSwitch>> switchTo(GuideAccount account);
 }
+
+/// The turn "undo that" would roll back, from a dry run.
+class GuideTurnPreview {
+  const GuideTurnPreview({
+    required this.turn,
+    required this.files,
+    this.prompt = '',
+  });
+
+  final int turn;
+
+  /// Files the undo would restore or delete.
+  final int files;
+
+  /// The turn's prompt (its first line).
+  final String prompt;
+}
+
+/// Review mode and "Undo this turn" (the companion's turn snapshots).
+abstract class GuideReviewer {
+  /// Review can open for [agent] (its turn, or on an older companion the
+  /// working tree's diff).
+  bool canReview(GuideAgent agent);
+
+  /// [agent]'s machine snapshots its turns, so one can be undone.
+  bool canUndo(GuideAgent agent);
+
+  /// Opens Review of [agent]'s last turn; false when it could not open.
+  Future<bool> review(GuideAgent agent);
+
+  /// The newest turn of [agent] an undo would restore, or null when it
+  /// has none. Throws (an AppFailure) with the companion's reason when the
+  /// agent is working or HEAD moved.
+  Future<GuideTurnPreview?> lastTurn(GuideAgent agent);
+
+  /// Undoes [turn]: the number of files restored. The state before is
+  /// saved, so Review's Redo can put it back.
+  Future<int> undo(GuideAgent agent, int turn);
+}

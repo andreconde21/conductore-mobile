@@ -205,3 +205,39 @@ class FakeAccounts implements GuideAccounts {
     ];
   }
 }
+
+/// Review and undo for the guide: every agent can, [last] is its newest
+/// turn, and every call is recorded.
+class FakeReviewer implements GuideReviewer {
+  FakeReviewer({this.undoable = true});
+
+  bool undoable;
+  GuideTurnPreview? last = const GuideTurnPreview(
+    turn: 4,
+    files: 3,
+    prompt: 'Fix the date parser',
+  );
+  final reviewed = <String>[];
+  final undone = <(String, int)>[];
+
+  @override
+  bool canReview(GuideAgent agent) => true;
+
+  @override
+  bool canUndo(GuideAgent agent) => undoable;
+
+  @override
+  Future<bool> review(GuideAgent agent) async {
+    reviewed.add(agent.id);
+    return true;
+  }
+
+  @override
+  Future<GuideTurnPreview?> lastTurn(GuideAgent agent) async => last;
+
+  @override
+  Future<int> undo(GuideAgent agent, int turn) async {
+    undone.add((agent.id, turn));
+    return 3;
+  }
+}

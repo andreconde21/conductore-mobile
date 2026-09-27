@@ -156,6 +156,30 @@ abstract final class GuidePhrases {
     r'(dá|da)-me (um )?(resumo|ponto de situação)|resumo( dos agentes)?',
   );
 
+  static final _undo = RegExp(
+    r'^(?:undo|revert|roll ?back)'
+    r'(?: (?:that|this|it|the last turn|the last change|the last changes|'
+    r'last turn|the changes|those changes|that turn|what (?:it|they) did))?'
+    r'(?: (?:for|on|of|from|in|by))?(?: (.+))?$|'
+    r'^(?:desfaz|desfazer|desfaça|reverte|reverter|anula|anular)'
+    r'(?: (?:isso|isto|o último turno|o ultimo turno|a última alteração|'
+    r'a ultima alteracao|as alterações|as alteracoes|o que (?:ele|ela) fez))?'
+    r'(?: (?:de|do|da|no|na|em))?(?: (.+))?$',
+    unicode: true,
+  );
+
+  static final _review = RegExp(
+    r'^(?:review|show(?: me)? the (?:changes|diff)|what changed)'
+    r'(?: (?:it|that|this|the changes|changes|the last turn|the diff))?'
+    r'(?: (?:for|on|of|from|in|by))?(?: (.+))?$|'
+    r'^(?:revê|reve|rever|revisão|revisao|mostra(?:-me)? (?:as alterações|'
+    r'as alteracoes|o diff)|o que mudou)'
+    r'(?: (?:isso|isto|as alterações|as alteracoes|o último turno|'
+    r'o ultimo turno|o diff))?'
+    r'(?: (?:de|do|da|no|na|em))?(?: (.+))?$',
+    unicode: true,
+  );
+
   static final _open = RegExp(
     r'^(?:open|show|show me|go to|switch to|take me to|jump to|bring up|'
     r'abre|abrir|abra|mostra|mostrar|mostra-me|vai para|ir para|vai ao|'
@@ -196,6 +220,12 @@ abstract final class GuidePhrases {
     }
     if (_deny.firstMatch(text) case final m?) {
       return GuideDecide(allow: false, target: _ref(m.group(1)));
+    }
+    if (_undo.firstMatch(text) case final m?) {
+      return GuideUndo(_ref(m.group(1) ?? m.group(2)));
+    }
+    if (_review.firstMatch(text) case final m?) {
+      return GuideReview(_ref(m.group(1) ?? m.group(2)));
     }
     if (_read.firstMatch(text) case final m?) {
       return GuideRead(_ref(m.group(1)));
