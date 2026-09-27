@@ -29,6 +29,7 @@ import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
+import 'package:conduit/features/voice_guide/presentation/guide_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -315,13 +316,20 @@ class SettingsSectionBody extends StatelessWidget {
         'View). Add a Dictate button to the pill (long-press the pill), '
         'or swipe up on the pill and pick Dictate.\n'
         'Talk: the speaking-head button in Chat View\'s composer runs a '
-        'hands-free conversation with Claude.\n'
+        'hands-free conversation with Claude. Long-press it for the voice '
+        'guide, which talks to all your agents (also the headset-mic button at '
+        'the top of home and the Voice guide quick-settings tile).\n'
         'A crossed-out mic means this phone has no speech recognizer yet; '
         'tap it to see how to get one.',
       ),
       _gap,
       const SettingsHeading('Dictation and read aloud'),
       SpeechSettingsControls(controller: theme),
+      if (PlatformFeatures.dictation && PlatformFeatures.textToSpeech) ...[
+        _gap,
+        const SettingsHeading('Voice guide'),
+        GuideSettingsControls(theme: theme, hosts: services.hostsController),
+      ],
     ] else
       const SettingsNote(
         'Dictation, read aloud and Talk use Android speech services, so '

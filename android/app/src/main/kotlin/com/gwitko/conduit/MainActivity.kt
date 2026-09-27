@@ -30,6 +30,7 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         flutterEngine.plugins.add(AgentStatusWidgetChannel()) // home widget + QS tile bridge
         flutterEngine.plugins.add(AgentNotificationBridge()) // agent + permission notifications
+        flutterEngine.plugins.add(GuideWakeBridge()) // voice guide: headset button
         fidoUsbCtapTransport = FidoUsbCtapTransport(this)
         val speech = SpeechRecognitionBridge(this)
         speechRecognition = speech
@@ -122,7 +123,13 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        GuideWakeBridge.markVoiceCommand(intent)
+        super.onCreate(savedInstanceState)
+    }
+
     override fun onNewIntent(intent: Intent) {
+        GuideWakeBridge.markVoiceCommand(intent)
         super.onNewIntent(intent)
         setIntent(intent)
         shareTarget?.consume(intent)

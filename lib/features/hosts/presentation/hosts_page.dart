@@ -69,6 +69,7 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
+import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -530,6 +531,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                           onLock: _lock,
                           onSettings: _openSettings,
                           onSwitcher: () => unawaited(_openSwitcher()),
+                          onGuide: _guideButton(context),
                           machine: _machineChip(),
                         ),
                       ),
@@ -553,6 +555,16 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  /// The voice guide's button, when the guide is on (it hides when
+  /// turned off in Settings).
+  VoidCallback? _guideButton(BuildContext context) {
+    final guide = GuideScope.maybeOf(context);
+    if (guide == null || !widget.themeController.voice.guide.enabled) {
+      return null;
+    }
+    return guide.start;
   }
 
   /// The desktop shell: sidebar, tabs and splits, dashboard.

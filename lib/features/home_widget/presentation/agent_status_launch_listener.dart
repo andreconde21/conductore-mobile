@@ -20,8 +20,12 @@ class AgentStatusLaunchListener extends StatefulWidget {
     required this.workspace,
     required this.child,
     this.connectFlow,
+    this.onGuide,
     super.key,
   });
+
+  /// Starts the voice guide; null ignores its launches.
+  final VoidCallback? onGuide;
 
   /// Opens agents at their exact Herdr place; without it the sheet only
   /// activates the host's tab and asks the provider to focus the agent.
@@ -71,6 +75,8 @@ class _AgentStatusLaunchListenerState extends State<AgentStatusLaunchListener> {
       switch (target) {
         case AgentStatusLaunchTarget.agents:
           await _openAgents();
+        case AgentStatusLaunchTarget.guide:
+          widget.onGuide?.call();
       }
     }());
   }

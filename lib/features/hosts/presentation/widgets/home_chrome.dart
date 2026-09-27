@@ -9,6 +9,7 @@ class HomeTopBar extends StatelessWidget {
     required this.onSettings,
     this.machine,
     this.onSwitcher,
+    this.onGuide,
     super.key,
   });
 
@@ -17,6 +18,9 @@ class HomeTopBar extends StatelessWidget {
 
   /// Opens the quick switcher; null hides its button.
   final VoidCallback? onSwitcher;
+
+  /// Starts the voice guide; null hides its button.
+  final VoidCallback? onGuide;
 
   /// The machine chip (absent before any machine is saved).
   final Widget? machine;
@@ -40,6 +44,15 @@ class HomeTopBar extends StatelessWidget {
             child: Center(child: machine ?? const ConduitGlyph(size: 24)),
           ),
           const SizedBox(width: 4),
+          if (onGuide != null)
+            IconButton(
+              key: const ValueKey('home-voice-guide'),
+              tooltip: 'Voice guide',
+              iconSize: 24,
+              color: colorScheme.onSurface,
+              icon: const Icon(Icons.headset_mic_outlined),
+              onPressed: onGuide,
+            ),
           if (onSwitcher != null)
             IconButton(
               key: const ValueKey('home-open-switcher'),

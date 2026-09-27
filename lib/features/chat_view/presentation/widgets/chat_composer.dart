@@ -19,6 +19,7 @@ class ChatComposer extends StatefulWidget {
     this.onExpand,
     this.dictation,
     this.onTalk,
+    this.onGuide,
     this.textController,
     this.initialText = '',
     this.onPasteImage,
@@ -45,6 +46,9 @@ class ChatComposer extends StatefulWidget {
 
   /// Starts the hands-free Talk loop; null hides the button.
   final VoidCallback? onTalk;
+
+  /// A long press on Talk starts the voice guide instead.
+  final VoidCallback? onGuide;
 
   /// The field's text, when the page needs it (Talk puts unsent speech
   /// back here); otherwise the composer owns one.
@@ -183,6 +187,7 @@ class _ChatComposerState extends State<ChatComposer> {
             : unavailable
             ? () => unawaited(showSpeechUnavailableDialog(context, dictation))
             : widget.onTalk,
+        onLongPress: unavailable ? null : widget.onGuide,
       );
     }
 

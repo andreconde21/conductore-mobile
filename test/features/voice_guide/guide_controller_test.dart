@@ -201,7 +201,7 @@ void main() {
     // And vanished entirely.
     await talk(tester, 'tell web to open a pull request');
     await hear(tester);
-    now = GuideWorld(machines: now.machines, agents: const []);
+    now = GuideWorld(machines: now.machines);
     await talk(tester, 'yes');
     expect(messenger.sent, isEmpty);
     expect(await hear(tester), "That's gone.");

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="guide_tile_label">Voice guide</string>
+    <string name="guide_tile_subtitle">Talk to your agents</string>
+    <string name="guide_voice_command_label">Conductore voice guide</string>
+</resources>
