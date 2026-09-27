@@ -281,17 +281,7 @@ class TranscriptParser {
     final pending = <PendingPermissionRequest>[
       if (raw['pending'] case final List<Object?> list)
         for (final entry in list)
-          if (entry is Map && _string(entry['id']) != null)
-            PendingPermissionRequest(
-              id: _string(entry['id'])!,
-              toolName: _string(entry['toolName']) ?? 'tool',
-              summary:
-                  _string(entry['summary']) ??
-                  _string(entry['toolName']) ??
-                  'tool',
-              toolInput: _formatInput(entry['toolInput']),
-              createdAt: _millis(entry['createdAt']),
-            ),
+          if (entry is Map && _string(entry['id']) != null) _request(entry),
     ];
     return ChatAgentStatus(
       state: _string(raw['state']) ?? 'unknown',
@@ -303,6 +293,22 @@ class TranscriptParser {
       pending: pending,
       lastEvent: _string(raw['lastEvent']),
       lastToolName: _string(raw['lastToolName']),
+    );
+  }
+
+  static PendingPermissionRequest _request(Map<Object?, Object?> entry) {
+    final info = parsePendingApprovalInfo(entry);
+    return PendingPermissionRequest(
+      id: _string(entry['id'])!,
+      toolName: _string(entry['toolName']) ?? 'tool',
+      summary:
+          _string(entry['summary']) ?? _string(entry['toolName']) ?? 'tool',
+      toolInput: _formatInput(entry['toolInput']),
+      createdAt: _millis(entry['createdAt']),
+      risk: info.risk,
+      batchable: info.batchable,
+      suggestedRules: info.suggestedRules,
+      repo: info.repo,
     );
   }
 

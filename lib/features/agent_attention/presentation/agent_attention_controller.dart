@@ -10,11 +10,20 @@ import 'package:conduit/features/agent_attention/domain/agent_attention_provider
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
+import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/foundation.dart';
+
+/// One waiting permission request with where it waits.
+typedef PendingApproval = ({
+  String hostId,
+  String hostName,
+  AgentInfo agent,
+  PendingPermissionRequest request,
+});
 
 /// Builds a command runner for one host; injected so tests can fake the
 /// remote side.
@@ -124,6 +133,11 @@ class AgentAttentionController extends ChangeNotifier {
   /// changes. Kept here so they survive closing the panel.
   final AgentInboxDismissals inboxDismissals = AgentInboxDismissals();
   final Set<String> _deciding = {};
+
+  /// Per saved host id: its approval rules and auto-approved log, once
+  /// loaded (see [loadApprovals]).
+  final Map<String, ApprovalsSnapshot> _approvals = {};
+  final Set<String> _loadingApprovals = {};
 
   /// Per host: request ids that currently have a permission notification.
   /// Kept across reconnects (monitors come and go with the session).
@@ -415,10 +429,359 @@ class AgentAttentionController extends ChangeNotifier {
     await notifier?.cancel(id: notificationId);
   }
 
+  /// "Claude needs permission: Bash · High risk".
+  static String permissionNotificationTitle(PendingPermissionRequest request) {
+    final risk = request.risk;
+    return 'Claude needs permission: ${request.toolName}'
+        '${risk == null ? '' : ' · ${risk.level.label}'}';
+  }
+
+  /// The request, the risk reason on its own line, and the machine.
+  static String permissionNotificationBody(
+    PendingPermissionRequest request,
+    String hostName,
+  ) {
+    final reason = request.risk?.reason ?? '';
+    return '${request.summary} (on $hostName)'
+        '${reason.isEmpty ? '' : '\n$reason'}';
+  }
+
   /// Notification id for one pending request (stable per request, so a
   /// re-seen request replaces instead of stacking).
   static String permissionNotificationId(String hostId, String requestId) =>
       '$hostId:perm:$requestId';
+
+  // --- smart approvals ------------------------------------------------------
+  //
+  // Risk labels, approval rules, time-boxed trust, "approve all safe" and
+  // the auto-approved log, on hosts whose companion reports the
+  // `smart-approvals` capability. The voice guide uses the same calls:
+  // [approveRequest], [approveAllLowRisk] and [trustRequest].
+
+  /// Whether [hostId]'s companion keeps approval rules and rates requests.
+  bool supportsSmartApprovals(String hostId) {
+    final monitor = _monitors[hostId];
+    return monitor != null &&
+        monitor.provider is SmartApprovalsProvider &&
+        (monitor.capabilities?.contains(smartApprovalsCapability) ?? false);
+  }
+
+  /// Every waiting request on the monitored hosts, oldest first.
+  List<PendingApproval> get pendingApprovals {
+    final all = <PendingApproval>[
+      for (final monitor in _monitors.values)
+        for (final agent in monitor.status.agents)
+          for (final request in agent.pendingRequests)
+            (
+              hostId: monitor.host.id,
+              hostName: monitor.host.name,
+              agent: agent,
+              request: request,
+            ),
+    ];
+    all.sort((a, b) {
+      final at = a.request.createdAt;
+      final bt = b.request.createdAt;
+      if (at == null || bt == null) {
+        return at == null ? (bt == null ? 0 : 1) : -1;
+      }
+      return at.compareTo(bt);
+    });
+    return all;
+  }
+
+  /// The waiting requests "Approve all safe" would take: rated low by a
+  /// companion that can answer them in a batch.
+  List<PendingApproval> get lowRiskPending => [
+    for (final pending in pendingApprovals)
+      if (pending.request.batchable && supportsSmartApprovals(pending.hostId))
+        pending,
+  ];
+
+  /// The rules and auto-approved log last loaded for [hostId].
+  ApprovalsSnapshot? approvalsFor(String hostId) => _approvals[hostId];
+
+  /// Whether [loadApprovals] runs for [hostId].
+  bool isLoadingApprovals(String hostId) => _loadingApprovals.contains(hostId);
+
+  /// Answers one request with "allow" (voice: "approve this").
+  Future<void> approveRequest(
+    String hostId,
+    PendingPermissionRequest request,
+  ) => decide(hostId, request, PermissionVerdict.allow);
+
+  /// Allows every waiting low-risk request, on [hostId] or on every host
+  /// (voice: "approve all safe"). With [only], just those (the list the
+  /// user confirmed); the companion re-checks each and skips anything not
+  /// rated low. Hosts without smart approvals are left alone.
+  Future<BatchApprovalResult> approveAllLowRisk({
+    String? hostId,
+    List<PendingApproval>? only,
+  }) async {
+    final chosen = only ?? lowRiskPending;
+    final byHost = <String, List<String>>{};
+    for (final pending in chosen) {
+      if (hostId != null && pending.hostId != hostId) {
+        continue;
+      }
+      byHost.putIfAbsent(pending.hostId, () => []).add(pending.request.id);
+    }
+    var result = const BatchApprovalResult();
+    Object? firstError;
+    for (final MapEntry(key: host, value: ids) in byHost.entries) {
+      final monitor = _monitors[host];
+      if (monitor == null) {
+        continue;
+      }
+      final provider = _smartOf(monitor.provider);
+      if (provider == null) {
+        continue;
+      }
+      for (final id in ids) {
+        _deciding.add(id);
+      }
+      notifyListeners();
+      try {
+        final stdout = await _runChecked(
+          monitor.runner,
+          provider.approveLowCommand(ids),
+        );
+        final batch = provider.parseBatch(stdout);
+        result = result.merge(batch);
+        for (final id in batch.approved) {
+          _removeRequest(monitor, id);
+        }
+      } catch (error) {
+        firstError ??= error;
+      } finally {
+        for (final id in ids) {
+          _deciding.remove(id);
+        }
+      }
+      if (!_disposed) {
+        notifyListeners();
+        unawaited(_poll(monitor));
+      }
+    }
+    if (firstError != null && result.approved.isEmpty) {
+      throw firstError;
+    }
+    return result;
+  }
+
+  /// Saves a rule from [request] and allows it (voice: "trust this for N
+  /// minutes"). Without [rule], the companion saves one for exactly this
+  /// call (never broader than what was asked); the scope's repo is the
+  /// request's. Also allows other waiting requests
+  /// the rule covers. High-risk requests are refused by the companion.
+  Future<TrustResult> trustRequest(
+    String hostId,
+    PendingPermissionRequest request, {
+    TrustDuration duration = const TrustDuration.minutes(60),
+    ApprovalScopeKind scope = ApprovalScopeKind.repo,
+    String? rule,
+    String source = 'trust',
+  }) async {
+    final monitor = _monitors[hostId];
+    final provider = _smartOf(monitor?.provider);
+    if (monitor == null || provider == null) {
+      throw const AppFailure(
+        'Trust needs the Conductore companion with approval rules on this '
+        'machine.',
+      );
+    }
+    final draft = ApprovalRuleDraft(
+      rule: rule ?? '',
+      // The companion fills in the request's repo (else the agent's cwd)
+      // and session.
+      scope: scope == ApprovalScopeKind.repo && request.repo != null
+          ? ApprovalScope.repo(request.repo!)
+          : ApprovalScope.ofKind(scope),
+      duration: duration,
+    );
+    if (!_deciding.add(request.id)) {
+      throw const AppFailure('This request is already being answered.');
+    }
+    notifyListeners();
+    final TrustResult result;
+    try {
+      final stdout = await _runChecked(
+        monitor.runner,
+        provider.trustCommand(request, draft, source: source),
+      );
+      result = provider.parseTrust(stdout);
+    } on _RequestGone {
+      if (!_disposed) {
+        _removeRequest(monitor, request.id, stillWaiting: true);
+        unawaited(_poll(monitor));
+      }
+      rethrow;
+    } finally {
+      _deciding.remove(request.id);
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
+    if (_disposed) {
+      return result;
+    }
+    for (final id in result.approved) {
+      _removeRequest(monitor, id);
+    }
+    notifyListeners();
+    unawaited(_poll(monitor));
+    unawaited(loadApprovals(monitor.host).catchError((_) => null));
+    return result;
+  }
+
+  /// Loads [host]'s rules and auto-approved log (over the monitor's
+  /// connection, else a one-off one). Returns null when the machine has no
+  /// companion that keeps rules; throws an [AppFailure] when it failed.
+  Future<ApprovalsSnapshot?> loadApprovals(SavedHost host) async {
+    final provider = _smartProvider(host);
+    if (provider == null) {
+      return null;
+    }
+    if (!_loadingApprovals.add(host.id)) {
+      return _approvals[host.id];
+    }
+    notifyListeners();
+    try {
+      final stdout = await _withRunner(
+        host,
+        (runner) => _runChecked(runner, provider.approvalsCommand()),
+      );
+      final snapshot = provider.parseApprovals(stdout);
+      if (!_disposed) {
+        _approvals[host.id] = snapshot;
+      }
+      return snapshot;
+    } finally {
+      _loadingApprovals.remove(host.id);
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Saves a rule on [host] (Settings › Agents › Approval rules). Waiting
+  /// requests it covers are answered by the companion.
+  Future<TrustResult> addRule(SavedHost host, ApprovalRuleDraft draft) =>
+      _ruleChange(host, (provider) => provider.addRuleCommand(draft));
+
+  /// Changes a rule's pattern, scope or duration on [host].
+  Future<TrustResult> editRule(
+    SavedHost host,
+    String ruleId,
+    ApprovalRuleDraft draft,
+  ) => _ruleChange(host, (provider) => provider.editRuleCommand(ruleId, draft));
+
+  /// Revokes a rule or trust on [host] (also the audit list's "Undo").
+  Future<void> removeRule(SavedHost host, String ruleId) async {
+    final provider = _requireSmart(host);
+    await _withRunner(
+      host,
+      (runner) => _runChecked(runner, provider.removeRuleCommand(ruleId)),
+    );
+    final cached = _approvals[host.id];
+    if (cached != null && !_disposed) {
+      _approvals[host.id] = cached.copyWith(
+        rules: [
+          for (final rule in cached.rules)
+            if (rule.id != ruleId) rule,
+        ],
+      );
+      notifyListeners();
+    }
+    unawaited(loadApprovals(host).catchError((_) => null));
+  }
+
+  Future<TrustResult> _ruleChange(
+    SavedHost host,
+    String Function(SmartApprovalsProvider provider) command,
+  ) async {
+    final provider = _requireSmart(host);
+    final stdout = await _withRunner(
+      host,
+      (runner) => _runChecked(runner, command(provider)),
+    );
+    final result = provider.parseRuleReply(stdout);
+    final monitor = _monitors[host.id];
+    if (monitor != null && !_disposed) {
+      for (final id in result.approved) {
+        _removeRequest(monitor, id);
+      }
+      unawaited(_poll(monitor));
+    }
+    unawaited(loadApprovals(host).catchError((_) => null));
+    return result;
+  }
+
+  static SmartApprovalsProvider? _smartOf(AgentAttentionProvider? provider) =>
+      switch (provider) {
+        final SmartApprovalsProvider smart => smart,
+        _ => null,
+      };
+
+  /// The monitor's provider when it resolved one (a Herdr host has none),
+  /// else the companion.
+  SmartApprovalsProvider? _smartProvider(SavedHost host) {
+    final resolved = _monitors[host.id]?.provider;
+    return _smartOf(resolved ?? _companionProvider);
+  }
+
+  SmartApprovalsProvider _requireSmart(SavedHost host) {
+    final provider = _smartProvider(host);
+    if (provider == null) {
+      throw const AppFailure(
+        'Approval rules need the Conductore companion on this machine.',
+      );
+    }
+    return provider;
+  }
+
+  Future<T> _withRunner<T>(
+    SavedHost host,
+    Future<T> Function(AgentCommandRunner runner) body,
+  ) async {
+    final (runner, :owned) = runnerFor(host);
+    try {
+      return await body(runner);
+    } finally {
+      if (owned) {
+        unawaited(runner.close());
+      }
+    }
+  }
+
+  /// Runs a companion command; its stdout, or an [AppFailure] (a
+  /// [_RequestGone] for requests answered elsewhere).
+  Future<String> _runChecked(AgentCommandRunner runner, String command) async {
+    final result = await runner.run(command, timeout: _decisionTimeout);
+    if (result.exitCode == 127) {
+      throw const AppFailure(
+        'The Conductore companion is not installed on this machine.',
+      );
+    }
+    if (result.exitCode != null && result.exitCode != 0) {
+      final reason = _errorText(
+        result.stdout.trim().isNotEmpty ? result.stdout : result.stderr,
+      );
+      if (reason.startsWith('unknown request') ||
+          reason.startsWith('request expired')) {
+        throw _RequestGone(reason);
+      }
+      if (reason.startsWith('unknown command')) {
+        throw AppFailure(
+          'Update the Conductore companion on this machine to use '
+          'approval rules.',
+          reason,
+        );
+      }
+      throw AppFailure('The companion refused.', reason);
+    }
+    return result.stdout;
+  }
 
   Future<void> _sendDecision(
     AgentCommandRunner runner,
@@ -857,6 +1220,10 @@ class AgentAttentionController extends ChangeNotifier {
       agents: snapshot.agents,
       updatedAt: DateTime.now(),
     );
+    if (snapshot.capabilities case final capabilities?) {
+      monitor.capabilities = capabilities;
+    }
+    _noticeAutoApprovals(monitor, snapshot.agents);
     if (notify) {
       await _notifyTransitions(monitor, snapshot, previousStates);
     }
@@ -928,8 +1295,11 @@ class AgentAttentionController extends ChangeNotifier {
         await notifier.cancel(id: '${host.id}:${agent.id}');
         await notifier.showPermissionRequest(
           id: permissionNotificationId(host.id, request.id),
-          title: 'Claude needs permission: ${request.toolName}',
-          body: _withMessage('${request.summary} (on ${host.name})', agent),
+          title: permissionNotificationTitle(request),
+          body: _withMessage(
+            permissionNotificationBody(request, host.name),
+            agent,
+          ),
           hostId: host.id,
           requestId: request.id,
           open: openTargetFor(host.id, agent),
@@ -942,6 +1312,27 @@ class AgentAttentionController extends ChangeNotifier {
         await notifier.cancel(id: permissionNotificationId(host.id, requestId));
       }
     }
+  }
+
+  /// A rule answered something since the last look: refresh the
+  /// auto-approved list if one was loaded (the inbox shows it).
+  void _noticeAutoApprovals(_HostMonitor monitor, List<AgentInfo> agents) {
+    DateTime? latest;
+    for (final agent in agents) {
+      final at = agent.lastAutoApprovedAt;
+      if (at != null && (latest == null || at.isAfter(latest))) {
+        latest = at;
+      }
+    }
+    final seen = monitor.lastAutoApprovedAt;
+    monitor.lastAutoApprovedAt = latest ?? seen;
+    if (latest == null ||
+        seen == null ||
+        !latest.isAfter(seen) ||
+        !_approvals.containsKey(monitor.host.id)) {
+      return;
+    }
+    unawaited(loadApprovals(monitor.host).catchError((_) => null));
   }
 
   /// Where tapping [agent]'s notification should land: the agent's Herdr
@@ -1027,6 +1418,12 @@ class _HostMonitor {
   int consecutiveFailures = 0;
   int skipTicks = 0;
   int? lastSequence;
+
+  /// The companion's reported features (from `status`); null until known.
+  Set<String>? capabilities;
+
+  /// Newest `lastAutoApprovedAt` seen among the host's agents.
+  DateTime? lastAutoApprovedAt;
 
   /// Bumped whenever a long-poll result is applied, so a status poll that
   /// was in flight meanwhile can tell it may be older.

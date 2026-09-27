@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
@@ -623,6 +624,7 @@ class ChatApprovalCard extends StatelessWidget {
     required this.request,
     required this.busy,
     required this.onDecide,
+    this.onTrust,
     super.key,
   });
 
@@ -630,11 +632,17 @@ class ChatApprovalCard extends StatelessWidget {
   final bool busy;
   final ValueChanged<PermissionVerdict> onDecide;
 
+  /// Saves a time-boxed rule (companions with smart approvals); hidden for
+  /// high-risk requests, which then also lose "Always".
+  final VoidCallback? onTrust;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isPlan = request.toolName == 'ExitPlanMode';
+    final high = request.risk?.level == PermissionRiskLevel.high;
+    final onTrust = request.trustable && !isPlan ? this.onTrust : null;
     String label(PermissionVerdict verdict) => switch (verdict) {
       PermissionVerdict.allow => isPlan ? 'Approve' : 'Allow',
       PermissionVerdict.deny => isPlan ? 'Keep planning' : 'Deny',
@@ -672,6 +680,10 @@ class ChatApprovalCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
+          if (request.risk case final risk?) ...[
+            const SizedBox(height: 6),
+            RiskLine(risk: risk),
+          ],
           const SizedBox(height: 10),
           Row(
             children: [
@@ -683,15 +695,27 @@ class ChatApprovalCard extends StatelessWidget {
                   child: Text(label(PermissionVerdict.deny)),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.tonal(
-                  onPressed: busy
-                      ? null
-                      : () => onDecide(PermissionVerdict.always),
-                  child: Text(label(PermissionVerdict.always)),
+              if (onTrust != null) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonal(
+                    key: ValueKey('chat-trust-${request.id}'),
+                    onPressed: busy ? null : onTrust,
+                    child: const Text('Trust…'),
+                  ),
                 ),
-              ),
+              ],
+              if (!(high && this.onTrust != null)) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonal(
+                    onPressed: busy
+                        ? null
+                        : () => onDecide(PermissionVerdict.always),
+                    child: Text(label(PermissionVerdict.always)),
+                  ),
+                ),
+              ],
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton(

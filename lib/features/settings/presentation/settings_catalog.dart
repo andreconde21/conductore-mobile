@@ -294,6 +294,12 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.agents,
+    'Approval rules',
+    keywords: ['trust', 'always', 'auto-approve', 'permissions', 'risk'],
+    availableWhen: _machines,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
     'Notifications',
     keywords: ['notify', 'alerts', 'approvals'],
     availableWhen: _machines,

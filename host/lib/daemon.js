@@ -19,6 +19,8 @@ const state = require('./state')
 const spool = require('./spool')
 const context = require('./context')
 const { permissionOutput } = require('./permission')
+const { Approvals, CAPABILITIES } = require('./approvals')
+const approvalOps = require('./approval-ops')
 const { usageFrom } = require('./statusline')
 const { log, debug } = require('./log')
 
@@ -138,6 +140,7 @@ class Daemon {
     this.state = loadSnapshot()
     this.changes = []
     this.waiters = new Map() // requestId -> { fifo, event, sessionId, timer }
+    this.approvals = new Approvals()
     this.pollers = new Set() // { socket, since, timer }
     this.usageEmits = new Map() // sessionId -> { at, timer }
     this.holds = new Map() // sessionId -> timer (usage/<sid>.hold exists)
@@ -282,15 +285,20 @@ class Daemon {
       if (fifo && isOurFifo(fifo)) writeFifo(fifo, '\n')
       return
     }
+    if (event.hook_event_name === 'PermissionRequest') {
+      event.request_id = requestId()
+      if (await approvalOps.autoApprove(this, event, fifo, header)) return
+    }
     await context.enrich(event, header)
     if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout)
     this.commit(state.reduce(this.state, event))
+    if (event.hook_event_name === 'SessionEnd') this.approvals.endSession(event.session_id)
   }
 
   // --- permission requests ----------------------------------------------------
 
   onPermission (event, fifo, timeout) {
-    const id = requestId()
+    const id = event.request_id || requestId()
     event.request_id = id
     this.commit(state.reduce(this.state, event))
     if (!fifo || !isOurFifo(fifo) || !fifoAlive(fifo)) {
@@ -320,8 +328,9 @@ class Daemon {
   }
 
   // Resolves a waiting hook. decision: allow | deny | always | timeout | gone.
+  // `rule`: the approval rule that answered it (logged as auto-approved).
   // Returns whether the hook received the answer.
-  settle (id, decision, message) {
+  settle (id, decision, message, rule = null) {
     const waiter = this.waiters.get(id)
     if (!waiter) return false
     this.waiters.delete(id)
@@ -335,8 +344,9 @@ class Daemon {
       // The hook is gone; its FIFO would otherwise linger.
       try { if (isOurFifo(waiter.fifo)) fs.unlinkSync(waiter.fifo) } catch {}
     }
-    const resolution = delivered || decision === 'timeout' ? decision : 'gone'
+    const resolution = delivered || decision === 'timeout' ? (rule && delivered ? 'auto' : decision) : 'gone'
     this.commit(state.resolvePermission(this.state, id, resolution))
+    if (rule && delivered) this.approvals.record(rule, waiter.event, this.state.agents[waiter.sessionId])
     log('permission', `${id} ${resolution}`)
     if (!this.waiters.size && this.probeTimer) { clearInterval(this.probeTimer); this.probeTimer = null }
     return delivered
@@ -511,7 +521,7 @@ class Daemon {
       case 'status':
         await this.drain()
         this.commit(state.prune(this.state))
-        this.reply(c, { ...state.snapshot(this.state), source: 'daemon' }); c.end(); return
+        this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES }); c.end(); return
       case 'events':
         await this.drain()
         return this.handleEvents(req, c)
@@ -520,6 +530,8 @@ class Daemon {
       case 'usage':
         // Legacy Node statusline (`conductore-hostd statusline`).
         this.reply(c, { ok: true, result: this.handleUsage(req) }); c.end(); return
+      case 'approve-low': case 'trust': case 'rules': case 'approvals':
+        this.reply(c, approvalOps.handle(this, req)); c.end(); return
       case 'stop':
         this.reply(c, { ok: true }); c.end()
         setImmediate(() => this.shutdown(0))
@@ -541,10 +553,11 @@ class Daemon {
       this.commit(state.resolvePermission(this.state, requestId, 'gone'))
       this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
     }
-    if (!this.settle(requestId, decision, message)) {
+    const verdict = approvalOps.decideVerdict(found.request, decision)
+    if (!this.settle(requestId, verdict.decision, message)) {
       this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
     }
-    this.reply(c, { ok: true, requestId, decision, sessionId: found.agent.sessionId }); c.end()
+    this.reply(c, { ok: true, requestId, decision: verdict.decision, sessionId: found.agent.sessionId, ...(verdict.note ? { note: verdict.note } : {}) }); c.end()
   }
 
   handleEvents (req, c) {
@@ -609,4 +622,4 @@ function run () {
   return d
 }
 
-module.exports = { Daemon, run, loadSnapshot, writeFifo, fifoAlive }
+module.exports = { Daemon, run, loadSnapshot, writeFifo, fifoAlive, isOurFifo }

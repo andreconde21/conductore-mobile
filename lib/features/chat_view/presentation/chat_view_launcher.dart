@@ -454,6 +454,7 @@ Future<void> openChatView({
         initialDraft: initialDraft,
         imageAttacher: imageAttacher,
         pasteImages: pasteImages,
+        attention: attention,
         onSetUpCompanion: companion == null || !context.mounted
             ? null
             : () => showCompanionSetup(context, host),
@@ -480,6 +481,8 @@ Future<void> openChatView({
         initialDraft: initialDraft,
         imageAttacher: imageAttacher,
         pasteImages: pasteImages,
+        attention: attention,
+        hostId: host.id,
         onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
             ? null
             : () => showCompanionSetup(routeContext, host),
