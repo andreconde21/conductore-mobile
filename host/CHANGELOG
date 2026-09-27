@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 0.9.0 (2026-09-27)
 
 - feat: `digest [--since <ms>] [--summaries] [--max-agents 10] [--max-ms 30000] [--lang en|pt] [--stuck-…]` for the phone's agents dashboard (capability `digest`). Per agent since a time: turns, edited files, lines +/- (`git diff --numstat` of those files, 1.5 s cap, else an estimate from the edits), test runs and the last result, failed commands, time waiting on the user, tokens and estimated cost (from the last 2 MB of the transcript), state, project, machine, last activity and the last reply's first line. Stuck flags with a reason: working 30 min without an edit, the same failure 3 times, the same command 5 times, an approval waiting 60 min, a turn that ended on an API error (thresholds per call).
 - feat: the daemon keeps a per-agent activity log for it (`~/.conductore/activity.json`, 0600): compact entries from the hook events it already parses, never tool input; at most 300 entries per agent and 64 agents, kept 24 h after an agent's last entry (so agents pruned after they ended still show). Written with the state snapshot; nothing at idle.
