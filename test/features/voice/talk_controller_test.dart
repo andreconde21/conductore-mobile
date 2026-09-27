@@ -426,6 +426,78 @@ void main() {
     expect(terminal.isActive, isTrue);
   });
 
+  testWidgets('an approval answered elsewhere while listening: the mic '
+      'closes and the loop waits for the turn, then reads it', (tester) async {
+    await setUpTalk(tester);
+    talk.start();
+    await settle(tester);
+    mic.say('clean the build');
+    await settle(tester, const Duration(seconds: 5));
+    final thread = [
+      prompt('u0', 'hi'),
+      reply('a0', 'Hello.'),
+      prompt('u1', 'x'),
+    ];
+    poll(thread, const [request], 'needs_permission');
+    await settle(tester);
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.target, isA<TalkApproval>());
+    expect(dictation.isActive, isTrue);
+
+    // Allowed from the notification; the user had started to answer.
+    mic.emit(const SpeechPartial('uh'));
+    poll(thread, const [], 'working');
+    await settle(tester);
+    expect(talk.phase, TalkPhase.waiting);
+    expect(dictation.isActive, isFalse);
+    expect(decided, isEmpty);
+
+    poll([...thread, reply('a1', 'Build cleaned.')]);
+    await settle(tester);
+    expect(tts.spoken.last, 'Build cleaned.');
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.phase, TalkPhase.listening);
+    expect(talk.target, isA<TalkPrompt>());
+    talk.stop();
+  });
+
+  testWidgets('a turn that finishes while listening is read, then the loop '
+      'listens again', (tester) async {
+    await setUpTalk(tester);
+    talk.start();
+    await settle(tester);
+    mic.say('run the tests');
+    await settle(tester, const Duration(seconds: 5));
+    expect(sent, ['run the tests']);
+    // Claude does not visibly start in time: the loop listens again.
+    await settle(tester, const Duration(seconds: 21));
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.phase, TalkPhase.listening);
+
+    final working = [
+      prompt('u0', 'hi'),
+      reply('a0', 'Hello.'),
+      prompt('u1', 'run the tests'),
+    ];
+    poll(working, const [], 'working');
+    await settle(tester);
+    expect(talk.phase, TalkPhase.listening);
+
+    final startsBefore = mic.starts.length;
+    poll([...working, reply('a1', 'All green.')]);
+    await settle(tester);
+    expect(tts.spoken, ['All green.']);
+    expect(talk.phase, TalkPhase.speaking);
+    expect(dictation.isActive, isFalse, reason: 'the mic must not hear it');
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.phase, TalkPhase.listening);
+    expect(mic.starts, hasLength(startsBefore + 1));
+    talk.stop();
+  });
+
   testWidgets('no microphone permission stops the loop', (tester) async {
     await setUpTalk(tester);
     mic.permission = false;

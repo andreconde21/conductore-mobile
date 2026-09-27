@@ -320,6 +320,45 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
+  testWidgets('Talk listening still hears an approval: the reader is not '
+      'muted by Talk\'s own mic', (tester) async {
+    final mic = FakeSpeechRecognizer();
+    final dictation = DictationController(mic, language: () => 'en-US');
+    addTearDown(dictation.dispose);
+    final chat = await pumpPage(tester, [
+      ok(page(history)),
+      ok(
+        page(
+          [],
+          offset: 200,
+          state: 'needs_permission',
+          pending: [
+            {'id': 'req-1', 'toolName': 'Bash', 'summary': 'npm test'},
+          ],
+        ),
+      ),
+    ], dictation: dictation);
+
+    await tester.tap(find.byKey(const ValueKey('chat-talk')));
+    await tester.pump();
+    expect(find.text('Listening…'), findsOneWidget);
+    expect(dictation.isActive, isTrue);
+
+    await chat.refresh();
+    await tester.pump();
+    expect(tts.spoken, [
+      'Claude needs your approval to run npm test. '
+          'Say allow, deny, or always.',
+    ]);
+    expect(dictation.isActive, isFalse, reason: 'the mic closes to hear it');
+    tts.done();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(dictation.isActive, isTrue);
+    expect(find.text('Say allow, deny, or always.'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('chat-talk-toggle')));
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   group('header toggles', () {
     IconButton readAloudButton(WidgetTester tester) => tester
         .widget<IconButton>(find.byKey(const ValueKey('chat-read-aloud')));

@@ -310,10 +310,15 @@ class _ChatViewPageState extends State<ChatViewPage>
       )?.showSnackBar(SnackBar(content: Text(message)));
     }
     if (talk.active) _talkMessageShown = null;
+    _syncDictation();
   }
 
+  /// Dictating into the composer keeps the reader quiet (and skips what
+  /// arrives meanwhile). Talk's own listening does not: it closes the mic
+  /// when there is something to read (see TalkController.update).
   void _syncDictation() {
-    _readAloud?.suppressed = _dictation?.isActive ?? false;
+    _readAloud?.suppressed =
+        (_dictation?.isActive ?? false) && !(_talk?.active ?? false);
   }
 
   void _toggleReadAloud() {
