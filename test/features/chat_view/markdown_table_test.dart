@@ -175,4 +175,62 @@ void main() {
     expect(expand.overlaps(lastHeader), isFalse);
     expect(expand.right, lessThanOrEqualTo(table.right + 0.5));
   });
+
+  group('desktop', () {
+    const desktops = TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    });
+
+    testWidgets(
+      'a click on the table does not open it; the button opens a dialog',
+      (tester) async {
+        await pump(tester, '| a | b |\n|---|---|\n| 1 | 2 |', 900);
+        await tester.tap(find.text('1', findRichText: true));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('markdown-table-full')), findsNothing);
+        await tester.tap(find.byKey(const ValueKey('markdown-table-expand')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('desktop-page-frame')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('markdown-table-full')),
+          findsOneWidget,
+        );
+      },
+      variant: desktops,
+    );
+
+    testWidgets('a wide table shows its scrollbar', (tester) async {
+      final header = List.generate(8, (i) => 'Column number $i').join(' | ');
+      final delimiter = List.filled(8, '---').join(' | ');
+      final row = List.generate(8, (i) => 'value $i with words').join(' | ');
+      await pump(tester, '| $header |\n| $delimiter |\n| $row |', 360);
+      final bar = tester.widget<Scrollbar>(
+        find.byKey(const ValueKey('markdown-table-scrollbar')),
+      );
+      expect(bar.thumbVisibility, isTrue);
+    }, variant: desktops);
+  });
+
+  testWidgets('phone: a tap on the table opens it full screen, no scrollbar', (
+    tester,
+  ) async {
+    final header = List.generate(8, (i) => 'Column number $i').join(' | ');
+    final delimiter = List.filled(8, '---').join(' | ');
+    final row = List.generate(8, (i) => 'value $i with words').join(' | ');
+    await pump(tester, '| $header |\n| $delimiter |\n| $row |', 360);
+    expect(
+      find.byKey(const ValueKey('markdown-table-scrollbar')),
+      findsNothing,
+    );
+    await pump(tester, '| a | b |\n|---|---|\n| 1 | 2 |', 360);
+    await tester.tap(find.text('1', findRichText: true));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('markdown-table-full')), findsOneWidget);
+    expect(find.byKey(const ValueKey('desktop-page-frame')), findsNothing);
+  });
 }
