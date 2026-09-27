@@ -17,7 +17,6 @@ import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/platform_agent_notifier.dart';
-import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
@@ -153,12 +152,15 @@ void main() {
     ),
     sshFiles: DartSshSftpRepository(hostKeyVerifier),
     localFiles: const LocalFileRepository(),
+    // A new network leaves the shared side connections half dead: they
+    // reconnect on their next command.
+    networkChanges: ConnectivityPlusNetwork().onNetworkChanged,
   );
   final terminalRepository = RoutingTerminalRepository(
     ssh: DartSshTerminalRepository(hostKeyVerifier),
     mosh: MoshTerminalRepository(
       hostKeyVerifier,
-      cleanupRunner: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+      cleanupRunner: hostChannels.runner,
     ),
     local: LocalTerminalRepository(
       resolveLaunch: localShellController.requireLaunch,
@@ -349,7 +351,7 @@ void main() {
     local: localSyncStore,
     hubFactory: (host, deviceId) => SshSyncHub(
       host: host,
-      runner: SshAgentCommandRunner(hostKeyVerifier, host),
+      runner: hostChannels.runner(host),
       sftp: sftpRepository,
       deviceId: deviceId,
     ),

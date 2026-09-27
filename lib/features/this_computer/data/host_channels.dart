@@ -1,3 +1,4 @@
+import 'package:conduit/features/agent_attention/data/shared_command_runners.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -17,19 +18,29 @@ class HostChannels {
     required this._localRunner,
     required SftpRepository sshFiles,
     required SftpRepository localFiles,
-  }) : files = RoutingSftpRepository(ssh: sshFiles, local: localFiles);
+    Stream<void>? networkChanges,
+    StdinAgentCommandRunner Function(SavedHost host)? sshRunner,
+  }) : files = RoutingSftpRepository(ssh: sshFiles, local: localFiles) {
+    _sshRunners = SharedCommandRunners(
+      sshRunner ?? (host) => SshAgentCommandRunner(_hostKeyVerifier, host),
+      networkChanges: networkChanges,
+    );
+  }
 
   final HostKeyVerifier _hostKeyVerifier;
   final AgentCommandRunner Function() _localRunner;
+
+  /// Every side channel of a saved machine shares one SSH connection.
+  late final SharedCommandRunners _sshRunners;
 
   /// Files of any machine: SFTP, or the local file system for "This
   /// computer".
   final SftpRepository files;
 
-  /// A command runner for [host]; the caller closes it.
-  AgentCommandRunner runner(SavedHost host) => host.isThisComputer
-      ? _localRunner()
-      : SshAgentCommandRunner(_hostKeyVerifier, host);
+  /// A command runner for [host]; the caller closes it. Runners of one
+  /// machine share its connection (see [SharedCommandRunners]).
+  AgentCommandRunner runner(SavedHost host) =>
+      host.isThisComputer ? _localRunner() : _sshRunners.lease(host);
 
   /// A port forwarder for the live preview of [host]; the caller closes it.
   PortForwarder portForwarder(SavedHost host) => host.isThisComputer

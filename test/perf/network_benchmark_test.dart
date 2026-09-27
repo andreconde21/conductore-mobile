@@ -12,7 +12,10 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
+import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
+import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/foundation.dart';
@@ -74,7 +77,7 @@ class NetworkLog {
 }
 
 /// One fake SSH connection: answers the companion, Herdr and tmux.
-class FakeConnection implements AgentCommandRunner {
+class FakeConnection implements StdinAgentCommandRunner {
   FakeConnection(this.host, this.log) {
     log.open(host);
   }
@@ -118,6 +121,14 @@ class FakeConnection implements AgentCommandRunner {
   }
 
   @override
+  Future<AgentCommandResult> runWithStdin(
+    String command, {
+    required String stdin,
+    required Duration timeout,
+    Future<void>? cancel,
+  }) => run(command, timeout: timeout);
+
+  @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -125,13 +136,21 @@ class FakeConnection implements AgentCommandRunner {
   }
 }
 
-enum Scene { home, background, chat }
+enum Scene { home, background, chat, terminal }
 
 void main() {
   void measure(Scene scene) {
     fakeAsync((async) {
       final log = NetworkLog();
-      AgentCommandRunner open(SavedHost host) => FakeConnection(host.id, log);
+      // The app's side channels, over fake SSH connections.
+      final channels = HostChannels(
+        hostKeyVerifier: NoopVerifier(),
+        localRunner: () => throw StateError('no local machine here'),
+        sshFiles: NoNetworkSftpRepository(),
+        localFiles: NoNetworkSftpRepository(),
+        sshRunner: (host) => FakeConnection(host.id, log),
+      );
+      final open = channels.runner;
 
       final machines = [
         for (var i = 0; i < 5; i++)
@@ -169,11 +188,29 @@ void main() {
             ..setAppActive(true)
             ..setAppForeground(false);
           usage.setAppActive(false);
+        case Scene.terminal:
+          break;
         case Scene.chat:
           attention.setAppForeground(true);
           final (runner, owned: _) = attention.runnerFor(machines.first);
           chat = ChatViewController(runner: runner, sessionId: 's-1')
             ..setVisible(true);
+      }
+      PreviewReadyController? preview;
+      SerialCommandChannel? tabs;
+      Timer? tabsTimer;
+      if (scene == Scene.terminal) {
+        // The terminal page in front: the monitor's long-poll, the tab
+        // strip's 2 s tmux poll and the preview watcher's port poll.
+        attention.setAppForeground(true);
+        tabs = SerialCommandChannel(runnerFactory: () => open(machines.first));
+        tabsTimer = Timer.periodic(
+          const Duration(seconds: 2),
+          (_) => unawaited(tabs!.query('tmux list-windows -t =main')),
+        );
+        preview = PreviewReadyController(
+          runnerFactory: () => open(machines.first),
+        )..setForeground(true);
       }
       // Settle, then count one steady minute.
       async.elapse(const Duration(minutes: 2));
@@ -195,7 +232,13 @@ void main() {
             .join(','),
       });
 
+      // One connection per machine for every side channel (before: the
+      // monitor, board, tab strip and preview watcher each had one).
+      expect(log.peakLive[monitored] ?? 0, lessThanOrEqualTo(1));
       chat?.dispose();
+      tabsTimer?.cancel();
+      unawaited(tabs?.close());
+      preview?.dispose();
       detachUsage?.call();
       usage.dispose();
       boards.dispose();
@@ -208,4 +251,5 @@ void main() {
   test('home on screen', () => measure(Scene.home));
   test('app in the background', () => measure(Scene.background));
   test('chat view open', () => measure(Scene.chat));
+  test('terminal page in front', () => measure(Scene.terminal));
 }
