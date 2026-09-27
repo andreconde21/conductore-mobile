@@ -41,6 +41,42 @@ void main() {
       expect(out.toString(), 'startend');
     });
 
+    test('a stray ESC P does not swallow the output after it', () {
+      final filter = TerminalStringSequenceFilter();
+      // `cat` of a binary: ESC P, then a prompt with colours.
+      expect(
+        filter.process('junk ${esc}P more\r\n$esc[32muser\$ $esc[0m'),
+        'junk $esc[32muser\$ $esc[0m',
+      );
+      expect(filter.process('still here'), 'still here');
+    });
+
+    test('CAN and SUB cancel a string sequence', () {
+      final filter = TerminalStringSequenceFilter();
+      expect(filter.process('a${esc}Pjunk\x18b'), 'ab');
+      expect(filter.process('a${esc}_junk\x1ab'), 'ab');
+    });
+
+    test('ESC followed by another introducer starts a new string', () {
+      final filter = TerminalStringSequenceFilter();
+      expect(filter.process('a${esc}Pone${esc}Ptwo$esc\\b'), 'ab');
+    });
+
+    test('a doubled ESC (tmux passthrough) stays inside the string', () {
+      final filter = TerminalStringSequenceFilter();
+      expect(
+        filter.process('a${esc}Ptmux;$esc$esc]52;c;aGk=\x07$esc\\b'),
+        'ab',
+      );
+    });
+
+    test('stops dropping after the length cap', () {
+      final filter = TerminalStringSequenceFilter();
+      final long = 'x' * TerminalStringSequenceFilter.maxStrippedLength;
+      expect(filter.process('${esc}P$long'), '');
+      expect(filter.process('shown'), 'shown');
+    });
+
     test('leaves a lone escape sequence (not a string sequence) intact', () {
       final filter = TerminalStringSequenceFilter();
       expect(filter.process('${esc}c'), '${esc}c');
