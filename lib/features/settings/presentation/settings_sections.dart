@@ -19,6 +19,7 @@ import 'package:conduit/features/home_widget/data/platform_agent_status_widget_c
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/quick_actions/presentation/personal_quick_actions_card.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/settings/presentation/privacy_settings.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
@@ -217,6 +218,8 @@ class SettingsSectionBody extends StatelessWidget {
         ),
       ),
     ),
+    _gap,
+    SettingsCard(child: PersonalQuickActionsCard(theme: theme)),
   ];
 
   List<Widget> _input(BuildContext context, ThemeController theme) => [

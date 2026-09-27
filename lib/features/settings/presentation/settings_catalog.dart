@@ -198,6 +198,11 @@ const List<SettingsEntry> settingsCatalog = [
     'Global snippets',
     keywords: ['snippet', 'snip', 'macro', 'command'],
   ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Quick actions',
+    keywords: ['commands', 'buttons', 'project', 'code-workspace', 'run'],
+  ),
   // Input
   SettingsEntry(
     SettingsSection.input,
