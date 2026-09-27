@@ -8,10 +8,20 @@ class RootfsManifest {
     required this.archiveUrl,
     required this.sha256,
     required this.downloadSizeBytes,
+    this.mirrorUrls = const [],
   });
 
   final String version;
+
+  /// Where the archive is fetched from first.
   final Uri archiveUrl;
+
+  /// Copies of the same archive, tried in order when [archiveUrl] fails.
+  /// The [sha256] pin applies to every one.
+  final List<Uri> mirrorUrls;
+
+  /// [archiveUrl], then the [mirrorUrls], without repeats.
+  List<Uri> get archiveUrls => {archiveUrl, ...mirrorUrls}.toList();
 
   final String sha256;
   final int downloadSizeBytes;

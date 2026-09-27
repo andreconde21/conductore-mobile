@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/share_target/domain/shared_payload.dart';
 import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
@@ -37,6 +40,37 @@ class _ClipboardSource implements PromptImageSource {
   Future<SharedFile?> pick(PromptImageOrigin origin) async {
     picks.add(origin);
     return origin == PromptImageOrigin.clipboard ? image : null;
+  }
+}
+
+/// Tells when the terminal next sends something to the host.
+class _WatchedTerminalSession extends TrackableTerminalSession {
+  Completer<void>? _next;
+
+  /// Completes on the next [send].
+  Future<void> nextSend() => (_next = Completer<void>()).future;
+
+  @override
+  Future<void> send(List<int> data) {
+    final sent = super.send(data);
+    _next?.complete();
+    _next = null;
+    return sent;
+  }
+}
+
+/// SFTP that fails to connect, and tells when it was asked to.
+class _FailingSftpRepository extends ThrowingSftpRepository {
+  Completer<void>? _next;
+
+  /// Completes on the next [connect].
+  Future<void> nextAttempt() => (_next = Completer<void>()).future;
+
+  @override
+  Future<SftpSession> connect(SavedHost host) {
+    _next?.complete();
+    _next = null;
+    return super.connect(host);
   }
 }
 
@@ -78,14 +112,14 @@ void main() {
     mimeType: 'image/png',
   );
 
-  Future<({TrackableTerminalSession remote, FakeSftpSession sftp})> pumpPage(
+  Future<({_WatchedTerminalSession remote, FakeSftpSession sftp})> pumpPage(
     WidgetTester tester, {
     required _ClipboardSource source,
     SftpRepository? sftpRepository,
     bool pasteImages = true,
     bool bracketedPaste = false,
   }) async {
-    final remote = TrackableTerminalSession();
+    final remote = _WatchedTerminalSession();
     final workspace = TerminalWorkspaceController(
       ImmediateTerminalRepository(remote),
     );
@@ -116,15 +150,28 @@ void main() {
     return (remote: remote, sftp: sftp);
   }
 
-  Future<void> tapPaste(WidgetTester tester) async {
+  /// Taps Paste and waits, in real time (the image is copied and read
+  /// from disk), until the paste reached its end, as [until] tells. The
+  /// timeout only turns a hang into a failure; no test depends on how
+  /// long the paste takes.
+  Future<void> tapPaste(
+    WidgetTester tester, {
+    required Future<void> Function() until,
+  }) async {
     await tester.runAsync(() async {
+      // Made here, not in the test's fake-async zone, whose microtasks
+      // only run on a pump.
+      final done = until();
       await tester.tap(find.byKey(const ValueKey('toolbar-paste')));
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await done.timeout(const Duration(seconds: 30));
+      // What follows in the same flow (the snackbar, clearing the status
+      // chip) is microtasks, which all run before this timer.
+      await Future<void>.delayed(Duration.zero);
     });
     await tester.pump();
   }
 
-  String typed(TrackableTerminalSession remote) =>
+  String typed(_WatchedTerminalSession remote) =>
       utf8.decode(remote.sent.expand((chunk) => chunk).toList());
 
   Future<void> finish(WidgetTester tester) async {
@@ -139,7 +186,7 @@ void main() {
       source: _ClipboardSource(clipboardImage()),
       bracketedPaste: true,
     );
-    await tapPaste(tester);
+    await tapPaste(tester, until: remote.nextSend);
 
     expect(sftp.writtenFiles.keys, [_remotePath]);
     expect(sftp.writtenFiles[_remotePath], [0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
@@ -155,7 +202,7 @@ void main() {
       tester,
       source: _ClipboardSource(clipboardImage()),
     );
-    await tapPaste(tester);
+    await tapPaste(tester, until: remote.nextSend);
     expect(typed(remote), _remotePath);
     await finish(tester);
   });
@@ -163,7 +210,7 @@ void main() {
   testWidgets('a text clipboard pastes the text as before', (tester) async {
     final source = _ClipboardSource(null);
     final (:remote, :sftp) = await pumpPage(tester, source: source);
-    await tapPaste(tester);
+    await tapPaste(tester, until: remote.nextSend);
     expect(source.picks, [PromptImageOrigin.clipboard]);
     expect(sftp.writtenFiles, isEmpty);
     expect(typed(remote), 'hello');
@@ -179,7 +226,7 @@ void main() {
       source: source,
       pasteImages: false,
     );
-    await tapPaste(tester);
+    await tapPaste(tester, until: remote.nextSend);
     expect(source.picks, isEmpty);
     expect(sftp.writtenFiles, isEmpty);
     expect(typed(remote), 'hello');
@@ -187,12 +234,13 @@ void main() {
   });
 
   testWidgets('a failed upload says so and types nothing', (tester) async {
+    final sftpRepository = _FailingSftpRepository();
     final (:remote, sftp: _) = await pumpPage(
       tester,
       source: _ClipboardSource(clipboardImage()),
-      sftpRepository: ThrowingSftpRepository(),
+      sftpRepository: sftpRepository,
     );
-    await tapPaste(tester);
+    await tapPaste(tester, until: sftpRepository.nextAttempt);
     expect(find.byKey(const ValueKey('paste-image-failed')), findsOneWidget);
     expect(find.textContaining('Could not paste the image'), findsOneWidget);
     expect(typed(remote), isEmpty);

@@ -62,11 +62,14 @@ void main() {
     '"cwd":"/home/a/api","state":"working","kind":"claude","pending":[]}]}',
   );
 
+  /// The workspace of the last [monitor].
+  late TerminalWorkspaceController workspace;
+
   Future<AgentAttentionController> monitor(
     WidgetTester tester,
     SavedHost host,
   ) async {
-    final workspace = TerminalWorkspaceController(
+    workspace = TerminalWorkspaceController(
       ImmediateTerminalRepository(TrackableTerminalSession()),
     );
     final controller = AgentAttentionController(
@@ -150,11 +153,14 @@ void main() {
         SessionViewScope(
           controller: views,
           child: goButton(
-            (context) => opened = openPreferredChatView(
-              context,
-              attention: attention,
-              host: companionHost(),
-              onOpenTerminal: (_) {},
+            (context) => unawaited(
+              openPreferredChatView(
+                context,
+                attention: attention,
+                workspace: workspace,
+                session: workspace.activeSession!,
+                onOpenTerminal: (_, _) {},
+              ).then((value) => opened = value),
             ),
           ),
         ),

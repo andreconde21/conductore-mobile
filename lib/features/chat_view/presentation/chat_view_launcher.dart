@@ -67,13 +67,22 @@ class ChatAgentMatched extends ChatAgentMatch {
 /// Several fit and nothing tells them apart: the user picks one of
 /// [candidates].
 class ChatAgentAmbiguous extends ChatAgentMatch {
-  const ChatAgentAmbiguous(this.candidates, {this.elsewhere = false});
+  const ChatAgentAmbiguous(
+    this.candidates, {
+    this.elsewhere = false,
+    this.inPlace = false,
+  });
 
   final List<AgentInfo> candidates;
 
   /// None of [candidates] is where the session is (its Herdr workspace or
   /// tmux session runs no Claude): ask even when there is only one.
   final bool elsewhere;
+
+  /// Every one of [candidates] is where the session is (several Claude
+  /// sessions in its Herdr workspace or tmux session), as opposed to a
+  /// session that says nothing about where it is.
+  final bool inPlace;
 }
 
 /// No live Claude session on the machine.
@@ -104,6 +113,11 @@ List<AgentInfo> _latestPerPane(List<AgentInfo> agents) {
   }
   return result;
 }
+
+/// The one of [agents] (not empty) whose state changed last; the first
+/// when none says.
+AgentInfo mostRecentAgent(List<AgentInfo> agents) =>
+    agents.reduce((best, agent) => _newer(agent, best) ? agent : best);
 
 bool _newer(AgentInfo a, AgentInfo b) {
   final at = a.stateChangedAt;
@@ -184,7 +198,7 @@ ChatAgentMatch resolveChatAgent(
     return ChatAgentMatched(scoped.single);
   }
   if (scoped.length > 1) {
-    return ChatAgentAmbiguous(scoped);
+    return ChatAgentAmbiguous(scoped, inPlace: true);
   }
   if (located) {
     return ChatAgentAmbiguous(live, elsewhere: true);

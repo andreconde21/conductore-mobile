@@ -95,6 +95,7 @@ class TalkController extends ChangeNotifier {
       onPartial: _onPartial,
       onFinish: _onHeard,
       onCancel: _onDictationFailed,
+      onTakenOver: _onTakenOver,
     );
     _readAloud.addListener(_onReadAloudChanged);
   }
@@ -155,6 +156,9 @@ class TalkController extends ChangeNotifier {
   /// Spoken when the session the loop talks to ends.
   static const sessionEnded = 'That session ended.';
 
+  /// Shown when another mic takes the recognizer while Talk listens.
+  static const takenOver = 'Talk stopped: another microphone is in use.';
+
   TalkPhase get phase => _phase;
   bool get active => _phase != TalkPhase.off;
   TalkTarget get target => _target;
@@ -211,11 +215,16 @@ class TalkController extends ChangeNotifier {
     List<PendingPermissionRequest> pending,
     String? state,
   ) {
+    final previous = _state;
     _items = items;
     _pending = pending;
     _state = state;
     if (state == 'ended' && active) {
       _sessionEnded();
+      return;
+    }
+    if (_phase == TalkPhase.listening) {
+      _followThread(previous);
       return;
     }
     if (_phase != TalkPhase.waiting) return;
@@ -233,6 +242,43 @@ class TalkController extends ChangeNotifier {
       _afterReading(_listen);
     }
   }
+
+  /// A poll while the mic is open: when a turn finished, the approval or
+  /// question being answered went away (answered elsewhere) or another
+  /// came, or the reader has something to say, close the mic, hear it out
+  /// and listen again for what the thread needs now. What was heard so far
+  /// answered the old state, so it is dropped.
+  void _followThread(String? previous) {
+    final finished =
+        _state == 'waiting_input' &&
+        (previous == 'working' || previous == 'needs_permission');
+    final changed = !_sameTarget(_target, _currentTarget());
+    if (!finished && !changed && !_readAloud.busy) return;
+    _timer?.cancel();
+    _transcript = '';
+    _message = null;
+    if (_pending.isEmpty && _state == 'working' && !_readAloud.busy) {
+      // An approval answered elsewhere and Claude carries on: wait for
+      // the turn as if it had been answered here.
+      _phase = TalkPhase.waiting;
+      _itemsAtSend = _items.length;
+      _sawWork = true;
+      notifyListeners();
+    } else {
+      _afterReading(_listen);
+    }
+    // After the phase change, so the cut-off phrase is not acted on.
+    if (_dictation.isActive) unawaited(_dictation.cancel());
+  }
+
+  static bool _sameTarget(TalkTarget a, TalkTarget b) => switch ((a, b)) {
+    (TalkPrompt(), TalkPrompt()) => true,
+    (TalkApproval(request: final x), TalkApproval(request: final y)) =>
+      x.id == y.id,
+    (TalkQuestion(question: final x), TalkQuestion(question: final y)) =>
+      x.id == y.id,
+    _ => false,
+  };
 
   /// The agent's session ended: after what is being read, say so once and
   /// stop, rather than listening to a dead session.
@@ -349,6 +395,16 @@ class TalkController extends ChangeNotifier {
           unawaited(_deliver(() => answer(number)));
         }
     }
+  }
+
+  /// Another mic (the terminal's, the voice guide's) took the recognizer:
+  /// what was heard is cut off, not a finished sentence, so nothing is
+  /// sent and the loop stops rather than fight for the microphone.
+  void _onTakenOver(String _) {
+    if (_phase != TalkPhase.listening) return;
+    stop();
+    _message = takenOver;
+    notifyListeners();
   }
 
   void _onDictationFailed({bool force = false}) {

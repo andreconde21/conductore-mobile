@@ -7,14 +7,14 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { Readable } = require('stream')
 const { execFile } = require('child_process')
 const sm = require('../lib/summarize')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-summarize-'))
+const root = tempDir('cnd-summarize-')
 const binDir = path.join(root, 'bin')
 const emptyDir = path.join(root, 'empty')
 const home = path.join(root, 'home')
@@ -270,7 +270,7 @@ test('stripMarkdown, cleanSummary and capWords', () => {
 })
 
 test('callers racing to clear a stale lock never both get it', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lock-'))
+  const dir = tempDir('cnd-lock-')
   const lockFile = path.join(dir, 'summarize.lock')
   for (let round = 0; round < 5; round++) {
     fs.writeFileSync(lockFile, '2147483646') // a pid that is not running
@@ -295,3 +295,5 @@ test('callers racing to clear a stale lock never both get it', async () => {
   }
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+test.after(() => cleanup())

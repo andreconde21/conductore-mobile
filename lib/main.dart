@@ -762,7 +762,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
         return widget.hostsController.findById(hostId);
       },
       onOpen: (host, agent) async {
-        await flow.openAgent(host, agent);
+        await flow.openAgent(host, agent, preferredView: true);
       },
       child: home,
     );

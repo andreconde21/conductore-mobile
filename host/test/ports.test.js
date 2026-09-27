@@ -3,8 +3,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const ports = require('../lib/ports')
 
 const SS = [
@@ -39,7 +39,7 @@ const scanOpts = (ssText = SS, proc = PROC) => ({
   }
 })
 
-const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cports-')), 'ports.json')
+const tmpFile = () => path.join(tempDir('cports-'), 'ports.json')
 
 test('parseSs reads address, port and owner; IPv6 brackets are stripped', () => {
   const rows = ports.parseSs(SS)
@@ -162,3 +162,5 @@ test('cli: ports rejects a bad --since', async () => {
   }
   assert.match(writes.join(''), /--since must be a non-negative number/)
 })
+
+test.after(() => cleanup())

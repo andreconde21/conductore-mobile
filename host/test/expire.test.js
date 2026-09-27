@@ -6,8 +6,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { spawn, execFile } = require('child_process')
 const state = require('../lib/state')
 const proc = require('../lib/proc')
@@ -52,7 +52,7 @@ test('identifyClaude accepts only a Claude Code process and sameProcess tracks i
 })
 
 test('a Claude Code killed without SessionEnd is ended by the daemon', { skip: !proc.hasProc() }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-exp-'))
+  const home = tempDir('cnd-exp-')
   const env = { ...process.env, CONDUCTORE_HOME: home, CONDUCTORE_SOCKET: path.join(home, 'hostd.sock') }
   for (const k of Object.keys(env)) if (/^(TMUX|HERDR_)/.test(k)) delete env[k]
   const cli = (...args) => new Promise((resolve, reject) => {
@@ -94,7 +94,7 @@ test('a Claude Code killed without SessionEnd is ended by the daemon', { skip: !
 })
 
 test('an auto-approved agent carries its process; expiry ends its session rules', { skip: !proc.hasProc() }, async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-exp-'))
+  const home = tempDir('cnd-exp-')
   const env = { ...process.env, CONDUCTORE_HOME: home, CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'), CONDUCTORE_PERMISSION_TIMEOUT: '30' }
   for (const k of Object.keys(env)) if (/^(TMUX|HERDR_)/.test(k)) delete env[k]
   env.TMUX_TMPDIR = home
@@ -153,3 +153,5 @@ test('an auto-approved agent carries its process; expiry ends its session rules'
     fs.rmSync(home, { recursive: true, force: true })
   }
 })
+
+test.after(() => cleanup())

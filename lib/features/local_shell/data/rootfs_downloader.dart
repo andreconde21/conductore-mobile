@@ -45,13 +45,46 @@ class HttpRootfsDownloader implements RootfsDownloader {
       existing = 0;
     }
 
+    // The primary, then each mirror: an unreachable or bad copy falls
+    // through to the next. The pinned sha256 is checked whichever served
+    // it; a full disk stops at once.
+    final urls = manifest.archiveUrls;
+    for (var i = 0; ; i++) {
+      try {
+        await _downloadFrom(
+          urls[i],
+          manifest: manifest,
+          file: file,
+          existing: existing,
+          total: total,
+          onProgress: onProgress,
+        );
+        onProgress?.call(1);
+        return;
+      } on DownloadException catch (error) {
+        if (error.kind == DownloadFailureKind.lowDisk || i == urls.length - 1) {
+          rethrow;
+        }
+        existing = await file.exists() ? await file.length() : 0;
+      }
+    }
+  }
+
+  Future<void> _downloadFrom(
+    Uri url, {
+    required RootfsManifest manifest,
+    required File file,
+    required int existing,
+    required int total,
+    required void Function(double)? onProgress,
+  }) async {
     final verifier = Sha256Verifier(manifest.sha256);
     final alreadyComplete = total > 0 && existing == total;
     if (alreadyComplete) {
       await _hashFile(file, verifier);
     } else {
       await _fetch(
-        manifest: manifest,
+        url: url,
         file: file,
         existing: existing,
         total: total,
@@ -67,18 +100,17 @@ class HttpRootfsDownloader implements RootfsDownloader {
         'Downloaded archive failed checksum verification.',
       );
     }
-    onProgress?.call(1);
   }
 
   Future<void> _fetch({
-    required RootfsManifest manifest,
+    required Uri url,
     required File file,
     required int existing,
     required int total,
     required Sha256Verifier verifier,
     required void Function(double)? onProgress,
   }) async {
-    final request = http.Request('GET', manifest.archiveUrl);
+    final request = http.Request('GET', url);
     if (existing > 0) {
       request.headers['Range'] = 'bytes=$existing-';
     }

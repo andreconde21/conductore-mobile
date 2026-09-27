@@ -15,6 +15,10 @@ const TOOL_CAP = 4096
 const TEXT_CAP = 32 * 1024
 const STRING_FIELD_CAP = 1024
 const SYSTEM_CAP = 500
+// A line longer than one read's maxBytes (a prompt with pasted images, a
+// big tool result) is still read and reduced on its own up to this size;
+// only a longer one is skipped.
+const OVERSIZED_LINE_CAP = 64 * 1024 * 1024
 
 // Line types a chat view renders; everything else (attachments, queue
 // operations, file-history snapshots, cost state, ...) is skipped.
@@ -115,8 +119,31 @@ function normalizeMessage (m) {
   return out
 }
 
+// A prompt the user typed while the agent was working, which Claude Code
+// absorbed into the running turn: it is recorded only as a `queued_command`
+// attachment, never as a `user` line. Prompts from teammates, coordinators
+// and background tasks (other `commandMode`s or `origin`s, or `isMeta`)
+// stay dropped.
+function queuedPrompt (d) {
+  const a = d.attachment
+  if (!a || a.type !== 'queued_command' || a.commandMode !== 'prompt') return null
+  if (a.isMeta || d.isMeta) return null
+  if (a.origin && a.origin.kind !== 'human') return null
+  if (typeof a.prompt !== 'string' && !Array.isArray(a.prompt)) return null
+  return {
+    type: 'user',
+    uuid: d.uuid || null,
+    parentUuid: d.parentUuid || null,
+    timestamp: d.timestamp || a.timestamp || null,
+    isSidechain: d.isSidechain === true,
+    queued: true,
+    message: normalizeMessage({ role: 'user', content: a.prompt })
+  }
+}
+
 // One parsed JSONL object -> the chat-view entry, or null to skip it.
 function normalizeEntry (d) {
+  if (d && d.type === 'attachment') return queuedPrompt(d)
   if (!d || typeof d !== 'object' || !KEPT_TYPES.has(d.type)) return null
   if (d.type === 'summary') {
     return { type: 'summary', summary: capString(d.summary || '', SYSTEM_CAP).value, leafUuid: d.leafUuid || null }
@@ -226,14 +253,22 @@ function readTranscript (file, opts = {}) {
     if (lastNl < from) {
       // No complete line in the window.
       if (length === maxBytes && start + length < size) {
-        // One line longer than maxBytes: skip it rather than stall forever.
+        // One line longer than maxBytes: read it alone (a prompt with
+        // images must not vanish), or skip it when even that is too big,
+        // rather than stall forever.
         let pos = start + length
         const chunk = 64 * 1024
         while (pos < size) {
           const more = readRange(fd, pos, Math.min(chunk, size - pos))
           const nl = more.indexOf(0x0a)
           if (nl !== -1) {
-            return { offset: pos + nl + 1, size, start: start + from, entries: [], skipped: 1, oversized: true, ...(reset ? { reset } : {}) }
+            const lineStart = start + from
+            const end = pos + nl + 1
+            let parsed = { entries: [], skipped: 1 }
+            if (end - lineStart <= OVERSIZED_LINE_CAP) {
+              parsed = parseLines(readRange(fd, lineStart, end - lineStart).toString('utf8'))
+            }
+            return { offset: end, size, start: lineStart, entries: parsed.entries, skipped: parsed.skipped, oversized: true, ...(reset ? { reset } : {}) }
           }
           pos += more.length
         }

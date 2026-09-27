@@ -16,6 +16,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/chat_view/data/attention_host_runner.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
@@ -631,10 +632,8 @@ class _TerminalPageState extends State<TerminalPage>
     final flow = widget.connectFlow;
     if (flow != null) return flow.runnerFactory(session.host);
     final attention = widget.agentAttention;
-    if (attention != null) {
-      final (runner, :owned) = attention.runnerFor(session.host);
-      return owned ? runner : _BorrowedRunner(runner);
-    }
+    // Asked per command, so a reconnect's new monitor connection is used.
+    if (attention != null) return AttentionHostRunner(attention, session.host);
     return _commandRunnerFor(session.host) ??
         SshAgentCommandRunner(verifier!, session.host);
   }
@@ -1224,13 +1223,12 @@ class _TerminalPageState extends State<TerminalPage>
     final host = connectFlow.hostsController.hosts
         .where((host) => host.id == hostId && !host.isLocal)
         .firstOrNull;
-    if (host == null) {
-      await connectFlow.pickHostAndConnect(context);
-    } else {
-      await connectFlow.connect(context, host, forcePicker: true);
-    }
+    final session = host == null
+        ? await connectFlow.pickHostAndConnect(context)
+        : await connectFlow.connect(context, host, forcePicker: true);
     if (!mounted) return;
     _showTerminal();
+    _openPreferredView(session);
   }
 
   /// Whether closing [session] ends what runs in it: a connected plain
@@ -1698,23 +1696,29 @@ class _TerminalPageState extends State<TerminalPage>
     _showTerminal();
   }
 
-  /// A session the user picked (its tab, the switcher): Chat View when its
-  /// pane runs a Claude session the companion knows and its effective view
-  /// is Chat View; the terminal otherwise.
-  void _openPreferredView(TerminalSessionController session) {
+  /// A session the user picked (its tab, the session grid, a new one from
+  /// the connect picker): Chat View when its effective view is Chat View
+  /// and it runs a Claude session the companion knows, once that is known
+  /// (see [openPreferredChatView]); the terminal otherwise.
+  void _openPreferredView(TerminalSessionController? session) {
     final attention = widget.agentAttention;
     if (!mounted ||
+        session == null ||
         attention == null ||
         widget.workspace.activeSession != session) {
       return;
     }
-    openPreferredChatView(
-      context,
-      attention: attention,
-      host: session.host,
-      dictation: _dictation,
-      onOpenTerminal: (agent) =>
-          _showAgentTerminal(attention, session.host, agent),
+    unawaited(
+      openPreferredChatView(
+        context,
+        attention: attention,
+        workspace: widget.workspace,
+        session: session,
+        herdr: widget.connectFlow?.herdr,
+        dictation: _dictation,
+        onOpenTerminal: (host, agent) =>
+            _showAgentTerminal(attention, host, agent),
+      ),
     );
   }
 
@@ -1813,6 +1817,7 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   Future<void> _openSessionGrid() async {
+    final before = widget.workspace.activeSession;
     await showSessionGrid(
       context,
       workspace: widget.workspace,
@@ -1822,12 +1827,15 @@ class _TerminalPageState extends State<TerminalPage>
     );
     if (!mounted) return;
     _showTerminal();
+    final active = widget.workspace.activeSession;
+    if (active != before) _openPreferredView(active);
   }
 
   Future<void> _openNewSession(SessionConnectFlow connectFlow) async {
-    await connectFlow.pickHostAndConnect(context);
+    final session = await connectFlow.pickHostAndConnect(context);
     if (!mounted) return;
     _showTerminal();
+    _openPreferredView(session);
   }
 
   /// The Herdr command channel for [session]'s gestures. For a session
@@ -3117,21 +3125,6 @@ class _TerminalScreen implements Listenable {
       for (var row = start; row < lines.length; row++) lines[row].getText(),
     ];
   }
-}
-
-/// A runner someone else owns (the agent monitor's connection): closing it
-/// is left to the owner.
-class _BorrowedRunner implements AgentCommandRunner {
-  const _BorrowedRunner(this._runner);
-
-  final AgentCommandRunner _runner;
-
-  @override
-  Future<AgentCommandResult> run(String command, {required Duration timeout}) =>
-      _runner.run(command, timeout: timeout);
-
-  @override
-  Future<void> close() async {}
 }
 
 /// A small progress pill over the terminal ("Uploading image…").

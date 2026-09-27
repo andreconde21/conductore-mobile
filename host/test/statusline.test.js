@@ -7,8 +7,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { spawn } = require('child_process')
 const sl = require('../lib/statusline')
 
@@ -100,7 +100,7 @@ test('merge migrates the Node statusline of 0.3 to the sh one, keeping what it w
 
 // --- through the real clients and daemon ---
 
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-sl-'))
+const home = tempDir('cnd-sl-')
 const env = {
   ...process.env,
   CONDUCTORE_HOME: home,
@@ -131,8 +131,8 @@ const cli = async (...args) => {
 const agentOf = async sid => (await cli('status')).json.agents.find(a => a.sessionId === sid)
 
 test.after(async () => {
-  await cli('stop')
-  fs.rmSync(home, { recursive: true, force: true })
+  await cli('stop').catch(() => {})
+  await cleanup()
 })
 
 test('statusline without a daemon or valid input still prints and exits 0 (sh and legacy Node)', async () => {

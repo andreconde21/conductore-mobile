@@ -3,8 +3,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const rules = require('../lib/rules')
 
 const ROOT = '/home/andre/Projects/app'
@@ -202,7 +202,7 @@ test('suggestions: specific first, then broader', () => {
 })
 
 test('store: load, save (0600), junk tolerant', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-rules-'))
+  const dir = tempDir('cnd-rules-')
   const file = path.join(dir, 'rules.json')
   assert.deepEqual(rules.load(file), [])
   const r = rules.makeRule({ rule: 'Bash(npm test *)' }, NOW)
@@ -217,7 +217,7 @@ test('store: load, save (0600), junk tolerant', () => {
 })
 
 test('repoRoot finds the git work tree, never above home', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-home-'))
+  const home = tempDir('cnd-home-')
   const repo = path.join(home, 'Projects', 'app')
   fs.mkdirSync(path.join(repo, 'packages', 'web'), { recursive: true })
   fs.mkdirSync(path.join(repo, '.git'))
@@ -250,3 +250,5 @@ test('narrowest: exactly this call, never a glob', () => {
     assert.equal(rules.findMatch([r], { session_id: 's', tool_name: tool, tool_input: other }, ctx, NOW), null, `${r.rule} covers nothing else`)
   }
 })
+
+test.after(() => cleanup())

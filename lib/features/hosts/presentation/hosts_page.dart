@@ -620,8 +620,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               machineMenu: _handleMenu,
               openSession: (session) {
                 widget.workspaceController.activate(session);
-                unawaited(_openTerminalWorkspace());
-                _openPreferredChat(session);
+                unawaited(_showSession(session));
               },
               sessionActions: _showSessionActions,
               noticeAction: _handleNoticeAction,
@@ -650,14 +649,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           await _openPane(host, workspace, null);
           return;
         }
-        await flow.openAgentLocation(
+        final session = await flow.openAgentLocation(
           host,
           workspaceId: workspace.id,
           tabId: tab.id,
           label: workspace.label,
         );
         if (!mounted) return;
-        await _openTerminalWorkspace();
+        await _showSession(session);
       case TmuxSessionTarget(:final host, :final session):
         await _openTmux(host, session.name);
       case TmuxWindowTarget(:final host, :final session, :final window):
@@ -668,7 +667,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             .firstOrNull;
         if (session == null) return;
         widget.workspaceController.activate(session);
-        await _openTerminalWorkspace();
+        await _showSession(session);
     }
   }
 
@@ -890,8 +889,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
     void open(TerminalSessionController session) {
       widget.workspaceController.activate(session);
-      unawaited(_openTerminalWorkspace());
-      _openPreferredChat(session);
+      unawaited(_showSession(session));
     }
 
     // The "+" tile fills the last row's gap (or stands alone when nothing
@@ -1335,12 +1333,18 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final existing = _sessionsFor(
       host,
     ).where((s) => HomeSessionInfo.tmuxSessionOf(s) == sessionName).firstOrNull;
+    // A window picked by hand is a place in the terminal: it stays there.
+    final preferredView = window == null;
     if (existing != null) {
       widget.workspaceController.activate(existing);
-      await _openTerminalWorkspace();
+      await _showSession(preferredView ? existing : null);
       return;
     }
-    await _openTarget(host, ConnectTarget.tmux(sessionName));
+    await _openTarget(
+      host,
+      ConnectTarget.tmux(sessionName),
+      preferredView: preferredView,
+    );
   }
 
   /// The gear: the full-screen Settings page.
@@ -1512,7 +1516,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     if (flow != null) {
       // Lands on the exact workspace, tab and pane: reuses (and if needed
       // reconnects) an open Herdr tab, or attaches a new one focused there.
-      await flow.openAgentLocation(
+      final session = await flow.openAgentLocation(
         host,
         workspaceId: workspace.id,
         tabId: pane?.agent.tab ?? '',
@@ -1520,7 +1524,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         label: workspace.label,
       );
       if (!mounted) return;
-      await _openTerminalWorkspace();
+      await _showSession(session, agent: pane?.agent);
       return;
     }
     final board = _boards?[host.id];
@@ -1534,7 +1538,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           unawaited(board.focusWorkspace(workspace.id));
         }
       }
-      await _openTerminalWorkspace();
+      await _showSession(existing, agent: pane?.agent);
       return;
     }
     if (pane != null && board != null) {
@@ -1549,6 +1553,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     await _openTarget(
       host,
       ConnectTarget.herdr(workspaceId: workspace.id, label: workspace.label),
+      agent: pane?.agent,
     );
   }
 
@@ -1568,40 +1573,64 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     return anyHerdr;
   }
 
-  Future<void> _openTarget(SavedHost host, ConnectTarget target) async {
+  /// Opens [target] on [host] and shows it (see [_showSession]; with
+  /// [preferredView] false, always in the terminal).
+  Future<void> _openTarget(
+    SavedHost host,
+    ConnectTarget target, {
+    AgentInfo? agent,
+    bool preferredView = true,
+  }) async {
     await widget.hostsController.markConnected(host);
     final flow = widget.connectFlow;
+    final TerminalSessionController session;
     if (flow != null) {
-      flow.open(host, target);
+      session = flow.open(host, target);
     } else {
-      widget.workspaceController.open(
+      session = widget.workspaceController.open(
         target.apply(host),
         startupCommand: target.startupCommand,
         target: target,
       );
     }
     if (!mounted) return;
-    await _openTerminalWorkspace();
+    await _showSession(preferredView ? session : null, agent: agent);
   }
 
-  /// After [session]'s terminal was pushed: Chat View on top when its pane
-  /// runs a Claude session the companion knows and it opens in Chat View.
-  /// Its Terminal button leaves the terminal, at the agent's pane.
-  void _openPreferredChat(TerminalSessionController session) {
-    final attention = widget.agentAttention;
-    openPreferredChatView(
-      _actionContext,
-      attention: attention,
-      host: session.host,
-      onOpenTerminal: (agent) {
-        final flow = widget.connectFlow;
-        if (flow != null) {
-          unawaited(flow.openAgent(session.host, agent));
-        } else {
-          unawaited(attention.focusAgent(session.host.id, agent));
-        }
-      },
-    );
+  /// Shows [session] (just opened or activated): the terminal, with Chat
+  /// View on top when its pane runs a Claude session and it opens in Chat
+  /// View, as soon as its agents are known (see [openPreferredChatView]).
+  /// [agent] pins which Claude session. Its Terminal button leaves the
+  /// terminal, at the agent's pane. Completes when the terminal page is
+  /// left, like [_openTerminalWorkspace].
+  Future<void> _showSession(
+    TerminalSessionController? session, {
+    AgentInfo? agent,
+  }) {
+    // Pushed first: Chat View goes over it and remembers it for back.
+    final shown = _openTerminalWorkspace();
+    if (session != null) {
+      final attention = widget.agentAttention;
+      final flow = widget.connectFlow;
+      unawaited(
+        openPreferredChatView(
+          _actionContext,
+          attention: attention,
+          workspace: widget.workspaceController,
+          session: session,
+          agent: agent,
+          herdr: flow?.herdr,
+          onOpenTerminal: (host, agent) {
+            if (flow != null) {
+              unawaited(flow.openAgent(host, agent));
+            } else {
+              unawaited(attention.focusAgent(host.id, agent));
+            }
+          },
+        ),
+      );
+    }
+    return shown;
   }
 
   Future<void> _showSessionActions(TerminalSessionController session) async {
@@ -1688,8 +1717,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   /// A deep link (notification, widget, agent sheet) opened a session.
   void _handleTerminalRequest() {
+    final opened = widget.connectFlow?.takeOpenedAgent();
     if (mounted && widget.workspaceController.hasSessions) {
-      unawaited(_openTerminalWorkspace());
+      unawaited(_showSession(opened?.session, agent: opened?.agent));
     }
   }
 
@@ -1815,19 +1845,21 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   Future<void> _connect(SavedHost host, {bool forcePicker = false}) async {
     final flow = widget.connectFlow;
+    final TerminalSessionController session;
     if (flow == null) {
       await widget.hostsController.markConnected(host);
-      widget.workspaceController.open(host);
+      session = widget.workspaceController.open(host);
     } else {
-      final session = await flow.connect(
+      final connected = await flow.connect(
         context,
         host,
         forcePicker: forcePicker,
       );
-      if (session == null) return;
+      if (connected == null) return;
+      session = connected;
     }
     if (!mounted) return;
-    await _openTerminalWorkspace();
+    await _showSession(session);
   }
 
   Future<void> _lock() async {

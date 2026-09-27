@@ -84,9 +84,9 @@ class QuickSwitcherSource {
   }
 }
 
-/// Opens what [item] names and shows it: a session in its effective view,
-/// an agent at its pane (in Chat View when its session opens there), a
-/// workspace or recent target in a new or reused session. [showTerminal]
+/// Opens what [item] names and shows it: a session, workspace or recent
+/// target (in a new or reused session) in its effective view, an agent at
+/// its pane (in Chat View when its session opens there). [showTerminal]
 /// brings the terminal on screen (a no-op when it already is); Chat View
 /// is pushed on top of it from [context].
 Future<void> openSwitcherItem(
@@ -108,18 +108,29 @@ Future<void> openSwitcherItem(
     showTerminal();
   }
 
-  switch (item) {
-    case SwitcherSessionItem(:final session):
-      source.workspace.activate(session);
-      showTerminal();
-      if (!context.mounted) return;
+  /// The terminal, then Chat View over it when [session] opens there.
+  void show(TerminalSessionController? session, {AgentInfo? agent}) {
+    if (!context.mounted) return;
+    showTerminal();
+    if (session == null) return;
+    unawaited(
       openPreferredChatView(
         context,
         attention: attention,
-        host: session.host,
+        workspace: source.workspace,
+        session: session,
+        agent: agent,
+        herdr: flow?.herdr,
         dictation: dictation,
-        onOpenTerminal: (agent) => toAgentPane(session.host, agent),
-      );
+        onOpenTerminal: toAgentPane,
+      ),
+    );
+  }
+
+  switch (item) {
+    case SwitcherSessionItem(:final session):
+      source.workspace.activate(session);
+      show(session);
     case SwitcherAgentItem(:final host, :final machine, :final agent):
       TerminalSessionController? session;
       if (flow != null) {
@@ -132,15 +143,17 @@ Future<void> openSwitcherItem(
         if (attention != null) unawaited(attention.focusAgent(host.id, agent));
       }
       if (!context.mounted) return;
-      showTerminal();
-      if (attention != null &&
+      if (session != null) {
+        show(session, agent: agent);
+      } else if (attention != null &&
           agentOpensInChat(
             views: SessionViewScope.maybeOf(context),
             attention: attention,
             monitoredHost: host,
             agent: agent,
-            sessionHostId: session?.host.id,
           )) {
+        // No session to show it in: Chat View straight over the terminal.
+        showTerminal();
         unawaited(
           openChatView(
             context: context,
@@ -151,32 +164,38 @@ Future<void> openSwitcherItem(
             onOpenTerminal: () => toAgentPane(host, agent),
           ),
         );
+      } else {
+        showTerminal();
       }
     case SwitcherWorkspaceItem(:final host, :final kind, :final id):
+      TerminalSessionController? session;
       if (kind == MultiplexerKind.herdr) {
         if (flow == null) return;
-        await flow.openAgentLocation(host, workspaceId: id, label: item.label);
+        session = await flow.openAgentLocation(
+          host,
+          workspaceId: id,
+          label: item.label,
+        );
       } else {
-        final open = source.workspace.sessions
+        session = source.workspace.sessions
             .where(
               (session) =>
                   baseHostId(session.host.id) == host.id &&
                   HomeSessionInfo.tmuxSessionOf(session) == id,
             )
             .firstOrNull;
-        if (open != null) {
-          source.workspace.activate(open);
+        if (session != null) {
+          source.workspace.activate(session);
         } else {
           if (flow == null) return;
           await flow.hostsController.markConnected(host);
-          flow.open(host, ConnectTarget.tmux(id));
+          session = flow.open(host, ConnectTarget.tmux(id));
         }
       }
-      if (context.mounted) showTerminal();
+      show(session);
     case SwitcherRecentItem(:final host, :final target):
       if (flow == null) return;
       await flow.hostsController.markConnected(host);
-      flow.open(host, target);
-      if (context.mounted) showTerminal();
+      show(flow.open(host, target));
   }
 }
