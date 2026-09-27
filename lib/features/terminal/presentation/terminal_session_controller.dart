@@ -63,6 +63,9 @@ class TerminalSessionController extends ChangeNotifier {
   final TerminalKeyboardController keyboard;
   final Terminal terminal;
   final _outputFilter = TerminalStringSequenceFilter();
+
+  /// stderr's own: a sequence split across chunks must not mix streams.
+  final _stderrFilter = TerminalStringSequenceFilter();
   final _predictiveEcho = PredictiveEcho();
   final _terminalPaintNotifier = ChangeNotifier();
   final Stopwatch _inputClock = Stopwatch()..start();
@@ -215,6 +218,7 @@ class TerminalSessionController extends ChangeNotifier {
     final generation = ++_connectionGeneration;
     _exitCode = null;
     _outputFilter.reset();
+    _stderrFilter.reset();
     _predictiveEcho.reset();
     _status = TerminalConnectionStatus.connecting;
     terminal.write(
@@ -269,7 +273,10 @@ class TerminalSessionController extends ChangeNotifier {
       _stderrSubscription = session.stderr
           .cast<List<int>>()
           .transform(const Utf8Decoder(allowMalformed: true))
-          .listen(_writeTerminalOutput, onError: _handleStreamError);
+          .listen(
+            (chunk) => _writeTerminalOutput(_stderrFilter.process(chunk)),
+            onError: _handleStreamError,
+          );
       _doneSubscription = session.done
           .asStream()
           .asyncMap((_) async {
