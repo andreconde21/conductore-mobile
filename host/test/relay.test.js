@@ -8,20 +8,20 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { execFile, execFileSync } = require('child_process')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 let hasTmux = true
 try { execFileSync('tmux', ['-V'], { stdio: 'ignore' }) } catch { hasTmux = false }
 
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-relay-'))
+const home = tempDir('cnd-relay-')
 const env = { ...process.env, CONDUCTORE_HOME: home, CONDUCTORE_SOCKET: path.join(home, 'none.sock'), CONDUCTORE_SEND_ENTER_DELAY_MS: '50' }
 for (const k of Object.keys(env)) if (/^(TMUX|HERDR_)/.test(k)) delete env[k]
 // Every server of this test, and the "default" one any unrouted tmux call
 // would reach, live in a private dir: a relay without -S hits nothing real.
-env.TMUX_TMPDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tmux-'))
+env.TMUX_TMPDIR = tempDir('cnd-tmux-')
 const servers = [`fix-${process.pid}-a`, `fix-${process.pid}-b`]
 const sockets = new Set()
 const file = name => path.join(home, name)
@@ -103,6 +103,5 @@ test('send reaches the agent on its own tmux server and refuses a reused pane id
 test.after(() => {
   for (const s of servers) { try { tmux(s, 'kill-server') } catch {} }
   for (const s of sockets) { try { fs.unlinkSync(s) } catch {} }
-  fs.rmSync(home, { recursive: true, force: true })
-  fs.rmSync(env.TMUX_TMPDIR, { recursive: true, force: true })
+  return cleanup()
 })

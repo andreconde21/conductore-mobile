@@ -16,6 +16,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/chat_view/data/attention_host_runner.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
@@ -631,10 +632,8 @@ class _TerminalPageState extends State<TerminalPage>
     final flow = widget.connectFlow;
     if (flow != null) return flow.runnerFactory(session.host);
     final attention = widget.agentAttention;
-    if (attention != null) {
-      final (runner, :owned) = attention.runnerFor(session.host);
-      return owned ? runner : _BorrowedRunner(runner);
-    }
+    // Asked per command, so a reconnect's new monitor connection is used.
+    if (attention != null) return AttentionHostRunner(attention, session.host);
     return _commandRunnerFor(session.host) ??
         SshAgentCommandRunner(verifier!, session.host);
   }
@@ -3126,21 +3125,6 @@ class _TerminalScreen implements Listenable {
       for (var row = start; row < lines.length; row++) lines[row].getText(),
     ];
   }
-}
-
-/// A runner someone else owns (the agent monitor's connection): closing it
-/// is left to the owner.
-class _BorrowedRunner implements AgentCommandRunner {
-  const _BorrowedRunner(this._runner);
-
-  final AgentCommandRunner _runner;
-
-  @override
-  Future<AgentCommandResult> run(String command, {required Duration timeout}) =>
-      _runner.run(command, timeout: timeout);
-
-  @override
-  Future<void> close() async {}
 }
 
 /// A small progress pill over the terminal ("Uploading image…").

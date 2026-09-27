@@ -7,12 +7,12 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { spawn, execFile } = require('child_process')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-sock-'))
+const root = tempDir('cnd-sock-')
 const home = path.join(root, 'h')
 const xdg = path.join(root, 'x')
 fs.mkdirSync(home)
@@ -60,4 +60,4 @@ test('a daemon from 0.7 still listening in XDG_RUNTIME_DIR is found and can be s
   await d.exited
 })
 
-test.after(() => fs.rmSync(root, { recursive: true, force: true }))
+test.after(() => cleanup())

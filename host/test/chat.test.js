@@ -10,18 +10,21 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { execFile } = require('child_process')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-chat-'))
+const home = tempDir('cnd-chat-')
 const binDir = path.join(home, 'bin')
 const callLog = path.join(home, 'calls.jsonl')
 fs.mkdirSync(binDir)
 
 const SOCK = '/tmp/fake-tmux-0/default'
 const PANES = { tmux: { '%3': 1003, '%4': 1004, '%9': 1009, '%6': 1006 }, herdr: { 'w1:p2': 'hd', 'w1:p7': 'someone-else' } }
+// A second Herdr server (a named session): the same pane id holds another agent.
+const HERDR_OTHER = path.join(home, 'herdr-other.sock')
+const OTHER_PANES = { 'w1:p2': 'hs' }
 
 // A fake multiplexer: logs {bin, args, stdin}; FAKE_<BIN>_FAIL makes it fail.
 for (const bin of ['tmux', 'herdr']) {
@@ -31,11 +34,12 @@ const fs = require('fs')
 const args = process.argv.slice(2)
 let stdin = ''
 try { if (args.includes('load-buffer')) stdin = fs.readFileSync(0, 'utf8') } catch {}
-fs.appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({ bin: ${JSON.stringify(bin)}, args, stdin }) + '\\n')
+const socket = process.env.HERDR_SOCKET_PATH || null
+fs.appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({ bin: ${JSON.stringify(bin)}, args, stdin, socket }) + '\\n')
 const fail = process.env.FAKE_${bin.toUpperCase()}_FAIL
 const isCheck = args.includes('display-message') || args[1] === 'list'
 if (fail && isCheck === !!process.env.FAKE_FAIL_CHECK) { process.stdout.write(fail + '\\n'); process.exit(1) }
-const panes = ${JSON.stringify(PANES)}.${bin}
+const panes = ${JSON.stringify(bin)} === 'herdr' && socket === ${JSON.stringify(HERDR_OTHER)} ? ${JSON.stringify(OTHER_PANES)} : ${JSON.stringify(PANES)}.${bin}
 if (args.includes('display-message')) {
   const pane = args[args.indexOf('-t') + 1]
   if (!(pane in panes)) { process.stderr.write("can't find pane: " + pane + '\\n'); process.exit(1) }
@@ -56,7 +60,7 @@ const env = {
 }
 // Even a tmux call without -S (the fake on PATH aside) can only reach a
 // private "default" server, never the real one.
-env.TMUX_TMPDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tmux-'))
+env.TMUX_TMPDIR = tempDir('cnd-tmux-')
 for (const k of Object.keys(env)) if (/^(TMUX$|TMUX_PANE$|HERDR_)/.test(k)) delete env[k]
 
 function cli (args, { input, extraEnv } = {}) {
@@ -108,6 +112,9 @@ fs.writeFileSync(path.join(home, 'state.json'), JSON.stringify({
     agent('closed', { tmux: { ...tmuxPane('%6'), paneId: '%8' } }),
     agent('old', { tmux: { session: 'main', window: 1, paneId: '%3', windowName: 'x' } }),
     agent('other', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p7', name: null } }),
+    agent('hs', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p2', name: null, socket: HERDR_OTHER } }),
+    // Recorded before the socket was: checked against the default server.
+    agent('hs-old', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p2', name: null } }),
     agent('exited', { tmux: tmuxPane('%3'), process: { pid: 2 ** 22 + 7, startTime: '1' } })
   ]
 }))
@@ -209,6 +216,35 @@ test('send prefers Herdr (agent prompt) and falls back to tmux when it fails', a
   assert.deepEqual(typed().map(c => c.bin), ['herdr'])
 })
 
+test("every herdr command goes to the agent's own Herdr server", async () => {
+  resetCalls()
+  const r = await cli(['send', 'hs', '--text', 'hi', '--no-enter'])
+  assert.equal(r.json.via, 'herdr')
+  const k = await cli(['interrupt', 'hs'])
+  assert.equal(k.json.via, 'herdr')
+  const f = await cli(['focus', 'hs'])
+  assert.equal(f.json.via, 'herdr')
+  const p = await cli(['send', 'hs', '--text', 'go'])
+  assert.equal(p.json.via, 'herdr')
+  const all = calls()
+  assert.deepEqual(all.filter(c => !isCheck(c)).map(c => c.args), [
+    ['pane', 'send-text', 'w1:p2', 'hi'],
+    ['pane', 'send-keys', 'w1:p2', 'esc'],
+    ['agent', 'focus', 'w1:p2'],
+    ['agent', 'prompt', 'w1:p2', 'go']
+  ])
+  assert.ok(all.filter(isCheck).length >= 4, 'each one checked the pane first')
+  assert.deepEqual([...new Set(all.map(c => c.socket))], [HERDR_OTHER])
+
+  // Without the socket, the default server's w1:p2 holds another session:
+  // the pane check refuses and nothing is typed.
+  resetCalls()
+  const old = await cli(['send', 'hs-old', '--text', 'hi'])
+  assert.equal(old.code, 1)
+  assert.match(old.json.error, /no longer holds this session/)
+  assert.deepEqual(typed(), [])
+})
+
 test('send refuses unknown, ended, permission-blocked and paneless sessions', async () => {
   resetCalls()
   assert.deepEqual((await cli(['send', 'nope', '--text', 'x'])).json, { error: 'unknown session nope' })
@@ -279,4 +315,4 @@ test('focus checks the pane and selects it on the agent\'s own tmux server', asy
   ])
 })
 
-test.after(() => fs.rmSync(env.TMUX_TMPDIR, { recursive: true, force: true }))
+test.after(() => cleanup())

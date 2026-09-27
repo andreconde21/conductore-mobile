@@ -192,7 +192,7 @@ class _LivePreviewViewState extends State<LivePreviewView> {
             }
             // Links off the preview go to the phone's browser so the tab
             // stays on the forwarded app.
-            unawaited(widget.openExternal(target));
+            if (mounted) unawaited(widget.openExternal(target));
             return NavigationDecision.prevent;
           },
           onPageStarted: (url) {
@@ -243,6 +243,8 @@ class _LivePreviewViewState extends State<LivePreviewView> {
   }
 
   void _reportUrl(String raw) {
+    // The WebView reports asynchronously, possibly after this view went.
+    if (!mounted) return;
     final parsed = Uri.tryParse(raw);
     if (parsed == null || !_isPreviewOrigin(parsed)) {
       return;

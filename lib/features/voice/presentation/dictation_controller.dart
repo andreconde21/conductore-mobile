@@ -78,12 +78,19 @@ class DictationSink {
     required this.onPartial,
     required this.onFinish,
     required this.onCancel,
+    this.onTakenOver,
   });
 
   final VoidCallback onBegin;
   final ValueChanged<String> onPartial;
   final ValueChanged<String> onFinish;
   final VoidCallback onCancel;
+
+  /// Another controller took the recognizer mid-session, with the text
+  /// heard so far. Null delivers it through [onFinish], which suits a
+  /// text field; a sink that acts on a finished phrase (Talk sends it)
+  /// must not treat a cut-off phrase as one.
+  final ValueChanged<String>? onTakenOver;
 }
 
 /// Joins dictated phrases: one space between them, none before
@@ -217,8 +224,13 @@ class DictationController extends ChangeNotifier {
     _current = this;
     if (other != null && !identical(other, this) && other.isActive) {
       // Keeps what the other session heard, in its own field.
-      await other.cancel();
-      if (_disposed || _status != DictationStatus.idle) return;
+      await other._cancel(takenOver: true);
+      // Taken back while waiting (Talk re-listening, another mic tap).
+      if (_disposed ||
+          _status != DictationStatus.idle ||
+          !identical(_current, this)) {
+        return;
+      }
     }
     Telemetry.instance.track(
       TelemetryEvent.voiceUsed(TelemetryVoice.dictation),
@@ -309,7 +321,9 @@ class DictationController extends ChangeNotifier {
   }
 
   /// Drops the session, keeping whatever partial text was already inserted.
-  Future<void> cancel() async {
+  Future<void> cancel() => _cancel(takenOver: false);
+
+  Future<void> _cancel({required bool takenOver}) async {
     if (_status == DictationStatus.idle) {
       return;
     }
@@ -317,7 +331,12 @@ class DictationController extends ChangeNotifier {
     final text = _sessionText;
     _endSession();
     _setStatus(DictationStatus.idle);
-    sink?.onFinish(text);
+    final takenOverSink = takenOver ? sink?.onTakenOver : null;
+    if (takenOverSink != null) {
+      takenOverSink(text);
+    } else {
+      sink?.onFinish(text);
+    }
     try {
       await _recognizer.cancel();
     } catch (_) {

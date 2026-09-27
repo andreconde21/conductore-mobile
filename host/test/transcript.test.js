@@ -6,11 +6,11 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { readTranscript, normalizeEntry } = require('../lib/transcript')
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tr-'))
+const dir = tempDir('cnd-tr-')
 let n = 0
 function file (lines, trailing = '') {
   const f = path.join(dir, `t${n++}.jsonl`)
@@ -251,3 +251,5 @@ test('normalizeEntry drops unknown line types', () => {
   assert.equal(normalizeEntry({ type: 'file-history-snapshot' }), null)
   assert.equal(normalizeEntry(null), null)
 })
+
+test.after(() => cleanup())

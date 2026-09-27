@@ -8,8 +8,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { execFile } = require('child_process')
 const usage = require('../lib/usage')
 const pricing = require('../lib/pricing')
@@ -22,7 +22,7 @@ const TODAY = usage.localDate(NOW)
 const YESTERDAY = usage.addDays(TODAY, -1)
 
 function tmpHome () {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'conductore-usage-'))
+  const root = tempDir('conductore-usage-')
   const home = path.join(root, 'home')
   fs.mkdirSync(path.join(home, '.claude', 'projects'), { recursive: true })
   return { root, home, cacheFile: path.join(root, 'usage-cache.json') }
@@ -211,7 +211,7 @@ test('Claude limits: the later window wins, then the higher use; past windows ar
 })
 
 test('project names: repository root, linked worktree, home', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'conductore-proj-'))
+  const root = tempDir('conductore-proj-')
   const repo = path.join(root, 'myrepo')
   fs.mkdirSync(path.join(repo, '.git', 'worktrees', 'wt'), { recursive: true })
   fs.mkdirSync(path.join(repo, 'src', 'deep'), { recursive: true })
@@ -249,7 +249,7 @@ test('--days and --since pick the range; nothing installed reports absent', () =
   assert.equal(run(t, { days: 1 }).claude.range.output, 1)
   assert.equal(run(t, { days: 7 }).claude.range.output, 11)
   assert.equal(run(t, { since: NOW - 2 * 24 * HOUR }).claude.range.output, 1)
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'conductore-empty-'))
+  const empty = tempDir('conductore-empty-')
   const r = usage.compute({ env: { HOME: empty }, now: NOW, cacheFile: path.join(empty, 'c.json') })
   assert.equal(r.claude.present, false)
   assert.equal(r.codex.present, false)
@@ -298,3 +298,5 @@ test('the time cap holds inside one large transcript and counts from startedAt',
   assert.equal(done.claude.today.messages, 60000)
   fs.rmSync(t.root, { recursive: true, force: true })
 })
+
+test.after(() => cleanup())

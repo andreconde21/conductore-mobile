@@ -57,8 +57,15 @@ function herdrContext (header) {
     workspaceId: header.herdr_workspace || null,
     tabId: header.herdr_tab || null,
     paneId: header.herdr_pane || null,
-    name: header.herdr_name || null
+    name: header.herdr_name || null,
+    // The agent's Herdr server; null is the default one.
+    socket: header.herdr_socket || null
   }
+}
+
+// The environment for a herdr command aimed at `socket` (null: as is).
+function herdrEnv (socket) {
+  return socket ? { ...process.env, HERDR_SOCKET_PATH: socket } : process.env
 }
 
 // --- Herdr's own view: `herdr pane list` ------------------------------------
@@ -69,11 +76,12 @@ function herdrContext (header) {
 // the Claude session id finds the pane. One call serves every lookup for
 // PANE_LIST_TTL_MS; when herdr is missing or not running, nothing is asked
 // again for HERDR_DOWN_MS. Sessions found in no pane are not asked about
-// again until their next SessionStart.
+// again until their next SessionStart. Each Herdr server (socket) has its
+// own list.
 
 const PANE_LIST_TTL_MS = 10000
 const HERDR_DOWN_MS = 5 * 60 * 1000
-let paneList = { at: 0, panes: null, pending: null, downUntil: 0 }
+const paneLists = new Map() // socket ('' = default) -> { at, panes, pending, downUntil }
 const notInHerdr = new Set()
 
 function parsePaneList (stdout) {
@@ -89,12 +97,18 @@ function parsePaneList (stdout) {
   }))
 }
 
-function herdrPanes (now = Date.now()) {
+function herdrPanes (socket = null, now = Date.now()) {
+  const key = socket || ''
+  let paneList = paneLists.get(key)
+  if (!paneList) {
+    paneList = { at: 0, panes: null, pending: null, downUntil: 0 }
+    paneLists.set(key, paneList)
+  }
   if (now < paneList.downUntil) return Promise.resolve(null)
   if (paneList.panes && now - paneList.at < PANE_LIST_TTL_MS) return Promise.resolve(paneList.panes)
   if (paneList.pending) return paneList.pending
   paneList.pending = new Promise(resolve => {
-    execFile('herdr', ['pane', 'list'], { timeout: 2000, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+    execFile('herdr', ['pane', 'list'], { timeout: 2000, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, env: herdrEnv(socket) }, (err, stdout) => {
       const panes = err ? null : parsePaneList(stdout)
       paneList.pending = null
       if (!panes) {
@@ -118,7 +132,8 @@ async function herdrLocation (header, event) {
   const sid = event.session_id
   if (event.hook_event_name === 'SessionStart') notInHerdr.delete(sid)
   if (!fromEnv && (header.tmux || notInHerdr.has(sid))) return null
-  const panes = await herdrPanes()
+  const socket = header.herdr_socket || null
+  const panes = await herdrPanes(socket)
   if (!panes) return fromEnv
   const pane = fromEnv && fromEnv.paneId
     ? panes.find(p => p.paneId === fromEnv.paneId)
@@ -131,7 +146,8 @@ async function herdrLocation (header, event) {
     workspaceId: pane.workspaceId,
     tabId: pane.tabId,
     paneId: pane.paneId,
-    name: (fromEnv && fromEnv.name) || null
+    name: (fromEnv && fromEnv.name) || null,
+    socket
   }
 }
 
@@ -145,9 +161,9 @@ async function enrich (event, header) {
 }
 
 function _reset () {
-  paneList = { at: 0, panes: null, pending: null, downUntil: 0 }
+  paneLists.clear()
   notInHerdr.clear()
   cache.clear()
 }
 
-module.exports = { enrich, tmuxContext, herdrContext, herdrLocation, parsePaneList, tmuxSocket, _reset }
+module.exports = { enrich, tmuxContext, herdrContext, herdrLocation, herdrEnv, parsePaneList, tmuxSocket, _reset }

@@ -6,16 +6,16 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { spawn, execFile } = require('child_process')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
 
 // Short paths: unix sockets are limited to ~100 bytes.
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-ap-'))
-const userHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-aph-'))
+const home = tempDir('cnd-ap-')
+const userHome = tempDir('cnd-aph-')
 const repo = path.join(userHome, 'Projects', 'app')
 const other = path.join(userHome, 'Projects', 'other')
 fs.mkdirSync(path.join(repo, '.git'), { recursive: true })
@@ -289,7 +289,5 @@ test('hook auto-answer latency stays low', async (t) => {
 
 test.after(async () => {
   await cli('stop').catch(() => {})
-  await sleep(200)
-  fs.rmSync(home, { recursive: true, force: true })
-  fs.rmSync(userHome, { recursive: true, force: true })
+  await cleanup()
 })

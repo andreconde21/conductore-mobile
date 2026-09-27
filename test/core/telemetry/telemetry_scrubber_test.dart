@@ -222,11 +222,10 @@ void main() {
       addTelemetryTerms(() => labels);
       final s = TelemetryScrubber(sensitiveTerms: () => [...runtimeTerms()]);
       labels.addAll(['moonbase', 'q***@z***.com']);
-      clean(
-        'StateError: no rings for moonbase (q***@z***.com)',
-        ['moonbase', 'q***@z***.com'],
-        s,
-      );
+      clean('StateError: no rings for moonbase (q***@z***.com)', [
+        'moonbase',
+        'q***@z***.com',
+      ], s);
     });
   });
 
