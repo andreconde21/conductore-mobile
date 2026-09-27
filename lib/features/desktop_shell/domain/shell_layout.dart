@@ -33,7 +33,11 @@ sealed class ShellNode {
       final id = json['id'];
       if (id is! String || id.isEmpty) return null;
       final view = json['view'];
-      return ShellPane(id, view is String && view.isNotEmpty ? view : null);
+      return ShellPane(
+        id,
+        view is String && view.isNotEmpty ? view : null,
+        json['slot'] == true,
+      );
     }
     if (type == 'split') {
       final first = fromJson(json['first'], depth + 1);
@@ -58,27 +62,41 @@ sealed class ShellNode {
 /// or a live preview), or nothing yet.
 @immutable
 final class ShellPane extends ShellNode {
-  const ShellPane(this.id, [this.view]);
+  const ShellPane(this.id, [this.view, this.slot = false]) : assert(id != '');
+
+  const ShellPane.slot(this.id, [this.view]) : slot = true;
 
   final String id;
 
   /// The view id (see `shell_view_id.dart`), or null for an empty pane.
   final String? view;
 
-  ShellPane withView(String? view) => ShellPane(id, view);
+  /// Made by a layout preset: it stays when empty (a place to drop a
+  /// session into), where other empty panes close.
+  final bool slot;
+
+  ShellPane withView(String? view) => ShellPane(id, view, slot);
 
   @override
-  Map<String, Object?> toJson() => {'type': 'pane', 'id': id, 'view': ?view};
+  Map<String, Object?> toJson() => {
+    'type': 'pane',
+    'id': id,
+    'view': ?view,
+    if (slot) 'slot': true,
+  };
 
   @override
   bool operator ==(Object other) =>
-      other is ShellPane && other.id == id && other.view == view;
+      other is ShellPane &&
+      other.id == id &&
+      other.view == view &&
+      other.slot == slot;
 
   @override
-  int get hashCode => Object.hash(id, view);
+  int get hashCode => Object.hash(id, view, slot);
 
   @override
-  String toString() => 'Pane($id, $view)';
+  String toString() => 'Pane($id, $view${slot ? ', slot' : ''})';
 }
 
 /// Two nodes side by side or stacked; [ratio] is the first child's share.
@@ -147,8 +165,16 @@ class ShellLayout {
   factory ShellLayout.single([String? view]) =>
       ShellLayout._(ShellPane('p1', view), 'p1');
 
-  /// The most panes the main area splits into.
-  static const maxPanes = 4;
+  /// The most panes the main area splits into (the 3×2 preset).
+  static const maxPanes = 6;
+
+  /// A layout of [root] focused on [focusedPaneId] (layout presets).
+  factory ShellLayout.of(ShellNode root, String focusedPaneId) {
+    final layout = ShellLayout._(root, focusedPaneId);
+    return layout.panes.any((pane) => pane.id == focusedPaneId)
+        ? layout
+        : ShellLayout._(root, layout.panes.first.id);
+  }
 
   final ShellNode root;
   final String focusedPaneId;
@@ -217,7 +243,7 @@ class ShellLayout {
     var layout = this;
     final previous = paneShowing(view);
     if (previous != null && previous.id != paneId) {
-      layout = layout.closePane(previous.id);
+      layout = layout._vacate(previous.id);
     }
     return ShellLayout._(
       _replace(
@@ -244,7 +270,7 @@ class ShellLayout {
     var layout = this;
     final previous = paneShowing(view);
     if (previous != null && previous.id != paneId) {
-      layout = layout.closePane(previous.id);
+      layout = layout._vacate(previous.id);
     }
     final target = layout.panes.where((pane) => pane.id == paneId).firstOrNull;
     if (target == null) return layout.reveal(view);
@@ -305,11 +331,18 @@ class ShellLayout {
     return ShellLayout._(next, remaining[index].id);
   }
 
-  /// [view] went away (its session or tab closed): its pane closes, or
-  /// shows [replacement] when it is the only pane.
+  /// [view] went away (its session or tab closed): its pane closes (a
+  /// preset's slot empties), or shows [replacement] when it is the only
+  /// pane.
   ShellLayout removeView(String view, {String? replacement}) {
     final pane = paneShowing(view);
     if (pane == null) return this;
+    if (pane.slot && panes.length > 1) {
+      return ShellLayout._(
+        _replace(root, pane.id, (_) => pane.withView(null)),
+        focusedPaneId,
+      );
+    }
     if (panes.length > 1) return closePane(pane.id);
     return ShellLayout._(
       _replace(root, pane.id, (_) => pane.withView(replacement)),
@@ -324,11 +357,20 @@ class ShellLayout {
     var layout = this;
     for (final pane in panes) {
       final view = pane.view;
-      if (view == null && layout.panes.length > 1) {
+      if (view == null && !pane.slot && layout.panes.length > 1) {
         layout = layout.closePane(pane.id);
       } else if (view != null && !existing.contains(view)) {
         layout = layout.panes.length > 1
-            ? layout.closePane(pane.id)
+            ? (pane.slot
+                  ? ShellLayout._(
+                      _replace(
+                        layout.root,
+                        pane.id,
+                        (_) => pane.withView(null),
+                      ),
+                      layout.focusedPaneId,
+                    )
+                  : layout.closePane(pane.id))
             : ShellLayout._(
                 _replace(layout.root, pane.id, (_) => pane.withView(null)),
                 layout.focusedPaneId,
@@ -336,6 +378,63 @@ class ShellLayout {
       }
     }
     return layout;
+  }
+
+  /// Swaps the views of panes [a] and [b] (a pane dragged onto another);
+  /// the focus follows the dragged view to [b].
+  ShellLayout swap(String a, String b) {
+    if (a == b) return focus(b);
+    final first = panes.where((pane) => pane.id == a).firstOrNull;
+    final second = panes.where((pane) => pane.id == b).firstOrNull;
+    if (first == null || second == null) return this;
+    var next = _replace(root, a, (_) => first.withView(second.view));
+    next = _replace(next, b, (_) => second.withView(first.view));
+    return ShellLayout._(next, b);
+  }
+
+  /// Moves the view of pane [from] to the [edge] of pane [to] (a pane
+  /// header dropped on another pane's edge): [from] closes, unless it is a
+  /// slot, which empties.
+  ShellLayout movePane(String from, String to, ShellEdge edge) {
+    if (from == to) return focus(to);
+    final source = panes.where((pane) => pane.id == from).firstOrNull;
+    final view = source?.view;
+    if (source == null || view == null) return this;
+    if (edge == ShellEdge.center) return swap(from, to);
+    return split(to, edge, view);
+  }
+
+  /// Shows [views] in the empty panes, in reading order (a preset filled
+  /// with sessions); extra views are left out.
+  ShellLayout fill(List<String> views) {
+    final queue = [
+      for (final view in views)
+        if (!visibleViews.contains(view)) view,
+    ];
+    var next = root;
+    for (final pane in panes) {
+      if (pane.view != null || queue.isEmpty) continue;
+      final view = queue.removeAt(0);
+      next = _replace(
+        next,
+        pane.id,
+        (node) => (node as ShellPane).withView(view),
+      );
+    }
+    return ShellLayout._(next, focusedPaneId);
+  }
+
+  /// Every pane made a slot (a restored saved layout keeps its shape while
+  /// its sessions come back).
+  ShellLayout asSlots() {
+    ShellNode walk(ShellNode node) => switch (node) {
+      ShellPane(:final id, :final view) => ShellPane(id, view, true),
+      ShellSplit() => node.copyWith(
+        first: walk(node.first),
+        second: walk(node.second),
+      ),
+    };
+    return ShellLayout._(walk(root), focusedPaneId);
   }
 
   /// Sets the ratio of the split at [path] (0 = first child, 1 = second,
@@ -426,6 +525,18 @@ class ShellLayout {
       }
     }
     return best;
+  }
+
+  /// Takes the view out of pane [paneId]: a slot empties, another pane
+  /// closes.
+  ShellLayout _vacate(String paneId) {
+    final pane = panes.where((pane) => pane.id == paneId).firstOrNull;
+    if (pane == null) return this;
+    if (!pane.slot) return closePane(paneId);
+    return ShellLayout._(
+      _replace(root, paneId, (_) => pane.withView(null)),
+      focusedPaneId,
+    );
   }
 
   String _nextPaneId() {

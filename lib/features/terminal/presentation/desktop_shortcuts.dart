@@ -43,7 +43,12 @@ enum DesktopAction {
 
   /// [DesktopShortcutMatch.index]: 0 left, 1 right, 2 up, 3 down.
   focusPane('Move between splits'),
-  nextUnread('Next unread');
+  nextUnread('Next unread'),
+
+  /// The desktop shell's command palette (every action, session, agent).
+  commandPalette('Command palette'),
+  openSettings('Settings'),
+  toggleSidebar('Show or hide the sidebar');
 
   const DesktopAction(this.label);
 
@@ -168,6 +173,19 @@ DesktopShortcutMatch? matchDesktopShortcut(KeyEvent event) {
     if (shift && key == LogicalKeyboardKey.keyU) {
       return match(DesktopAction.nextUnread);
     }
+    // Ctrl+Shift+P / Cmd+Shift+P, like VS Code. Plain Ctrl+P stays with
+    // the shell (previous history line).
+    if (shift && key == LogicalKeyboardKey.keyP) {
+      return match(DesktopAction.commandPalette);
+    }
+    // Ctrl+, / Cmd+, : Ctrl+, sends nothing to a shell.
+    if (!shift && key == LogicalKeyboardKey.comma) {
+      return match(DesktopAction.openSettings);
+    }
+    // Ctrl+Shift+B / Cmd+B: plain Ctrl+B is tmux's prefix.
+    if (shift != _mac && key == LogicalKeyboardKey.keyB) {
+      return match(DesktopAction.toggleSidebar);
+    }
   }
 
   // Between splits: Alt+arrows, Cmd+Option+arrows on macOS.
@@ -271,6 +289,9 @@ String desktopShortcutKeys(DesktopAction action) => switch (action) {
   DesktopAction.splitDown => _mac ? 'Cmd+Shift+D' : 'Ctrl+Shift+-',
   DesktopAction.focusPane => _mac ? 'Cmd+Option+arrows' : 'Alt+arrows',
   DesktopAction.nextUnread => _mac ? 'Cmd+Shift+U' : 'Ctrl+Shift+U',
+  DesktopAction.commandPalette => _mac ? 'Cmd+Shift+P' : 'Ctrl+Shift+P',
+  DesktopAction.openSettings => '$_mod+,',
+  DesktopAction.toggleSidebar => _mac ? 'Cmd+B' : 'Ctrl+Shift+B',
 };
 
 /// Everything the help sheet lists, for the running OS.

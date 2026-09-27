@@ -408,6 +408,13 @@ class _TerminalPageState extends State<TerminalPage>
   @override
   void requestSplit(ShellEdge edge) => _shellSync?.requestSplit(edge);
 
+  @override
+  void placeView(String paneId, ShellEdge edge, String viewId) =>
+      _dropView(paneId, edge, viewId);
+
+  @override
+  void cancelSplit() => _shellSync?.clearSplit();
+
   /// Splits the focused pane at [edge] with the most recent view on no
   /// pane, or with a new session when every view is on screen.
   Future<void> _splitFocused(ShellEdge edge) async {
@@ -1181,6 +1188,9 @@ class _TerminalPageState extends State<TerminalPage>
       case DesktopAction.focusPane:
         return _focusPaneToward(match.index);
       case DesktopAction.nextUnread:
+      case DesktopAction.commandPalette:
+      case DesktopAction.openSettings:
+      case DesktopAction.toggleSidebar:
         // The desktop shell's own handler (it knows the sidebar).
         return false;
     }
@@ -1198,7 +1208,9 @@ class _TerminalPageState extends State<TerminalPage>
       // Only the desktop shell splits and has unread rows.
       DesktopAction.splitRight ||
       DesktopAction.splitDown ||
-      DesktopAction.nextUnread => _shellSync != null,
+      DesktopAction.nextUnread ||
+      DesktopAction.commandPalette ||
+      DesktopAction.toggleSidebar => _shellSync != null,
       // Alt+arrows stay the shell's word motion unless a split lies that
       // way.
       DesktopAction.focusPane =>
@@ -1780,6 +1792,11 @@ class _TerminalPageState extends State<TerminalPage>
 
   /// The quick switcher (grid button, swipes on the top row, Ctrl+K).
   Future<void> _openSwitcher({bool fromKeyboard = false}) async {
+    // In the desktop shell, the command palette lists the same and more.
+    if (widget.shell?.onOpenPalette case final openPalette?) {
+      openPalette();
+      return;
+    }
     if (_switcherOpen) return;
     _switcherOpen = true;
     final source = _switcherSource;
@@ -2309,6 +2326,12 @@ class _TerminalPageState extends State<TerminalPage>
         views.keys.toSet(),
         (layout) => layout.closePane(paneId),
       ),
+      onSwap: (from, to) => shell.controller.editLayout(
+        views.keys.toSet(),
+        (layout) => layout.swap(from, to),
+      ),
+      onDropNode: shell.onDropNode,
+      onFillPane: shell.onFillPane,
     );
   }
 

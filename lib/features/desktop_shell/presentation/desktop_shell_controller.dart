@@ -1,11 +1,15 @@
 import 'dart:async';
 
+import 'package:conduit/features/command_palette/domain/palette_entry.dart'
+    show notePaletteRecent;
 import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
+import 'package:conduit/features/desktop_shell/domain/layout_presets.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/domain/unread_tracker.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
+import 'package:conduit/features/usage/domain/usage_range.dart';
 import 'package:flutter/foundation.dart';
 
 /// The optional panel on the right of the main area.
@@ -21,6 +25,9 @@ enum ShellRightPanel {
   /// The usage breakdown (limits, tokens, cost), from the usage summary.
   usage,
 }
+
+/// What the sidebar lists: the machine tree, or projects across machines.
+enum ShellSidebarTab { machines, projects }
 
 /// State of the desktop shell: the sidebar (width, collapsed, the user's
 /// arrangement), the main area's split layout, the right panel and the
@@ -68,8 +75,12 @@ class DesktopShellController extends ChangeNotifier {
   bool _showHome = false;
   bool _showUsage = false;
   String? _usageDay;
+  UsageRangePreset? _usagePreset;
   String _filter = '';
   bool _layoutHeld = true;
+  ShellSidebarTab _sidebarTab = ShellSidebarTab.machines;
+  List<SavedShellLayout> _savedLayouts = const [];
+  List<String> _paletteRecents = const [];
   bool _loaded = false;
   bool _disposed = false;
   Timer? _saveTimer;
@@ -118,6 +129,73 @@ class DesktopShellController extends ChangeNotifier {
 
   bool get loaded => _loaded;
 
+  /// The sidebar's tab (machines or projects).
+  ShellSidebarTab get sidebarTab => _sidebarTab;
+
+  set sidebarTab(ShellSidebarTab tab) {
+    if (tab == _sidebarTab) return;
+    _sidebarTab = tab;
+    _changed();
+  }
+
+  /// Layouts saved under a name, in the order they were saved.
+  List<SavedShellLayout> get savedLayouts => _savedLayouts;
+
+  /// Saves the current layout as [name] (replacing one of that name).
+  SavedShellLayout saveLayout(String name) {
+    final existing = _savedLayouts
+        .where((saved) => saved.name == name)
+        .firstOrNull;
+    final saved = SavedShellLayout(
+      id: existing?.id ?? 'l${_clock().microsecondsSinceEpoch}',
+      name: name,
+      layout: layout.value,
+    );
+    _savedLayouts = [
+      for (final other in _savedLayouts)
+        if (other.id == saved.id) saved else other,
+      if (existing == null) saved,
+    ];
+    _changed();
+    return saved;
+  }
+
+  void deleteSavedLayout(String id) {
+    final next = [
+      for (final saved in _savedLayouts)
+        if (saved.id != id) saved,
+    ];
+    if (next.length == _savedLayouts.length) return;
+    _savedLayouts = next;
+    _changed();
+  }
+
+  void renameSavedLayout(String id, String name) {
+    _savedLayouts = [
+      for (final saved in _savedLayouts)
+        saved.id == id ? saved.rename(name) : saved,
+    ];
+    _changed();
+  }
+
+  /// Palette entries run lately, most recent first.
+  List<String> get paletteRecents => _paletteRecents;
+
+  void notePaletteUse(String id) {
+    final next = notePaletteRecent(_paletteRecents, id);
+    if (listEquals(next, _paletteRecents)) return;
+    _paletteRecents = next;
+    _scheduleSave();
+  }
+
+  /// Puts [next] on screen as is (a preset or a saved layout): views that
+  /// are not open yet are kept for when they come.
+  void replaceLayout(ShellLayout next) {
+    if (next == layout.value) return;
+    layout.value = next;
+    _scheduleSave();
+  }
+
   /// The dashboard is on screen although views are open ("Home").
   bool get showHome => _showHome;
 
@@ -126,6 +204,9 @@ class DesktopShellController extends ChangeNotifier {
 
   /// The day the explorer opened at (the Usage tab's chart), once.
   String? get usageDay => _usageDay;
+
+  /// The range the explorer opened on (the command palette), once.
+  UsageRangePreset? get usagePreset => _usagePreset;
 
   /// The sidebar's filter text (not saved).
   String get filter => _filter;
@@ -172,6 +253,17 @@ class DesktopShellController extends ChangeNotifier {
       _rightPanelWidth = _clampRightPanel(panelWidth.toDouble());
     }
     _prefs = SidebarPrefs.fromJson(json['sidebar']);
+    _sidebarTab = json['sidebarTab'] == ShellSidebarTab.projects.name
+        ? ShellSidebarTab.projects
+        : ShellSidebarTab.machines;
+    _savedLayouts = SavedShellLayout.listFromJson(json['savedLayouts']);
+    final recents = json['paletteRecents'];
+    _paletteRecents = recents is List
+        ? [
+            for (final id in recents)
+              if (id is String) id,
+          ]
+        : const [];
     layout.value = ShellLayout.fromJson(json['layout']);
     unread.load(json['unread']);
   }
@@ -184,6 +276,9 @@ class DesktopShellController extends ChangeNotifier {
     'sidebar': _prefs.toJson(),
     'layout': layout.value.toJson(),
     'unread': unread.toJson(),
+    'sidebarTab': _sidebarTab.name,
+    'savedLayouts': [for (final saved in _savedLayouts) saved.toJson()],
+    'paletteRecents': _paletteRecents,
   };
 
   static double _clampSidebar(double width) =>
@@ -253,10 +348,14 @@ class DesktopShellController extends ChangeNotifier {
   }
 
   /// Opens the usage explorer in the main area (at [day]), or closes it.
-  void setShowUsage(bool value, {String? day}) {
-    if (_disposed || (value == _showUsage && day == _usageDay)) return;
+  void setShowUsage(bool value, {String? day, UsageRangePreset? preset}) {
+    if (_disposed ||
+        (value == _showUsage && day == _usageDay && preset == _usagePreset)) {
+      return;
+    }
     _showUsage = value;
     _usageDay = value ? day : null;
+    _usagePreset = value ? preset : null;
     notifyListeners();
   }
 

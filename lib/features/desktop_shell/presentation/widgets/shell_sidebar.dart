@@ -487,8 +487,18 @@ class _ShellSidebarState extends State<ShellSidebar> {
         row.section == _HeaderKind.pinned ||
         (row.section == _HeaderKind.machines &&
             (node.kind == SidebarNodeKind.machine || node.isReorderableChild));
-    if (!draggable) return tile;
     final drag = SidebarDrag(node, pinned: row.section == _HeaderKind.pinned);
+    // Every row can be dragged onto a pane (or the Pinned header); only
+    // some reorder among their siblings.
+    if (!draggable) {
+      return Draggable<SidebarDrag>(
+        data: drag,
+        affinity: PlatformFeatures.isDesktop ? null : Axis.horizontal,
+        dragAnchorStrategy: pointerDragAnchorStrategy,
+        feedback: _RowFeedback(label: node.label),
+        child: tile,
+      );
+    }
     return DragTarget<SidebarDrag>(
       onWillAcceptWithDetails: (details) => _accepts(row, details.data),
       onAcceptWithDetails: (details) => _drop(row, details.data),

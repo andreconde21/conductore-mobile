@@ -94,6 +94,7 @@ class UsageExplorerView extends StatefulWidget {
   const UsageExplorerView({
     required this.usage,
     this.initialDay,
+    this.initialPreset,
     this.onUpdateCompanion,
     this.onClose,
     this.fileExport,
@@ -106,6 +107,9 @@ class UsageExplorerView extends StatefulWidget {
 
   /// A day to open in detail at once.
   final String? initialDay;
+
+  /// The range to start on (the command palette's "Usage: 7 days").
+  final UsageRangePreset? initialPreset;
 
   /// Opens the agent hooks screen for a machine whose companion is older.
   final void Function(String hostId)? onUpdateCompanion;
@@ -145,6 +149,10 @@ class _UsageExplorerViewState extends State<UsageExplorerView>
           widget.firstWeekday ??
           firstWeekdayFor(WidgetsBinding.instance.platformDispatcher.locale),
     )..start();
+    if (widget.initialPreset case final preset?
+        when preset != UsageRangePreset.custom) {
+      _explorer.setPreset(preset);
+    }
     if (widget.initialDay case final day?) {
       if (!_explorer.range.contains(day)) {
         _explorer.setPreset(UsageRangePreset.last30);
