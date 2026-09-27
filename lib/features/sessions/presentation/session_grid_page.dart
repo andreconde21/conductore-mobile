@@ -10,6 +10,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/live_terminal_preview.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -68,6 +69,7 @@ class SessionGridPage extends StatefulWidget {
 class _SessionGridPageState extends State<SessionGridPage>
     with WidgetsBindingObserver {
   Timer? _refreshTimer;
+  final _previewTicks = ValueNotifier<int>(0);
   bool _visible = true;
 
   @override
@@ -81,6 +83,7 @@ class _SessionGridPageState extends State<SessionGridPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
+    _previewTicks.dispose();
     super.dispose();
   }
 
@@ -102,8 +105,9 @@ class _SessionGridPageState extends State<SessionGridPage>
 
   void _startTimer() {
     _refreshTimer?.cancel();
+    // Tiles redraw their previews on a tick, each only after output.
     _refreshTimer = Timer.periodic(widget.refreshInterval, (_) {
-      if (mounted) setState(() {});
+      if (mounted) _previewTicks.value += 1;
     });
   }
 
@@ -178,100 +182,103 @@ class _SessionGridPageState extends State<SessionGridPage>
         : width >= 600
         ? 3
         : 2;
-    return Scaffold(
-      body: ConduitBackdrop(
-        palette: palette,
-        child: SafeArea(
-          bottom: shouldApplyBottomSafeArea(context),
-          child: ListenableBuilder(
-            listenable: Listenable.merge([
-              widget.workspace,
-              widget.agentAttention ?? _inert,
-            ]),
-            builder: (context, _) {
-              final sessions = widget.workspace.sessions;
-              final active = widget.workspace.activeSession;
-              return CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 16, 4),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            tooltip: 'Back',
-                            icon: const Icon(Icons.arrow_back_rounded),
-                            onPressed: () => Navigator.of(context).pop(),
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              'Sessions',
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.w800),
+    return PreviewClock(
+      ticks: _previewTicks,
+      child: Scaffold(
+        body: ConduitBackdrop(
+          palette: palette,
+          child: SafeArea(
+            bottom: shouldApplyBottomSafeArea(context),
+            child: ListenableBuilder(
+              listenable: Listenable.merge([
+                widget.workspace,
+                widget.agentAttention ?? _inert,
+              ]),
+              builder: (context, _) {
+                final sessions = widget.workspace.sessions;
+                final active = widget.workspace.activeSession;
+                return CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 16, 4),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              tooltip: 'Back',
+                              icon: const Icon(Icons.arrow_back_rounded),
+                              onPressed: () => Navigator.of(context).pop(),
                             ),
-                          ),
-                          Text(
-                            sessions.length == 1
-                                ? '1 open'
-                                : '${sessions.length} open',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-                    sliver: SliverGrid(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.78,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          if (index == sessions.length) {
-                            return _AddTile(
-                              palette: palette,
-                              brightness: brightness,
-                              onTap: _add,
-                            );
-                          }
-                          final session = sessions[index];
-                          return SessionTile(
-                            key: ValueKey(session.host.id),
-                            session: session,
-                            palette: palette,
-                            brightness: brightness,
-                            selected: session == active,
-                            agentStatus: widget.agentAttention?.statusFor(
-                              session.host.id,
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Sessions',
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
                             ),
-                            onTap: () => _activate(session),
-                            onLongPress: () => _showActions(session),
-                          );
-                        },
-                        childCount:
-                            sessions.length +
-                            (widget.connectFlow == null ? 0 : 1),
-                      ),
-                    ),
-                  ),
-                  if (sessions.isEmpty && widget.connectFlow == null)
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: Center(
-                        child: Text(
-                          'No open sessions.',
-                          style: Theme.of(context).textTheme.bodyMedium,
+                            Text(
+                              sessions.length == 1
+                                  ? '1 open'
+                                  : '${sessions.length} open',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                ],
-              );
-            },
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+                      sliver: SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 0.78,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            if (index == sessions.length) {
+                              return _AddTile(
+                                palette: palette,
+                                brightness: brightness,
+                                onTap: _add,
+                              );
+                            }
+                            final session = sessions[index];
+                            return SessionTile(
+                              key: ValueKey(session.host.id),
+                              session: session,
+                              palette: palette,
+                              brightness: brightness,
+                              selected: session == active,
+                              agentStatus: widget.agentAttention?.statusFor(
+                                session.host.id,
+                              ),
+                              onTap: () => _activate(session),
+                              onLongPress: () => _showActions(session),
+                            );
+                          },
+                          childCount:
+                              sessions.length +
+                              (widget.connectFlow == null ? 0 : 1),
+                        ),
+                      ),
+                    ),
+                    if (sessions.isEmpty && widget.connectFlow == null)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                          child: Text(
+                            'No open sessions.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -347,11 +354,6 @@ class SessionTile extends StatelessWidget {
     final foreground = palette.foregroundFor(brightness);
     final muted = palette.mutedForegroundFor(brightness);
     final accent = palette.accent;
-    final preview = TerminalPreview.capture(
-      session.terminal,
-      rows: previewRows,
-      columns: previewColumns,
-    );
     final target = ConnectTarget.fromSessionHostId(session.host.id);
     final hostName = _baseName(session);
     final subtitle = _subtitle(session, target);
@@ -385,11 +387,18 @@ class SessionTile extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(8, 8, 4, 4),
                   child: Stack(
                     children: [
-                      _PreviewText(
-                        preview: preview,
-                        color: palette.terminalForegroundFor(brightness),
-                        placeholder: _placeholderFor(session.status),
-                        placeholderColor: muted,
+                      TerminalSnapshotBuilder(
+                        terminal: session.terminal,
+                        builder: (context) => _PreviewText(
+                          preview: TerminalPreview.capture(
+                            session.terminal,
+                            rows: previewRows,
+                            columns: previewColumns,
+                          ),
+                          color: palette.terminalForegroundFor(brightness),
+                          placeholder: _placeholderFor(session.status),
+                          placeholderColor: muted,
+                        ),
                       ),
                       Positioned(
                         top: 0,
