@@ -364,7 +364,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     // A selection naming only machines that are gone falls back to "All";
     // store that, so the next import does not bring the old one back.
     final stored = _preferences.machineFilter;
-    final valid = MachineFilter(stored).validFor(widget.hostsController.hosts);
+    final valid = MachineFilter(
+      stored,
+    ).validFor(widget.hostsController.machines);
     if (valid.keys.length != stored.length) {
       _savePreferences(_preferences.copyWith(machineFilter: valid.keys));
     }
