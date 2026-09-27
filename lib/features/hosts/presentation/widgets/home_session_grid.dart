@@ -268,7 +268,6 @@ class HomeSessionTile extends StatelessWidget {
     final terminalTheme = palette.terminalThemeFor(brightness);
     final foreground = palette.foregroundFor(brightness);
     final muted = palette.mutedForegroundFor(brightness);
-    final preview = StyledTerminalPreview.capture(session.terminal);
     final radius = BorderRadius.circular(AppTheme.radius);
     final state = info.agentState;
     final attention = state != null && state.needsAttention;
@@ -315,12 +314,17 @@ class HomeSessionTile extends StatelessWidget {
                                   style: TextStyle(color: muted, fontSize: 11),
                                 ),
                               )
-                            : LiveTerminalPreview(
-                                preview: preview,
-                                theme: terminalTheme,
-                                fontFamily: fontFamily,
-                                placeholder: placeholderFor(session.status),
-                                placeholderColor: muted,
+                            : TerminalSnapshotBuilder(
+                                terminal: session.terminal,
+                                builder: (context) => LiveTerminalPreview(
+                                  preview: StyledTerminalPreview.capture(
+                                    session.terminal,
+                                  ),
+                                  theme: terminalTheme,
+                                  fontFamily: fontFamily,
+                                  placeholder: placeholderFor(session.status),
+                                  placeholderColor: muted,
+                                ),
                               ),
                       ),
                     ),
@@ -874,7 +878,6 @@ class HomeSessionRow extends StatelessWidget {
     final muted = palette.mutedForegroundFor(brightness);
     final state = info.agentState;
     final attention = state != null && state.needsAttention;
-    final tail = tailOf(session);
     final placeholder =
         info.restoreNote ?? HomeSessionTile.placeholderFor(session.status);
     return Semantics(
@@ -980,17 +983,23 @@ class HomeSessionRow extends StatelessWidget {
                 const SizedBox(height: 4),
                 Padding(
                   padding: const EdgeInsets.only(left: 17),
-                  child: Text(
-                    placeholder ?? (tail.isEmpty ? ' ' : tail),
-                    key: const ValueKey('home-row-tail'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: false,
-                    style: TextStyle(
-                      color: muted,
-                      fontFamily: fontFamily,
-                      fontSize: 12,
-                    ),
+                  child: TerminalSnapshotBuilder(
+                    terminal: session.terminal,
+                    builder: (context) {
+                      final tail = tailOf(session);
+                      return Text(
+                        placeholder ?? (tail.isEmpty ? ' ' : tail),
+                        key: const ValueKey('home-row-tail'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: muted,
+                          fontFamily: fontFamily,
+                          fontSize: 12,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
