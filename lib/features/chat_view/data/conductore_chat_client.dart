@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/features/agent_attention/data/companion_reply.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
@@ -63,6 +64,8 @@ class ConductoreChatClient {
       if (before != null) '--before $before',
       if (tailBytes != null) '--tail-bytes $tailBytes',
       if (maxBytes != null) '--max-bytes $maxBytes',
+      // Last: an older companion would read a word after it as its value.
+      companionGzipFlag,
     ];
     return ConductoreHostAttentionProvider.remoteCommand(args.join(' '));
   }

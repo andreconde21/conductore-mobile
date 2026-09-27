@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:conduit/features/agent_attention/data/companion_reply.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 
 /// Which coding agent a number belongs to.
@@ -601,12 +602,14 @@ String companionUsageArguments({
   ],
   if (hourly) '--hourly',
   if (sessions) '--sessions',
+  // Last: an older companion would read a word after it as its value.
+  companionGzipFlag,
 ].join(' ');
 
 /// Parses `conductore-hostd usage` output. Null for anything that is not a
 /// usage report (an older companion answers with an error).
 UsageReport? parseUsageReport(String stdout) {
-  final text = stdout.trim();
+  final text = unpackCompanionReply(stdout).trim();
   if (text.isEmpty) {
     return null;
   }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/features/agent_attention/data/companion_reply.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:flutter/foundation.dart';
 
@@ -206,7 +207,7 @@ class TranscriptParser {
   const TranscriptParser._();
 
   static TranscriptPage parsePage(String raw) {
-    final decoded = jsonDecode(raw.trim());
+    final decoded = jsonDecode(unpackCompanionReply(raw).trim());
     if (decoded is! Map) {
       throw const FormatException('transcript output is not an object');
     }

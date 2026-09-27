@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -308,4 +309,23 @@ void main() {
       watched.dispose();
     });
   });
+
+  test(
+    'transcript asks for gzip last, and a packed page reads the same',
+    () async {
+      final plain = page([userLine('u1', 'hi')], offset: 50);
+      final runner = ScriptedAgentCommandRunner([
+        ok(
+          jsonEncode({
+            'encoding': 'gzip',
+            'data': base64.encode(gzip.encode(utf8.encode(plain))),
+          }),
+        ),
+      ]);
+      final controller = controllerFor(runner);
+      await controller.refresh();
+      expect(runner.commands.single, contains('--tail-bytes 1000 --gzip'));
+      expect(controller.items.single, isA<ChatUserMessage>());
+    },
+  );
 }
