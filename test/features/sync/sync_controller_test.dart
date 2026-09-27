@@ -204,6 +204,32 @@ void main() {
     expect(server.metaReads, reads);
   });
 
+  test('a notification without a real change does not backdate the next '
+      'edit', () async {
+    final (a, b) = await twoDevices();
+    await a.sync.syncNow();
+    await b.sync.syncNow();
+
+    // T0: a no-op notification on A (like markConnected).
+    a.local.theme.notifyListeners();
+    a.timers.fireDelays(const Duration(seconds: 5));
+    await pumpEventQueue();
+    // T0+30m: B edits the machine.
+    _tick(const Duration(minutes: 30));
+    await b.rename('a', 'B at +30m');
+    await b.sync.syncNow();
+    // T0+60m: A edits it; the later edit must win.
+    _tick(const Duration(minutes: 30));
+    await a.rename('a', 'A at +60m');
+    await a.sync.syncNow();
+
+    expect(a.host('a').name, 'A at +60m');
+    expect(
+      (await _hubRecords(server))['host:a']!.value,
+      containsPair('name', 'A at +60m'),
+    );
+  });
+
   test(
     'polls while open, pauses in the background and flushes on pause',
     () async {

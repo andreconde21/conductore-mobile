@@ -150,6 +150,9 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void>? _running;
   bool _again = false;
   bool _forcePush = false;
+
+  /// When the app first reported a change since [_stampEdits] last ran.
+  DateTime? _changedSince;
   final Completer<void> _loaded = Completer<void>();
 
   SyncConfig? get config => _config;
@@ -232,7 +235,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     if (_debounce != null) {
       _debounce!.cancel();
       _debounce = null;
-      unawaited(syncNow().whenComplete(_closeHub));
+      unawaited(_syncIfChanged().whenComplete(_closeHub));
     } else if (_running == null) {
       unawaited(_closeHub());
     }
@@ -247,14 +250,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
 
   void _onLocalChange() {
     if (!enabled || _applying) return;
-    final config = _config!;
-    if (config.dirtySince == null) {
-      // Edits are stamped with this time, not the (later, maybe offline)
-      // sync's. Saved in the background; a lost write only makes the
-      // stamp later.
-      _config = config.copyWith(dirtySince: _now());
-      unawaited(_state.saveConfig(_config));
-    }
+    _changedSince ??= _now();
     _debounce?.cancel();
     _debounce = _timers.delay(pushDelay, () {
       _debounce = null;
@@ -264,9 +260,30 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _syncIfChanged() async {
     if (!enabled) return;
-    if (_running != null || await _localChanged()) {
+    if (await _stampEdits() || _running != null) {
       await syncNow();
     }
+  }
+
+  /// Whether this device has unsynced edits. When it has and none were
+  /// stamped yet, they are stamped with the first change notification
+  /// since the last check, not the (later, maybe offline) sync's time. A
+  /// notification that changed nothing (a connect time) stamps nothing,
+  /// so it cannot backdate a later edit.
+  Future<bool> _stampEdits() async {
+    final since = _changedSince;
+    _changedSince = null;
+    final changed = await _localChanged();
+    final config = _config;
+    if (changed &&
+        since != null &&
+        config != null &&
+        config.dirtySince == null) {
+      // Saved in the background; a lost write only makes the stamp later.
+      _config = config.copyWith(dirtySince: since);
+      unawaited(_state.saveConfig(_config));
+    }
+    return changed;
   }
 
   /// Whether this device's data differs from what it last synced, without
@@ -378,6 +395,11 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
       _config = _config!.copyWith(lastSyncAt: _now());
+      // A stamp taken while this pass ran, for edits it pushed, must not
+      // backdate the next edit.
+      if (_config!.dirtySince != null && !await _localChanged()) {
+        _config = _config!.copyWith(clearDirtySince: true);
+      }
       await _state.saveConfig(_config);
       _status = SyncStatus.idle;
       _error = null;
@@ -403,6 +425,10 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     SyncKey key,
   ) async {
     final options = _options(config);
+    // Edits not stamped yet (their push still waits for the debounce) are
+    // stamped with their first notification; only real edits use it.
+    final pendingSince = _changedSince;
+    _changedSince = null;
     final base = await _state.loadBase();
     var local = await _local.snapshot(options);
     final meta = await hub.readMeta(config.vaultId);
@@ -443,7 +469,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
 
-    var dirtySince = config.dirtySince;
+    var dirtySince = config.dirtySince ?? pendingSince;
     SyncMergeResult merge() => mergeSync(
       base: base,
       local: local,
