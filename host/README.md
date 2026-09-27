@@ -66,7 +66,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/spawn.at` | time of the last start attempt |
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
 | `~/.conductore/ports.json` | listening ports and the seq each first appeared at (`ports`) |
-| `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets and daily token sums, last 31 days (about 1.3 MB for 1,100 transcripts) |
+| `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets, token sums per hour and per session for the last 31 days, daily sums to 62 days, and the cswap accounts seen active (about 1.35 MB for 1,050 transcripts) |
 | `~/.conductore/cswap-cache.json` | `usage` with cswap: the last `cswap list` answer (masked rows only), 60 s |
 | `~/.conductore/summarize.lock` | pid of the running `summarize` (one at a time; never the text) |
 | `~/.conductore/guide.lock` | pid of the running `guide` (one at a time; never the request) |
@@ -470,7 +470,7 @@ it first appeared; a port that closes is dropped, and when it opens again
   language servers) unless the command line is a known dev server.
 * `source`: `ss`, `lsof`, `proc` (no process details) or `none`.
 
-### `conductore-hostd usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]`
+### `conductore-hostd usage [--days 7] [--since <iso>] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--day YYYY-MM-DD] [--hourly] [--sessions] [--max-bytes N] [--max-ms N]`
 
 Usage at a glance, computed on this machine from local files (no network,
 no Anthropic or OpenAI API): the account's rate limits, each live
@@ -479,7 +479,9 @@ project and model.
 
 ```json
 {"version":"0.7.0","schema":1,"machine":"devbox","generatedAt":1790340104253,
- "timeZone":"Europe/Lisbon","today":"2026-09-25","from":"2026-09-19",
+ "timeZone":"Europe/Lisbon","utcOffsetMin":60,"today":"2026-09-25",
+ "from":"2026-09-19","to":"2026-09-25","hourly":false,
+ "detailFrom":"2026-08-26","historyFrom":"2026-07-26",
  "claude":{"present":true,
    "limits":[{"label":"5h","usedPct":42,"resetsAt":1790348400000,"expired":false},
              {"label":"7d","usedPct":18,"resetsAt":1790697600000,"expired":false}],
@@ -489,13 +491,14 @@ project and model.
             "tokens":9549200,"messages":212,"costUsd":8.93},
    "range":{…same fields, from `from` to `today`…},
    "rows":[{"date":"2026-09-25","project":"api","model":"claude-opus-5",
+            "account":"work",
             "input":1200,"output":98000,"cacheWrite":350000,"cacheRead":9100000,
             "messages":212,"costUsd":8.93}]},
  "codex":{"present":false},
  "pricing":{"estimate":true,"asOf":"2026-09-25","note":"Estimate at public API list prices. …",
             "sources":{"claude":"…","codex":"…"},"unpriced":[]},
  "scan":{"ms":61,"files":1137,"filesRead":0,"bytesRead":0,"partial":false,
-         "pendingFiles":0,"busy":false,"cacheBytes":1311180}}
+         "pendingFiles":0,"busy":false,"rebuilding":false,"cacheBytes":1348310}}
 ```
 
 * `claude.limits`: the 5-hour and 7-day windows (and `spend` when set)
@@ -515,8 +518,14 @@ project and model.
   rows are fast mode.
 * `project`: the repository the entry's cwd is in (the main checkout's
   name for a linked worktree), `~` for the home directory, else the cwd's
-  name. `rows` hold one line per day, project, model and speed; the phone
-  groups them by machine, project, model or day.
+  name. `rows` hold one line per day, project, model, speed and account;
+  the phone groups them by machine, project, model, account or day.
+* `account` (with cswap only, else absent): the cswap account the
+  companion last saw active before the message. The companion sees the
+  active account each time `usage` runs (`cswap list`, 60 s cache), so a
+  switch made while nothing asked for usage is noticed late, and messages
+  before the first sighting have no account. The sightings are kept in the
+  usage cache (`accountLog`, 500 at most).
 * `costUsd`: an **estimate** at public API list prices from
   `lib/pricing.js` (one dated table, applied when answering, so an update
   also reprices history). On a subscription plan it is the API-equivalent
@@ -527,8 +536,26 @@ project and model.
   session logs (running totals turned into per-day deltas, `input` without
   the cached part, `cacheRead` = cached input) and `limits` from the newest
   event's `rate_limits` (primary 5h, secondary 7d). Read only.
-* `--days` (1–31, default 7) or `--since <iso>` (day granularity) set
-  `from`. Only the last 31 days are kept.
+* The range: `--from`/`--to` (local dates; `--from` alone runs to today,
+  `--to` alone takes `--days` days up to it), or `--day D` for one day;
+  otherwise `--since <iso>` (day granularity) or `--days` (1–62, default 7)
+  up to today. `to` is never after today and `from` never before
+  `historyFrom`; `today` totals are today's whatever the range. Older
+  companions ignore these flags and answer `--days`: a caller that sends
+  `--days 31 --from … --to …` gets the range from a new companion and 31
+  days from an old one (which sends no `to`).
+* Kept: the last 31 days in full (from `detailFrom`: hours, sessions),
+  days 32 to 62 as daily sums only (from `historyFrom`), so a 30-day range
+  can be compared with the one before.
+* `--hourly`: `rows` are per hour as well, with `hour` (0–23, local; none
+  on history days). `hourly: true` says the rows carry hours.
+* `--sessions`: `claude.bySession` (and `codex.bySession`): one line per
+  day, session (the first 8 characters of its id; subagents count for
+  their parent), project, model, speed and account, with the same totals.
+* After an upgrade from a companion before hours and sessions (a version 1
+  cache), the transcripts are read again; until that is done the answer
+  comes from the old daily sums, with `scan.rebuilding: true`,
+  `hourly: false`, no `bySession` and `detailFrom: null`.
 * Cost: incremental. The cache holds, per file, the byte offset read so
   far; only files whose size or mtime changed are opened, from there, and
   only lines containing `"usage"` and `"assistant"` (Codex: `token_count`,
@@ -536,7 +563,12 @@ project and model.
   `--max-bytes` (256 MB) or `--max-ms` (2500 ms), newest files first, then
   answers with `scan.partial: true`; the next call goes on (the phone
   polls again sooner). A first scan of 2 GB of transcripts takes about five
-  calls; afterwards a call takes ~60 ms. It runs at nice 10, never touches
+  calls on an idle machine; afterwards a call takes ~60 ms. Hours, sessions
+  and accounts cost little: on development-central (2.2 GB, 1,053
+  transcripts in 31 days, load 40) the cache went from 1.20 MB to 1.35 MB
+  (hour buckets 24 KB to 73 KB, sessions 31 KB, file offsets 319 KB to
+  388 KB) and a warm call stayed at ~48 ms median; a `--day --hourly
+  --sessions` answer is ~13 KB. It runs at nice 10, never touches
   the daemon's event path, and a second concurrent call answers from the
   cache with `scan.busy: true` instead of scanning too.
 

@@ -1,5 +1,12 @@
 # Changelog — host companion
 
+## Unreleased
+
+- feat: `usage --from YYYY-MM-DD --to YYYY-MM-DD` and `--day YYYY-MM-DD` answer any range of the kept days (`--days` and `--since` still work; `--days` now goes to 62). The reply adds `to`, `detailFrom`, `historyFrom` and `utcOffsetMin`; `today` totals are today's whatever the range. Older companions ignore the flags, so the phone sends `--days 31` alongside.
+- feat: `usage --hourly` splits rows by local hour (`hour`, `hourly: true`); `usage --sessions` adds `bySession` (per day and session, subagents counted for their parent). Both from the cache: hour and session sums for the last 31 days, daily sums kept to 62 days so a 30-day range has a previous period.
+- feat: with cswap, rows carry `account`: the account the companion last saw active before the message (sightings in the usage cache, noticed each time `usage` runs). None before the first sighting.
+- perf: the cache (version 2) grew from 1.20 MB to 1.35 MB on development-central (1,053 transcripts, 2.2 GB); a warm call stays at ~48 ms median. A version 1 cache is read again once after the upgrade (about 40 capped calls on development-central under load 40, answered from the old daily sums meanwhile, `scan.rebuilding: true`). Nothing runs at idle.
+
 ## 0.9.0 (2026-09-27)
 
 - feat: `digest [--since <ms>] [--summaries] [--max-agents 10] [--max-ms 30000] [--lang en|pt] [--stuck-…]` for the phone's agents dashboard (capability `digest`). Per agent since a time: turns, edited files, lines +/- (`git diff --numstat` of those files, 1.5 s cap, else an estimate from the edits), test runs and the last result, failed commands, time waiting on the user, tokens and estimated cost (from the last 2 MB of the transcript), state, project, machine, last activity and the last reply's first line. Stuck flags with a reason: working 30 min without an edit, the same failure 3 times, the same command 5 times, an approval waiting 60 min, a turn that ended on an API error (thresholds per call).

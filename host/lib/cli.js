@@ -61,11 +61,14 @@ const USAGE = `usage: conductore-hostd <command>
   ports [--since <seq>]           TCP ports your own processes listen on
                                   (dev servers), each with the seq it
                                   first appeared at; --since: only newer
-  usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]
+  usage [--days 7] [--since <iso>] [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+        [--day YYYY-MM-DD] [--hourly] [--sessions] [--max-bytes N] [--max-ms N]
                                   Claude Code / Codex limits, context per
                                   session, tokens and estimated cost per
-                                  day, project and model (incremental scan);
-                                  with cswap, every Claude account's limits
+                                  day (--hourly: hour), project and model
+                                  (incremental scan; --sessions: per
+                                  session too); with cswap, every Claude
+                                  account's limits
   cswap-switch <slot> | --best    switch the Claude account for new
                                   sessions (cswap switch)
   summarize [--max-words 45] [--timeout-ms 20000]
@@ -441,6 +444,20 @@ async function usageCmd (args) {
     if (!Number.isFinite(since)) return fail('--since must be an ISO date or time')
     opts.since = since
   }
+  for (const flag of ['from', 'to', 'day']) {
+    if (flags[flag] === undefined) continue
+    if (!usageMod().DATE_RE.test(String(flags[flag])) || !Number.isFinite(Date.parse(flags[flag]))) return fail(`--${flag} must be a date (YYYY-MM-DD)`)
+  }
+  if (flags.day !== undefined) {
+    if (flags.from !== undefined || flags.to !== undefined) return fail('use --day or --from/--to, not both')
+    opts.from = opts.to = flags.day
+  } else {
+    if (flags.from !== undefined) opts.from = flags.from
+    if (flags.to !== undefined) opts.to = flags.to
+    if (opts.from && opts.to && opts.from > opts.to) return fail('--from must not be after --to')
+  }
+  opts.hourly = flags.hourly === true
+  opts.sessions = flags.sessions === true
   // Scanning is background work: never compete with the agents.
   try { os.setPriority(0, 10) } catch {}
   try {
@@ -449,10 +466,13 @@ async function usageCmd (args) {
     opts.cacheFile = paths.usageCachePath()
     // --max-ms caps the whole call, Node's start included.
     opts.startedAt = Math.round(performance.timeOrigin)
-    const result = usageMod().compute(opts)
-    // Every cswap account's limits; nothing at all without cswap.
+    // Every cswap account's limits; nothing at all without cswap. Read
+    // first: the scan counts new messages for the account active now.
     let cswap = null
     try { cswap = await cswapMod().accounts({ cacheFile: cswapCachePath() }) } catch {}
+    const active = cswap && Array.isArray(cswap.accounts) ? cswap.accounts.find(a => a && a.active) : null
+    if (active && !cswap.stale) opts.activeAccount = active.label
+    const result = usageMod().compute(opts)
     if (cswap) {
       const { accounts, ...meta } = cswap
       result.claude.accounts = accounts
