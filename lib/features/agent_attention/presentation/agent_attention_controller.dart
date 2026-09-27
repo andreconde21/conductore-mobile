@@ -1022,6 +1022,7 @@ class AgentAttentionController extends ChangeNotifier {
     }
     monitor.fetching = true;
     final watchGeneration = monitor.watchGeneration;
+    final before = _MonitorView.of(monitor);
     try {
       final provider = await _resolveProvider(monitor);
       final snapshot = await provider.fetchAgents(monitor.runner);
@@ -1070,7 +1071,9 @@ class AgentAttentionController extends ChangeNotifier {
       );
     } finally {
       monitor.fetching = false;
-      if (!_disposed) {
+      // A poll that found what was already shown (the usual 15 s tick)
+      // rebuilds nothing: the dashboard, home and widget listen here.
+      if (!_disposed && _MonitorView.of(monitor) != before) {
         notifyListeners();
       }
     }
@@ -1445,6 +1448,56 @@ class _HostMonitor {
   int watchGeneration = 0;
   Map<String, _AgentMark> lastStates = const {};
   AgentHostStatus status = const AgentHostStatus(loading: true);
+}
+
+/// What listeners see of one monitor, to tell a poll that changed
+/// something from one that did not ([AgentHostStatus.updatedAt] aside).
+@immutable
+class _MonitorView {
+  const _MonitorView(
+    this.agents,
+    this.loading,
+    this.error,
+    this.unavailableReason,
+    this.provider,
+    this.capabilities,
+  );
+
+  factory _MonitorView.of(_HostMonitor monitor) => _MonitorView(
+    monitor.status.agents,
+    monitor.status.loading,
+    monitor.status.error,
+    monitor.status.unavailableReason,
+    monitor.provider,
+    monitor.capabilities,
+  );
+
+  final List<AgentInfo> agents;
+  final bool loading;
+  final String? error;
+  final String? unavailableReason;
+  final AgentAttentionProvider? provider;
+  final Set<String>? capabilities;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _MonitorView &&
+      listEquals(other.agents, agents) &&
+      other.loading == loading &&
+      other.error == error &&
+      other.unavailableReason == unavailableReason &&
+      identical(other.provider, provider) &&
+      setEquals(other.capabilities, capabilities);
+
+  @override
+  int get hashCode => Object.hash(
+    Object.hashAll(agents),
+    loading,
+    error,
+    unavailableReason,
+    provider,
+    capabilities?.length,
+  );
 }
 
 typedef _AgentMark = ({

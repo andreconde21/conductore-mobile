@@ -149,11 +149,18 @@ void main() {
       'paints': probe.paints,
       'top': probe.top().replaceAll(' ', ','),
     });
-    expect(attention.statusFor('h')?.agents, hasLength(_agents));
+    final agents = attention.statusFor('h')?.agents.length;
     await tester.pumpWidget(const SizedBox());
     digest.dispose();
     attention.dispose();
     workspace.dispose();
     await tester.pump(const Duration(minutes: 1));
+    // Checked after teardown: a failure must not leave the timers running.
+    expect(agents, _agents);
+    // Quiet polls change nothing on screen: before, each of the 8 rebuilt
+    // the whole dashboard (about 640 widgets).
+    expect(runner.runs - runsBefore, greaterThanOrEqualTo(8));
+    expect(attentionNotifies, 0);
+    expect(probe.builds, 0);
   });
 }
