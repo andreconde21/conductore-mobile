@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -50,12 +51,14 @@ Future<void> openReview({
     send: send ?? (text) => ConductoreChatClient(runner).send(agent.id, text),
     onClose: runner.close,
   );
-  return Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      settings: reviewRouteSettings(hostId: host.id, agentId: agent.id),
-      builder: (context) =>
-          ReviewPage(controller: controller, host: host, dictation: dictation),
-    ),
+  // Phones: a full page; desktop: a large dialog, so the shell's sidebar
+  // and tabs stay in sight (Review's own Esc still closes it).
+  return pushAdaptivePage<void>(
+    context,
+    desktopMaxWidth: 1280,
+    settings: reviewRouteSettings(hostId: host.id, agentId: agent.id),
+    builder: (context) =>
+        ReviewPage(controller: controller, host: host, dictation: dictation),
   );
 }
 

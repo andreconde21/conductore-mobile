@@ -43,6 +43,8 @@ Future<RecentDirectoryPick?> showRecentDirectoriesSheet({
   return showAdaptiveModal<RecentDirectoryPick>(
     kind: AdaptiveModalKind.dialog,
     context: context,
+    // The whole panel on desktop: nothing to drag there.
+    desktopFill: true,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
@@ -75,9 +77,9 @@ class RecentDirectoriesSheet extends StatelessWidget {
     final muted = theme.colorScheme.onSurfaceVariant;
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.6,
-      minChildSize: 0.3,
-      maxChildSize: 0.92,
+      initialChildSize: adaptiveSheetFraction(context, 0.6),
+      minChildSize: adaptiveSheetFraction(context, 0.3),
+      maxChildSize: adaptiveSheetFraction(context, 0.92),
       builder: (context, scrollController) => ListView(
         controller: scrollController,
         padding: EdgeInsets.fromLTRB(

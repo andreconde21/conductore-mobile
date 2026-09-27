@@ -47,6 +47,8 @@ import 'package:conduit/features/live_preview/presentation/live_preview_view.dar
 import 'package:conduit/features/live_preview/presentation/preview_ready_chip.dart';
 import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/quick_actions/presentation/quick_action_runner.dart';
+import 'package:conduit/features/quick_actions/presentation/session_quick_actions.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_actions.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_sheet.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_shortcut.dart';
@@ -406,6 +408,13 @@ class _TerminalPageState extends State<TerminalPage>
 
   @override
   void requestSplit(ShellEdge edge) => _shellSync?.requestSplit(edge);
+
+  @override
+  void placeView(String paneId, ShellEdge edge, String viewId) =>
+      _dropView(paneId, edge, viewId);
+
+  @override
+  void cancelSplit() => _shellSync?.clearSplit();
 
   /// Splits the focused pane at [edge] with the most recent view on no
   /// pane, or with a new session when every view is on screen.
@@ -1180,6 +1189,9 @@ class _TerminalPageState extends State<TerminalPage>
       case DesktopAction.focusPane:
         return _focusPaneToward(match.index);
       case DesktopAction.nextUnread:
+      case DesktopAction.commandPalette:
+      case DesktopAction.openSettings:
+      case DesktopAction.toggleSidebar:
         // The desktop shell's own handler (it knows the sidebar).
         return false;
     }
@@ -1191,13 +1203,16 @@ class _TerminalPageState extends State<TerminalPage>
   /// [_desktopShortcuts], which sees the key after the terminal does).
   bool _keepFromSession(KeyEvent event) {
     if (isQuickSwitcherShortcut(event)) return true;
+    if (widget.shell?.keepKey?.call(event) ?? false) return true;
     final match = matchDesktopShortcut(event);
     if (match == null) return false;
     return switch (match.action) {
       // Only the desktop shell splits and has unread rows.
       DesktopAction.splitRight ||
       DesktopAction.splitDown ||
-      DesktopAction.nextUnread => _shellSync != null,
+      DesktopAction.nextUnread ||
+      DesktopAction.commandPalette ||
+      DesktopAction.toggleSidebar => _shellSync != null,
       // Alt+arrows stay the shell's word motion unless a split lies that
       // way.
       DesktopAction.focusPane =>
@@ -1381,6 +1396,41 @@ class _TerminalPageState extends State<TerminalPage>
       return null;
     }
     return loopbackPreviewPort(url);
+  }
+
+  /// The menu's "Quick actions" for [session]'s project, when there is
+  /// something to offer (see [sessionProjectOf]).
+  VoidCallback? _quickActionsFor(TerminalSessionController? session) {
+    if (session == null) return null;
+    final personal = widget.themeController.quickActions;
+    final project = sessionProjectOf(
+      attention: widget.agentAttention,
+      sessionHostId: session.host.id,
+      sessionTitle: session.title,
+      personal: personal,
+    );
+    if (project == null) return null;
+    return () {
+      final machine =
+          widget.connectFlow?.hostsController.findById(
+            baseHostId(session.host.id),
+          ) ??
+          session.host;
+      unawaited(
+        showSessionQuickActions(
+          context,
+          project: project,
+          machine: machine,
+          sessionHost: session.host,
+          personal: personal,
+          attention: widget.agentAttention,
+          runner: QuickActionRunner(
+            workspace: widget.workspace,
+            attention: widget.agentAttention,
+          ),
+        ),
+      );
+    };
   }
 
   Future<void> _openInBrowser(String url) async {
@@ -1773,6 +1823,11 @@ class _TerminalPageState extends State<TerminalPage>
 
   /// The quick switcher (grid button, swipes on the top row, Ctrl+K).
   Future<void> _openSwitcher({bool fromKeyboard = false}) async {
+    // In the desktop shell, the command palette lists the same and more.
+    if (widget.shell?.onOpenPalette case final openPalette?) {
+      openPalette();
+      return;
+    }
     if (_switcherOpen) return;
     _switcherOpen = true;
     final source = _switcherSource;
@@ -2302,6 +2357,12 @@ class _TerminalPageState extends State<TerminalPage>
         views.keys.toSet(),
         (layout) => layout.closePane(paneId),
       ),
+      onSwap: (from, to) => shell.controller.editLayout(
+        views.keys.toSet(),
+        (layout) => layout.swap(from, to),
+      ),
+      onDropNode: shell.onDropNode,
+      onFillPane: shell.onFillPane,
     );
   }
 
@@ -2339,6 +2400,7 @@ class _TerminalPageState extends State<TerminalPage>
       onOpenAgentPanel: _agentPanelOpener(),
       child: TerminalSurface(
         session: session,
+        onLinkOpen: (url) => unawaited(_openInBrowser(url)),
         autoConnect: widget.workspace.mayAutoConnect(session),
         palette: palette,
         brightness: brightness,
@@ -2469,6 +2531,21 @@ class _TerminalPageState extends State<TerminalPage>
                                   : () => _openNewSession(connectFlow),
                               onShowShortcuts: PlatformFeatures.isDesktop
                                   ? () => unawaited(_showDesktopShortcuts())
+                                  : null,
+                              onQuickActions: _quickActionsFor(activeSession),
+                              onComposePrompt:
+                                  PlatformFeatures.isDesktop &&
+                                      activeSession != null
+                                  ? () => unawaited(
+                                      _openPromptComposer(activeSession),
+                                    )
+                                  : null,
+                              onRecentDirectories:
+                                  PlatformFeatures.isDesktop &&
+                                      activeSession != null
+                                  ? () => unawaited(
+                                      _openRecentDirectories(activeSession),
+                                    )
                                   : null,
                               onOpenChatView:
                                   attention == null ||

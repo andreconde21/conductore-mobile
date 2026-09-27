@@ -674,13 +674,15 @@ void main() {
     await _keys(tester, const [], LogicalKeyboardKey.f11);
     expect(find.byKey(const ValueKey('shell-sidebar')), findsOneWidget);
 
-    // The quick switcher opens once (the shell's, not the page's too).
+    // The switcher keys open the command palette once (the shell's, not
+    // the page's quick switcher too).
     await _keys(tester, [
       LogicalKeyboardKey.controlLeft,
       LogicalKeyboardKey.shiftLeft,
     ], LogicalKeyboardKey.keyK);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('quick-switcher')), findsOneWidget);
+    expect(find.byKey(const ValueKey('command-palette')), findsOneWidget);
+    expect(find.byKey(const ValueKey('quick-switcher')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 

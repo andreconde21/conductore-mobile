@@ -13,6 +13,7 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/toolbar_arrow_pad.dart';
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -154,6 +155,50 @@ void main() {
         TerminalKey.backtab,
       ]);
       expect(platformCalls.where(_isHaptic), hasLength(2));
+    });
+
+    testWidgets(
+      'desktop: right-click runs the long-press action, tooltips say so',
+      (tester) async {
+        final controller = _RecordingTerminalSessionController();
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        addTearDown(controller.dispose);
+        recordPlatformCalls(tester);
+        await tester.pumpWidget(
+          buildToolbar(controller: controller, focusNode: focusNode),
+        );
+        expect(
+          find.byTooltip('Escape. Right-click for Ctrl+C'),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Esc'), buttons: kSecondaryButton);
+        await tester.tap(find.text('Tab'), buttons: kSecondaryButton);
+        expect(controller.sentControlKeys, [TerminalKey.keyC]);
+        expect(controller.sentKeys, [TerminalKey.backtab]);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
+
+    testWidgets('phone: right-click does nothing, tooltips say long-press', (
+      tester,
+    ) async {
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+      recordPlatformCalls(tester);
+      await tester.pumpWidget(
+        buildToolbar(controller: controller, focusNode: focusNode),
+      );
+      expect(find.byTooltip('Escape. Long-press for Ctrl+C'), findsOneWidget);
+      await tester.tap(find.text('Esc'), buttons: kSecondaryButton);
+      expect(controller.sentControlKeys, isEmpty);
+      expect(controller.sentKeys, isEmpty);
     });
 
     testWidgets('Ctrl tap arms the next key, long-press latches until '

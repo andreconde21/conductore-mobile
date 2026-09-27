@@ -8,6 +8,7 @@ import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_rows.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'diff_view_controller_test.dart' show FakeGitDiffSource;
@@ -217,5 +218,57 @@ void main() {
     final collapsed = DiffRows.build(diff, isCollapsed: (file) => file == app);
     expect(collapsed.offsetOfFile(readme), diffFileHeaderHeight);
     expect(rows.maxLineLength, greaterThan(0));
+  });
+
+  group('desktop keys', () {
+    String bigDiff() {
+      final out = StringBuffer();
+      for (final name in ['a.txt', 'b.txt', 'c.txt']) {
+        out
+          ..writeln('diff --git a/$name b/$name')
+          ..writeln('--- a/$name')
+          ..writeln('+++ b/$name')
+          ..writeln('@@ -1,40 +1,40 @@');
+        for (var i = 0; i < 40; i++) {
+          out.writeln('+line $i');
+        }
+      }
+      return out.toString();
+    }
+
+    Future<double> pressJ(WidgetTester tester) async {
+      source.snapshots['/home/u/app'] = GitDiffSnapshot(
+        path: '/home/u/app',
+        repositoryRoot: '/home/u/app',
+        unstaged: UnifiedDiff.parse(bigDiff()),
+        staged: UnifiedDiff.parse(''),
+      );
+      await pumpReady(tester);
+      await tester.tap(find.text('line 3').first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+      await tester.pumpAndSettle();
+      final vertical = find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      );
+      return tester.state<ScrollableState>(vertical.first).position.pixels;
+    }
+
+    testWidgets(
+      'j jumps to the next file on desktop',
+      (tester) async {
+        expect(await pressJ(tester), greaterThan(0));
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
+
+    testWidgets('j does nothing on phones', (tester) async {
+      expect(await pressJ(tester), 0);
+    });
   });
 }

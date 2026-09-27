@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/diff_view/domain/git_diff_source.dart';
@@ -6,6 +7,7 @@ import 'package:conduit/features/diff_view/domain/unified_diff.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_rows.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Git diff for one working directory, rendered as a unified diff with
 /// collapsible files, a staged/unstaged toggle and a file list for jumping.
@@ -35,6 +37,7 @@ class _DiffViewState extends State<DiffView> {
   static const _fontSize = 12.5;
 
   final _scrollController = ScrollController();
+  final _keysFocus = FocusNode(debugLabel: 'diff-view-keys');
   DiffRows? _rows;
   Object? _rowsSource;
   bool _rowsStaged = false;
@@ -59,6 +62,7 @@ class _DiffViewState extends State<DiffView> {
   void dispose() {
     widget.controller.removeListener(_handleControllerChanged);
     _scrollController.dispose();
+    _keysFocus.dispose();
     super.dispose();
   }
 
@@ -332,7 +336,7 @@ class _DiffViewState extends State<DiffView> {
         brightness: brightness,
       );
     }
-    return DiffRowsList(
+    final list = DiffRowsList(
       rows: rows,
       scrollController: _scrollController,
       palette: palette,
@@ -343,6 +347,68 @@ class _DiffViewState extends State<DiffView> {
       onToggleFile: controller.toggleCollapsed,
       isCollapsed: controller.isCollapsed,
       onOpenFile: widget.onOpenFile == null ? null : _openFile,
+    );
+    if (!PlatformFeatures.isDesktop) return list;
+    return _keyboard(diff, rows, list);
+  }
+
+  /// Desktop: j / k jump to the next / previous file, n / p to the next /
+  /// previous hunk, like Review. The keys work once the diff was clicked
+  /// (it never takes the focus on its own, the terminal keeps it).
+  Widget _keyboard(UnifiedDiff diff, DiffRows rows, Widget child) {
+    List<double> fileOffsets() => [
+      for (final file in diff.files) ?rows.offsetOfFile(file),
+    ];
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyJ): () =>
+            _step(fileOffsets(), 1),
+        const SingleActivator(LogicalKeyboardKey.keyK): () =>
+            _step(fileOffsets(), -1),
+        const SingleActivator(LogicalKeyboardKey.keyN): () =>
+            _step(rows.hunkOffsets, 1),
+        const SingleActivator(LogicalKeyboardKey.keyP): () =>
+            _step(rows.hunkOffsets, -1),
+      },
+      child: Focus(
+        focusNode: _keysFocus,
+        child: Listener(
+          onPointerDown: (_) {
+            if (!_keysFocus.hasFocus) _keysFocus.requestFocus();
+          },
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  /// Scrolls to the first of [offsets] after (or, with a negative
+  /// [direction], before) the current scroll position.
+  void _step(List<double> offsets, int direction) {
+    if (!_scrollController.hasClients || offsets.isEmpty) return;
+    final position = _scrollController.position;
+    final current = position.pixels;
+    double? target;
+    if (direction > 0) {
+      for (final offset in offsets) {
+        if (offset > current + 1) {
+          target = offset;
+          break;
+        }
+      }
+    } else {
+      for (final offset in offsets.reversed) {
+        if (offset < current - 1) {
+          target = offset;
+          break;
+        }
+      }
+    }
+    if (target == null) return;
+    _scrollController.animateTo(
+      target.clamp(0, position.maxScrollExtent),
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOutCubic,
     );
   }
 }

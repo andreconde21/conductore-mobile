@@ -7,6 +7,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
 import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_actions.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 /// How the terminal shows a session's multiplexer tabs.
@@ -111,7 +112,9 @@ class _MultiplexerTabsPollerState extends State<MultiplexerTabsPoller>
 /// shown, and "+" for a new one.
 ///
 /// Tap switches; long-press offers rename, move and close; on a desktop
-/// the chips of a tmux session can be dragged into a new order.
+/// the chips of a tmux session can be dragged into a new order, and a
+/// right-click opens the same menu, a double-click renames, a middle-click
+/// or the hover close button closes.
 class MultiplexerTabStrip extends StatefulWidget {
   const MultiplexerTabStrip({
     required this.controller,
@@ -140,6 +143,11 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip> {
   final _activeKey = GlobalKey();
   final _scroll = ScrollController();
   String? _lastActive;
+
+  // The last click on a chip, to tell a desktop double-click (rename)
+  // without delaying the single click that switches.
+  String? _lastTapId;
+  DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
@@ -190,6 +198,29 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip> {
     widget.onChanged?.call();
   }
 
+  void _tap(MultiplexerTab tab) {
+    if (widget.desktop) {
+      final now = DateTime.now();
+      final isDouble =
+          _lastTapId == tab.id &&
+          now.difference(_lastTapAt) <= kDoubleTapTimeout;
+      _lastTapId = isDouble ? null : tab.id;
+      _lastTapAt = now;
+      if (isDouble) {
+        unawaited(
+          renameMultiplexerTab(
+            context,
+            widget.controller,
+            tab,
+            onDone: widget.onChanged,
+          ),
+        );
+        return;
+      }
+    }
+    unawaited(_select(tab));
+  }
+
   Future<void> _create() async {
     await widget.controller.create();
     widget.onChanged?.call();
@@ -215,7 +246,7 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip> {
           showIndex: controller.kind == MultiplexerTabsKind.tmux,
           palette: palette,
           brightness: brightness,
-          onTap: () => unawaited(_select(tab)),
+          onTap: () => _tap(tab),
           onLongPress: () => unawaited(
             showMultiplexerTabActions(
               context,
@@ -224,6 +255,28 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip> {
               onDone: widget.onChanged,
             ),
           ),
+          onSecondaryTapUp: widget.desktop
+              ? (details) => unawaited(
+                  showMultiplexerTabActions(
+                    context,
+                    controller,
+                    tab,
+                    onDone: widget.onChanged,
+                    anchorPosition: details.globalPosition,
+                  ),
+                )
+              : null,
+          onClose: widget.desktop
+              ? () => unawaited(
+                  closeMultiplexerTab(
+                    context,
+                    controller,
+                    tab,
+                    onDone: widget.onChanged,
+                  ),
+                )
+              : null,
+          closeTooltip: 'Close ${multiplexerTabNoun(controller)}',
         );
 
         final list = reorderable
@@ -291,7 +344,7 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip> {
   }
 }
 
-class _TabChip extends StatelessWidget {
+class _TabChip extends StatefulWidget {
   const _TabChip({
     required this.tab,
     required this.showIndex,
@@ -299,6 +352,9 @@ class _TabChip extends StatelessWidget {
     required this.brightness,
     required this.onTap,
     required this.onLongPress,
+    this.onSecondaryTapUp,
+    this.onClose,
+    this.closeTooltip = 'Close',
     super.key,
   });
 
@@ -309,12 +365,31 @@ class _TabChip extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
+  /// Desktop only: the right-click menu.
+  final GestureTapUpCallback? onSecondaryTapUp;
+
+  /// Desktop only: the hover close button and the middle-click.
+  final VoidCallback? onClose;
+  final String closeTooltip;
+
+  @override
+  State<_TabChip> createState() => _TabChipState();
+}
+
+class _TabChipState extends State<_TabChip> {
+  bool _hovered = false;
+
   @override
   Widget build(BuildContext context) {
+    final tab = widget.tab;
+    final palette = widget.palette;
+    final brightness = widget.brightness;
+    final showIndex = widget.showIndex;
+    final onClose = widget.onClose;
     final accent = palette.accent;
     final foreground = palette.foregroundFor(brightness);
     final muted = palette.mutedForegroundFor(brightness);
-    return Center(
+    final chip = Center(
       child: Semantics(
         selected: tab.active,
         button: true,
@@ -344,8 +419,12 @@ class _TabChip extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: onTap,
-            onLongPress: onLongPress,
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            onSecondaryTapUp: widget.onSecondaryTapUp,
+            onHover: onClose == null
+                ? null
+                : (hovered) => setState(() => _hovered = hovered),
             child: Container(
               height: 24,
               constraints: const BoxConstraints(maxWidth: 168),
@@ -382,12 +461,46 @@ class _TabChip extends StatelessWidget {
                     const SizedBox(width: 5),
                     MultiplexerTabDot(tab: tab),
                   ],
+                  if (onClose != null) ...[
+                    const SizedBox(width: 3),
+                    // Space kept while hidden, so chips don't jump.
+                    Visibility(
+                      visible: _hovered,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: IconButton(
+                        key: ValueKey('mux-tab-close-button-${tab.id}'),
+                        tooltip: widget.closeTooltip,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 18,
+                          height: 18,
+                        ),
+                        iconSize: 13,
+                        color: muted,
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: onClose,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
         ),
       ),
+    );
+    if (onClose == null) return chip;
+    // A middle-click closes, like a browser tab.
+    return Listener(
+      onPointerDown: (event) {
+        if (event.kind == PointerDeviceKind.mouse &&
+            event.buttons & kMiddleMouseButton != 0) {
+          onClose();
+        }
+      },
+      child: chip,
     );
   }
 }

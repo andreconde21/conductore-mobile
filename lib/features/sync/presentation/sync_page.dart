@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -128,8 +130,10 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> _setUp() async {
-    final done = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => _SetUpPage(controller: _sync)),
+    final done = await pushAdaptivePage<bool>(
+      context,
+      desktopMaxWidth: 640,
+      builder: (_) => _SetUpPage(controller: _sync),
     );
     if (done == true) {
       _snack('Sync is on.');
@@ -138,8 +142,10 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> _join() async {
-    final done = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => _JoinPage(controller: _sync)),
+    final done = await pushAdaptivePage<bool>(
+      context,
+      desktopMaxWidth: 640,
+      builder: (_) => _JoinPage(controller: _sync),
     );
     if (done == true) {
       _snack('This device joined sync.');
@@ -312,8 +318,10 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> _addDevice() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => _AddDevicePage(controller: _sync)),
+    await pushAdaptivePage<void>(
+      context,
+      desktopMaxWidth: 640,
+      builder: (_) => _AddDevicePage(controller: _sync),
     );
     unawaited(_refreshDevices());
   }
@@ -755,6 +763,13 @@ class _SetUpPageState extends State<_SetUpPage> {
               labelText: 'This device\'s name',
               hintText: widget.controller.defaultDeviceName,
             ),
+            onSubmitted: _desktop
+                ? (_) {
+                    if (_hubHasData == null && _hub != null && !_busy) {
+                      _check();
+                    }
+                  }
+                : null,
           ),
           const SizedBox(height: 16),
           if (_hubHasData == null)
@@ -778,6 +793,16 @@ class _SetUpPageState extends State<_SetUpPage> {
               controller: _passphrase,
               obscureText: _obscure,
               autofocus: true,
+              textInputAction: !_desktop
+                  ? null
+                  : _hubHasData == false
+                  ? TextInputAction.next
+                  : TextInputAction.done,
+              onSubmitted: _desktop && _hubHasData == true
+                  ? (_) {
+                      if (!_busy) _submit();
+                    }
+                  : null,
               decoration: InputDecoration(
                 labelText: 'Sync passphrase',
                 suffixIcon: IconButton(
@@ -797,6 +822,11 @@ class _SetUpPageState extends State<_SetUpPage> {
                 key: const ValueKey('sync-passphrase-confirm'),
                 controller: _confirm,
                 obscureText: _obscure,
+                onSubmitted: _desktop
+                    ? (_) {
+                        if (!_busy) _submit();
+                      }
+                    : null,
                 decoration: const InputDecoration(
                   labelText: 'Confirm passphrase',
                   helperText:
@@ -915,6 +945,7 @@ class _JoinPageState extends State<_JoinPage> {
             controller: _words,
             autocorrect: false,
             enableSuggestions: false,
+            textInputAction: _desktop ? TextInputAction.next : null,
             decoration: const InputDecoration(
               labelText: 'The six words',
               helperText: 'Type them as shown, separated by spaces.',
@@ -923,6 +954,11 @@ class _JoinPageState extends State<_JoinPage> {
           const SizedBox(height: 12),
           TextField(
             controller: _name,
+            onSubmitted: _desktop
+                ? (_) {
+                    if (!_busy) _submit();
+                  }
+                : null,
             decoration: const InputDecoration(
               labelText: 'This device\'s name (optional)',
               helperText: 'Leave empty for the name given on the other device.',
@@ -1055,6 +1091,11 @@ class _AddDevicePageState extends State<_AddDevicePage> {
               key: const ValueKey('sync-new-device-name'),
               controller: _name,
               decoration: const InputDecoration(labelText: 'New device name'),
+              onSubmitted: _desktop
+                  ? (_) {
+                      if (!_busy) _create();
+                    }
+                  : null,
             ),
             const SizedBox(height: 16),
             FilledButton(
@@ -1129,3 +1170,6 @@ class _AddDevicePageState extends State<_AddDevicePage> {
     );
   }
 }
+
+/// Desktop forms submit on Enter; phones keep their keyboards' behaviour.
+bool get _desktop => PlatformFeatures.isDesktop;

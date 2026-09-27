@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -122,6 +123,7 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           IconButton(
+            tooltip: PlatformFeatures.isDesktop ? 'Back' : null,
             onPressed: onBack,
             icon: const Icon(Icons.arrow_back_rounded),
           ),

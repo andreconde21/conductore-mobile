@@ -1366,17 +1366,22 @@ class _TextSheetState extends State<_TextSheet> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: TextField(
-                  key: const ValueKey('review-text-field'),
-                  controller: _text,
-                  focusNode: _focus,
-                  autofocus: dictation == null,
-                  minLines: 2,
-                  maxLines: 6,
-                  textInputAction: TextInputAction.newline,
-                  decoration: InputDecoration(
-                    hintText: widget.hint,
-                    border: const OutlineInputBorder(),
+                child: _submitShortcuts(
+                  onSubmit: canSend
+                      ? () => Navigator.of(context).pop(_text.text)
+                      : null,
+                  child: TextField(
+                    key: const ValueKey('review-text-field'),
+                    controller: _text,
+                    focusNode: _focus,
+                    autofocus: dictation == null,
+                    minLines: 2,
+                    maxLines: 6,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      hintText: widget.hint,
+                      border: const OutlineInputBorder(),
+                    ),
                   ),
                 ),
               ),
@@ -1429,4 +1434,21 @@ class _TextSheetState extends State<_TextSheet> {
       ),
     );
   }
+}
+
+/// On desktop, Ctrl+Enter (Cmd+Enter on macOS) submits a multiline field
+/// whose Enter inserts a newline. Phones are left as they are.
+Widget _submitShortcuts({
+  required VoidCallback? onSubmit,
+  required Widget child,
+}) {
+  if (!PlatformFeatures.isDesktop) return child;
+  void submit() => onSubmit?.call();
+  return CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.enter, control: true): submit,
+      const SingleActivator(LogicalKeyboardKey.enter, meta: true): submit,
+    },
+    child: child,
+  );
 }

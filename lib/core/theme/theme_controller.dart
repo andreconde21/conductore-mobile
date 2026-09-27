@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
@@ -45,6 +46,7 @@ class ThemeController extends ChangeNotifier {
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
   VoicePreferences _voice = VoicePreferences.defaults;
+  List<QuickAction> _quickActions = const [];
 
   /// The stored light/dark choice. Omarchy themes are dark or light
   /// themselves, so the app follows [effectiveThemeMode]; this stays for
@@ -112,6 +114,9 @@ class ThemeController extends ChangeNotifier {
   /// Read-aloud and continuous-dictation settings.
   VoicePreferences get voice => _voice;
 
+  /// Personal quick actions (Settings; synced with the appearance).
+  List<QuickAction> get quickActions => _quickActions;
+
   Future<void> load() async {
     final preferences = await _repository.load();
     _themeMode = preferences.themeMode;
@@ -136,6 +141,7 @@ class ThemeController extends ChangeNotifier {
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
     _voice = preferences.voice;
+    _quickActions = preferences.quickActions;
     _omarchySyncHostId = preferences.omarchySyncHostId;
     _omarchySyncedTheme = preferences.omarchySyncedTheme;
     notifyListeners();
@@ -418,6 +424,13 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setQuickActions(List<QuickAction> actions) async {
+    if (_listEquals(_quickActions, actions)) return;
+    _quickActions = List.unmodifiable(actions);
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -439,6 +452,7 @@ class ThemeController extends ChangeNotifier {
         terminalGestures: _terminalGestures,
         speechLanguage: _speechLanguage,
         voice: _voice,
+        quickActions: _quickActions,
         remoteClipboardEnabled: _remoteClipboardEnabled,
         pasteImagesAsFiles: _pasteImagesAsFiles,
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,

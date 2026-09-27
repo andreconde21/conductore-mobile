@@ -1,6 +1,7 @@
 import 'package:conduit/features/review/data/review_client.dart';
 import 'package:conduit/features/review/presentation/review_controller.dart';
 import 'package:conduit/features/review/presentation/review_page.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -144,6 +145,70 @@ void main() {
       'Please keep b.\n\nReview comments:\n- lib/a.dart:3: b should stay 2',
     );
     expect(review.done, isTrue);
+  });
+
+  Future<void> commentWithCtrlEnter(WidgetTester tester) async {
+    await pumpReview(tester);
+    await tester.tap(
+      find.textContaining('final b = 3;', findRichText: true).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('review-text-field')),
+      'b should stay 2',
+    );
+    await tester.pump();
+    final meta = defaultTargetPlatform == TargetPlatform.macOS;
+    final modifier = meta
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    await tester.sendKeyDownEvent(modifier);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(modifier);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'desktop: Ctrl/Cmd+Enter submits a comment',
+    (tester) async {
+      await commentWithCtrlEnter(tester);
+      expect(review.comments.single.line, 3);
+      expect(find.byKey(const ValueKey('review-text-field')), findsNothing);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
+
+  testWidgets(
+    'desktop: commentable diff lines show the click cursor',
+    (tester) async {
+      await pumpReview(tester);
+      final clickable = find.byKey(const ValueKey('diff-line-clickable'));
+      expect(clickable, findsWidgets);
+      expect(
+        tester.widget<MouseRegion>(clickable.first).cursor,
+        SystemMouseCursors.click,
+      );
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
+
+  testWidgets('phone: diff lines have no hover region', (tester) async {
+    await pumpReview(tester);
+    expect(find.byKey(const ValueKey('diff-line-clickable')), findsNothing);
+  });
+
+  testWidgets('phone: Ctrl+Enter does not submit a comment', (tester) async {
+    await commentWithCtrlEnter(tester);
+    expect(review.comments, isEmpty);
+    expect(find.byKey(const ValueKey('review-text-field')), findsOneWidget);
   });
 
   testWidgets('undo this turn asks first, lists the files, and offers redo', (

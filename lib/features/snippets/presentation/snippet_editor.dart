@@ -1,5 +1,7 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class SnippetListEditor extends StatelessWidget {
   const SnippetListEditor({
@@ -212,6 +214,7 @@ class _SnippetDialog extends StatefulWidget {
 class _SnippetDialogState extends State<_SnippetDialog> {
   late final TextEditingController _labelController;
   late final TextEditingController _textController;
+  final _textFocus = FocusNode();
   late bool _hidden;
   late bool _submit;
 
@@ -229,11 +232,39 @@ class _SnippetDialogState extends State<_SnippetDialog> {
   void dispose() {
     _labelController.dispose();
     _textController.dispose();
+    _textFocus.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final desktop = PlatformFeatures.isDesktop;
+    final dialog = _dialog(context, desktop: desktop);
+    if (!desktop) return dialog;
+    // Desktop: Ctrl/Cmd+Enter saves from anywhere, the multiline command
+    // included.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter, control: true):
+            _submitSnippet,
+        const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+            _submitSnippet,
+      },
+      child: dialog,
+    );
+  }
+
+  /// Desktop, Enter in the name: saves once there is a command, else moves
+  /// on to the command.
+  void _onNameSubmitted(String _) {
+    if (_textController.text.isNotEmpty) {
+      _submitSnippet();
+    } else {
+      _textFocus.requestFocus();
+    }
+  }
+
+  Widget _dialog(BuildContext context, {required bool desktop}) {
     return AlertDialog(
       scrollable: true,
       title: Text(widget.initial == null ? 'Add snippet' : 'Edit snippet'),
@@ -249,10 +280,14 @@ class _SnippetDialogState extends State<_SnippetDialog> {
               border: OutlineInputBorder(),
             ),
             textInputAction: TextInputAction.next,
+            onSubmitted: desktop ? _onNameSubmitted : null,
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _textController,
+            focusNode: _textFocus,
+            // A hidden snippet is one line: Enter saves it on desktop.
+            onSubmitted: desktop && _hidden ? (_) => _submitSnippet() : null,
             scrollPadding: const EdgeInsets.fromLTRB(20, 48, 20, 20),
             decoration: const InputDecoration(
               labelText: 'Command or text',
@@ -283,6 +318,7 @@ class _SnippetDialogState extends State<_SnippetDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
+          key: const ValueKey('snippet-dialog-save'),
           onPressed: _submitSnippet,
           child: Text(widget.initial == null ? 'Add' : 'Save'),
         ),

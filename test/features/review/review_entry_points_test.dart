@@ -106,9 +106,7 @@ void main() {
     expect(without.supportsSnapshots(host().id), isFalse);
   });
 
-  testWidgets('the inbox offers Review for an agent between turns', (
-    tester,
-  ) async {
+  Future<void> reviewFromInbox(WidgetTester tester) async {
     tester.view.physicalSize = const Size(800, 1600);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
@@ -135,7 +133,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('review-page')), findsOneWidget);
     expect(find.text('a.dart'), findsOneWidget);
+  }
+
+  testWidgets('the inbox offers Review for an agent between turns', (
+    tester,
+  ) async {
+    await reviewFromInbox(tester);
+    // Phones: a full page, not the desktop dialog.
+    expect(find.byKey(const ValueKey('desktop-page-frame')), findsNothing);
   });
+
+  testWidgets(
+    'desktop: Review opens as a dialog over the window',
+    (tester) async {
+      await reviewFromInbox(tester);
+      expect(find.byKey(const ValueKey('desktop-page-frame')), findsOneWidget);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
 
   testWidgets('Chat View: a Review button, and Review after each turn', (
     tester,

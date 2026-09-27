@@ -190,7 +190,9 @@ class _ChatMessageActionsState extends State<ChatMessageActions> {
     if (_desktop && widget.selectable) {
       body = SelectionArea(
         // Right-click opens this row's menu, which offers the selection.
-        contextMenuBuilder: null,
+        // An empty builder, not null: SelectableRegion still shows its
+        // toolbar on a right-click and a null builder throws there.
+        contextMenuBuilder: (_, _) => const SizedBox.shrink(),
         onSelectionChanged: (content) => _selection = content?.plainText ?? '',
         child: body,
       );

@@ -1,4 +1,5 @@
 import 'package:conduit/core/diagnostics/app_error_log.dart';
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
@@ -24,6 +25,7 @@ Future<void> showThemeSheet({
     kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
+    desktopFill: true,
     builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
       value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
       child: _ThemeSheet(controller: controller),
@@ -44,9 +46,9 @@ class _ThemeSheet extends StatelessWidget {
       builder: (context, _) {
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.7,
-          minChildSize: 0.4,
-          maxChildSize: 0.92,
+          initialChildSize: adaptiveSheetFraction(context, 0.7),
+          minChildSize: adaptiveSheetFraction(context, 0.4),
+          maxChildSize: adaptiveSheetFraction(context, 0.92),
           builder: (context, scrollController) {
             return SafeArea(
               bottom: shouldApplyBottomSafeArea(context),
@@ -876,6 +878,10 @@ class _CustomKeyboardItemDialogState extends State<_CustomKeyboardItemDialog> {
                 border: OutlineInputBorder(),
               ),
               textInputAction: TextInputAction.next,
+              // Desktop: a Ctrl key needs nothing more, so Enter adds it.
+              onSubmitted: PlatformFeatures.isDesktop && controlMode
+                  ? (_) => _submitItem()
+                  : null,
             ),
             const SizedBox(height: 12),
             if (textMode) ...[
@@ -887,6 +893,14 @@ class _CustomKeyboardItemDialogState extends State<_CustomKeyboardItemDialog> {
                 ),
                 minLines: 1,
                 maxLines: 3,
+                // Desktop: Enter adds the key (the checkbox below sends
+                // Enter); phones keep the multiline keyboard.
+                textInputAction: PlatformFeatures.isDesktop
+                    ? TextInputAction.done
+                    : null,
+                onSubmitted: PlatformFeatures.isDesktop
+                    ? (_) => _submitItem()
+                    : null,
               ),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,

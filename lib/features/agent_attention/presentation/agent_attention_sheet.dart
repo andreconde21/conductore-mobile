@@ -11,6 +11,7 @@ import 'package:conduit/features/agent_attention/presentation/approval_sheets.da
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/inbox_row_desktop_actions.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/usage_update_hint.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
@@ -447,7 +448,14 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
       secondaryBackground: background(AlignmentDirectional.centerEnd),
       onDismissed: (_) =>
           controller.inboxDismissals.dismiss(entry.hostId, agent),
-      child: row,
+      child: InboxRowDesktopActions(
+        entryKey: entry.key,
+        onHide: () => controller.inboxDismissals.dismiss(entry.hostId, agent),
+        onOpen: row.onOpen,
+        onOpenChat: row.onOpenChat,
+        onReview: row.onReview,
+        child: row,
+      ),
     );
   }
 }

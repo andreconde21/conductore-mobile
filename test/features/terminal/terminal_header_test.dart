@@ -1,4 +1,5 @@
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
@@ -271,5 +272,38 @@ void main() {
     expect(tools, [SessionTool.gitDiff, SessionTool.livePreview]);
     expect(chats, 1);
     expect(find.byIcon(Icons.more_vert_rounded), findsOneWidget);
+  });
+
+  testWidgets('phones: the menu is unchanged without quick actions, and '
+      'offers them once there are some', (tester) async {
+    await pumpTerminal(tester);
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('terminal-menu-quick-actions')),
+      findsNothing,
+    );
+    // The desktop-only entries stay off phones.
+    expect(find.byKey(const ValueKey('terminal-menu-compose')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('terminal-menu-recent-dirs')),
+      findsNothing,
+    );
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+
+    await themeController.setQuickActions(const [
+      QuickAction(id: 'deploy', label: 'Deploy', command: 'make deploy'),
+    ]);
+    await tester.pump();
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('terminal-menu-quick-actions')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('session-quick-actions')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('session-quick-action-deploy')),
+      findsOneWidget,
+    );
   });
 }

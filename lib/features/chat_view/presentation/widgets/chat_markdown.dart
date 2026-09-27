@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/chat_view/domain/markdown_table.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_search_highlight.dart';
@@ -540,9 +542,7 @@ class MarkdownTableView extends StatelessWidget {
         );
         final sized = fits
             ? tableWidget
-            : SingleChildScrollView(
-                key: const ValueKey('markdown-table-scroll'),
-                scrollDirection: Axis.horizontal,
+            : _SidewaysScroll(
                 child: SizedBox(width: natural, child: tableWidget),
               );
         if (fullScreen) return sized;
@@ -552,7 +552,15 @@ class MarkdownTableView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            GestureDetector(onTap: () => openFullScreen(context), child: sized),
+            // Desktop: a click on the table selects text, only the button
+            // opens it.
+            if (PlatformFeatures.isDesktop)
+              sized
+            else
+              GestureDetector(
+                onTap: () => openFullScreen(context),
+                child: sized,
+              ),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
@@ -577,13 +585,54 @@ class MarkdownTableView extends StatelessWidget {
   }
 
   void openFullScreen(BuildContext context) {
+    // Phones: a full-screen page; desktop: a large dialog over the chat.
     unawaited(
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          fullscreenDialog: true,
-          builder: (context) => _FullScreenTable(table: table, style: style),
-        ),
+      pushAdaptivePage<void>(
+        context,
+        fullscreenDialog: true,
+        desktopMaxWidth: 1100,
+        builder: (context) => _FullScreenTable(table: table, style: style),
       ),
+    );
+  }
+}
+
+/// A table wider than the bubble, scrolled sideways; on desktop with an
+/// always-visible scrollbar, since a mouse has no sideways swipe.
+class _SidewaysScroll extends StatefulWidget {
+  const _SidewaysScroll({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_SidewaysScroll> createState() => _SidewaysScrollState();
+}
+
+class _SidewaysScrollState extends State<_SidewaysScroll> {
+  final _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final desktop = PlatformFeatures.isDesktop;
+    final scroll = SingleChildScrollView(
+      key: const ValueKey('markdown-table-scroll'),
+      controller: desktop ? _controller : null,
+      scrollDirection: Axis.horizontal,
+      padding: desktop ? const EdgeInsets.only(bottom: 10) : null,
+      child: widget.child,
+    );
+    if (!desktop) return scroll;
+    return Scrollbar(
+      key: const ValueKey('markdown-table-scrollbar'),
+      controller: _controller,
+      thumbVisibility: true,
+      child: scroll,
     );
   }
 }

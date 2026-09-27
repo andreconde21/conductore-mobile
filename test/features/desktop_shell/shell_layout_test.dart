@@ -42,17 +42,19 @@ void main() {
       expect(layout.panes.length, 3);
     });
 
-    test('never more than four panes', () {
+    test('never more than six panes', () {
       var layout = ShellLayout.single('a')
           .split('p1', ShellEdge.right, 'b')
           .split('p1', ShellEdge.bottom, 'c')
-          .split('p2', ShellEdge.bottom, 'd');
-      expect(layout.panes.length, 4);
+          .split('p2', ShellEdge.bottom, 'd')
+          .split('p3', ShellEdge.right, 'e')
+          .split('p4', ShellEdge.right, 'f');
+      expect(layout.panes.length, 6);
       expect(layout.canSplit, isFalse);
-      layout = layout.split('p1', ShellEdge.right, 'e');
-      expect(layout.panes.length, 4);
-      // The fifth view replaced the target pane's instead.
-      expect(layout.paneShowing('e')?.id, 'p1');
+      layout = layout.split('p1', ShellEdge.right, 'g');
+      expect(layout.panes.length, 6);
+      // The seventh view replaced the target pane's instead.
+      expect(layout.paneShowing('g')?.id, 'p1');
     });
 
     test('splitting the only pane with its own view needs another view', () {

@@ -120,24 +120,35 @@ class CompanionInstallSheet extends StatelessWidget {
           // Pinned below the list so the choice is always on screen.
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    key: const ValueKey('companion-install-confirm'),
-                    onPressed: () => Navigator.of(context).pop(true),
-                    icon: const Icon(Icons.download_rounded),
-                    label: Text(action),
-                  ),
-                ),
-              ],
+            child: Builder(
+              builder: (context) {
+                final cancel = OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                );
+                final confirm = FilledButton.icon(
+                  key: const ValueKey('companion-install-confirm'),
+                  onPressed: () => Navigator.of(context).pop(true),
+                  icon: const Icon(Icons.download_rounded),
+                  label: Text(action),
+                );
+                // Desktop: dialog buttons at their size, on the right.
+                if (useDesktopModals(context)) {
+                  return OverflowBar(
+                    key: const ValueKey('companion-install-actions'),
+                    alignment: MainAxisAlignment.end,
+                    spacing: 12,
+                    children: [cancel, confirm],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: cancel),
+                    const SizedBox(width: 12),
+                    Expanded(child: confirm),
+                  ],
+                );
+              },
             ),
           ),
         ],

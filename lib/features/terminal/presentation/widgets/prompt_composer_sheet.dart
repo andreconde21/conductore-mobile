@@ -6,6 +6,7 @@ import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -289,6 +290,11 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
     final colorScheme = theme.colorScheme;
     final length = _controller.text.length;
     final canSend = !_sending && length > 0 && !_oversized;
+    final desktop = PlatformFeatures.isDesktop;
+    void sendShortcut() {
+      if (canSend) unawaited(_send());
+    }
+
     final bracketedPaste = widget.bracketedPasteSupported?.call() ?? true;
     final String? notice;
     if (_oversized) {
@@ -394,36 +400,54 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                                 ),
                             ],
                           ),
-                  IconButton(
-                    tooltip: 'Paste clipboard',
-                    icon: const Icon(Icons.content_paste_rounded),
-                    onPressed: _sending ? null : _pasteFromClipboard,
-                  ),
-                  IconButton(
-                    tooltip: 'Select all',
-                    icon: const Icon(Icons.select_all_rounded),
-                    onPressed: _sending || length == 0 ? null : _selectAll,
-                  ),
-                  IconButton(
-                    tooltip: 'Clear draft',
-                    icon: const Icon(Icons.backspace_outlined),
-                    onPressed: _sending || length == 0 ? null : _clear,
-                  ),
+                  // A desktop has these on the keyboard (Ctrl+V, Ctrl+A,
+                  // Delete) and in the field's right-click menu.
+                  if (!desktop) ...[
+                    IconButton(
+                      tooltip: 'Paste clipboard',
+                      icon: const Icon(Icons.content_paste_rounded),
+                      onPressed: _sending ? null : _pasteFromClipboard,
+                    ),
+                    IconButton(
+                      tooltip: 'Select all',
+                      icon: const Icon(Icons.select_all_rounded),
+                      onPressed: _sending || length == 0 ? null : _selectAll,
+                    ),
+                    IconButton(
+                      tooltip: 'Clear draft',
+                      icon: const Icon(Icons.backspace_outlined),
+                      onPressed: _sending || length == 0 ? null : _clear,
+                    ),
+                  ],
                 ],
               ),
-              TextField(
-                controller: _controller,
-                focusNode: _focusNode,
-                // readOnly (not enabled: false) keeps focus and the keyboard
-                // through a send, so a failed send leaves the user editing.
-                readOnly: _sending,
-                minLines: 4,
-                maxLines: 8,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText: 'Type, dictate, or paste a prompt…',
-                  border: OutlineInputBorder(),
+              CallbackShortcuts(
+                // Desktop: Ctrl+Enter (Cmd+Enter on macOS) sends; Enter
+                // stays a new line.
+                bindings: {
+                  if (desktop) ...{
+                    const SingleActivator(
+                      LogicalKeyboardKey.enter,
+                      control: true,
+                    ): sendShortcut,
+                    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+                        sendShortcut,
+                  },
+                },
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  // readOnly (not enabled: false) keeps focus and the keyboard
+                  // through a send, so a failed send leaves the user editing.
+                  readOnly: _sending,
+                  minLines: 4,
+                  maxLines: 8,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  decoration: const InputDecoration(
+                    hintText: 'Type, dictate, or paste a prompt…',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
@@ -478,20 +502,27 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                     child: const Text('Cancel'),
                   ),
                   const Spacer(),
-                  FilledButton.icon(
-                    onPressed: canSend ? _send : null,
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(
-                            _submitEnter
-                                ? Icons.send_rounded
-                                : Icons.keyboard_return_rounded,
-                          ),
-                    label: Text(_submitEnter ? 'Insert & Send' : 'Insert'),
+                  Tooltip(
+                    message: desktop
+                        ? (defaultTargetPlatform == TargetPlatform.macOS
+                              ? 'Cmd+Enter'
+                              : 'Ctrl+Enter')
+                        : '',
+                    child: FilledButton.icon(
+                      onPressed: canSend ? _send : null,
+                      icon: _sending
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              _submitEnter
+                                  ? Icons.send_rounded
+                                  : Icons.keyboard_return_rounded,
+                            ),
+                      label: Text(_submitEnter ? 'Insert & Send' : 'Insert'),
+                    ),
                   ),
                 ],
               ),

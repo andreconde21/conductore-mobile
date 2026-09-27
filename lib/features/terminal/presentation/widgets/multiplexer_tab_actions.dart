@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -52,14 +53,17 @@ class MultiplexerTabDot extends StatelessWidget {
   }
 }
 
-/// Long-press on a tab (strip chip or list row): rename, move left or
-/// right (when the multiplexer can), close after asking. [onDone] runs
-/// after the action (or the dismissal), to give the terminal its focus.
+/// Long-press (or right-click, on desktop) on a tab (strip chip or list
+/// row): rename, move left or right (when the multiplexer can), close
+/// after asking. [onDone] runs after the action (or the dismissal), to
+/// give the terminal its focus. [anchorPosition] places the desktop menu
+/// at the pointer.
 Future<void> showMultiplexerTabActions(
   BuildContext context,
   MultiplexerTabsController controller,
   MultiplexerTab tab, {
   VoidCallback? onDone,
+  Offset? anchorPosition,
 }) async {
   final noun = multiplexerTabNoun(controller);
   final index = controller.tabs.indexWhere((other) => other.id == tab.id);
@@ -67,6 +71,7 @@ Future<void> showMultiplexerTabActions(
   final action = await showAdaptiveModal<_TabAction>(
     context: context,
     kind: AdaptiveModalKind.menu,
+    anchorPosition: anchorPosition,
     useSafeArea: true,
     builder: (context) => SafeArea(
       child: Column(
@@ -122,6 +127,41 @@ Future<void> showMultiplexerTabActions(
     onDone?.call();
     return;
   }
+  await _runTabAction(context, controller, tab, action);
+  onDone?.call();
+}
+
+/// Asks for a new name for [tab] and renames it (a desktop double-click
+/// on a strip chip).
+Future<void> renameMultiplexerTab(
+  BuildContext context,
+  MultiplexerTabsController controller,
+  MultiplexerTab tab, {
+  VoidCallback? onDone,
+}) async {
+  await _runTabAction(context, controller, tab, _TabAction.rename);
+  onDone?.call();
+}
+
+/// Closes [tab] after asking (a desktop chip's close button or a
+/// middle-click).
+Future<void> closeMultiplexerTab(
+  BuildContext context,
+  MultiplexerTabsController controller,
+  MultiplexerTab tab, {
+  VoidCallback? onDone,
+}) async {
+  await _runTabAction(context, controller, tab, _TabAction.close);
+  onDone?.call();
+}
+
+Future<void> _runTabAction(
+  BuildContext context,
+  MultiplexerTabsController controller,
+  MultiplexerTab tab,
+  _TabAction action,
+) async {
+  final noun = multiplexerTabNoun(controller);
   void snack(String message) => ScaffoldMessenger.maybeOf(
     context,
   )?.showSnackBar(SnackBar(content: Text(message)));
@@ -165,7 +205,6 @@ Future<void> showMultiplexerTabActions(
         snack('Could not close the $noun.');
       }
   }
-  onDone?.call();
 }
 
 enum _TabAction { rename, moveLeft, moveRight, close }
@@ -293,50 +332,90 @@ Future<void> showMultiplexerTabsSheet(
                       padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
                       children: [
                         for (final (i, tab) in tabs.indexed)
-                          ListTile(
-                            key: ValueKey('mux-tabs-sheet-${tab.id}'),
-                            dense: true,
-                            selected: tab.active,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: AppTheme.borderRadius,
-                            ),
-                            leading: SizedBox(
-                              width: 28,
-                              child: Text(
-                                controller.kind == MultiplexerTabsKind.tmux
-                                    ? '${tab.index}'
-                                    : '${i + 1}',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
+                          GestureDetector(
+                            // Right-click on desktop, like the long-press.
+                            onSecondaryTapUp: PlatformFeatures.isDesktop
+                                ? (details) => unawaited(
+                                    showMultiplexerTabActions(
+                                      sheetContext,
+                                      controller,
+                                      tab,
+                                      anchorPosition: details.globalPosition,
+                                    ),
+                                  )
+                                : null,
+                            child: ListTile(
+                              key: ValueKey('mux-tabs-sheet-${tab.id}'),
+                              dense: true,
+                              selected: tab.active,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: AppTheme.borderRadius,
+                              ),
+                              leading: SizedBox(
+                                width: 28,
+                                child: Text(
+                                  controller.kind == MultiplexerTabsKind.tmux
+                                      ? '${tab.index}'
+                                      : '${i + 1}',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                               ),
-                            ),
-                            title: Text(
-                              tab.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: tab.active
-                                    ? FontWeight.w800
-                                    : FontWeight.w600,
+                              title: Text(
+                                tab.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: tab.active
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                ),
                               ),
-                            ),
-                            subtitle: _subtitle(tab),
-                            trailing: MultiplexerTabDot(tab: tab, size: 8),
-                            onTap: () {
-                              Navigator.of(sheetContext).pop();
-                              unawaited(
-                                controller.select(tab).whenComplete(() {
-                                  onDone?.call();
-                                }),
-                              );
-                            },
-                            onLongPress: () => unawaited(
-                              showMultiplexerTabActions(
-                                sheetContext,
-                                controller,
-                                tab,
+                              subtitle: _subtitle(tab),
+                              trailing: PlatformFeatures.isDesktop
+                                  ? Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        MultiplexerTabDot(tab: tab, size: 8),
+                                        IconButton(
+                                          key: ValueKey(
+                                            'mux-tabs-sheet-more-${tab.id}',
+                                          ),
+                                          tooltip:
+                                              '${noun[0].toUpperCase()}'
+                                              '${noun.substring(1)} actions',
+                                          iconSize: 18,
+                                          visualDensity: VisualDensity.compact,
+                                          icon: const Icon(
+                                            Icons.more_horiz_rounded,
+                                          ),
+                                          onPressed: () => unawaited(
+                                            showMultiplexerTabActions(
+                                              sheetContext,
+                                              controller,
+                                              tab,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : MultiplexerTabDot(tab: tab, size: 8),
+                              onTap: () {
+                                Navigator.of(sheetContext).pop();
+                                unawaited(
+                                  controller.select(tab).whenComplete(() {
+                                    onDone?.call();
+                                  }),
+                                );
+                              },
+                              onLongPress: () => unawaited(
+                                showMultiplexerTabActions(
+                                  sheetContext,
+                                  controller,
+                                  tab,
+                                ),
                               ),
                             ),
                           ),
