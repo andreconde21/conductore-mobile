@@ -52,6 +52,10 @@ class TelemetryEvent {
   const TelemetryEvent.digestOpened()
     : this._('digest_opened', TelemetryScreen.home);
 
+  /// The usage explorer was opened (no range, filter or numbers).
+  const TelemetryEvent.usageExplorerOpened()
+    : this._('usage_explorer_opened', TelemetryScreen.home);
+
   TelemetryEvent.voiceUsed(TelemetryVoice kind)
     : this._('voice_used', TelemetryScreen.chat, {'kind': kind.name});
 
