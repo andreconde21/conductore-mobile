@@ -24,6 +24,7 @@ const { Approvals, CAPABILITIES } = require('./approvals')
 const approvalOps = require('./approval-ops')
 const { usageFrom } = require('./statusline')
 const { Activity } = require('./activity')
+const { Turns } = require('./turns')
 const { log, debug } = require('./log')
 
 const CHANGE_BUFFER = 1000
@@ -141,6 +142,19 @@ function loadActivity () {
   try { return new Activity(JSON.parse(fs.readFileSync(paths.activityPath(), 'utf8'))) } catch { return new Activity() }
 }
 
+function loadTurns () {
+  try { return new Turns(JSON.parse(fs.readFileSync(paths.turnsPath(), 'utf8'))) } catch { return new Turns() }
+}
+
+function writeTurnsSync (turns) {
+  if (!turns.dirty) return
+  const file = paths.turnsPath()
+  const tmp = `${file}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(turns), { mode: 0o600 })
+  fs.renameSync(tmp, file)
+  turns.dirty = false
+}
+
 function writeActivitySync (activity) {
   if (!activity.dirty) return
   const file = paths.activityPath()
@@ -207,6 +221,8 @@ class Daemon {
   constructor () {
     this.state = loadSnapshot()
     this.activity = loadActivity()
+    this.turns = loadTurns()
+    this.turns.onDirty = () => this.scheduleSnapshot()
     this.changes = [] // { seq, line }: each change record serialized once
     this.changeChars = 0
     this.waiters = new Map() // requestId -> { fifo, event, sessionId, timer }
@@ -266,6 +282,7 @@ class Daemon {
     process.on('exit', () => this.releaseLock())
     this.expireAgents()
     this.commit(state.prune(this.state))
+    this.turns.prune()
     this.schedulePrune()
     this.flushSnapshot()
     this.importParkedUsage()
@@ -376,6 +393,9 @@ class Daemon {
     if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout)
     this.commit(state.reduce(this.state, event))
     this.activity.onEvent(event)
+    // Queues git snapshots in the background; never awaited here.
+    this.turns.onEvent(event)
+    this.scheduleSnapshot()
     if (event.hook_event_name === 'SessionEnd') this.approvals.endSession(event.session_id)
   }
 
@@ -570,6 +590,15 @@ class Daemon {
   flushSnapshot () {
     try { writeSnapshotSync(this.state) } catch (err) { log('daemon', 'snapshot failed', err.message) }
     try { writeActivitySync(this.activity) } catch (err) { log('daemon', 'activity snapshot failed', err.message) }
+    try { writeTurnsSync(this.turns) } catch (err) { log('daemon', 'turns snapshot failed', err.message) }
+  }
+
+  // The turn store changes after the event path returned (a snapshot
+  // finished); the same debounce writes it.
+  scheduleSnapshot () {
+    if (this.snapshotTimer || !this.turns.dirty) return
+    this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
+    this.snapshotTimer.unref()
   }
 
   // --- socket -----------------------------------------------------------------
@@ -639,6 +668,18 @@ class Daemon {
       case 'usage':
         // Legacy Node statusline (`conductore-hostd statusline`).
         this.reply(c, { ok: true, result: this.handleUsage(req) }); c.end(); return
+      case 'turns': {
+        // `turns`, `diff`, `undo`: the session's turn records, after its
+        // queued snapshots finished when asked to wait.
+        await this.drain()
+        const sid = String(req.sessionId || '')
+        const idle = req.wait ? await this.turns.idle(sid) : this.turns.pending(sid) === 0
+        this.turns.prune()
+        this.scheduleSnapshot()
+        const a = this.state.agents[sid]
+        const agent = a ? { name: a.name, state: a.state, cwd: a.cwd, endedAt: a.endedAt } : null
+        this.reply(c, { ok: true, sessionId: sid, idle, agent, record: this.turns.view(sid, Number(req.limit) || 20) }); c.end(); return
+      }
       case 'approve-low': case 'trust': case 'rules': case 'approvals':
         this.reply(c, approvalOps.handle(this, req)); c.end(); return
       case 'stop':
@@ -714,6 +755,9 @@ class Daemon {
     for (const t of [this.snapshotTimer, this.pruneTimer, this.idleTimer]) clearTimeout(t)
     clearInterval(this.probeTimer)
     clearInterval(this.watchFallback)
+    // A snapshot still running is dropped (its temp index goes with tmp/'s
+    // hourly clean-up); the next turn takes a new one.
+    require('./snapshots').killAll()
     try { this.watcher && this.watcher.close() } catch {}
     this.flushSnapshot()
     try { this.server && this.server.close() } catch {}
