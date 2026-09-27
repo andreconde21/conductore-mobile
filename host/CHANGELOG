@@ -1,5 +1,10 @@
 # Changelog — host companion
 
+## Unreleased
+
+- feat: `usage` reports every Claude account cswap (claude-swap) manages when it is on PATH or at `~/.local/bin/cswap`: `claude.accounts` (slot, alias, label = alias or a masked email, active, disabled, 5h/7d `usedPct` and `resetsAt`, per-model windows, `stale` for last-good data) and `claude.cswap` (`activeSlot`, `fetchedAt`). One `cswap list --json` per minute at most (3 s timeout, own process group, nice 10), cached in `~/.conductore/cswap-cache.json` (masked rows only), silent fallback. Without cswap neither field exists.
+- feat: `cswap-switch <slot> | --best` runs `cswap switch` (or `--strategy best`) for new Claude sessions on the machine and reports the from/to slots by label. Emails are never printed.
+
 ## 0.7.0 (2026-09-25)
 
 - feat: `summarize [--max-words 45] [--timeout-ms 20000]`: a one- or two-sentence spoken version of the reply on stdin (64 KB max) for the phone's "Claude summary" read-aloud mode, as one JSON line (`summary`, `ms`, `model`, or `error`: claude-missing, not-logged-in, timeout, busy, failed; exit 0). Replies under 40 words come back as they are (`passthrough: true`) without calling Claude.
