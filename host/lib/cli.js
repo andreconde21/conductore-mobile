@@ -22,6 +22,7 @@ const portsMod = lazy('./ports')
 const usageMod = lazy('./usage')
 const summarizeMod = lazy('./summarize')
 const guideMod = lazy('./guide')
+const digestMod = lazy('./digest')
 const cswapMod = lazy('./cswap')
 const rulesMod = lazy('./rules')
 const riskMod = lazy('./risk')
@@ -70,6 +71,12 @@ const USAGE = `usage: conductore-hostd <command>
   summarize [--max-words 45] [--timeout-ms 20000]
                                   a spoken one- or two-sentence summary of
                                   the reply on stdin (claude -p, no tools)
+  digest [--since <ms>] [--summaries] [--max-agents 10] [--max-ms 30000]
+         [--lang en|pt] [--stuck-working-min 30] [--stuck-errors 3]
+         [--stuck-repeats 5] [--stuck-approval-min 60]
+                                  every agent's facts since a time, stuck
+                                  flags, and (--summaries) a short summary of
+                                  the agents that changed (claude -p, no tools)
   guide [--timeout-ms 15000]      the voice guide: one action for the
                                   {utterance, context} JSON on stdin
                                   (claude -p, no tools)
@@ -451,6 +458,10 @@ async function usageCmd (args) {
       result.claude.accounts = accounts
       result.claude.cswap = meta
     }
+    // The companion's own claude calls for `digest --summaries` (not in any
+    // transcript: they run without session persistence).
+    const digestToday = digestMod().loadStore(paths.digestPath()).usage
+    if (digestToday && digestToday.date === result.today) result.companion = { digest: digestToday }
     return out({ version: paths.VERSION, ...result })
   } catch (err) {
     return fail(`usage failed: ${err.message}`)
@@ -545,6 +556,92 @@ async function guideCmd (args) {
     }))
   } catch (err) {
     return out({ schema: gm.SCHEMA, error: 'failed', message: String(err.message).slice(0, 200) })
+  } finally {
+    for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal)
+  }
+}
+
+// The agents and their activity: the daemon when it runs (started when
+// events wait in the spool, like `status`), else state.json and
+// activity.json. A daemon from before `digest` answers `status` only.
+async function digestData () {
+  const ask = async () => {
+    const [res] = await client.request({ op: 'digest' }, { timeoutMs: 5000 })
+    if (res && !res.error) return { status: res, activity: (res.activity && res.activity.agents) || {}, source: 'daemon', hasActivity: true }
+    if (res && /unknown op/.test(res.error || '')) {
+      const [st] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+      if (st && !st.error) return { status: st, activity: {}, source: 'daemon', hasActivity: false }
+    }
+    return null
+  }
+  try { const r = await ask(); if (r) return r } catch {}
+  if (spoolMod().isSpooled(paths.spoolDir())) {
+    try {
+      await client.ensureDaemon()
+      const r = await ask()
+      if (r) return r
+    } catch {}
+  }
+  let activity = {}
+  let hasActivity = false
+  try {
+    const a = JSON.parse(fs.readFileSync(paths.activityPath(), 'utf8'))
+    if (a && a.agents) { activity = a.agents; hasActivity = true }
+  } catch {}
+  try {
+    return { status: readSnapshotFile(), activity, source: 'snapshot', hasActivity }
+  } catch {
+    return { status: { agents: [] }, activity, source: 'none', hasActivity }
+  }
+}
+
+// Always exits 0 with one JSON document (errors as {error, message}).
+async function digestCmd (args) {
+  const dm = digestMod()
+  const sm = summarizeMod()
+  const { flags } = parseFlags(args)
+  const bad = message => out({ schema: dm.SCHEMA, error: 'failed', message })
+  const opts = { summaries: flags.summaries === true, lang: flags.lang === 'pt' ? 'pt' : 'en', thresholds: {} }
+  if (flags.since !== undefined) {
+    const n = optNumber(flags, 'since')
+    if (Number.isNaN(n)) return bad('--since must be epoch milliseconds')
+    opts.since = n
+  }
+  for (const [flag, key, min, max] of [['max-agents', 'maxAgents', 1, 30], ['max-ms', 'maxMs', 5000, 120000]]) {
+    const n = optNumber(flags, flag)
+    if (n === undefined) continue
+    if (Number.isNaN(n) || n < min || n > max) return bad(`--${flag} must be between ${min} and ${max}`)
+    opts[key] = n
+  }
+  for (const [flag, key, max] of [['stuck-working-min', 'workingMin', 1440], ['stuck-errors', 'sameError', 100], ['stuck-repeats', 'sameCommand', 100], ['stuck-approval-min', 'approvalMin', 1440]]) {
+    const n = optNumber(flags, flag)
+    if (n === undefined) continue
+    if (Number.isNaN(n) || n < 1 || n > max) return bad(`--${flag} must be between 1 and ${max}`)
+    opts.thresholds[key] = n
+  }
+  // Background work: never compete with the agents (claude and git inherit it).
+  try { os.setPriority(0, 10) } catch {}
+  let child = null
+  const onSignal = () => {
+    if (child) sm.killGroup(child, 'SIGKILL')
+    process.exit(1)
+  }
+  for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(sig, onSignal)
+  try {
+    paths.ensureDirs()
+    const data = await digestData()
+    return out({
+      version: paths.VERSION,
+      ...await dm.digest({
+        ...opts,
+        data,
+        storeFile: paths.digestPath(),
+        lockFile: path.join(paths.homeDir(), 'digest.lock'),
+        onChild: c => { child = c }
+      })
+    })
+  } catch (err) {
+    return bad(String(err.message).slice(0, 200))
   } finally {
     for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal)
   }
@@ -783,6 +880,7 @@ async function main (argv) {
     case 'usage': return usageCmd(args)
     case 'summarize': return summarizeCmd(args)
     case 'guide': return guideCmd(args)
+    case 'digest': return digestCmd(args)
     case 'cswap-switch': return cswapSwitchCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()

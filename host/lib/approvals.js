@@ -25,7 +25,8 @@ const AUDIT_MAX_BYTES = 128 * 1024
 // `status` report them). Names only ever get added.
 //   smart-approvals  risk labels on pending requests, rules and time-boxed
 //                    trust (`rules`, `trust`), `approve-low`, `approvals`
-const CAPABILITIES = ['smart-approvals']
+//   digest           `digest`: facts, stuck flags and summaries per agent
+const CAPABILITIES = ['smart-approvals', 'digest']
 
 const rulesFile = () => path.join(paths.homeDir(), 'rules.json')
 const auditFile = () => path.join(paths.homeDir(), 'auto-approved.json')

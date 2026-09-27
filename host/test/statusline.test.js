@@ -263,7 +263,7 @@ test('install migrates a 0.3 install (Node hook entries, Node statusline) idempo
   assert.equal(inst.json.statusLine, 'updated')
   const cfg = JSON.parse(fs.readFileSync(file, 'utf8'))
   const ours = Object.values(cfg.hooks).flat().flatMap(g => g.hooks).filter(h => /conductore-hook' \w+$/.test(h.command))
-  assert.equal(ours.length, 9)
+  assert.equal(ours.length, 11)
   assert.ok(ours.every(h => h.command.startsWith(`${q(HOOK)} `)))
   assert.equal(cfg.hooks.PermissionRequest[0].hooks[0].async, undefined)
   assert.deepEqual(cfg.hooks.Stop[0], { hooks: [{ type: 'command', command: 'echo other' }] })

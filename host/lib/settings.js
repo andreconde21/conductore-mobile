@@ -15,9 +15,11 @@ const EVENTS = [
   'UserPromptSubmit',
   'PreToolUse',
   'PostToolUse',
+  'PostToolUseFailure',
   'PermissionRequest',
   'Notification',
   'Stop',
+  'StopFailure',
   'SubagentStop',
   'SessionEnd'
 ]
