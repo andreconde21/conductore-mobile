@@ -10,7 +10,6 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
-import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
@@ -105,7 +104,10 @@ class FakeConnection implements StdinAgentCommandRunner {
       await Future<void>.delayed(ConductoreHostAttentionProvider.watchTimeout);
       out = '{"type":"timeout","seq":1}';
     } else if (command.contains('conductore-hostd transcript')) {
-      out = page([userLine('u1', 'hi')], offset: 50, state: 'working');
+      // Nothing new after the first read.
+      out = command.contains('--since')
+          ? page(const [], offset: 50)
+          : page([userLine('u1', 'hi')], offset: 50);
     } else if (command.contains('conductore-hostd usage')) {
       out = '{"version":1,"days":[]}';
     } else if (command.contains('tmux list-sessions')) {

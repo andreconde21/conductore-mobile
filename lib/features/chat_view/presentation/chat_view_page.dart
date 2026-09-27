@@ -264,9 +264,31 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   bool _readAloudPrimed = false;
 
+  /// Whether a route covers this chat (or its desktop tab is hidden):
+  /// tickers are off below it.
+  bool _covered = false;
+
+  /// Polls only while the chat can be seen: a route on top (the terminal,
+  /// a sheet) or a hidden desktop tab pauses it, unless the chat is
+  /// reading aloud or in Talk, which the user hears rather than sees.
+  void _syncPolling() {
+    if (!mounted) return;
+    final resumed =
+        _lifecycle == null || _lifecycle == AppLifecycleState.resumed;
+    final listening =
+        (_readAloud?.enabled ?? false) || (_talk?.active ?? false);
+    if (!resumed) return;
+    _chat.setVisible(!_covered || listening);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final covered = !TickerMode.valuesOf(context).enabled;
+    if (covered != _covered) {
+      _covered = covered;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncPolling());
+    }
     final readAloud = _readAloud;
     // The chat on screen holds the speaker; a chat opened on top takes it
     // (this one then finishes its sentence and keeps quiet), and it comes
@@ -521,7 +543,11 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (state == AppLifecycleState.resumed ||
         readAloud == null ||
         !(readAloud.enabled || talking)) {
-      _chat.setVisible(state == AppLifecycleState.resumed);
+      if (state == AppLifecycleState.resumed) {
+        _syncPolling();
+      } else {
+        _chat.setVisible(false);
+      }
       return;
     }
     // Read-aloud is on. Keep polling and reading while only the screen

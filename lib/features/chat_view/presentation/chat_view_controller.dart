@@ -127,6 +127,20 @@ class ChatViewController extends ChangeNotifier {
   static const _clockSkew = Duration(minutes: 10);
 
   Timer? _timer;
+
+  /// Polls in a row that brought nothing while the agent was not working.
+  /// A quiet chat polls less often: every [_pollInterval], then twice and
+  /// four times that after [_quietPollsPerStep] quiet polls each. Anything
+  /// new, a send, or the agent monitor seeing a change resets it (the
+  /// monitor's long-poll still wakes the chat at once).
+  int _quietPolls = 0;
+  static const _quietPollsPerStep = 10;
+
+  int get _quietFactor => _quietPolls >= 2 * _quietPollsPerStep
+      ? 4
+      : _quietPolls >= _quietPollsPerStep
+      ? 2
+      : 1;
   Future<void>? _inFlight;
   bool _pollAgain = false;
   bool _visible = false;
@@ -247,6 +261,7 @@ class ChatViewController extends ChangeNotifier {
       return;
     }
     _visible = visible;
+    _quietPolls = 0;
     _timer?.cancel();
     _timer = null;
     _timerInterval = null;
@@ -265,7 +280,7 @@ class ChatViewController extends ChangeNotifier {
     final interval =
         activity == ChatActivity.working || activity == ChatActivity.thinking
         ? _workingPollInterval
-        : _pollInterval;
+        : _pollInterval * _quietFactor;
     if (_timer != null && _timerInterval == interval) {
       return;
     }
@@ -329,6 +344,7 @@ class ChatViewController extends ChangeNotifier {
         }
         _error = null;
         _loading = false;
+        _quietPolls = changed ? 0 : _quietPolls + 1;
         _retime();
         // A poll that brought nothing (most of them) rebuilds nothing.
         if (changed) notifyListeners();
@@ -441,6 +457,7 @@ class ChatViewController extends ChangeNotifier {
   );
 
   Future<void> _queue(_Outgoing outgoing) {
+    _quietPolls = 0;
     _outgoing.add(outgoing);
     notifyListeners();
     final done = Completer<void>();
@@ -551,6 +568,7 @@ class ChatViewController extends ChangeNotifier {
 
   /// Types [text] without a bubble (a partial prompt, a menu key).
   Future<void> _type(String text, {required bool enter}) async {
+    _quietPolls = 0;
     _sending = true;
     notifyListeners();
     try {
@@ -651,6 +669,7 @@ class ChatViewController extends ChangeNotifier {
 
   void _onAgentChanged() {
     if (_visible && !_disposed) {
+      _quietPolls = 0;
       unawaited(refresh());
     }
   }

@@ -6,6 +6,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -260,5 +261,51 @@ void main() {
     await pumpEventQueue();
     expect(runner.commands, hasLength(2));
     controller.setVisible(false);
+  });
+
+  test('a quiet chat polls less often; anything new returns to the pace, '
+      'and quiet polls notify no one', () {
+    fakeAsync((async) {
+      final runner = ScriptedAgentCommandRunner([
+        ok(page([userLine('u1', 'hi')], offset: 50)),
+        ok(page([], offset: 50)),
+      ]);
+      final controller = ChatViewController(
+        runner: runner,
+        sessionId: 's-1',
+        pollInterval: const Duration(seconds: 1),
+      );
+      var notifies = 0;
+      controller
+        ..addListener(() => notifies += 1)
+        ..setVisible(true);
+      async.elapse(const Duration(seconds: 1));
+      notifies = 0;
+      final start = runner.commands.length;
+      // 10 polls at 1 s, 10 at 2 s, then every 4 s.
+      async.elapse(const Duration(seconds: 60));
+      final polls = runner.commands.length - start;
+      expect(polls, inInclusiveRange(22, 27));
+      expect(notifies, 0);
+
+      // The monitor saw a change: back to every second.
+      final changes = ChangeNotifier();
+      final watched = ChatViewController(
+        runner: runner,
+        sessionId: 's-1',
+        agentChanges: changes,
+        pollInterval: const Duration(seconds: 1),
+      )..setVisible(true);
+      async.elapse(const Duration(seconds: 60));
+      changes.notifyListeners();
+      async.flushMicrotasks();
+      final after = runner.commands.length;
+      async.elapse(const Duration(seconds: 5));
+      // The timer keeps its 4 s pace until the next poll retimes it; from
+      // then on it is every second again.
+      expect(runner.commands.length - after, greaterThanOrEqualTo(2));
+      controller.dispose();
+      watched.dispose();
+    });
   });
 }
