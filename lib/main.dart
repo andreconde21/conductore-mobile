@@ -86,7 +86,15 @@ import 'package:conduit/features/this_computer/presentation/self_machine_watcher
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
+import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
+import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
+import 'package:conduit/features/voice_guide/data/companion_guide_brain.dart';
+import 'package:conduit/features/voice_guide/data/guide_wake_channel.dart';
+import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
+import 'package:conduit/features/voice_guide/presentation/guide_controller.dart';
+import 'package:conduit/features/voice_guide/presentation/guide_overlay.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -351,6 +359,69 @@ void main() {
   sessionViews.fallbackHostOf = hostsController.fallbackHostIdFor;
   loadSessionViews(sessionViews);
 
+  // The voice guide (CON-007): hands-free commands from the Guide button,
+  // its quick-settings tile or the headset. Its own mic and speaker share
+  // the platform recognizer and voice with the chats (one listens at a
+  // time).
+  final navigatorKey = GlobalKey<NavigatorState>();
+  // One recognizer and one voice for the whole app (see VoiceServices).
+  final voice = VoiceServices.platform();
+  GuideController? guide;
+  final guideRecognizer = voice.recognizer;
+  final guideTts = voice.tts;
+  if (guideRecognizer != null && guideTts != null) {
+    String guideLanguage() {
+      final own = themeController.voice.guide.language;
+      return own.isNotEmpty ? own : themeController.speechLanguage;
+    }
+
+    final guideNavigator = AppGuideNavigator(
+      navigatorKey: navigatorKey,
+      workspace: workspaceController,
+      attention: agentAttention,
+      hosts: hostsController,
+      connectFlow: connectFlow,
+      sessionViews: sessionViews,
+    );
+    guide = GuideController(
+      dictation: DictationController(guideRecognizer, language: guideLanguage),
+      speaker: ReadAloudController(
+        tts: guideTts,
+        preferences: () {
+          final voice = themeController.voice;
+          final own = voice.guide.language;
+          // A guide language of its own speaks with that language's
+          // best voice, not the chats' voice.
+          return own.isEmpty
+              ? voice
+              : voice.copyWith(ttsLanguage: own, ttsVoice: '');
+        },
+        dictationLanguage: () => themeController.speechLanguage,
+      ),
+      world: () => buildGuideWorld(
+        attention: agentAttention,
+        hosts: hostsController,
+        screen: guideNavigator.screen,
+      ),
+      approvals: attentionApprovalActions(agentAttention),
+      navigator: guideNavigator,
+      messenger: AttentionGuideMessenger(agentAttention),
+      preferences: () => themeController.voice.guide,
+      speechLanguage: () => themeController.speechLanguage,
+      brain: CompanionGuideBrain(
+        candidates: () => guideBrainCandidates(
+          attention: agentAttention,
+          hosts: hostsController,
+          preferredHostId: themeController.voice.guide.brainHostId,
+        ),
+        runnerFor: agentAttention.runnerFor,
+      ),
+      usage: (code) => guideUsageText(usage.summary, code),
+      accounts: UsageGuideAccounts(usage),
+      locked: () => !lockController.isUnlocked,
+    );
+  }
+
   // Settings from any route (the terminal's ⋮ menu): the same services
   // the home page's gear passes.
   final settingsServices = SettingsServices(
@@ -401,6 +472,10 @@ void main() {
                   sessionRestore: sessionRestore,
                   localDataChanges: localDataChanges,
                   hostChannels: hostChannels,
+                  navigatorKey: navigatorKey,
+                  voice: voice,
+                  guide: guide,
+                  guideWake: guide == null ? null : GuideWakeChannel(),
                 ),
               ),
             ),
@@ -431,6 +506,10 @@ class ConduitApp extends StatefulWidget {
     this.sessionRestore,
     this.localDataChanges,
     this.hostChannels,
+    this.navigatorKey,
+    this.voice,
+    this.guide,
+    this.guideWake,
     super.key,
   });
 
@@ -460,6 +539,19 @@ class ConduitApp extends StatefulWidget {
   /// means SSH only.
   final HostChannels? hostChannels;
 
+  /// The app's navigator, for the voice guide to move around.
+  final GlobalKey<NavigatorState>? navigatorKey;
+
+  /// The app's one recognizer and voice; null lets each page make its
+  /// own (tests).
+  final VoiceServices? voice;
+
+  /// The voice guide; null on platforms without speech.
+  final GuideController? guide;
+
+  /// The headset-button wake for [guide].
+  final GuideWakeChannel? guideWake;
+
   @override
   State<ConduitApp> createState() => _ConduitAppState();
 }
@@ -480,6 +572,26 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     widget.lockController.addListener(_syncShareTargetGate);
     _syncTerminalPreferences();
     _syncShareTargetGate();
+    final guide = widget.guide;
+    if (guide != null) {
+      widget.guideWake?.setListener(guide.start);
+      widget.themeController.addListener(_syncGuideWake);
+      widget.lockController.addListener(_stopGuideWhenLocked);
+      _syncGuideWake();
+    }
+  }
+
+  // Locking closes every session: the guide stops with them.
+  void _stopGuideWhenLocked() {
+    if (!widget.lockController.isUnlocked) widget.guide?.stop();
+  }
+
+  // "Wake with headset button" follows the guide's settings.
+  void _syncGuideWake() {
+    final prefs = widget.themeController.voice.guide;
+    unawaited(
+      widget.guideWake?.setHeadsetWake(prefs.enabled && prefs.headsetWake),
+    );
   }
 
   // Shares wait behind the lock screen instead of opening pickers over it.
@@ -571,6 +683,9 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     widget.workspaceController.removeListener(_syncBackgroundKeepalive);
     widget.themeController.removeListener(_syncTerminalPreferences);
     widget.lockController.removeListener(_syncShareTargetGate);
+    widget.themeController.removeListener(_syncGuideWake);
+    widget.lockController.removeListener(_stopGuideWhenLocked);
+    widget.guideWake?.setListener(null);
     if (PlatformFeatures.backgroundKeepalive) {
       unawaited(_backgroundKeepalive.stop().catchError((_) {}));
     }
@@ -652,7 +767,8 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       listenable: widget.themeController,
       builder: (context, _) {
         _updateThemes(widget.themeController.palette);
-        return MaterialApp(
+        final app = MaterialApp(
+          navigatorKey: widget.navigatorKey,
           title: 'Conductore',
           debugShowCheckedModeBanner: false,
           theme: _lightTheme,
@@ -671,6 +787,8 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   AndroidThreeButtonNavigationBackground(
                     color: Theme.of(context).scaffoldBackgroundColor,
                   ),
+                  if (widget.guide case final guide?)
+                    GuideOverlay(controller: guide),
                 ],
               ),
             );
@@ -724,6 +842,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   agentAttention: widget.agentAttention,
                   workspace: widget.workspaceController,
                   connectFlow: widget.connectFlow,
+                  onGuide: widget.guide?.start,
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
                     agentAttention: widget.agentAttention,
@@ -738,6 +857,16 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
             },
           ),
         );
+        // The Guide button (home) and Talk's long press find the guide
+        // here.
+        final guide = widget.guide;
+        final voice = widget.voice;
+        final guided = guide == null
+            ? app
+            : GuideScope(controller: guide, child: app);
+        return voice == null
+            ? guided
+            : VoiceServicesScope(services: voice, child: guided);
       },
     );
   }

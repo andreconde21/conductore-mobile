@@ -96,6 +96,34 @@
         </service>
         <!-- End agent status widget/tile -->
 
+        <!-- Voice guide (CON-007): its quick-settings tile, and the headset's
+             voice-assistant button while "Wake with headset button" is on
+             (GuideWakeBridge enables the alias). -->
+        <service
+            android:name=".GuideTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_guide_tile"
+            android:label="@string/guide_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
+        <activity-alias
+            android:name=".GuideVoiceCommand"
+            android:targetActivity=".MainActivity"
+            android:label="@string/guide_voice_command_label"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- Allow / Deny / Always buttons on permission notifications (feat/host-approvals) -->
         <receiver
             android:name=".AgentPermissionActionReceiver"

@@ -476,6 +476,7 @@ Future<void> openChatView({
   final over = topRouteOf(navigator);
   await navigator.push(
     MaterialPageRoute<void>(
+      settings: chatRouteSettings(hostId: host.id, agentId: agent.id),
       builder: (routeContext) => ChatViewPage(
         controller: controller,
         hostName: host.name,

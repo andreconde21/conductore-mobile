@@ -179,12 +179,13 @@ function buildPrompt (text, maxWords) {
 const NOT_LOGGED_IN = /not logged in|please run \/login|invalid api key|oauth token (has )?(expired|revoked)|authentication[_ ]error|\/login\b/i
 
 // Runs claude with the prompt on stdin. Resolves
-// { code, signal, stdout, stderr, timedOut, spawnError }.
-function runClaude (bin, prompt, { maxWords, timeoutMs, env, onChild }) {
+// { code, signal, stdout, stderr, timedOut, spawnError }. `args` defaults to
+// the summary's own (the guide passes its own fixed ones).
+function runClaude (bin, prompt, { maxWords, args, timeoutMs, env, onChild }) {
   return new Promise(resolve => {
     let child
     try {
-      child = spawn(bin, claudeArgs(maxWords), {
+      child = spawn(bin, args || claudeArgs(maxWords), {
         cwd: os.homedir(),
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -389,6 +390,10 @@ module.exports = {
   words,
   readInput,
   findClaude,
+  runClaude,
+  acquireLock,
+  modelFrom,
+  NOT_LOGGED_IN,
   claudeArgs,
   systemPrompt,
   buildPrompt,

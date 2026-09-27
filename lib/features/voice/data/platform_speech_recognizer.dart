@@ -46,12 +46,22 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
 
   @override
   Stream<SpeechEvent> get events {
-    return _events ??= _eventChannel
-        .receiveBroadcastStream()
-        .map(SpeechEvent.fromMap)
-        .where((event) => event != null)
-        .cast<SpeechEvent>();
+    return _events ??= _shared.putIfAbsent(
+      _eventChannel,
+      () => _eventChannel
+          .receiveBroadcastStream()
+          .map(SpeechEvent.fromMap)
+          .where((event) => event != null)
+          .cast<SpeechEvent>(),
+    );
   }
+
+  /// One stream per event channel for every instance: a platform event
+  /// channel has a single Dart handler, so a second
+  /// `receiveBroadcastStream` would take the events from the first
+  /// listener, and cancelling either would silence both (a chat's own
+  /// voice and the voice guide share the platform side).
+  static final Map<EventChannel, Stream<SpeechEvent>> _shared = {};
 
   Future<bool> _bool(String method) async {
     try {

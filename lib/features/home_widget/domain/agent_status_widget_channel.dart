@@ -4,6 +4,10 @@ import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 enum AgentStatusLaunchTarget {
   /// Open the agent attention sheet.
   agents,
+
+  /// Start the voice guide (its quick-settings tile, the headset's
+  /// voice-assistant button).
+  guide,
 }
 
 /// Outcome of asking the system to add the quick-settings tile.

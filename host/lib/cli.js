@@ -21,6 +21,7 @@ const spoolMod = lazy('./spool')
 const portsMod = lazy('./ports')
 const usageMod = lazy('./usage')
 const summarizeMod = lazy('./summarize')
+const guideMod = lazy('./guide')
 const cswapMod = lazy('./cswap')
 const rulesMod = lazy('./rules')
 const riskMod = lazy('./risk')
@@ -69,6 +70,9 @@ const USAGE = `usage: conductore-hostd <command>
   summarize [--max-words 45] [--timeout-ms 20000]
                                   a spoken one- or two-sentence summary of
                                   the reply on stdin (claude -p, no tools)
+  guide [--timeout-ms 15000]      the voice guide: one action for the
+                                  {utterance, context} JSON on stdin
+                                  (claude -p, no tools)
   statusline [--chain '<cmd>']    legacy Node statusLine command (install
                                   now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
@@ -510,6 +514,42 @@ async function summarizeCmd (args) {
   }
 }
 
+// Always exits 0 with one JSON line: {action} or {error, message}.
+async function guideCmd (args) {
+  const gm = guideMod()
+  const sm = summarizeMod()
+  const { flags } = parseFlags(args)
+  let timeoutMs = gm.DEFAULT_TIMEOUT_MS
+  const n = optNumber(flags, 'timeout-ms')
+  if (n !== undefined) {
+    if (Number.isNaN(n) || n < 1000 || n > 120000) return out({ schema: gm.SCHEMA, error: 'failed', message: '--timeout-ms must be between 1000 and 120000' })
+    timeoutMs = n
+  }
+  // Background work: never compete with the agents (claude inherits it).
+  try { os.setPriority(0, 10) } catch {}
+  let child = null
+  const onSignal = () => {
+    if (child) sm.killGroup(child, 'SIGKILL')
+    process.exit(1)
+  }
+  for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(sig, onSignal)
+  try {
+    paths.ensureDirs()
+    const { text, truncated } = await sm.readInput(process.stdin, timeoutMs)
+    if (truncated) return out({ schema: gm.SCHEMA, error: 'failed', message: `stdin is larger than ${gm.MAX_INPUT_BYTES} bytes` })
+    return out(await gm.guide({
+      input: text,
+      timeoutMs,
+      lockFile: path.join(paths.homeDir(), 'guide.lock'),
+      onChild: c => { child = c }
+    }))
+  } catch (err) {
+    return out({ schema: gm.SCHEMA, error: 'failed', message: String(err.message).slice(0, 200) })
+  } finally {
+    for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal)
+  }
+}
+
 async function portsCmd (args) {
   const { flags } = parseFlags(args)
   const since = optNumber(flags, 'since')
@@ -742,6 +782,7 @@ async function main (argv) {
     case 'ports': return portsCmd(args)
     case 'usage': return usageCmd(args)
     case 'summarize': return summarizeCmd(args)
+    case 'guide': return guideCmd(args)
     case 'cswap-switch': return cswapSwitchCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()

@@ -295,6 +295,11 @@ class DictationController extends ChangeNotifier {
         _restarting ? Duration.zero : _finishTimeout,
         _complete,
       );
+    } else {
+      // A recognizer that never sends its result must not leave the mic
+      // "finishing" for good: keep what was heard.
+      _finishTimer?.cancel();
+      _finishTimer = Timer(_finishTimeout, _complete);
     }
     try {
       await _recognizer.stop();

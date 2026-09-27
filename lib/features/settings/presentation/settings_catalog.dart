@@ -96,6 +96,8 @@ bool _omarchy(SettingsServices s) => s.theme.omarchySync != null;
 bool _speech(SettingsServices _) =>
     PlatformFeatures.dictation || PlatformFeatures.textToSpeech;
 bool _tts(SettingsServices _) => PlatformFeatures.textToSpeech;
+bool _guide(SettingsServices _) =>
+    PlatformFeatures.dictation && PlatformFeatures.textToSpeech;
 bool _beeps(SettingsServices _) => PlatformFeatures.muteRestartBeeps;
 bool _homeWidget(SettingsServices _) => PlatformFeatures.homeWidget;
 bool _backup(SettingsServices s) => s.backupService != null;
@@ -284,6 +286,36 @@ const List<SettingsEntry> settingsCatalog = [
     'Talk: send after a pause of',
     keywords: ['talk', 'voice mode', 'hands-free'],
     availableWhen: _tts,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Voice guide',
+    keywords: ['guide', 'hands-free', 'driving', 'talk to the fleet', 'voice'],
+    availableWhen: _guide,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Brain machine',
+    keywords: ['guide', 'claude', 'haiku'],
+    availableWhen: _guide,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Say yes before acting',
+    keywords: ['guide', 'confirm', 'approve', 'low risk'],
+    availableWhen: _guide,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Guide language',
+    keywords: ['guide', 'portuguese', 'english'],
+    availableWhen: _guide,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Wake with headset button',
+    keywords: ['guide', 'headset', 'bluetooth', 'media button', 'driving'],
+    availableWhen: _guide,
   ),
   // Agents
   SettingsEntry(
