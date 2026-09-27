@@ -370,6 +370,14 @@ class HomeBoardController extends ChangeNotifier {
   int _generation = 0;
   int _failures = 0;
   int _skipTicks = 0;
+
+  /// Polls in a row that found the board as it was. The longer a machine
+  /// stays quiet, the more ticks are skipped: 5 s, then 10, 15 and at most
+  /// 20 s between listings (a change, a refresh or coming back to the
+  /// page returns to 5 s).
+  int _quietPolls = 0;
+  static const _quietPollsPerStep = 3;
+  static const _maxQuietSkip = 3;
   HomeBoardState _state = const HomeBoardState();
 
   SavedHost? get host => _host;
@@ -422,6 +430,7 @@ class HomeBoardController extends ChangeNotifier {
     _connectedBefore = connectedBefore;
     _failures = 0;
     _skipTicks = 0;
+    _quietPolls = 0;
     _state = HomeBoardState(phase: _initialPhase());
     notifyListeners();
     _start();
@@ -447,6 +456,8 @@ class HomeBoardController extends ChangeNotifier {
     if (_disposed || visible == _visible) return;
     _visible = visible;
     if (visible) {
+      _quietPolls = 0;
+      _skipTicks = 0;
       _start();
     } else {
       _stopTimer();
@@ -470,6 +481,7 @@ class HomeBoardController extends ChangeNotifier {
     _requested = true;
     _failures = 0;
     _skipTicks = 0;
+    _quietPolls = 0;
     _start(force: true);
   }
 
@@ -479,6 +491,7 @@ class HomeBoardController extends ChangeNotifier {
     if (_disposed || !_listable || _needsRequest) return;
     _failures = 0;
     _skipTicks = 0;
+    _quietPolls = 0;
     if (_timer == null && _visible) {
       _startTimer();
     }
@@ -618,7 +631,8 @@ class HomeBoardController extends ChangeNotifier {
       if (_disposed || generation != _generation) return;
       _state = next;
       _failures = 0;
-      _skipTicks = 0;
+      _quietPolls = next.sameBoardAs(before) ? _quietPolls + 1 : 0;
+      _skipTicks = (_quietPolls ~/ _quietPollsPerStep).clamp(0, _maxQuietSkip);
       if (_nothingToPoll) {
         // No point polling a machine without tmux or Herdr; pull-to-refresh
         // or switching machines tries again.

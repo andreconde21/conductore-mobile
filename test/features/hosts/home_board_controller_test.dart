@@ -304,11 +304,54 @@ void main() {
       tmuxOnly
         ..tmuxExitCode = 127
         ..tmuxStderr = 'sh: 1: tmux: not found';
-      await tester.pump(const Duration(seconds: 6));
+      // Quiet for a while, the board lists every 10 s by now.
+      await tester.pump(const Duration(seconds: 11));
       expect(timed.state.tmux, HomeTmuxStatus.notInstalled);
       final stopped = polls();
       await tester.pump(const Duration(minutes: 1));
       expect(polls(), stopped);
+      timed.setVisible(false);
+    });
+
+    testWidgets('a quiet board stretches its polls to 20 s; a change, a '
+        'refresh or coming back returns to 5 s', (tester) async {
+      final quiet = HerdrFakeRunner.tmuxOnly();
+      final timed = HomeBoardController(runnerFactory: (_) => quiet);
+      addTearDown(timed.dispose);
+      timed
+        ..setVisible(true)
+        ..selectHost(connected('a'));
+      await tester.pump();
+      int polls() => quiet.commands
+          .where((c) => c.startsWith('tmux list-sessions'))
+          .length;
+      // Two minutes of the same listing: 5, 5, 5, 10, 10, 10, 15, … 20 s.
+      var start = polls();
+      await tester.pump(const Duration(minutes: 2));
+      final quietPolls = polls() - start;
+      expect(quietPolls, inInclusiveRange(7, 10));
+      start = polls();
+      await tester.pump(const Duration(minutes: 1));
+      expect(polls() - start, 3, reason: 'every 20 s once settled');
+
+      // A new session shows up: back to every 5 s.
+      quiet.tmuxSessions = '${TmuxFixtures.sessions}extra\t0\t1\t1790229700\n';
+      while (timed.state.tmuxSessions.length < 3) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      start = polls();
+      await tester.pump(const Duration(seconds: 10));
+      expect(polls() - start, 2, reason: 'every 5 s after a change');
+
+      // Leaving and coming back starts at 5 s too.
+      await tester.pump(const Duration(minutes: 2));
+      timed
+        ..setVisible(false)
+        ..setVisible(true);
+      await tester.pump();
+      start = polls();
+      await tester.pump(const Duration(seconds: 10));
+      expect(polls() - start, 2, reason: 'every 5 s after coming back');
       timed.setVisible(false);
     });
 
