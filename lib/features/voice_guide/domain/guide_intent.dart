@@ -138,6 +138,12 @@ class GuideUsage extends GuideIntent {
   const GuideUsage();
 }
 
+/// "Catch me up": the agents dashboard in a few sentences (counts, then
+/// who needs the user and who is stuck).
+class GuideCatchUp extends GuideIntent {
+  const GuideCatchUp();
+}
+
 class GuideHelp extends GuideIntent {
   const GuideHelp();
 }

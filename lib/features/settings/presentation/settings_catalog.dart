@@ -338,6 +338,12 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.agents,
+    'Dashboard',
+    keywords: ['digest', 'summaries', 'stuck', 'catch up', 'while away'],
+    availableWhen: _usage,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
     'Usage',
     keywords: ['context', 'rate limit', 'tokens'],
     availableWhen: _usage,

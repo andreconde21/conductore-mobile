@@ -78,6 +78,7 @@ class GuideController extends ChangeNotifier {
     required this.speechLanguage,
     this.brain,
     this.usage,
+    this.catchUp,
     this.accounts,
     this.locked,
     this.afterSpeechPause = const Duration(milliseconds: 400),
@@ -111,6 +112,9 @@ class GuideController extends ChangeNotifier {
   /// Null: only the phone's own phrases work.
   final GuideBrain? brain;
   final GuideUsageText? usage;
+
+  /// "Catch me up"; null says what is waiting instead.
+  final GuideCatchUpText? catchUp;
 
   /// Claude account switching; null (or not available) says so.
   final GuideAccounts? accounts;
@@ -472,6 +476,10 @@ class GuideController extends ChangeNotifier {
         return s.home;
       case GuideUsage():
         return usage?.call(s.code) ?? s.noUsage;
+      case GuideCatchUp():
+        final catchUp = this.catchUp;
+        if (catchUp == null) return s.waiting(now);
+        return catchUp(s.code);
       case GuideSay(:final text):
         return text;
       case GuideSwitchAccount(:final account):

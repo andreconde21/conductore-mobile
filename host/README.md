@@ -637,7 +637,8 @@ every case:
 ```
 
 * `action` is one of `open`, `chat`, `terminal`, `approve`, `deny`,
-  `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`;
+  `approveAllSafe`, `trust`, `send`, `read`, `usage`, `catchUp`, `home`,
+  `say`;
   `target` is an id from the context or empty, `text` the prompt for
   `send`, `minutes` (1–480) for `trust`, `speak` one short sentence to say.
 * The answer is checked here too: an action outside the list, an id the

@@ -14,6 +14,8 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
@@ -534,6 +536,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                           onSettings: _openSettings,
                           onSwitcher: () => unawaited(_openSwitcher()),
                           onGuide: _guideButton(context),
+                          onAgents: DigestScope.maybeOf(context) == null
+                              ? null
+                              : _openAgentsDashboard,
+                          agentsBadge: widget.agentAttention.attentionCount,
                           machine: _machineChip(),
                         ),
                       ),
@@ -664,6 +670,39 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         widget.workspaceController.activate(session);
         await _openTerminalWorkspace();
     }
+  }
+
+  /// The phone's agents dashboard (home bar button).
+  void _openAgentsDashboard() {
+    final digest = DigestScope.maybeOf(context);
+    if (digest == null) return;
+    unawaited(
+      showAgentsDashboard(
+        context,
+        controller: digest,
+        attention: widget.agentAttention,
+        onOpenChat: (host, agent) => unawaited(_openChatForAgent(host, agent)),
+        onOpenTerminal: (host, agent) =>
+            unawaited(_openAgentTerminal(host, agent)),
+      ),
+    );
+  }
+
+  /// The dashboard's Terminal button: the agent's own pane, in the
+  /// terminal (a new session when none is open there).
+  Future<void> _openAgentTerminal(SavedHost host, AgentInfo agent) async {
+    final flow = widget.connectFlow;
+    if (flow != null) {
+      await flow.openAgent(host, agent);
+    } else {
+      final session = widget.workspaceController.sessions
+          .where((session) => session.host.id == host.id)
+          .firstOrNull;
+      if (session != null) widget.workspaceController.activate(session);
+      unawaited(widget.agentAttention.focusAgent(host.id, agent));
+    }
+    if (!mounted || !widget.workspaceController.hasSessions) return;
+    await _openTerminalWorkspace();
   }
 
   /// The agents panel's and the dashboard's Chat buttons.

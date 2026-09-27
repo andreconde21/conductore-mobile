@@ -9,6 +9,8 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
@@ -1350,6 +1352,7 @@ class DesktopHomeState extends State<DesktopHome> {
         isDeciding: attention.isDeciding,
         onNewSession: () => unawaited(widget.actions.newSession()),
         usage: _usageView(context, dashboard: true),
+        agents: _agentsDigest(context),
         actions: [_agentsToggle(), _previewToggle()],
         // Crash reports and usage counts, once, like the phone's home.
         notice: const PrivacyNotice(),
@@ -1358,6 +1361,31 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   static final Listenable _never = ChangeNotifier();
+
+  /// The agents dashboard (companion `digest`) in the home's main column;
+  /// null without the app's digest controller.
+  Widget? _agentsDigest(BuildContext context) {
+    final digest = DigestScope.maybeOf(context);
+    if (digest == null) return null;
+    return AgentsDashboardView(
+      controller: digest,
+      attention: widget.agentAttention,
+      shrinkWrap: true,
+      inlineMenu: true,
+      padding: EdgeInsets.zero,
+      onOpenChat: (host, agent) =>
+          unawaited(widget.actions.openChat(host, agent)),
+      onOpenTerminal: (host, agent) {
+        final flow = widget.connectFlow;
+        if (flow != null) {
+          unawaited(flow.openAgent(host, agent));
+        } else {
+          unawaited(widget.agentAttention.focusAgent(host.id, agent));
+        }
+        _controller.showHome = false;
+      },
+    );
+  }
 
   /// Usage at a glance (companion `usage`): the app's usage controller in
   /// its compact layout; a tap opens the breakdown in the right panel.

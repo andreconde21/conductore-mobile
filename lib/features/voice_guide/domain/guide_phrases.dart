@@ -147,6 +147,15 @@ abstract final class GuidePhrases {
     r'(uso|consumo|limites?)|(o )?(meu )?(uso|consumo)|quanto (uso|consumo|falta)',
   );
 
+  static final _catchUp = _re(
+    r'catch me up|(give me a |a )?(quick )?(catch ?up|recap|rundown|briefing)|'
+    r'what (did i miss|have i missed|happened)( while i was away)?|'
+    r'(summari[sz]e|sum up)( the| my)? agents|brief me|'
+    r'(põe|poe|ponha|pões|poes)[- ]?me a par|(põe|poe)[- ]?me ao corrente|'
+    r'o que (é que )?(perdi|aconteceu)|faz(-me)? (um )?(resumo|ponto de situação|ponto da situação)|'
+    r'(dá|da)-me (um )?(resumo|ponto de situação)|resumo( dos agentes)?',
+  );
+
   static final _open = RegExp(
     r'^(?:open|show|show me|go to|switch to|take me to|jump to|bring up|'
     r'abre|abrir|abra|mostra|mostrar|mostra-me|vai para|ir para|vai ao|'
@@ -181,6 +190,7 @@ abstract final class GuidePhrases {
     if (_terminal.hasMatch(text)) return const GuideShowTerminal();
     if (_approveAllSafe.hasMatch(text)) return const GuideApproveAllSafe();
     if (_usage.hasMatch(text)) return const GuideUsage();
+    if (_catchUp.hasMatch(text)) return const GuideCatchUp();
     if (_approve.firstMatch(text) case final m?) {
       return GuideDecide(allow: true, target: _ref(m.group(1)));
     }
