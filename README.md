@@ -531,6 +531,39 @@ tools/build-release.sh [previous-release.apk]
 
 Release builds do not include the local Arch Linux shell's native binaries.
 
+### Local-shell rootfs mirror
+
+The on-device shell downloads its distribution archives from upstream's
+release, [gwitko/conduit-rootfs `rootfs-pd-v4.37.0`](https://github.com/gwitko/conduit-rootfs/releases/tag/rootfs-pd-v4.37.0).
+Each archive's sha256 is pinned in
+`lib/features/local_shell/local_shell_config.dart`, so any copy of the same
+files works. A build tries a primary source first and then a fallback, both
+set at build time:
+
+```sh
+flutter build apk --release --flavor full --split-per-abi \
+  --dart-define=ROOTFS_BASE_URL=https://github.com/andreconde21/conductore-mobile/releases/download/rootfs-pd-v4.37.0 \
+  --dart-define=ROOTFS_FALLBACK_BASE_URL=https://github.com/gwitko/conduit-rootfs/releases/download/rootfs-pd-v4.37.0
+```
+
+Both default to upstream, so a build without them behaves as before
+(`tools/build-release.sh` passes none). To
+mirror the archives to a release on andreconde21/conductore-mobile:
+
+```sh
+tag=rootfs-pd-v4.37.0
+mkdir rootfs-mirror && cd rootfs-mirror
+gh release download "$tag" --repo gwitko/conduit-rootfs --pattern '*-aarch64-pd-*.tar.xz'
+sha256sum *.tar.xz   # compare with the pins in local_shell_config.dart
+gh release create "$tag" --repo andreconde21/conductore-mobile \
+  --title "Local-shell rootfs ($tag)" --notes "Mirror of gwitko/conduit-rootfs $tag." \
+  --prerelease *.tar.xz
+```
+
+Keep the tag and the file names unchanged, because the app appends each file
+name to the base URL. Then pass the mirror's download URL as
+`ROOTFS_BASE_URL`.
+
 Tagged releases (`v*`) are built by GitHub Actions and go to Google Play
 internal testing, TestFlight and a GitHub prerelease with the APKs and the
 Linux, Windows and macOS bundles; see
