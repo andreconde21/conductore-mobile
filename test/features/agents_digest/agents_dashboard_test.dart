@@ -271,7 +271,7 @@ void main() {
       TargetPlatform.windows,
       TargetPlatform.macOS,
     });
-    final modifier = LogicalKeyboardKey.controlLeft;
+    const modifier = LogicalKeyboardKey.controlLeft;
     LogicalKeyboardKey sendModifier() =>
         defaultTargetPlatform == TargetPlatform.macOS
         ? LogicalKeyboardKey.metaLeft
