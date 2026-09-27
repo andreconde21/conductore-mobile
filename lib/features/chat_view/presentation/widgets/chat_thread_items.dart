@@ -7,8 +7,8 @@ import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_markdown.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_search_highlight.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 const _mono = 'monospace';
 
@@ -57,28 +57,25 @@ class ChatOutgoingBubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              GestureDetector(
-                onLongPress: () => _copy(context, item.text),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 9,
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer.withValues(alpha: 0.5),
+                  border: failed ? Border.all(color: scheme.error) : null,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(AppTheme.radius),
+                    topRight: Radius.circular(AppTheme.radius),
+                    bottomLeft: Radius.circular(AppTheme.radius),
+                    bottomRight: Radius.circular(4),
                   ),
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer.withValues(alpha: 0.5),
-                    border: failed ? Border.all(color: scheme.error) : null,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(AppTheme.radius),
-                      topRight: Radius.circular(AppTheme.radius),
-                      bottomLeft: Radius.circular(AppTheme.radius),
-                      bottomRight: Radius.circular(4),
-                    ),
-                  ),
-                  child: Text(
-                    item.answer ? 'Answer: ${item.text}' : item.text,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
-                    ),
+                ),
+                child: Text(
+                  item.answer ? 'Answer: ${item.text}' : item.text,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
                   ),
                 ),
               ),
@@ -145,8 +142,10 @@ class ChatUserBubble extends StatelessWidget {
             key: const ValueKey('slash-command-chip'),
             visualDensity: VisualDensity.compact,
             avatar: const Icon(Icons.keyboard_command_key_rounded, size: 16),
-            label: Text(
+            label: ChatHighlightedText(
               item.text,
+              itemId: item.id,
+              segment: 0,
               style: theme.textTheme.bodySmall?.copyWith(fontFamily: _mono),
             ),
           ),
@@ -159,43 +158,39 @@ class ChatUserBubble extends StatelessWidget {
         constraints: BoxConstraints(
           maxWidth: MediaQuery.sizeOf(context).width * 0.85,
         ),
-        child: GestureDetector(
-          onLongPress: () => _copy(context, item.text),
-          child: Container(
-            margin: const EdgeInsets.only(left: 40, top: 6, bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(AppTheme.radius),
-                topRight: Radius.circular(AppTheme.radius),
-                bottomLeft: Radius.circular(AppTheme.radius),
-                bottomRight: Radius.circular(4),
-              ),
+        child: Container(
+          margin: const EdgeInsets.only(left: 40, top: 6, bottom: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(AppTheme.radius),
+              topRight: Radius.circular(AppTheme.radius),
+              bottomLeft: Radius.circular(AppTheme.radius),
+              bottomRight: Radius.circular(4),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (item.text.isNotEmpty)
-                  Text(
-                    item.text,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onPrimaryContainer,
-                      fontFamily: item.isCommand ? _mono : null,
-                    ),
-                  ),
-                for (final block in item.pasted)
-                  ChatPastedBlock(
-                    text: block,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (item.text.isNotEmpty)
+                ChatHighlightedText(
+                  item.text,
+                  itemId: item.id,
+                  segment: 0,
+                  style: theme.textTheme.bodyMedium?.copyWith(
                     color: scheme.onPrimaryContainer,
+                    fontFamily: item.isCommand ? _mono : null,
                   ),
-                if (item.imageCount > 0) ...[
-                  const SizedBox(height: 6),
-                  _ImageChip(count: item.imageCount),
-                ],
+                ),
+              for (final block in item.pasted)
+                ChatPastedBlock(text: block, color: scheme.onPrimaryContainer),
+              if (item.imageCount > 0) ...[
+                const SizedBox(height: 6),
+                _ImageChip(count: item.imageCount),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -212,21 +207,18 @@ class ChatAssistantBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return GestureDetector(
-      onLongPress: () => _copy(context, item.text),
-      child: Padding(
-        padding: const EdgeInsets.only(top: 6, bottom: 6, right: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ChatMarkdown(item.text, style: theme.textTheme.bodyMedium),
-            if (item.truncated)
-              Text(
-                'Message shortened; the full text is in the terminal.',
-                style: theme.textTheme.bodySmall,
-              ),
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 6, right: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ChatMarkdown(item.text, style: theme.textTheme.bodyMedium),
+          if (item.truncated)
+            Text(
+              'Message shortened; the full text is in the terminal.',
+              style: theme.textTheme.bodySmall,
+            ),
+        ],
       ),
     );
   }
@@ -296,8 +288,10 @@ class ChatNoticeRow extends StatelessWidget {
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 6),
           Flexible(
-            child: Text(
+            child: ChatHighlightedText(
               item.text,
+              itemId: item.id,
+              segment: 0,
               style: theme.textTheme.bodySmall?.copyWith(color: color),
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
@@ -343,6 +337,9 @@ class _ChatToolCardState extends State<ChatToolCard> {
     final item = widget.item;
     final summary = ChatToolSummary.of(item);
     final failed = item.failed;
+    // Open while the find bar has a match here, to show it.
+    final expanded =
+        _expanded || ChatSearchHighlight.forItem(context, item.id) != null;
     final border = failed ? scheme.error : scheme.outlineVariant;
     final exit = summary.exitCode;
     final status = item.running
@@ -389,9 +386,11 @@ class _ChatToolCardState extends State<ChatToolCard> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
+                      child: ChatHighlightedText(
                         summary.subject,
-                        maxLines: _expanded ? 6 : 1,
+                        itemId: item.id,
+                        segment: 0,
+                        maxLines: expanded ? 6 : 1,
                         overflow: TextOverflow.ellipsis,
                         style: small?.copyWith(fontFamily: _mono),
                       ),
@@ -432,27 +431,32 @@ class _ChatToolCardState extends State<ChatToolCard> {
                       style: small,
                     ),
                   ),
-                if (summary.diff.isNotEmpty && _expanded)
+                if (summary.diff.isNotEmpty && expanded)
                   _DiffPreview(lines: summary.diff),
                 if (summary.resultPreview case final preview?)
-                  if (_expanded || failed || item.kind == ChatToolKind.bash)
+                  if (expanded || failed || item.kind == ChatToolKind.bash)
                     _Output(
-                      text: _expanded
+                      text: expanded
                           ? (item.result?.content ?? preview)
                           : preview,
                       error: failed,
-                      maxLines: _expanded ? null : 6,
+                      maxLines: expanded ? null : 6,
+                      itemId: expanded && item.result != null ? item.id : null,
                     ),
-                if (_expanded && item.kind == ChatToolKind.task)
+                if (expanded && item.kind == ChatToolKind.task)
                   for (final child in item.children)
                     Padding(
                       padding: const EdgeInsets.only(left: 12),
                       child: ChatToolCard(item: child),
                     ),
-                if (item.result case final result? when _expanded) ...[
+                if (item.result case final result? when expanded) ...[
                   if (summary.resultPreview == null &&
                       result.content.trim().isNotEmpty)
-                    _Output(text: result.content, error: failed),
+                    _Output(
+                      text: result.content,
+                      error: failed,
+                      itemId: item.id,
+                    ),
                   if (result.images > 0) _ImageChip(count: result.images),
                   if (result.truncated)
                     Text(
@@ -460,7 +464,7 @@ class _ChatToolCardState extends State<ChatToolCard> {
                       style: small,
                     ),
                 ],
-                if (_expanded && item.inputTruncated)
+                if (expanded && item.inputTruncated)
                   Text('Input shortened by the host.', style: small),
               ],
             ),
@@ -511,11 +515,19 @@ class _DiffPreview extends StatelessWidget {
 }
 
 class _Output extends StatelessWidget {
-  const _Output({required this.text, required this.error, this.maxLines});
+  const _Output({
+    required this.text,
+    required this.error,
+    this.maxLines,
+    this.itemId,
+  });
 
   final String text;
   final bool error;
   final int? maxLines;
+
+  /// Set when [text] is the call's full result (search run 1 of its row).
+  final String? itemId;
 
   @override
   Widget build(BuildContext context) {
@@ -529,8 +541,10 @@ class _Output extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: SingleChildScrollView(
-        child: Text(
+        child: ChatHighlightedText(
           text,
+          itemId: itemId ?? '',
+          segment: 1,
           maxLines: maxLines,
           overflow: maxLines == null ? null : TextOverflow.ellipsis,
           style: theme.textTheme.bodySmall?.copyWith(
@@ -579,7 +593,7 @@ class ChatTodoCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final todo in item.todos)
+          for (final (index, todo) in item.todos.indexed)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
@@ -600,8 +614,10 @@ class ChatTodoCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
+                    child: ChatHighlightedText(
                       todo.content,
+                      itemId: item.id,
+                      segment: index,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         decoration: todo.status == ChatTodoStatus.completed
                             ? TextDecoration.lineThrough
@@ -997,11 +1013,4 @@ class _CardShell extends StatelessWidget {
       ),
     );
   }
-}
-
-void _copy(BuildContext context, String text) {
-  Clipboard.setData(ClipboardData(text: text));
-  ScaffoldMessenger.maybeOf(context)
-    ?..hideCurrentSnackBar()
-    ..showSnackBar(const SnackBar(content: Text('Copied')));
 }

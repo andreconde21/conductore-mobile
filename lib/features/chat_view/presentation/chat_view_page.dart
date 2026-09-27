@@ -9,10 +9,13 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
+import 'package:conduit/features/chat_view/data/platform_text_share.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_working.dart';
+import 'package:conduit/features/chat_view/presentation/chat_forward.dart';
+import 'package:conduit/features/chat_view/presentation/chat_thread_extras.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
@@ -58,6 +61,9 @@ class ChatViewPage extends StatefulWidget {
     this.clipboardHasImage = PlatformPromptImageSource.clipboardHasImage,
     this.attention,
     this.hostId,
+    this.forwardTargets,
+    this.onForward,
+    this.share = PlatformTextShare.share,
     super.key,
   });
 
@@ -115,13 +121,29 @@ class ChatViewPage extends StatefulWidget {
   final AgentAttentionController? attention;
   final String? hostId;
 
+  /// Where a message can be sent ("Send to another agent"), and how;
+  /// default: the other live sessions [attention] knows, opened in their
+  /// own chat with the message sent there.
+  final List<ChatForwardTarget> Function()? forwardTargets;
+  final ChatForward? onForward;
+
+  /// A message's "Share": the system share sheet (tests inject one).
+  final Future<bool> Function(String text) share;
+
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
 }
 
 class _ChatViewPageState extends State<ChatViewPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, ChatThreadExtras {
   final _scroll = ScrollController();
+
+  @override
+  TextEditingController get composerText => _composerText;
+
+  @override
+  ScrollController get threadScroll => _scroll;
+
   bool _monitoringTurnedOn = false;
 
   Future<void> _enableMonitoring() async {
@@ -691,11 +713,13 @@ class _ChatViewPageState extends State<ChatViewPage>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => wrapShortcuts(_page(context));
+
+  Widget _page(BuildContext context) {
     final theme = Theme.of(context);
     return ListenableBuilder(
       // Settings too: Tool activity and the read-aloud length show here.
-      listenable: Listenable.merge([_chat, ?_settings]),
+      listenable: Listenable.merge([_chat, ?_settings, search]),
       builder: (context, _) {
         final activity = _chat.activity;
         final working = _working;
@@ -739,6 +763,7 @@ class _ChatViewPageState extends State<ChatViewPage>
               ],
             ),
             actions: [
+              searchButton(),
               if (_talk case final talk?)
                 ListenableBuilder(
                   listenable: talk,
@@ -784,6 +809,7 @@ class _ChatViewPageState extends State<ChatViewPage>
             top: false,
             child: Column(
               children: [
+                ?findBar(),
                 if (_chat.error case final error?)
                   MaterialBanner(
                     content: Text(error, maxLines: 3),
@@ -845,6 +871,7 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   Widget _composer(ChatActivity? activity) => ChatComposer(
     textController: _composerText,
+    focusNode: composerFocus,
     onTalk: _talk == null ? null : _startTalk,
     onGuide: GuideScope.maybeOf(context) == null ? null : _startGuide,
     enabled: _chat.canSend,
@@ -922,6 +949,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
     // What the user sent stays at the bottom until the transcript shows
     // it; while frozen above that entry, the bubble stands in for it.
+    searchThread(items, shownCount, _toolActivity);
     final shownIds = {for (final item in items.take(shownCount)) item.id};
     final outgoing = [
       for (final o in allOutgoing)
@@ -959,11 +987,13 @@ class _ChatViewPageState extends State<ChatViewPage>
           onTrust: _smartApprovals ? () => _trust(request) : null,
         ),
       for (final o in outgoing.reversed)
-        ChatOutgoingBubble(
-          key: ValueKey(o.id),
-          item: o,
-          onRetry: () => unawaited(_retry(o)),
-          onEdit: o.answer ? null : () => _edit(o),
+        decorateOutgoing(
+          o,
+          ChatOutgoingBubble(
+            item: o,
+            onRetry: () => unawaited(_retry(o)),
+            onEdit: o.answer ? null : () => _edit(o),
+          ),
         ),
       for (final entry in ChatToolActivity.arrange(
         items.sublist(0, shownCount),
@@ -978,7 +1008,7 @@ class _ChatViewPageState extends State<ChatViewPage>
           final ChatToolGroup group => ChatToolGroupRow(
             key: ValueKey(group.id),
             group: group,
-            expanded: _openGroups.contains(group.id),
+            expanded: _openGroups.contains(group.id) || searchOpens(group),
             onToggle: () => setState(() {
               if (!_openGroups.remove(group.id)) _openGroups.add(group.id);
             }),
@@ -1016,14 +1046,17 @@ class _ChatViewPageState extends State<ChatViewPage>
           text: 'No messages yet. Send a prompt to start.',
         ),
     ];
+    noteRows(rows);
     return Stack(
       children: [
-        ListView(
-          key: const ValueKey('chat-thread'),
-          controller: _scroll,
-          reverse: true,
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          children: rows,
+        wrapThread(
+          ListView(
+            key: const ValueKey('chat-thread'),
+            controller: _scroll,
+            reverse: true,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            children: rows,
+          ),
         ),
         if (held > 0)
           Positioned(
@@ -1057,7 +1090,7 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   Widget _row(ChatItem item, {required bool isLast, required bool waiting}) {
     final key = ValueKey(item.id);
-    return switch (item) {
+    return decorateRow(item, switch (item) {
       ChatUserMessage() => ChatUserBubble(key: key, item: item),
       ChatAgentMessage() => ChatAgentMessageCard(key: key, item: item),
       ChatTaskNotice() => ChatTaskNoticeRow(key: key, item: item),
@@ -1076,7 +1109,7 @@ class _ChatViewPageState extends State<ChatViewPage>
             : null,
       ),
       ChatNotice() => ChatNoticeRow(key: key, item: item),
-    };
+    });
   }
 }
 

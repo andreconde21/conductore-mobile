@@ -21,6 +21,7 @@ class ChatComposer extends StatefulWidget {
     this.onTalk,
     this.onGuide,
     this.textController,
+    this.focusNode,
     this.initialText = '',
     this.onPasteImage,
     this.clipboardHasImage,
@@ -54,6 +55,9 @@ class ChatComposer extends StatefulWidget {
   /// back here); otherwise the composer owns one.
   final TextEditingController? textController;
 
+  /// The field's focus, when the page moves it there ("Quote in reply").
+  final FocusNode? focusNode;
+
   /// Text the field starts with (e.g. an uploaded screenshot's path).
   final String initialText;
 
@@ -73,7 +77,7 @@ class ChatComposer extends StatefulWidget {
 class _ChatComposerState extends State<ChatComposer> {
   late final TextEditingController _controller =
       widget.textController ?? TextEditingController(text: widget.initialText);
-  final _focusNode = FocusNode();
+  late final _focusNode = widget.focusNode ?? FocusNode();
   AppLifecycleListener? _lifecycle;
   bool _clipboardHasImage = false;
 
@@ -90,7 +94,11 @@ class _ChatComposerState extends State<ChatComposer> {
   void dispose() {
     _lifecycle?.dispose();
     if (widget.textController == null) _controller.dispose();
-    _focusNode.dispose();
+    if (widget.focusNode == null) {
+      _focusNode.dispose();
+    } else {
+      _focusNode.removeListener(_onFocusChanged);
+    }
     super.dispose();
   }
 
