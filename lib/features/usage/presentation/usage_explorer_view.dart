@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -381,22 +383,22 @@ class _UsageExplorerViewState extends State<UsageExplorerView>
       return;
     }
     explorer.selectDay(day);
+    // A narrow pane on desktop (a split, a small window): the day opens as
+    // a dialog over the shell rather than a page covering it.
     unawaited(
-      Navigator.of(context)
-          .push(
-            MaterialPageRoute<void>(
-              builder: (context) => _UsageDayPage(
-                explorer: explorer,
-                usage: widget.usage,
-                onUpdateCompanion: widget.onUpdateCompanion,
-              ),
-            ),
-          )
-          .then((_) {
-            if (mounted) {
-              explorer.selectDay(null);
-            }
-          }),
+      pushAdaptivePage<void>(
+        context,
+        desktopMaxWidth: 720,
+        builder: (context) => _UsageDayPage(
+          explorer: explorer,
+          usage: widget.usage,
+          onUpdateCompanion: widget.onUpdateCompanion,
+        ),
+      ).then((_) {
+        if (mounted) {
+          explorer.selectDay(null);
+        }
+      }),
     );
   }
 
@@ -1379,7 +1381,7 @@ class _UsageDayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final page = Scaffold(
       key: const ValueKey('usage-day-page'),
       appBar: AppBar(title: const Text('Usage by day')),
       body: GestureDetector(
@@ -1407,6 +1409,18 @@ class _UsageDayPage extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (!PlatformFeatures.isDesktop) return page;
+    // Desktop: the arrow keys step the day like the swipe (Esc closes the
+    // page on its own).
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+            explorer.stepDay(-1),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            explorer.stepDay(1),
+      },
+      child: Focus(autofocus: true, child: page),
     );
   }
 }
