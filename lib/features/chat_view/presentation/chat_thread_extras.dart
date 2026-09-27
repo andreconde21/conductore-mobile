@@ -12,7 +12,6 @@ import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_find_bar.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_message_actions.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_search_highlight.dart';
-import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -176,18 +175,13 @@ mixin ChatThreadExtras on State<ChatViewPage> {
   bool searchOpens(ChatToolGroup group) =>
       search.active && group.items.any((item) => search.hasMatch(item.id));
 
-  /// Notes which row each item is in, so a match off screen can be
-  /// scrolled to.
-  void noteRows(List<Widget> rows) {
+  /// Notes which row each item is in ([rows]: the item ids of each row,
+  /// in list order), so a match off screen can be scrolled to.
+  void noteRows(List<List<String>> rows) {
     final rowOf = <String, int>{};
     for (var i = 0; i < rows.length; i++) {
-      switch (rows[i]) {
-        case _ChatAnchor(:final id):
-          rowOf[id] = i;
-        case ChatToolGroupRow(:final group):
-          for (final item in group.items) {
-            rowOf[item.id] = i;
-          }
+      for (final id in rows[i]) {
+        rowOf[id] = i;
       }
     }
     _rowOf = rowOf;

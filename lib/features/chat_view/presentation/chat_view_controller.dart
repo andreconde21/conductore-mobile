@@ -318,8 +318,10 @@ class ChatViewController extends ChangeNotifier {
         }
         final grew = page.entries.isNotEmpty || offset == null || page.reset;
         _offset = page.offset;
-        if (page.agent != null) {
-          _agent = page.agent;
+        var changed = grew || _error != null || _loading;
+        if (page.agent case final agent? when agent != _agent) {
+          _agent = agent;
+          changed = true;
         }
         if (grew) {
           _items = ChatItemBuilder.build(_entries);
@@ -328,7 +330,8 @@ class ChatViewController extends ChangeNotifier {
         _error = null;
         _loading = false;
         _retime();
-        notifyListeners();
+        // A poll that brought nothing (most of them) rebuilds nothing.
+        if (changed) notifyListeners();
         reads += 1;
         if (page.offset >= page.size ||
             page.offset == offset ||

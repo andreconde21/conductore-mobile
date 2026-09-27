@@ -149,6 +149,10 @@ void main() {
         'top': probe.top().replaceAll(' ', ','),
       });
       expect(chat.items.length, greaterThanOrEqualTo(2040));
+      // A minute of polls that bring nothing rebuilds only the header's
+      // clock: before, each poll rebuilt the page (about 650 widgets).
+      expect(idle.notifies, 0);
+      expect(idle.builds, lessThan(100));
     } finally {
       probe.uninstall();
     }
