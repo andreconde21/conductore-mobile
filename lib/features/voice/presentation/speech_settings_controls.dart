@@ -6,6 +6,7 @@ import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
 import 'package:conduit/features/voice/domain/speech_languages.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
+import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:flutter/material.dart';
 
 /// Settings → Speech: dictation (language, continuous listening and its
@@ -38,6 +39,7 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
     super.initState();
     _tts =
         widget.textToSpeech ??
+        VoiceServicesScope.maybeOf(context)?.tts ??
         (PlatformFeatures.textToSpeech ? PlatformTextToSpeech() : null);
   }
 

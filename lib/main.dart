@@ -82,10 +82,9 @@ import 'package:conduit/features/this_computer/presentation/self_machine_watcher
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
-import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
-import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
+import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:conduit/features/voice_guide/data/companion_guide_brain.dart';
 import 'package:conduit/features/voice_guide/data/guide_wake_channel.dart';
@@ -350,8 +349,12 @@ void main() {
   // the platform recognizer and voice with the chats (one listens at a
   // time).
   final navigatorKey = GlobalKey<NavigatorState>();
+  // One recognizer and one voice for the whole app (see VoiceServices).
+  final voice = VoiceServices.platform();
   GuideController? guide;
-  if (PlatformFeatures.dictation && PlatformFeatures.textToSpeech) {
+  final guideRecognizer = voice.recognizer;
+  final guideTts = voice.tts;
+  if (guideRecognizer != null && guideTts != null) {
     String guideLanguage() {
       final own = themeController.voice.guide.language;
       return own.isNotEmpty ? own : themeController.speechLanguage;
@@ -366,12 +369,9 @@ void main() {
       sessionViews: sessionViews,
     );
     guide = GuideController(
-      dictation: DictationController(
-        PlatformSpeechRecognizer(),
-        language: guideLanguage,
-      ),
+      dictation: DictationController(guideRecognizer, language: guideLanguage),
       speaker: ReadAloudController(
-        tts: PlatformTextToSpeech(),
+        tts: guideTts,
         preferences: () {
           final voice = themeController.voice;
           final own = voice.guide.language;
@@ -456,6 +456,7 @@ void main() {
                   localDataChanges: localDataChanges,
                   hostChannels: hostChannels,
                   navigatorKey: navigatorKey,
+                  voice: voice,
                   guide: guide,
                   guideWake: guide == null ? null : GuideWakeChannel(),
                 ),
@@ -489,6 +490,7 @@ class ConduitApp extends StatefulWidget {
     this.localDataChanges,
     this.hostChannels,
     this.navigatorKey,
+    this.voice,
     this.guide,
     this.guideWake,
     super.key,
@@ -522,6 +524,10 @@ class ConduitApp extends StatefulWidget {
 
   /// The app's navigator, for the voice guide to move around.
   final GlobalKey<NavigatorState>? navigatorKey;
+
+  /// The app's one recognizer and voice; null lets each page make its
+  /// own (tests).
+  final VoiceServices? voice;
 
   /// The voice guide; null on platforms without speech.
   final GuideController? guide;
@@ -815,7 +821,13 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
         // The Guide button (home) and Talk's long press find the guide
         // here.
         final guide = widget.guide;
-        return guide == null ? app : GuideScope(controller: guide, child: app);
+        final voice = widget.voice;
+        final guided = guide == null
+            ? app
+            : GuideScope(controller: guide, child: app);
+        return voice == null
+            ? guided
+            : VoiceServicesScope(services: voice, child: guided);
       },
     );
   }

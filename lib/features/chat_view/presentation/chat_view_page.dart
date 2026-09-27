@@ -28,6 +28,7 @@ import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
 import 'package:conduit/features/voice/presentation/talk_controller.dart';
+import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
 import 'package:flutter/material.dart';
@@ -160,6 +161,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (widget.dictation == null) {
       final recognizer =
           widget.speechRecognizer ??
+          VoiceServicesScope.maybeOf(context)?.recognizer ??
           (PlatformFeatures.dictation ? PlatformSpeechRecognizer() : null);
       if (recognizer != null) {
         _ownDictation = DictationController(
@@ -171,6 +173,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
     final tts =
         widget.textToSpeech ??
+        VoiceServicesScope.maybeOf(context)?.tts ??
         (PlatformFeatures.textToSpeech ? PlatformTextToSpeech() : null);
     if (tts != null) {
       _readAloud = ReadAloudController(

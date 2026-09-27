@@ -105,6 +105,7 @@ import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -263,6 +264,7 @@ class _TerminalPageState extends State<TerminalPage>
     }
     final recognizer =
         widget.speechRecognizer ??
+        VoiceServicesScope.maybeOf(context)?.recognizer ??
         (defaultTargetPlatform == TargetPlatform.android
             ? PlatformSpeechRecognizer()
             : null);
