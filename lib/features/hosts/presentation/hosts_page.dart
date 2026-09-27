@@ -1866,16 +1866,13 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   Future<void> _openFiles(SavedHost host) async {
     await widget.hostsController.markConnected(host);
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SftpBrowserPage(
-          host: host,
-          repository: widget.sftpRepository,
-          fileExport: widget.fileExport,
-          themeController: widget.themeController,
-          bookmarksRepository: widget.sftpBookmarksRepository,
-        ),
-      ),
+    await openSftpBrowser(
+      context,
+      host: host,
+      repository: widget.sftpRepository,
+      fileExport: widget.fileExport,
+      themeController: widget.themeController,
+      bookmarksRepository: widget.sftpBookmarksRepository,
     );
   }
 
@@ -1906,11 +1903,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openForm([SavedHost? host]) async {
-    final savedHost = await Navigator.of(context).push<SavedHost>(
-      MaterialPageRoute(
-        builder: (_) =>
-            HostFormPage(host: host, themeController: widget.themeController),
-      ),
+    final savedHost = await openHostForm(
+      context,
+      host: host,
+      themeController: widget.themeController,
     );
     if (savedHost != null) {
       await widget.hostsController.upsert(savedHost);

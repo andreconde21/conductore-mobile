@@ -2369,6 +2369,7 @@ class _TerminalPageState extends State<TerminalPage>
       onOpenAgentPanel: _agentPanelOpener(),
       child: TerminalSurface(
         session: session,
+        onLinkOpen: (url) => unawaited(_openInBrowser(url)),
         autoConnect: widget.workspace.mayAutoConnect(session),
         palette: palette,
         brightness: brightness,
