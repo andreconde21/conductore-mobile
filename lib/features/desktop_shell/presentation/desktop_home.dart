@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/desktop_window.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
@@ -183,6 +184,7 @@ class DesktopHomeState extends State<DesktopHome> {
   );
 
   List<SidebarNode> _tree = const [];
+  final _panelFocus = FocusNode(debugLabel: 'shell-right-panel');
 
   /// The machine tree grouped by project (the Projects tab).
   List<ProjectGroup> _projects = const [];
@@ -300,6 +302,7 @@ class DesktopHomeState extends State<DesktopHome> {
     _shortcuts.detach();
     HardwareKeyboard.instance.removeHandler(_handleQuickActionKey);
     _projectFiles.dispose();
+    _panelFocus.dispose();
     widget.hostsController.removeListener(_rebuildTree);
     widget.workspace.removeListener(_handleWorkspaceChanged);
     widget.agentAttention.removeListener(_rebuildTree);
@@ -1437,6 +1440,8 @@ class DesktopHomeState extends State<DesktopHome> {
         if (needsYou.isNotEmpty) unawaited(open(needsYou.first));
       },
       footer: _sidebarFooter(compact: true),
+      onContextMenu: (node, position) =>
+          unawaited(showNodeMenu(node, position)),
     );
   }
 
@@ -1592,6 +1597,12 @@ class DesktopHomeState extends State<DesktopHome> {
                 palette: palette,
                 brightness: brightness,
                 onTap: () => unawaited(open(node)),
+                onLongPress: () => unawaited(
+                  showNodeMenu(
+                    node,
+                    AdaptiveModalPointer.recent ?? Offset.zero,
+                  ),
+                ),
               ),
               TmuxSessionTarget(:final session) => DormantTmuxTile(
                 key: ValueKey('dashboard-other-${node.key}'),
@@ -1599,6 +1610,12 @@ class DesktopHomeState extends State<DesktopHome> {
                 palette: palette,
                 brightness: brightness,
                 onTap: () => unawaited(open(node)),
+                onLongPress: () => unawaited(
+                  showNodeMenu(
+                    node,
+                    AdaptiveModalPointer.recent ?? Offset.zero,
+                  ),
+                ),
               ),
               _ => const SizedBox.shrink(),
             },
@@ -1785,68 +1802,89 @@ class DesktopHomeState extends State<DesktopHome> {
       ShellRightPanel.usage => 'Usage',
       ShellRightPanel.none => '',
     };
-    return Material(
-      key: ValueKey('shell-right-panel-${panel.name}'),
-      color: palette.panel,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            height: 40,
-            padding: const EdgeInsets.only(left: 14),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: palette.hairline)),
-            ),
-            child: Row(
+    // Esc in the panel closes it.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            _controller.rightPanel = ShellRightPanel.none,
+      },
+      child: Listener(
+        // A click in the panel gives it the keys (Esc), unless something
+        // inside takes them.
+        onPointerDown: (_) {
+          if (!_panelFocus.hasFocus) _panelFocus.requestFocus();
+        },
+        child: Focus(
+          focusNode: _panelFocus,
+          child: Material(
+            key: ValueKey('shell-right-panel-${panel.name}'),
+            color: palette.panel,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13.5,
-                    ),
+                Container(
+                  height: 40,
+                  padding: const EdgeInsets.only(left: 14),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: palette.hairline)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close the panel',
+                        iconSize: 18,
+                        onPressed: () =>
+                            _controller.rightPanel = ShellRightPanel.none,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Close the panel',
-                  iconSize: 18,
-                  onPressed: () =>
-                      _controller.rightPanel = ShellRightPanel.none,
-                  icon: const Icon(Icons.close_rounded),
+                Expanded(
+                  child: switch (panel) {
+                    ShellRightPanel.agents => AgentAttentionSheet(
+                      controller: widget.agentAttention,
+                      onOpenAgent: (host, agent) {
+                        final flow = widget.connectFlow;
+                        if (flow != null) {
+                          unawaited(flow.openAgent(host, agent));
+                        } else {
+                          unawaited(
+                            widget.agentAttention.focusAgent(host.id, agent),
+                          );
+                        }
+                        _controller.showHome = false;
+                      },
+                      onOpenChat: (host, agent) =>
+                          unawaited(widget.actions.openChat(host, agent)),
+                    ),
+                    ShellRightPanel.preview => _previewPanel(context),
+                    ShellRightPanel.usage => switch (UsageScope.maybeOf(
+                      context,
+                    )) {
+                      final usage? => ListView(
+                        key: const ValueKey('shell-usage-panel'),
+                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
+                        children: [UsageBreakdown(controller: usage)],
+                      ),
+                      null => const SizedBox.shrink(),
+                    },
+                    ShellRightPanel.none => const SizedBox.shrink(),
+                  },
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: switch (panel) {
-              ShellRightPanel.agents => AgentAttentionSheet(
-                controller: widget.agentAttention,
-                onOpenAgent: (host, agent) {
-                  final flow = widget.connectFlow;
-                  if (flow != null) {
-                    unawaited(flow.openAgent(host, agent));
-                  } else {
-                    unawaited(widget.agentAttention.focusAgent(host.id, agent));
-                  }
-                  _controller.showHome = false;
-                },
-                onOpenChat: (host, agent) =>
-                    unawaited(widget.actions.openChat(host, agent)),
-              ),
-              ShellRightPanel.preview => _previewPanel(context),
-              ShellRightPanel.usage => switch (UsageScope.maybeOf(context)) {
-                final usage? => ListView(
-                  key: const ValueKey('shell-usage-panel'),
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
-                  children: [UsageBreakdown(controller: usage)],
-                ),
-                null => const SizedBox.shrink(),
-              },
-              ShellRightPanel.none => const SizedBox.shrink(),
-            },
-          ),
-        ],
+        ),
       ),
     );
   }

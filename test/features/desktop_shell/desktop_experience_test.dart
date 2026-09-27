@@ -4,6 +4,7 @@ import 'package:conduit/core/presentation/desktop_window.dart';
 import 'package:conduit/features/desktop_shell/domain/layout_presets.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -273,4 +274,32 @@ void main() {
     expect(h.shell.paletteRecents, isEmpty);
     await tearDownShell(tester);
   });
+
+  testWidgets('the sidebar filter opens its first match on Enter and '
+      'clears on Esc; Esc closes the right panel', (tester) async {
+    final h = await pumpShell(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('sidebar-filter')),
+      'build',
+    );
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settleShell(tester);
+    expect(h.workspace.sessions, isNotEmpty);
+    await tester.tap(find.byKey(const ValueKey('sidebar-filter')));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(h.shell.filter, isEmpty);
+
+    h.shell.rightPanel = ShellRightPanel.agents;
+    h.shell.showHome = true;
+    await settleShell(tester);
+    await tester.tap(find.byKey(const ValueKey('shell-right-panel-agents')));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(h.shell.rightPanel, ShellRightPanel.none);
+    await tearDownShell(tester);
+  }, variant: _linux);
 }

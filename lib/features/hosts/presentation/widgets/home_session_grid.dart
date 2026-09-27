@@ -300,6 +300,8 @@ class HomeSessionTile extends StatelessWidget {
               child: InkWell(
                 onTap: onTap,
                 onLongPress: onLongPress,
+                // A right-click opens the same actions (desktop).
+                onSecondaryTap: onLongPress,
                 child: Stack(
                   children: [
                     Positioned.fill(
@@ -639,6 +641,8 @@ class DormantWorkspaceTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
+        // A right-click opens the same actions (desktop).
+        onSecondaryTap: onLongPress,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 11, 10, 10),
           child: Column(
@@ -728,6 +732,8 @@ class DormantTmuxTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
+        // A right-click opens the same actions (desktop).
+        onSecondaryTap: onLongPress,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 11, 10, 10),
           child: Column(
