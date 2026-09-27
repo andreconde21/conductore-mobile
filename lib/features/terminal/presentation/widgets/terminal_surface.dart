@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_path_detector.dart';
@@ -7,6 +9,7 @@ import 'package:conduit/features/terminal/domain/terminal_remote_scroll.dart';
 import 'package:conduit/features/terminal/presentation/desktop_keyboard.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +29,7 @@ class TerminalSurface extends StatefulWidget {
     this.onPathTap,
     this.onLinkTap,
     this.onLinkLongPress,
+    this.onLinkOpen,
     this.autoConnect = true,
     this.onKeyEvent,
     this.dragScrollsRemote = true,
@@ -56,6 +60,12 @@ class TerminalSurface extends StatefulWidget {
   /// the logical line it sits on. The word selection the long press makes
   /// stays unless the callback resolves to true (an action was taken).
   final Future<bool> Function(String url, String line)? onLinkLongPress;
+
+  /// Desktop only: opens an http(s) link straight away, for a Ctrl+click
+  /// (Cmd+click on macOS). When set, a plain click on a link no longer
+  /// calls [onLinkTap] on desktop, so it can start a selection like any
+  /// other text. Null keeps the plain click on [onLinkTap].
+  final ValueChanged<String>? onLinkOpen;
 
   /// Whether a disconnected session connects as soon as this view is
   /// built. False for a background tab that waits to be shown (a session
@@ -105,6 +115,10 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   int _pointersDown = 0;
   // Copy mode this surface entered for a drag; a tap leaves it again.
   bool _dragEnteredScrollMode = false;
+  // Desktop: the mouse is over a link (a hand cursor), and the buttons of
+  // the last press (a middle-click also reaches the secondary callback).
+  bool _hoveringLink = false;
+  int _lastButtons = 0;
 
   static PointerInputs _pointerInputsFor(bool terminalMouseInput) {
     return terminalMouseInput
@@ -207,10 +221,16 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
       return;
     }
     final onLinkTap = widget.onLinkTap;
-    if (onLinkTap != null) {
+    final onLinkOpen = PlatformFeatures.isDesktop ? widget.onLinkOpen : null;
+    if (onLinkTap != null || onLinkOpen != null) {
       final url = terminalUrlAt(line.text, line.column);
       if (url != null) {
-        onLinkTap(url);
+        if (onLinkOpen != null) {
+          // Ctrl/Cmd+click opens; a plain click stays a click in text.
+          if (_linkModifierPressed) onLinkOpen(url);
+        } else {
+          onLinkTap?.call(url);
+        }
         return;
       }
     }
@@ -222,6 +242,99 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     if (path != null) {
       onPathTap(path);
     }
+  }
+
+  /// Ctrl on Linux and Windows, Cmd on macOS: the modifier of a click that
+  /// opens a link.
+  static bool get _linkModifierPressed =>
+      defaultTargetPlatform == TargetPlatform.macOS
+      ? HardwareKeyboard.instance.isMetaPressed
+      : HardwareKeyboard.instance.isControlPressed;
+
+  /// Desktop: a hand cursor while the mouse is over a link.
+  void _handleHover(PointerHoverEvent event) {
+    final render = _viewKey.currentState?.renderTerminal;
+    var overLink = false;
+    if (render != null && render.attached) {
+      final offset = render.getCellOffset(render.globalToLocal(event.position));
+      final line = _logicalLineAt(offset);
+      overLink = line != null && terminalUrlAt(line.text, line.column) != null;
+    }
+    if (overLink != _hoveringLink) {
+      setState(() => _hoveringLink = overLink);
+    }
+  }
+
+  /// Desktop right-click, when the remote program does not take the mouse
+  /// itself (TerminalView only calls this for clicks it did not report):
+  /// Copy, Paste and Select all at the pointer. The right button leaves a
+  /// selection alone, so Copy copies what was just selected.
+  Future<void> _handleSecondaryTapUp(
+    TapUpDetails details,
+    CellOffset offset,
+  ) async {
+    // A middle-click reaches this callback too; it is not a menu.
+    if (_lastButtons & kSecondaryMouseButton == 0) return;
+    final terminal = widget.session.terminal;
+    if (terminal.mouseMode != MouseMode.none) return;
+    final selection = _terminalController.selection;
+    final action = await showAdaptiveModal<_TerminalMenuAction>(
+      context: context,
+      kind: AdaptiveModalKind.menu,
+      anchorPosition: details.globalPosition,
+      desktopMaxWidth: 220,
+      builder: (context) => Column(
+        key: const ValueKey('terminal-context-menu'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            key: const ValueKey('terminal-menu-copy'),
+            dense: true,
+            enabled: selection != null,
+            leading: const Icon(Icons.copy_rounded, size: 18),
+            title: const Text('Copy'),
+            onTap: () => Navigator.of(context).pop(_TerminalMenuAction.copy),
+          ),
+          ListTile(
+            key: const ValueKey('terminal-menu-paste'),
+            dense: true,
+            leading: const Icon(Icons.content_paste_rounded, size: 18),
+            title: const Text('Paste'),
+            onTap: () => Navigator.of(context).pop(_TerminalMenuAction.paste),
+          ),
+          ListTile(
+            key: const ValueKey('terminal-menu-select-all'),
+            dense: true,
+            leading: const Icon(Icons.select_all_rounded, size: 18),
+            title: const Text('Select all'),
+            onTap: () =>
+                Navigator.of(context).pop(_TerminalMenuAction.selectAll),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case _TerminalMenuAction.copy:
+        final current = _terminalController.selection ?? selection;
+        if (current != null) {
+          await Clipboard.setData(
+            ClipboardData(text: terminal.buffer.getText(current)),
+          );
+          _terminalController.clearSelection();
+        }
+      case _TerminalMenuAction.paste:
+        await _pasteClipboard();
+      case _TerminalMenuAction.selectAll:
+        final buffer = terminal.buffer;
+        _terminalController.setSelection(
+          buffer.createAnchor(0, buffer.height - terminal.viewHeight),
+          buffer.createAnchor(terminal.viewWidth, buffer.height - 1),
+        );
+      case null:
+        break;
+    }
+    widget.focusNode?.requestFocus();
   }
 
   /// The logical line under [offset] with soft-wrapped rows joined, so a
@@ -264,6 +377,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   // same pointer without competing, so selection keeps working and the
   // link menu opens on top of it.
   void _handlePointerDown(PointerDownEvent event) {
+    _lastButtons = event.buttons;
     _pointersDown += 1;
     // Any touch catches a running fling, as in a scroll view.
     _stopMomentum();
@@ -487,6 +601,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
         children: [
           Listener(
             behavior: HitTestBehavior.translucent,
+            onPointerHover: PlatformFeatures.isDesktop ? _handleHover : null,
             onPointerDown: _handlePointerDown,
             onPointerMove: _handlePointerMove,
             onPointerUp: _handlePointerEnd,
@@ -503,6 +618,13 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                       : _imageAwareShortcuts(),
                   controller: _terminalController,
                   onTapUp: _handleTapUp,
+                  onSecondaryTapUp: PlatformFeatures.isDesktop
+                      ? (details, offset) =>
+                            unawaited(_handleSecondaryTapUp(details, offset))
+                      : null,
+                  mouseCursor: _hoveringLink
+                      ? SystemMouseCursors.click
+                      : SystemMouseCursors.text,
                   focusNode: widget.focusNode,
                   onKeyEvent: widget.onKeyEvent,
                   autofocus: widget.focusNode != null,
@@ -603,6 +725,8 @@ class _RemoteScrollDragRecognizer extends VerticalDragGestureRecognizer {
     }
   }
 }
+
+enum _TerminalMenuAction { copy, paste, selectAll }
 
 /// Paste from a key shortcut, handled by [TerminalSurface] so an image on
 /// the clipboard can be uploaded instead of ignored.
