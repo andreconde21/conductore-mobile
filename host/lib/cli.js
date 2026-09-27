@@ -364,7 +364,7 @@ async function transcriptCmd (args) {
   try {
     const a = found.agent
     // The agent's live status rides along so one poll refreshes the whole view.
-    const agent = { name: a.name, state: a.state, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
+    const agent = { name: a.name, state: a.state, lastEvent: a.lastEvent || null, lastToolName: a.lastToolName || null, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
     return out({ sessionId, agent, ...transcriptMod().readTranscript(file, opts) })
   } catch (err) {
     if (err.code === 'ENOENT') return fail(`transcript not found: ${file}`)
