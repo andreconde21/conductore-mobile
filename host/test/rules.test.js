@@ -188,7 +188,7 @@ test('suggestions: specific first, then broader', () => {
   assert.equal(s('Bash', { command: 'cd web && npm test 2>&1 | tail -5' })[0], 'Bash(npm test *)')
   assert.equal(s('Bash', { command: 'npm run build && npm test' })[0], 'Bash(npm run build && npm test)')
   assert.deepEqual(s('Edit', { file_path: `${ROOT}/src/components/Button.tsx` }), ['Edit(src/components/**)', 'Edit(src/**)', 'Edit(**)'])
-  assert.deepEqual(s('Write', { file_path: `${ROOT}/README.md` }), ['Edit(README.md)', 'Edit(**)'])
+  assert.deepEqual(s('Write', { file_path: `${ROOT}/README.md` }), ['Edit(/README.md)', 'Edit(**)'])
   assert.deepEqual(s('Read', { file_path: '/etc/nginx/nginx.conf' }), ['Read(//etc/nginx/**)'])
   assert.deepEqual(s('WebFetch', { url: 'https://docs.rs/serde' }), ['WebFetch(domain:docs.rs)', 'WebFetch'])
   assert.deepEqual(s('mcp__github__create_issue', {}), ['mcp__github__create_issue', 'mcp__github'])
@@ -228,4 +228,25 @@ test('repoRoot finds the git work tree, never above home', () => {
   assert.equal(rules.repoRoot(loose, home), loose)
   assert.equal(rules.repoRoot('relative', home), null)
   fs.rmSync(home, { recursive: true })
+})
+
+test('narrowest: exactly this call, never a glob', () => {
+  assert.equal(rules.narrowest('Bash', { command: 'npm  test -- --grep x' }, ctx), 'Bash(npm test -- --grep x)')
+  assert.equal(rules.narrowest('Bash', { command: 'rm *.log' }, ctx), null)
+  assert.equal(rules.narrowest('Bash', { _truncated: true }, ctx), null)
+  assert.equal(rules.narrowest('Edit', { file_path: `${ROOT}/src/a.ts` }, ctx), 'Edit(src/a.ts)')
+  assert.equal(rules.narrowest('Write', { file_path: `${ROOT}/README.md` }, ctx), 'Edit(/README.md)')
+  assert.equal(rules.narrowest('Read', { file_path: '/etc/hosts' }, ctx), 'Read(//etc/hosts)')
+  assert.equal(rules.narrowest('WebFetch', { url: 'https://docs.rs/x' }, ctx), 'WebFetch(domain:docs.rs)')
+  assert.equal(rules.narrowest('Task', {}, ctx), 'Task')
+  for (const [tool, input, other] of [
+    ['Bash', { command: 'npm test -- --grep x' }, { command: 'npm test' }],
+    ['Edit', { file_path: `${ROOT}/src/a.ts` }, { file_path: `${ROOT}/src/b.ts` }],
+    ['Write', { file_path: `${ROOT}/README.md` }, { file_path: `${ROOT}/docs/README.md` }],
+    ['Read', { file_path: '/etc/hosts' }, { file_path: '/etc/passwd' }]
+  ]) {
+    const r = rec(rules.narrowest(tool, input, ctx))
+    assert.ok(rules.findMatch([r], { session_id: 's', tool_name: tool, tool_input: input }, ctx, NOW), `${r.rule} covers its call`)
+    assert.equal(rules.findMatch([r], { session_id: 's', tool_name: tool, tool_input: other }, ctx, NOW), null, `${r.rule} covers nothing else`)
+  }
 })

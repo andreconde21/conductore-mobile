@@ -342,7 +342,8 @@ void main() {
       expect(result.rule.rule, 'Bash(git status *)');
       final sent = runner.sent('trust').single;
       expect(sent, contains('trust req-low'));
-      expect(sent, contains('Bash(git status *)'));
+      // No rule picked: the companion saves one for exactly this call.
+      expect(sent, isNot(contains('--rule')));
       expect(sent, contains('--scope repo'));
       expect(sent, contains('/home/a/api'));
       expect(sent, contains('--minutes 15'));

@@ -158,9 +158,11 @@ function absoluteGlob (pattern, base, home) {
   let p = pattern.trim()
   if (p.startsWith('//')) return path.posix.normalize(p.slice(1))
   if (p === '~' || p.startsWith('~/')) return path.posix.join(home || '/nonexistent-home', p.slice(1))
-  if (p.startsWith('./')) p = p.slice(2)
-  else if (p.startsWith('/')) p = p.slice(1) // Claude Code: `/x` is project-relative
-  if (!p.includes('/') && !p.startsWith('**')) p = '**/' + p
+  // Claude Code: `/x` (and `./x`) is anchored at the project; a bare
+  // name without `/` matches at any depth.
+  const anchored = p.startsWith('./') || p.startsWith('/')
+  p = p.replace(/^\.?\//, '')
+  if (!anchored && !p.includes('/') && !p.startsWith('**')) p = '**/' + p
   return path.posix.join(base || '/', p)
 }
 
@@ -284,7 +286,7 @@ function suggest (toolName, toolInput, ctx = {}) {
       const isDir = tool === 'LS' || tool === 'Glob' || tool === 'Grep'
       if (isDir) add(`${family}(${rel}/**)`)
       else if (dir !== '.') add(`${family}(${dir}/**)`)
-      else add(`${family}(${rel})`)
+      else add(`${family}(/${rel})`)
       const top = rel.split('/')[0]
       if (top !== rel && top !== dir) add(`${family}(${top}/**)`)
       add(`${family}(**)`)
@@ -310,6 +312,33 @@ function suggest (toolName, toolInput, ctx = {}) {
   }
   add(tool)
   return out
+}
+
+// The narrowest rule that covers exactly this call (what a trust saves when
+// the user did not pick one): the exact command, the exact file, the host.
+// Null when the input was truncated or the command is too long for a rule.
+function narrowest (toolName, toolInput, ctx = {}) {
+  const tool = typeof toolName === 'string' ? toolName : ''
+  const input = toolInput && typeof toolInput === 'object' ? toolInput : {}
+  if (!tool || input._truncated) return null
+  if (tool === 'Bash') {
+    if (typeof input.command !== 'string' || !input.command.trim()) return null
+    const rule = `Bash(${norm(input.command)})`
+    return rule.length <= MAX_RULE_LENGTH && !input.command.includes('*') ? rule : null
+  }
+  if (EDIT_TOOLS.has(tool) || READ_TOOLS.has(tool)) {
+    const family = EDIT_TOOLS.has(tool) ? 'Edit' : 'Read'
+    const target = toolTarget(tool, input, ctx)
+    if (!target || /[*?]/.test(target)) return null
+    const root = ctx.root || ctx.cwd
+    const pattern = root && risk.inside(target, root) && target !== root ? path.relative(root, target) : `/${target}`
+    return `${family}(${pattern.includes('/') ? pattern : `/${pattern}`})`
+  }
+  if (tool === 'WebFetch') {
+    const host = risk.hostOf(input.url)
+    return host ? `WebFetch(domain:${host})` : null
+  }
+  return tool
 }
 
 // --- repo ---------------------------------------------------------------------
@@ -434,6 +463,7 @@ module.exports = {
   pathCovered,
   findMatch,
   suggest,
+  narrowest,
   repoRoot,
   makeRule,
   normalizeScope,

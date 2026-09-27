@@ -478,7 +478,9 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     final scope = draft.scope;
     final duration = draft.duration;
     return [
-      '--rule ${shellQuoteArgument(draft.rule.trim())}',
+      // No rule: the companion picks the narrowest (trust only).
+      if (draft.rule.trim().isNotEmpty)
+        '--rule ${shellQuoteArgument(draft.rule.trim())}',
       '--scope ${scope.kind.name}',
       if (scope.kind == ApprovalScopeKind.repo && scope.path != null)
         '--path ${shellQuoteArgument(scope.path!)}',

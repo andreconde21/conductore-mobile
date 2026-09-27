@@ -151,7 +151,8 @@ class ApprovalRuleDraft {
     required this.duration,
   });
 
-  /// Claude Code syntax: `Tool` or `Tool(pattern)`.
+  /// Claude Code syntax: `Tool` or `Tool(pattern)`. Empty in a trust:
+  /// the companion saves a rule for exactly the trusted call.
   final String rule;
   final ApprovalScope scope;
   final TrustDuration duration;

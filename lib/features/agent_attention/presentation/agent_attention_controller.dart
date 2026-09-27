@@ -570,8 +570,9 @@ class AgentAttentionController extends ChangeNotifier {
   }
 
   /// Saves a rule from [request] and allows it (voice: "trust this for N
-  /// minutes"). Without [rule], the companion's first suggestion; the
-  /// scope's repo is the request's. Also allows other waiting requests
+  /// minutes"). Without [rule], the companion saves one for exactly this
+  /// call (never broader than what was asked); the scope's repo is the
+  /// request's. Also allows other waiting requests
   /// the rule covers. High-risk requests are refused by the companion.
   Future<TrustResult> trustRequest(
     String hostId,
@@ -590,10 +591,7 @@ class AgentAttentionController extends ChangeNotifier {
       );
     }
     final draft = ApprovalRuleDraft(
-      rule:
-          rule ??
-          request.suggestedRules.firstOrNull ??
-          (request.toolName.isEmpty ? 'tool' : request.toolName),
+      rule: rule ?? '',
       // The companion fills in the request's repo (else the agent's cwd)
       // and session.
       scope: scope == ApprovalScopeKind.repo && request.repo != null

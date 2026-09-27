@@ -97,7 +97,7 @@ test('trust: allows the request, saves a 0600 rule, and the hook answers the nex
   const p = hook(bash('a1', 'npm test -- --grep auth'))
   const [req] = await pendingOf('a1')
   assert.equal(req.risk.level, 'low')
-  const t = await cli('trust', req.id, '--minutes', '15')
+  const t = await cli('trust', req.id, '--minutes', '15', '--rule', 'Bash(npm test *)')
   assert.equal(t.code, 0, JSON.stringify(t.json))
   assert.equal(t.json.rule.rule, 'Bash(npm test *)')
   assert.deepEqual(t.json.rule.scope, { kind: 'repo', path: repo })
@@ -131,6 +131,20 @@ test('trust: allows the request, saves a 0600 rule, and the hook answers the nex
   const [req2] = await pendingOf('a2')
   await cli('decide', req2.id, 'allow')
   await q
+})
+
+test('trust without a rule covers only that exact call', async () => {
+  const p = hook(bash('n1', 'npm run lint -- --fix=false'))
+  const [req] = await pendingOf('n1')
+  const t = await cli('trust', req.id, '--minutes', '5')
+  assert.equal(t.json.rule.rule, 'Bash(npm run lint -- --fix=false)')
+  await p
+  assert.ok(allowed(await hook(bash('n1', 'npm run lint -- --fix=false'))))
+  const q = hook(bash('n1', 'npm run lint'))
+  const [other] = await pendingOf('n1')
+  await cli('decide', other.id, 'allow')
+  await q
+  await cli('rules', 'remove', t.json.rule.id)
 })
 
 test('high risk is never auto-approved, whatever the rules say', async () => {

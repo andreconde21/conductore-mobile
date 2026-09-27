@@ -24,12 +24,6 @@ const VERSION = '0.7.0'
 // (no optimizing compiler; CPU per event stays far below a millisecond)
 // touches ~6 MB less of the node binary, one V8 worker thread instead of 4.
 // --no-expose-wasm only silences lite mode's startup warning.
-// Features this companion has, for the phone to gate on (`version` and
-// `status` report them). Names only ever get added.
-//   smart-approvals  risk labels on pending requests, rules and time-boxed
-//                    trust (`rules`, `trust`), `approve-low`, `approvals`
-const CAPABILITIES = ['smart-approvals']
-
 const DAEMON_NODE_FLAGS = ['--max-old-space-size=16', '--max-semi-space-size=1', '--lite-mode', '--no-expose-wasm', '--v8-pool-size=1']
 
 function homeDir () {
@@ -84,7 +78,6 @@ function idleExitMs () {
 module.exports = {
   PROTOCOL_VERSION,
   VERSION,
-  CAPABILITIES,
   DAEMON_NODE_FLAGS,
   homeDir,
   runtimeDir,
@@ -97,9 +90,6 @@ module.exports = {
   lockPath: () => path.join(homeDir(), 'hostd.pid'),
   logPath: () => path.join(homeDir(), 'hostd.log'),
   rulesPath: () => path.join(homeDir(), 'always-rules.json'),
-  // Approval rules and time-boxed trust (rules.js), and what they answered.
-  approvalRulesPath: () => path.join(homeDir(), 'rules.json'),
-  autoApprovedPath: () => path.join(homeDir(), 'auto-approved.json'),
   spoolDir: () => path.join(homeDir(), 'spool'),
   tmpDir: () => path.join(homeDir(), 'tmp'),
   usageDir: () => path.join(homeDir(), 'usage'),

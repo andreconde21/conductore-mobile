@@ -725,7 +725,7 @@ async function main (argv) {
     case 'uninstall': return uninstall()
     case 'doctor': return doctor()
     case 'stop': return stop()
-    case 'version': return out({ version: paths.VERSION, protocol: paths.PROTOCOL_VERSION, node: process.versions.node, capabilities: paths.CAPABILITIES })
+    case 'version': return out({ version: paths.VERSION, protocol: paths.PROTOCOL_VERSION, node: process.versions.node, capabilities: require('./approvals').CAPABILITIES })
     case 'help': case '--help': case '-h': case undefined:
       process.stdout.write(USAGE); return cmd === undefined ? 1 : 0
     default: return fail(`unknown command ${cmd}\n${USAGE}`)

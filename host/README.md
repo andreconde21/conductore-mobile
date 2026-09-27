@@ -70,7 +70,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 | `~/.conductore/rules.json` | approval rules and time-boxed trust the hook answers by itself (see Approval rules), mode 0600 |
-| `~/.conductore/auto-approved.json` | what those rules answered in the last 24 h (at most 500 entries), mode 0600 |
+| `~/.conductore/auto-approved.json` | what those rules answered in the last 24 h (at most 500 entries and 128 KB, no tool input), mode 0600 |
 
 Environment: `CONDUCTORE_PERMISSION_TIMEOUT` (seconds the hook waits for the
 phone, default 120, read by the hook), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
@@ -258,8 +258,8 @@ reason, never allowed.
 ### `conductore-hostd trust <requestId> [--rule 'Tool(pattern)'] [--scope repo|session|any] [--minutes 60 | --until-session-end | --forever] [--path <dir>]`
 
 "Trust this for N minutes": saves a rule from a waiting request (default:
-its first `suggestedRules` entry, scope `repo` = the request's `repo`, 60
-minutes), allows the request, and allows every other waiting request the
+a rule for exactly this call, e.g. the exact command, never broader than
+what was asked; scope `repo` = the request's `repo`; 60 minutes), allows the request, and allows every other waiting request the
 rule covers. `--scope session` limits it to this agent session (and drops
 it when the session ends); `--until-session-end` keeps the scope but ends
 with the session. Refused for high-risk requests.
@@ -812,7 +812,7 @@ park throttle, `--chain` passthrough) through a real daemon,
 tool calls) and the shell reader, `test/rules.test.js` rule syntax,
 matching, scopes, expiry and suggestions, `test/approvals.test.js` trust,
 rules, `approve-low`, the auto-approved log and the hook's auto-answer
-latency through a real daemon,
+latency through a real daemon, `test/audit.test.js` the log's byte cap,
 `test/summarize.test.js` the `summarize` command with a fake `claude`
 (argv, passthrough, markdown and word cap, timeout kill, busy, truncation),
 and

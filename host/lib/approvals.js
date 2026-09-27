@@ -13,13 +13,27 @@ const risk = require('./risk')
 const { summarize } = require('./state')
 const { log } = require('./log')
 
+const path = require('path')
+
 const AUDIT_KEEP_MS = 24 * 60 * 60 * 1000
 const AUDIT_MAX = 500
+// The log never holds tool input (a summary capped at 200 chars), and is
+// capped by size too, so it stays small on the daemon's 16 MB heap.
+const AUDIT_MAX_BYTES = 128 * 1024
+
+// Features this companion has, for the phone to gate on (`version` and
+// `status` report them). Names only ever get added.
+//   smart-approvals  risk labels on pending requests, rules and time-boxed
+//                    trust (`rules`, `trust`), `approve-low`, `approvals`
+const CAPABILITIES = ['smart-approvals']
+
+const rulesFile = () => path.join(paths.homeDir(), 'rules.json')
+const auditFile = () => path.join(paths.homeDir(), 'auto-approved.json')
 
 class Approvals {
-  constructor ({ rulesFile = paths.approvalRulesPath(), auditFile = paths.autoApprovedPath(), home = os.homedir() } = {}) {
-    this.rulesFile = rulesFile
-    this.auditFile = auditFile
+  constructor ({ rules = rulesFile(), audit = auditFile(), home = os.homedir() } = {}) {
+    this.rulesFile = rules
+    this.auditFile = audit
     this.home = home
     this.list = []
     this.mtime = -1
@@ -154,6 +168,9 @@ class Approvals {
       scope: rule.scope
     })
     if (entries.length > AUDIT_MAX) entries.length = AUDIT_MAX
+    let bytes = 0
+    const keep = entries.findIndex(e => (bytes += JSON.stringify(e).length + 1) > AUDIT_MAX_BYTES)
+    if (keep !== -1) entries.length = Math.max(keep, 1)
     this.audit = entries
     try {
       const tmp = `${this.auditFile}.${process.pid}.tmp`
@@ -180,4 +197,4 @@ class Approvals {
   }
 }
 
-module.exports = { Approvals, AUDIT_KEEP_MS }
+module.exports = { Approvals, CAPABILITIES, AUDIT_KEEP_MS, AUDIT_MAX_BYTES }
