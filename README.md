@@ -169,8 +169,12 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   tokens and an estimated cost per day, machine, project and model, Codex
   too. On the home screen, the widget and the Quick Settings tile, with an
   optional alert at 80% of the 5-hour window.
-- **Notifications with actions**: approve or deny a permission prompt, or jump
-  to the agent's exact pane, straight from the notification.
+- **Notifications with actions**: one notification per agent, updated in place
+  with what it needs now ("api · VTM needs you: Approve Bash: npm test · +2
+  more"). Approve or deny the first request, or jump to the agent's exact
+  pane, straight from the notification. It alerts only when an agent newly
+  needs you, goes away once everything is answered, and all agents stack
+  under one summary that opens the dashboard.
 - **Home screen widget and Quick Settings tile** showing agents that need you.
 - Agent attention dashboard that polls Herdr and shows which agents are
   working, waiting, or finished.
