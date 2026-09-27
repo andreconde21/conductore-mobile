@@ -429,6 +429,23 @@ class AgentAttentionController extends ChangeNotifier {
     await notifier?.cancel(id: notificationId);
   }
 
+  /// "Claude needs permission: Bash · High risk".
+  static String permissionNotificationTitle(PendingPermissionRequest request) {
+    final risk = request.risk;
+    return 'Claude needs permission: ${request.toolName}'
+        '${risk == null ? '' : ' · ${risk.level.label}'}';
+  }
+
+  /// The request, the risk reason on its own line, and the machine.
+  static String permissionNotificationBody(
+    PendingPermissionRequest request,
+    String hostName,
+  ) {
+    final reason = request.risk?.reason ?? '';
+    return '${request.summary} (on $hostName)'
+        '${reason.isEmpty ? '' : '\n$reason'}';
+  }
+
   /// Notification id for one pending request (stable per request, so a
   /// re-seen request replaces instead of stacking).
   static String permissionNotificationId(String hostId, String requestId) =>
@@ -1280,8 +1297,11 @@ class AgentAttentionController extends ChangeNotifier {
         await notifier.cancel(id: '${host.id}:${agent.id}');
         await notifier.showPermissionRequest(
           id: permissionNotificationId(host.id, request.id),
-          title: 'Claude needs permission: ${request.toolName}',
-          body: _withMessage('${request.summary} (on ${host.name})', agent),
+          title: permissionNotificationTitle(request),
+          body: _withMessage(
+            permissionNotificationBody(request, host.name),
+            agent,
+          ),
           hostId: host.id,
           requestId: request.id,
           open: openTargetFor(host.id, agent),
