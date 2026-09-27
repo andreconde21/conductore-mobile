@@ -202,10 +202,12 @@ class _UsageSummaryViewState extends State<UsageSummaryView>
             summary: summary,
             now: now,
             loading: widget.controller.isLoading,
+            onAccounts: widget.onTap,
           ),
           UsageSummaryLayout.compact => _SummaryCompact(
             summary: summary,
             now: now,
+            onAccounts: widget.onTap,
           ),
         };
         final onTap = widget.onTap;
@@ -255,16 +257,79 @@ class _LabeledRing extends StatelessWidget {
   }
 }
 
+/// "+N accounts" (cswap), and "best: home 12%" when another account has
+/// clearly more headroom than the active one. Nothing without other
+/// accounts. Tapping it opens the breakdown ([onTap]).
+class UsageAccountsChip extends StatelessWidget {
+  const UsageAccountsChip({
+    required this.summary,
+    required this.now,
+    this.onTap,
+    this.dense = false,
+    super.key,
+  });
+
+  final UsageSummary summary;
+  final DateTime now;
+  final VoidCallback? onTap;
+
+  /// Count only: a sidebar or a collapsed bar.
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final others = summary.otherAccountCount;
+    if (others == 0) {
+      return const SizedBox.shrink();
+    }
+    final palette = AppPalette.of(context);
+    final best = dense ? null : summary.bestAccount(now);
+    final bestUsed = best?.usedPct(now);
+    final text = [
+      dense ? '+$others' : '+$others account${others == 1 ? '' : 's'}',
+      if (best != null && bestUsed != null)
+        'best: ${best.label} ${bestUsed.round()}%',
+    ].join(' · ');
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        border: Border.all(color: palette.hairline),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 11,
+          height: 1.2,
+          color: best != null ? palette.accent : palette.mutedForeground,
+        ),
+      ),
+    );
+    return Tooltip(
+      message: '${summary.accounts.length} Claude accounts (cswap)',
+      child: InkWell(
+        key: const ValueKey('usage-accounts-chip'),
+        onTap: onTap,
+        child: chip,
+      ),
+    );
+  }
+}
+
 class _SummaryBar extends StatelessWidget {
   const _SummaryBar({
     required this.summary,
     required this.now,
     required this.loading,
+    this.onAccounts,
   });
 
   final UsageSummary summary;
   final DateTime now;
   final bool loading;
+  final VoidCallback? onAccounts;
 
   @override
   Widget build(BuildContext context) {
@@ -312,6 +377,15 @@ class _SummaryBar extends StatelessWidget {
                       color: palette.subtleForeground,
                     ),
                   ),
+                if (summary.otherAccountCount > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: UsageAccountsChip(
+                      summary: summary,
+                      now: now,
+                      onTap: onAccounts,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -322,10 +396,15 @@ class _SummaryBar extends StatelessWidget {
 }
 
 class _SummaryCompact extends StatelessWidget {
-  const _SummaryCompact({required this.summary, required this.now});
+  const _SummaryCompact({
+    required this.summary,
+    required this.now,
+    this.onAccounts,
+  });
 
   final UsageSummary summary;
   final DateTime now;
+  final VoidCallback? onAccounts;
 
   @override
   Widget build(BuildContext context) {
@@ -373,6 +452,15 @@ class _SummaryCompact extends StatelessWidget {
               style: TextStyle(fontSize: 12, color: palette.mutedForeground),
             ),
           ),
+          if (summary.otherAccountCount > 0) ...[
+            const SizedBox(width: 6),
+            UsageAccountsChip(
+              summary: summary,
+              now: now,
+              onTap: onAccounts,
+              dense: true,
+            ),
+          ],
         ],
       ),
     );
@@ -487,6 +575,15 @@ class _CollapsedBarState extends State<_CollapsedBar> with UsageViewAttachment {
                 style: TextStyle(fontSize: 13, color: palette.foreground),
               ),
             ),
+            if (summary.otherAccountCount > 0) ...[
+              const SizedBox(width: 6),
+              UsageAccountsChip(
+                summary: summary,
+                now: now,
+                onTap: () => showUsageSheet(context, widget.controller),
+                dense: true,
+              ),
+            ],
           ],
         ),
       ),
@@ -623,6 +720,10 @@ class _UsageBreakdownState extends State<UsageBreakdown>
                 machine.error != null,
             onUpdateCompanion: widget.onUpdateCompanion,
           ),
+        ],
+        if (summary.accounts.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          UsageAccountsSection(controller: controller, now: now),
         ],
         if (hasReport) ...[
           const SizedBox(height: 14),
@@ -787,14 +888,291 @@ class UsageLimitBar extends StatelessWidget {
     );
   }
 
-  static String _resetsIn(Duration delta) {
-    if (delta.inHours >= 24) {
-      return 'in ${delta.inDays}d ${delta.inHours % 24}h';
+  static String _resetsIn(Duration delta) => formatResetsIn(delta);
+}
+
+/// `in 6d 13h`, `in 4h 39m`, `in 5m`.
+String formatResetsIn(Duration delta) {
+  if (delta.inHours >= 24) {
+    return 'in ${delta.inDays}d ${delta.inHours % 24}h';
+  }
+  if (delta.inMinutes >= 60) {
+    return 'in ${delta.inHours}h ${delta.inMinutes % 60}m';
+  }
+  return 'in ${math.max(1, delta.inMinutes)}m';
+}
+
+/// `11h ago`, `3d ago`, `just now`.
+String _ago(Duration delta) {
+  if (delta.inDays >= 1) {
+    return '${delta.inDays}d ago';
+  }
+  if (delta.inHours >= 1) {
+    return '${delta.inHours}h ago';
+  }
+  if (delta.inMinutes >= 1) {
+    return '${delta.inMinutes}m ago';
+  }
+  return 'just now';
+}
+
+/// The breakdown's "Accounts" section (cswap): one pair of rings (5-hour,
+/// week) per Claude account across machines, the active one marked,
+/// disabled ones greyed, reset times, and "Switch" / "Switch to best" on
+/// machines whose companion reports cswap.
+class UsageAccountsSection extends StatelessWidget {
+  const UsageAccountsSection({
+    required this.controller,
+    required this.now,
+    super.key,
+  });
+
+  final UsageController controller;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final summary = controller.summary;
+    final accounts = summary.accounts;
+    final switchable = [
+      for (final machine in summary.machines)
+        if (machine.canSwitchAccounts) machine,
+    ];
+    return Column(
+      key: const ValueKey('usage-accounts'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('Accounts', style: theme.textTheme.labelLarge),
+            ),
+            if (switchable.isNotEmpty && accounts.length > 1)
+              TextButton(
+                key: const ValueKey('usage-switch-best'),
+                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                onPressed: () => switchUsageAccount(
+                  context,
+                  controller,
+                  machines: [
+                    for (final m in switchable) (m.hostId, m.hostName),
+                  ],
+                ),
+                child: const Text('Switch to best'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        for (final account in accounts)
+          _AccountRow(
+            account: account,
+            now: now,
+            showMachines: summary.machines.length > 1,
+            onSwitch: account.switchTargets.isEmpty
+                ? null
+                : () => switchUsageAccount(
+                    context,
+                    controller,
+                    account: account,
+                    machines: [
+                      for (final p in account.switchTargets)
+                        (p.hostId, p.hostName),
+                    ],
+                  ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AccountRow extends StatelessWidget {
+  const _AccountRow({
+    required this.account,
+    required this.now,
+    required this.showMachines,
+    this.onSwitch,
+  });
+
+  final UsageAccountSummary account;
+  final DateTime now;
+  final bool showMachines;
+  final VoidCallback? onSwitch;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: palette.mutedForeground,
+    );
+    String? reset(String name, UsageLimit? limit) {
+      final at = limit?.resetsAt;
+      if (at == null || !at.isAfter(now)) {
+        return null;
+      }
+      return '$name ${formatResetsIn(at.difference(now))}';
     }
-    if (delta.inMinutes >= 60) {
-      return 'in ${delta.inHours}h ${delta.inMinutes % 60}m';
-    }
-    return 'in ${math.max(1, delta.inMinutes)}m';
+
+    final resets = [
+      ?reset('5h', account.fiveHour),
+      ?reset('week', account.weekly),
+    ];
+    final usageAt = account.usageAt;
+    final notes = [
+      if (account.active && showMachines)
+        'active on ${account.activeOn.join(', ')}',
+      if (account.disabled) 'disabled',
+      if (account.stale && usageAt != null)
+        'as of ${_ago(now.difference(usageAt))}',
+      if (resets.isNotEmpty) 'resets ${resets.join(' · ')}',
+    ];
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          _LabeledRing(label: '5h', limit: account.fiveHour, now: now),
+          const SizedBox(width: 8),
+          _LabeledRing(label: 'Week', limit: account.weekly, now: now),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        account.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: account.active
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    if (account.active) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        key: ValueKey('usage-account-active-${account.label}'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        color: palette.accent.withValues(alpha: 0.18),
+                        child: Text(
+                          'active',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: palette.accent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (notes.isNotEmpty)
+                  Text(
+                    notes.join(' · '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: muted,
+                  ),
+              ],
+            ),
+          ),
+          if (onSwitch != null)
+            TextButton(
+              key: ValueKey('usage-account-switch-${account.label}'),
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              onPressed: onSwitch,
+              child: const Text('Switch'),
+            ),
+        ],
+      ),
+    );
+    return KeyedSubtree(
+      key: ValueKey('usage-account-${account.label}'),
+      child: account.disabled ? Opacity(opacity: 0.45, child: row) : row,
+    );
+  }
+}
+
+/// Asks to confirm, then switches the Claude account on the chosen machine
+/// ([account], or cswap's best with none) and reports the outcome in a
+/// snackbar. [machines] are (hostId, name) pairs whose companion reports
+/// cswap.
+Future<void> switchUsageAccount(
+  BuildContext context,
+  UsageController controller, {
+  required List<(String, String)> machines,
+  UsageAccountSummary? account,
+}) async {
+  if (machines.isEmpty) {
+    return;
+  }
+  final hostId = await showDialog<String>(
+    context: context,
+    builder: (context) =>
+        _AccountSwitchDialog(account: account?.label, machines: machines),
+  );
+  if (hostId == null || !context.mounted) {
+    return;
+  }
+  final slot = account?.placements
+      .where((p) => p.hostId == hostId)
+      .firstOrNull
+      ?.account
+      .slot;
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final result = await controller.switchAccount(
+    hostId,
+    slot: slot,
+    best: account == null,
+  );
+  messenger?.showSnackBar(SnackBar(content: Text(result.message)));
+}
+
+class _AccountSwitchDialog extends StatelessWidget {
+  const _AccountSwitchDialog({required this.account, required this.machines});
+
+  /// Null: cswap's best.
+  final String? account;
+  final List<(String, String)> machines;
+
+  @override
+  Widget build(BuildContext context) {
+    final one = machines.length == 1;
+    final where = one ? machines.single.$2 : 'the machine you pick';
+    final target = account == null
+        ? 'the account with the most headroom'
+        : account!;
+    return AlertDialog(
+      key: const ValueKey('usage-switch-confirm'),
+      title: Text(
+        account == null ? 'Switch to best account?' : 'Switch to $account?',
+      ),
+      content: Text(
+        'This changes the Claude account for new Claude sessions on '
+        '$where to $target (cswap switch). Sessions already running keep '
+        'their account.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        for (final (hostId, name) in machines)
+          FilledButton(
+            key: ValueKey('usage-switch-confirm-$hostId'),
+            onPressed: () => Navigator.of(context).pop(hostId),
+            child: Text(one ? 'Switch' : 'Switch on $name'),
+          ),
+      ],
+    );
   }
 }
 

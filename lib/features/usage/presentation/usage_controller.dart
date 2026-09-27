@@ -216,6 +216,48 @@ class UsageController extends ChangeNotifier with WidgetsBindingObserver {
     _evaluateAlert();
   }
 
+  /// Makes account [slot] (or, with [best], the one cswap finds has the
+  /// most headroom) the Claude account for new sessions on [hostId]
+  /// (`cswap switch` through the companion), then asks that machine for
+  /// usage again. Callers confirm first.
+  Future<UsageAccountSwitchResult> switchAccount(
+    String hostId, {
+    int? slot,
+    bool best = false,
+  }) async {
+    final host = _hosts[hostId];
+    if (host == null || _disposed) {
+      return const UsageAccountSwitchResult.failed('Machine not found');
+    }
+    assert(best || slot != null, 'a slot or best');
+    AgentCommandRunner? runner;
+    var owned = false;
+    try {
+      final (r, owned: o) = _source.runnerFor(host);
+      runner = r;
+      owned = o;
+      final result = await r.run(
+        CompanionCommands.hostdCommand(
+          best ? 'cswap-switch --best' : 'cswap-switch $slot',
+        ),
+        timeout: commandTimeout,
+      );
+      return parseAccountSwitchResult(result.stdout);
+    } on Object catch (error) {
+      return UsageAccountSwitchResult.failed(
+        _firstLine('$error') ?? 'Unreachable',
+      );
+    } finally {
+      if (owned) {
+        unawaited(runner?.close());
+      }
+      // The companion forgot its account cache: show the new state.
+      if (!_disposed) {
+        unawaited(_fetch(host));
+      }
+    }
+  }
+
   Future<void> setBarCollapsed(bool collapsed) =>
       _savePreferences(_preferences.copyWith(barCollapsed: collapsed));
 
