@@ -14,7 +14,6 @@ dependencies:
   connectivity_plus: ^6.1.0
   cbor: ^6.3.7
   crypto: ^3.0.7
-  cupertino_icons: ^1.0.8
   # Vendored from gwitko/dartssh2_conduit@c39f316a with a small SFTP patch;
   # see third_party/dartssh2/README.md.
   dartssh2:
