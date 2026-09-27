@@ -162,6 +162,32 @@ void main() {
     expect(a.sync.status, SyncStatus.idle);
   });
 
+  test('a machine that takes the hub\'s id keeps its connect memory', () async {
+    final a = await _Device.create(
+      server,
+      hosts: [_hub(), machine('a')],
+      trustedKeys: [_hubKey()],
+    );
+    await a.sync.setUp(hub: a.host('hub'), passphrase: _passphrase);
+    final b = await _Device.create(
+      server,
+      hosts: [_hub(id: 'my-hub')],
+      trustedKeys: [_hubKey()],
+    );
+    b.local.connect.values = {
+      'my-hub': {'rememberChoice': true},
+    };
+    b.local.recentDirs.values = {
+      'my-hub': ['~/src'],
+    };
+    _tick();
+
+    await b.sync.setUp(hub: b.host('my-hub'), passphrase: _passphrase);
+
+    expect(b.local.connect.values.keys, ['hub']);
+    expect(b.local.recentDirs.values['hub'], ['~/src']);
+  });
+
   test('a wrong passphrase cannot join an existing hub', () async {
     await twoDevices();
     final c = await _Device.create(server, hosts: [_hub()]);

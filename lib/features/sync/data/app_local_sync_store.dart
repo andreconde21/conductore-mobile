@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/session_snapshot.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/sync/data/app_settings_codec.dart';
@@ -165,11 +166,21 @@ class AppLocalSyncStore implements LocalSyncStore {
     }
 
     if (on.contains(SyncCategory.connections)) {
+      // With machines syncing, the memory of a machine no longer saved
+      // (deleted, or its id changed) stays here instead of following that
+      // id to every device.
+      final saved = on.contains(SyncCategory.machines)
+          ? {for (final host in hosts.hosts) host.id}
+          : null;
+      bool known(String hostId) =>
+          saved == null || saved.contains(baseHostId(hostId));
       (await connectPreferences.readAll()).forEach((hostId, value) {
-        if (value != null) out[SyncKeys.connect(hostId)] = value;
+        if (value != null && known(hostId)) {
+          out[SyncKeys.connect(hostId)] = value;
+        }
       });
       (await recentDirectoriesStore.readAll()).forEach((hostId, value) {
-        if (value is List && value.isNotEmpty) {
+        if (value is List && value.isNotEmpty && known(hostId)) {
           out[SyncKeys.recentDirs(hostId)] = value;
         }
       });
@@ -543,6 +554,49 @@ class AppLocalSyncStore implements LocalSyncStore {
             return byPosition != 0 ? byPosition : a.$2.compareTo(b.$2);
           });
     await theme.setTerminalSnippets([for (final (_, id) in ordered) byId[id]!]);
+  }
+
+  @override
+  Future<void> renameHosts(Map<String, String> renamed) async {
+    if (renamed.isEmpty) return;
+    await _whenLoaded();
+    // `a#tmux:work` (a session on machine a) moves with a.
+    String? renamedId(String hostId) {
+      final base = baseHostId(hostId);
+      final to = renamed[base];
+      return to == null ? null : '$to${hostId.substring(base.length)}';
+    }
+
+    final connect = await connectPreferences.readAll();
+    if (connect.keys.any((id) => renamedId(id) != null)) {
+      await connectPreferences.writeAll({
+        for (final MapEntry(:key, :value) in connect.entries)
+          renamedId(key) ?? key: value,
+      });
+    }
+    final dirs = await recentDirectoriesStore.readAll();
+    final controller = recentDirectories;
+    var dirsChanged = false;
+    for (final MapEntry(:key, :value) in dirs.entries.toList()) {
+      final to = renamedId(key);
+      if (to == null) continue;
+      final list = value is List
+          ? value.whereType<String>().toList()
+          : <String>[];
+      if (controller != null) {
+        await controller.replace(to, list);
+        await controller.replace(key, const []);
+      } else {
+        dirs
+          ..remove(key)
+          ..[to] = list;
+        dirsChanged = true;
+      }
+    }
+    if (dirsChanged) await recentDirectoriesStore.writeAll(dirs);
+    final followed = theme.omarchySyncHostId;
+    final followTo = followed == null ? null : renamed[followed];
+    if (followTo != null) await theme.setOmarchySyncHost(followTo);
   }
 
   Future<void> _applyConnections(

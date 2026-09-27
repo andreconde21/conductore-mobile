@@ -695,6 +695,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       ],
       manualOrder: [for (final id in _hosts.manualOrder) renamed[id] ?? id],
     );
+    await _local.renameHosts(renamed);
     final hubId = renamed[config.hubHostId];
     if (hubId != null) {
       _config = config.copyWith(hubHostId: hubId);

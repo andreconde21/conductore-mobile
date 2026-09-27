@@ -166,6 +166,7 @@ void main() {
 
   test('settings, trusted keys, connect memory and sessions travel', () async {
     final source = await LocalDevice.create(
+      hosts: [machine('a')],
       trustedKeys: [
         HostKeyRecord(
           host: 'a.example.com',
@@ -207,6 +208,60 @@ void main() {
     expect(target.connect.values['a'], {'rememberChoice': true});
     expect(target.recentDirs.values['a'], ['~/src']);
     expect(target.sessions.stored.entries.single.hostId, 'a');
+  });
+
+  test('connect memory of a machine that is no longer saved stops '
+      'syncing', () async {
+    final device = await LocalDevice.create(hosts: [machine('a')]);
+    device.connect.values = {
+      'a': {'rememberChoice': true},
+      'a#tmux:work': {'rememberChoice': true},
+      'gone': {'rememberChoice': true},
+    };
+    device.recentDirs.values = {
+      'a': ['~/src'],
+      'gone': ['~/old'],
+    };
+
+    final values = await device.store.snapshot(_defaults);
+    expect(
+      values.keys.where((k) => k.startsWith('connect:')),
+      unorderedEquals(['connect:a', 'connect:a#tmux:work']),
+    );
+    expect(values.keys.where((k) => k.startsWith('recentDirs:')), [
+      'recentDirs:a',
+    ]);
+
+    // Without machines syncing, the saved list says nothing about ids.
+    final connectionsOnly = await device.store.snapshot(
+      const LocalSyncOptions(categories: {SyncCategory.connections}),
+    );
+    expect(connectionsOnly.keys, contains('connect:gone'));
+  });
+
+  test('renaming machine ids moves their connect memory and theme '
+      'follow', () async {
+    final device = await LocalDevice.create(hosts: [machine('new')]);
+    device.connect.values = {
+      'old': {'rememberChoice': true},
+      'old#tmux:work': {'rememberChoice': false},
+      'other': {'rememberChoice': true},
+    };
+    device.recentDirs.values = {
+      'old': ['~/src'],
+    };
+    await device.theme.setOmarchySyncHost('old');
+
+    await device.store.renameHosts({'old': 'new'});
+
+    expect(
+      device.connect.values.keys,
+      unorderedEquals(['new', 'new#tmux:work', 'other']),
+    );
+    expect(device.recentDirs.values, {
+      'new': ['~/src'],
+    });
+    expect(device.theme.omarchySyncHostId, 'new');
   });
 
   group('the followed Omarchy machine', () {
