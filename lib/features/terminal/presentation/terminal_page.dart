@@ -1224,13 +1224,12 @@ class _TerminalPageState extends State<TerminalPage>
     final host = connectFlow.hostsController.hosts
         .where((host) => host.id == hostId && !host.isLocal)
         .firstOrNull;
-    if (host == null) {
-      await connectFlow.pickHostAndConnect(context);
-    } else {
-      await connectFlow.connect(context, host, forcePicker: true);
-    }
+    final session = host == null
+        ? await connectFlow.pickHostAndConnect(context)
+        : await connectFlow.connect(context, host, forcePicker: true);
     if (!mounted) return;
     _showTerminal();
+    _openPreferredView(session);
   }
 
   /// Whether closing [session] ends what runs in it: a connected plain
@@ -1698,23 +1697,29 @@ class _TerminalPageState extends State<TerminalPage>
     _showTerminal();
   }
 
-  /// A session the user picked (its tab, the switcher): Chat View when its
-  /// pane runs a Claude session the companion knows and its effective view
-  /// is Chat View; the terminal otherwise.
-  void _openPreferredView(TerminalSessionController session) {
+  /// A session the user picked (its tab, the session grid, a new one from
+  /// the connect picker): Chat View when its effective view is Chat View
+  /// and it runs a Claude session the companion knows, once that is known
+  /// (see [openPreferredChatView]); the terminal otherwise.
+  void _openPreferredView(TerminalSessionController? session) {
     final attention = widget.agentAttention;
     if (!mounted ||
+        session == null ||
         attention == null ||
         widget.workspace.activeSession != session) {
       return;
     }
-    openPreferredChatView(
-      context,
-      attention: attention,
-      host: session.host,
-      dictation: _dictation,
-      onOpenTerminal: (agent) =>
-          _showAgentTerminal(attention, session.host, agent),
+    unawaited(
+      openPreferredChatView(
+        context,
+        attention: attention,
+        workspace: widget.workspace,
+        session: session,
+        herdr: widget.connectFlow?.herdr,
+        dictation: _dictation,
+        onOpenTerminal: (host, agent) =>
+            _showAgentTerminal(attention, host, agent),
+      ),
     );
   }
 
@@ -1813,6 +1818,7 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   Future<void> _openSessionGrid() async {
+    final before = widget.workspace.activeSession;
     await showSessionGrid(
       context,
       workspace: widget.workspace,
@@ -1822,12 +1828,15 @@ class _TerminalPageState extends State<TerminalPage>
     );
     if (!mounted) return;
     _showTerminal();
+    final active = widget.workspace.activeSession;
+    if (active != before) _openPreferredView(active);
   }
 
   Future<void> _openNewSession(SessionConnectFlow connectFlow) async {
-    await connectFlow.pickHostAndConnect(context);
+    final session = await connectFlow.pickHostAndConnect(context);
     if (!mounted) return;
     _showTerminal();
+    _openPreferredView(session);
   }
 
   /// The Herdr command channel for [session]'s gestures. For a session

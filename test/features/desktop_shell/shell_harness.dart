@@ -15,6 +15,7 @@ import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -81,6 +82,9 @@ class ShellHarness {
   /// The app's usage controller, provided above the page when set.
   UsageController? usageController;
 
+  /// "Open Claude sessions in", provided above the page when set.
+  SessionViewController? sessionViews;
+
   Widget page({bool? shellMode, UsageSummaryBuilder? usage}) => MaterialApp(
     home: _withUsage(
       HostsPage(
@@ -114,7 +118,13 @@ class ShellHarness {
 
   Widget _withUsage(Widget page) {
     final usage = usageController;
-    return usage == null ? page : UsageScope(controller: usage, child: page);
+    final views = sessionViews;
+    final withUsage = usage == null
+        ? page
+        : UsageScope(controller: usage, child: page);
+    return views == null
+        ? withUsage
+        : SessionViewScope(controller: views, child: withUsage);
   }
 }
 
