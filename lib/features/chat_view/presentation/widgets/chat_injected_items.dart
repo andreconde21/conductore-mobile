@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_search_highlight.dart';
 import 'package:flutter/material.dart';
 
 const _mono = 'monospace';
@@ -35,6 +36,9 @@ class _ChatAgentMessageCardState extends State<ChatAgentMessageCard> {
     final long =
         item.body.split('\n').length > _collapsedLines ||
         item.body.length > 280;
+    // Open while the find bar has a match here.
+    final expanded =
+        _expanded || ChatSearchHighlight.forItem(context, item.id) != null;
     return Align(
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
@@ -75,8 +79,10 @@ class _ChatAgentMessageCardState extends State<ChatAgentMessageCard> {
               ),
               if (item.summary case final summary? when summary.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(
+                ChatHighlightedText(
                   summary,
+                  itemId: item.id,
+                  segment: 0,
                   style: theme.textTheme.labelLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
@@ -84,10 +90,12 @@ class _ChatAgentMessageCardState extends State<ChatAgentMessageCard> {
               ],
               if (item.body.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(
+                ChatHighlightedText(
                   item.body,
-                  maxLines: _expanded ? null : _collapsedLines,
-                  overflow: _expanded ? null : TextOverflow.ellipsis,
+                  itemId: item.id,
+                  segment: 1,
+                  maxLines: expanded ? null : _collapsedLines,
+                  overflow: expanded ? null : TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(color: muted),
                 ),
               ],
@@ -99,7 +107,7 @@ class _ChatAgentMessageCardState extends State<ChatAgentMessageCard> {
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   onPressed: () => setState(() => _expanded = !_expanded),
-                  child: Text(_expanded ? 'Show less' : 'Show more'),
+                  child: Text(expanded ? 'Show less' : 'Show more'),
                 ),
             ],
           ),
@@ -131,6 +139,9 @@ class _IdleChipState extends State<_IdleChip> {
     final firstLine = item.body.split('\n').first.trim();
     // More than fits on the collapsed line.
     final more = item.body.trim() != firstLine || firstLine.length > 60;
+    // Open while the find bar has a match here.
+    final expanded =
+        _expanded || ChatSearchHighlight.forItem(context, item.id) != null;
     return Padding(
       key: const ValueKey('agent-idle-row'),
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -159,7 +170,7 @@ class _IdleChipState extends State<_IdleChip> {
                   ),
                   if (more)
                     Icon(
-                      _expanded
+                      expanded
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
                       size: 18,
@@ -170,11 +181,13 @@ class _IdleChipState extends State<_IdleChip> {
               if (item.body.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(left: 22, top: 2),
-                  child: Text(
-                    _expanded ? item.body : firstLine,
+                  child: ChatHighlightedText(
+                    expanded ? item.body : firstLine,
                     key: const ValueKey('agent-idle-result'),
-                    maxLines: _expanded ? null : 1,
-                    overflow: _expanded ? null : TextOverflow.ellipsis,
+                    itemId: expanded ? item.id : '',
+                    segment: 0,
+                    maxLines: expanded ? null : 1,
+                    overflow: expanded ? null : TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(color: muted),
                   ),
                 ),
@@ -208,8 +221,10 @@ class ChatTaskNoticeRow extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Expanded(
-            child: Text(
+            child: ChatHighlightedText(
               item.summary,
+              itemId: item.id,
+              segment: 0,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(color: color),
@@ -244,6 +259,9 @@ class _ChatShellCommandCardState extends State<ChatShellCommandCard> {
       if (item.stdout?.trim().isNotEmpty ?? false) item.stdout!.trim(),
       if (item.stderr?.trim().isNotEmpty ?? false) item.stderr!.trim(),
     ].join('\n');
+    // Open while the find bar has a match here.
+    final expanded =
+        _expanded || ChatSearchHighlight.forItem(context, item.id) != null;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Material(
@@ -280,9 +298,11 @@ class _ChatShellCommandCardState extends State<ChatShellCommandCard> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
+                      child: ChatHighlightedText(
                         item.command,
-                        maxLines: _expanded ? 6 : 1,
+                        itemId: item.id,
+                        segment: 0,
+                        maxLines: expanded ? 6 : 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontFamily: _mono,
@@ -297,7 +317,7 @@ class _ChatShellCommandCardState extends State<ChatShellCommandCard> {
                       ),
                   ],
                 ),
-                if (_expanded && output.isNotEmpty)
+                if (expanded && output.isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(top: 6),
                     padding: const EdgeInsets.all(6),
@@ -307,8 +327,10 @@ class _ChatShellCommandCardState extends State<ChatShellCommandCard> {
                       borderRadius: BorderRadius.circular(AppTheme.radius),
                     ),
                     child: SingleChildScrollView(
-                      child: Text(
+                      child: ChatHighlightedText(
                         output,
+                        itemId: item.id,
+                        segment: 1,
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontFamily: _mono,
                           color: item.failed ? scheme.error : null,

@@ -408,7 +408,9 @@ ChatViewAccess _blockedBy(CompanionStatus status, SavedHost host) {
 /// Opens the chat view for [agent] on [host] as a full-screen route, or
 /// through the nearest [ChatViewPresenter] (the desktop shell's tabs).
 /// [onOpenTerminal] runs after the route is popped by its Terminal button
-/// (the caller shows that session's TUI).
+/// (the caller shows that session's TUI). [initialSend] is sent as a prompt
+/// as the chat opens (a message passed on from another chat), showing as
+/// its pending bubble.
 Future<void> openChatView({
   required BuildContext context,
   required AgentAttentionController attention,
@@ -418,6 +420,7 @@ Future<void> openChatView({
   DictationController? dictation,
   Widget Function(BuildContext routeContext)? accessoryBuilder,
   String initialDraft = '',
+  String initialSend = '',
   PromptImageAttacher? imageAttacher,
   bool pasteImages = true,
 }) async {
@@ -456,6 +459,10 @@ Future<void> openChatView({
     decide: decide,
     agentChanges: changes,
   );
+  if (initialSend.trim().isNotEmpty) {
+    // A failure stays on the bubble, with Retry.
+    unawaited(controller.send(initialSend).onError((_, _) {}));
+  }
   // The desktop shell shows the chat as a tab in its panes.
   final presenter = ChatViewPresenter.maybeOf(context);
   if (presenter != null) {

@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/chat_view/domain/markdown_table.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_search_highlight.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Renders the Markdown subset agent replies actually use: paragraphs,
@@ -177,6 +179,83 @@ List<MarkdownBlock> parseMarkdownBlocks(String text) {
   return blocks;
 }
 
+/// The text of each searchable run of [text] as [ChatMarkdown] shows it,
+/// in display order: one per paragraph, heading, list item, quote and code
+/// block, and one per table cell (headers first). Search matches count
+/// against these, so a highlight lands where the text is on screen.
+List<String> markdownSearchSegments(String text) => [
+  for (final block in parseMarkdownBlocks(text))
+    ...switch (block) {
+      MarkdownParagraph(:final text) ||
+      MarkdownHeading(:final text) ||
+      MarkdownListItem(:final text) ||
+      MarkdownQuote(:final text) => [markdownPlainInline(text)],
+      MarkdownCode(:final code) => [code],
+      MarkdownRule() => const <String>[],
+      MarkdownTableBlock(:final table) => [
+        for (final cell in table.headers) markdownPlainInline(cell),
+        for (final row in table.rows)
+          for (final cell in row) markdownPlainInline(cell),
+      ],
+    },
+];
+
+/// [text] without its Markdown: what "Copy" puts on the clipboard. Lists
+/// keep their markers, tables become tab-separated rows.
+String markdownToPlainText(String text) {
+  final out = StringBuffer();
+  MarkdownBlock? previous;
+  for (final block in parseMarkdownBlocks(text)) {
+    if (previous != null) {
+      out.write(
+        previous is MarkdownListItem && block is MarkdownListItem
+            ? '\n'
+            : '\n\n',
+      );
+    }
+    previous = block;
+    out.write(switch (block) {
+      MarkdownParagraph(:final text) ||
+      MarkdownHeading(:final text) ||
+      MarkdownQuote(:final text) => markdownPlainInline(text),
+      MarkdownListItem(:final marker, :final text, :final indent) =>
+        '${'  ' * indent}$marker ${markdownPlainInline(text)}',
+      MarkdownCode(:final code) => code,
+      MarkdownRule() => '---',
+      MarkdownTableBlock(:final table) => [
+        table.headers.map(markdownPlainInline).join('\t'),
+        for (final row in table.rows) row.map(markdownPlainInline).join('\t'),
+      ].join('\n'),
+    });
+  }
+  return out.toString();
+}
+
+/// The text [markdownSpans] shows for [text] (the same rules, no spans).
+String markdownPlainInline(String text) {
+  final out = StringBuffer();
+  var index = 0;
+  for (final match in _inline.allMatches(text)) {
+    out.write(text.substring(index, match.start));
+    index = match.end;
+    if (match.group(1) case final code?) {
+      out.write(code);
+    } else if (match.group(2) ?? match.group(3) case final bold?) {
+      out.write(markdownPlainInline(bold));
+    } else if (match.group(4) ?? match.group(5) case final italic?) {
+      out.write(italic);
+    } else {
+      final label = match.group(6) ?? match.group(8)!;
+      final url = match.group(7) ?? match.group(8)!;
+      out.write(
+        _safeLink(url) == null && label != url ? '$label ($url)' : label,
+      );
+    }
+  }
+  out.write(text.substring(index));
+  return out.toString();
+}
+
 class _ChatMarkdownState extends State<ChatMarkdown> {
   final List<TapGestureRecognizer> _recognizers = [];
 
@@ -203,17 +282,33 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
     final base = widget.style ?? theme.textTheme.bodyMedium!;
     final blocks = parseMarkdownBlocks(widget.text);
     final children = <Widget>[];
+    // Search highlights, per run in markdownSearchSegments order.
+    final highlight = ChatSearchHighlight.maybeOf(context);
+    var segment = 0;
+    List<InlineSpan> marked(String text, TextStyle base, {bool code = false}) {
+      final spans = code ? [TextSpan(text: text)] : _spans(text, base);
+      final index = segment++;
+      return highlight == null ? spans : highlight.mark(index, spans);
+    }
+
+    // Table cells are laid out later (and maybe more than once), so they
+    // get every match marked but not the current one.
+    List<InlineSpan> cell(String text, TextStyle base) {
+      final spans = _spans(text, base);
+      return highlight == null ? spans : highlight.markAll(spans);
+    }
+
     for (final block in blocks) {
       if (children.isNotEmpty) {
         children.add(const SizedBox(height: 6));
       }
       children.add(switch (block) {
         MarkdownParagraph(:final text) => Text.rich(
-          TextSpan(children: _spans(text, base)),
+          TextSpan(children: marked(text, base)),
           style: base,
         ),
         MarkdownHeading(:final level, :final text) => Text.rich(
-          TextSpan(children: _spans(text, base)),
+          TextSpan(children: marked(text, base)),
           style: base.copyWith(
             fontWeight: FontWeight.w800,
             fontSize:
@@ -236,7 +331,7 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
               ),
               Expanded(
                 child: Text.rich(
-                  TextSpan(children: _spans(text, base)),
+                  TextSpan(children: marked(text, base)),
                   style: base,
                 ),
               ),
@@ -251,33 +346,23 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
             ),
           ),
           child: Text.rich(
-            TextSpan(children: _spans(text, base)),
+            TextSpan(children: marked(text, base)),
             style: base.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
-        MarkdownCode(:final code) => Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(AppTheme.radius),
-          ),
-          padding: const EdgeInsets.all(10),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Text(
-              code,
-              style: base.copyWith(
-                fontFamily: 'monospace',
-                fontSize: (base.fontSize ?? 14) * 0.88,
-              ),
-            ),
+        MarkdownCode(:final code) => _CodeBlock(
+          code: code,
+          spans: marked(code, base, code: true),
+          style: base.copyWith(
+            fontFamily: 'monospace',
+            fontSize: (base.fontSize ?? 14) * 0.88,
           ),
         ),
         MarkdownRule() => Divider(color: theme.colorScheme.outlineVariant),
         MarkdownTableBlock(:final table) => MarkdownTableView(
           table: table,
           style: base,
-          spans: _spans,
+          spans: cell,
         ),
       });
     }
@@ -285,6 +370,59 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: children,
+    );
+  }
+}
+
+/// A fenced code block, scrollable sideways, with a copy button on it.
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock({
+    required this.code,
+    required this.spans,
+    required this.style,
+  });
+
+  final String code;
+  final List<InlineSpan> spans;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+      ),
+      child: Stack(
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            // Room on the right for the copy button.
+            padding: const EdgeInsets.fromLTRB(10, 10, 40, 10),
+            child: Text.rich(TextSpan(children: spans), style: style),
+          ),
+          Positioned(
+            top: 2,
+            right: 2,
+            child: IconButton(
+              key: const ValueKey('markdown-code-copy'),
+              tooltip: 'Copy code',
+              visualDensity: VisualDensity.compact,
+              iconSize: 16,
+              color: scheme.onSurfaceVariant,
+              onPressed: () {
+                unawaited(Clipboard.setData(ClipboardData(text: code)));
+                ScaffoldMessenger.maybeOf(context)
+                  ?..hideCurrentSnackBar()
+                  ..showSnackBar(const SnackBar(content: Text('Code copied')));
+              },
+              icon: const Icon(Icons.copy_rounded),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -576,11 +714,8 @@ InlineSpan _link(
   ThemeData theme,
   List<TapGestureRecognizer> recognizers,
 ) {
-  final uri = Uri.tryParse(url);
-  final safe =
-      uri != null &&
-      (uri.scheme == 'https' || uri.scheme == 'http' || uri.scheme == 'mailto');
-  if (!safe) {
+  final uri = _safeLink(url);
+  if (uri == null) {
     return TextSpan(text: label == url ? url : '$label ($url)');
   }
   final recognizer = TapGestureRecognizer()
@@ -594,4 +729,15 @@ InlineSpan _link(
       decoration: TextDecoration.underline,
     ),
   );
+}
+
+/// [url] when it may open (http, https, mailto), else null.
+Uri? _safeLink(String url) {
+  final uri = Uri.tryParse(url);
+  return uri != null &&
+          (uri.scheme == 'https' ||
+              uri.scheme == 'http' ||
+              uri.scheme == 'mailto')
+      ? uri
+      : null;
 }

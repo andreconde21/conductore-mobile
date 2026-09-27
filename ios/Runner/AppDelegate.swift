@@ -17,7 +17,42 @@ import UIKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ConductoreVoice") {
       registerVoice(messenger: registrar.messenger())
+      registerShare(messenger: registrar.messenger())
     }
+  }
+
+  /// Chat View's message "Share": the system activity sheet for text.
+  private func registerShare(messenger: FlutterBinaryMessenger) {
+    FlutterMethodChannel(name: "conduit/share_text", binaryMessenger: messenger)
+      .setMethodCallHandler { call, result in
+        guard call.method == "share",
+          let args = call.arguments as? [String: Any],
+          let text = args["text"] as? String
+        else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        let root = UIApplication.shared.connectedScenes
+          .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }
+          .first
+        guard var top = root else {
+          result(FlutterError(code: "no_window", message: "Nothing to share from", details: nil))
+          return
+        }
+        while let presented = top.presentedViewController { top = presented }
+        let sheet = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let subject = args["subject"] as? String {
+          sheet.setValue(subject, forKey: "subject")
+        }
+        // iPad: a popover needs an anchor.
+        if let popover = sheet.popoverPresentationController {
+          popover.sourceView = top.view
+          popover.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+          popover.permittedArrowDirections = []
+        }
+        top.present(sheet, animated: true)
+        result(nil)
+      }
   }
 
   /// Dictation and read-aloud: the same channels as Android's MainActivity.
