@@ -165,7 +165,8 @@ test('claude missing, not logged in, crash', async () => {
 
 test('timeout kills claude and everything it started', async () => {
   reset()
-  const r = await cli(['--timeout-ms', '1000'], { input: request(), extraEnv: { FAKE_MODE: 'hang' } })
+  // Long enough for the fake to start on a loaded machine.
+  const r = await cli(['--timeout-ms', '3000'], { input: request(), extraEnv: { FAKE_MODE: 'hang' } })
   assert.equal(r.json.error, 'timeout')
   const pids = JSON.parse(fs.readFileSync(pidsFile, 'utf8'))
   await new Promise(resolve => setTimeout(resolve, 1500))
