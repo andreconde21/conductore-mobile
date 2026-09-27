@@ -2,6 +2,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/this_computer/data/device_local_sync.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
@@ -36,6 +37,7 @@ abstract final class AppSettingsCodec {
     'terminalGestures',
     'speechLanguage',
     'voice',
+    'quickActions',
   ];
 
   static Map<String, Object?> encode(ThemeController theme) {
@@ -72,6 +74,9 @@ abstract final class AppSettingsCodec {
       // Read-aloud and dictation settings; the per-session toggles stay on
       // each device.
       'voice': theme.voice.toJson(includeSessions: false),
+      'quickActions': [
+        for (final action in theme.quickActions) action.toJson(),
+      ],
     };
   }
 
@@ -168,6 +173,10 @@ abstract final class AppSettingsCodec {
       await theme.setVoice(
         VoicePreferences.fromJson(voice, fallback: theme.voice),
       );
+    }
+    final quickActions = json['quickActions'];
+    if (quickActions is List) {
+      await theme.setQuickActions(QuickAction.listFromJson(quickActions));
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
@@ -30,6 +31,7 @@ class ThemePreferences {
     this.terminalGestures = TerminalGesturePreferences.defaults,
     this.speechLanguage = '',
     this.voice = VoicePreferences.defaults,
+    this.quickActions = const [],
     this.remoteClipboardEnabled = true,
     this.pasteImagesAsFiles = true,
     this.restoreSessionsOnLaunch = true,
@@ -77,6 +79,9 @@ class ThemePreferences {
 
   /// Read-aloud and continuous-dictation settings.
   final VoicePreferences voice;
+
+  /// Personal quick actions (Settings), for every project or one.
+  final List<QuickAction> quickActions;
 
   /// Whether text the remote copies with OSC 52 lands on the phone
   /// clipboard. On by default, like most desktop terminals.
@@ -136,6 +141,7 @@ class ThemePreferencesRepository {
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
   static const _speechLanguageKey = 'conduit.speech_language.v1';
   static const _voiceKey = 'conductore.voice.v1';
+  static const _quickActionsKey = 'conductore.quick_actions.v1';
   static const _remoteClipboardEnabledKey =
       'conduit.remote_clipboard_enabled.v1';
   static const _pasteImagesAsFilesKey = 'conductore.paste_images_as_files.v1';
@@ -198,6 +204,7 @@ class ThemePreferencesRepository {
     final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
     final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
     final rawVoice = await _storage.read(key: _voiceKey);
+    final rawQuickActions = await _storage.read(key: _quickActionsKey);
     final rawRemoteClipboardEnabled = await _storage.read(
       key: _remoteClipboardEnabledKey,
     );
@@ -248,6 +255,7 @@ class ThemePreferencesRepository {
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
       speechLanguage: rawSpeechLanguage?.trim() ?? '',
       voice: VoicePreferences.decode(rawVoice),
+      quickActions: QuickAction.decodeList(rawQuickActions),
       remoteClipboardEnabled:
           rawRemoteClipboardEnabled == null ||
           rawRemoteClipboardEnabled == 'true',
@@ -372,6 +380,10 @@ class ThemePreferencesRepository {
       value: preferences.speechLanguage,
     );
     await _storage.write(key: _voiceKey, value: preferences.voice.encode());
+    await _storage.write(
+      key: _quickActionsKey,
+      value: QuickAction.encodeList(preferences.quickActions),
+    );
     await _storage.write(
       key: _remoteClipboardEnabledKey,
       value: preferences.remoteClipboardEnabled.toString(),
