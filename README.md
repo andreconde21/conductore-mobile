@@ -34,6 +34,128 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 - **Agents first.** The app is built around watching and steering coding agents
   (Claude Code) inside Herdr and tmux, not around a generic terminal.
 
+## New in preview 17
+
+- **Review mode and undo** (companion 1.0): the companion snapshots the
+  repository at the start and end of every Claude turn, so you can review a
+  turn file by file on swipeable cards with coloured diffs, reject a single
+  file (it is reverted), comment on lines, send feedback, or undo the whole
+  turn and redo it. It opens from Chat View, the dashboard, the inbox, or
+  after each turn if you want. The voice guide knows "undo that" and
+  "review", and asks before it undoes.
+- **Usage explorer**: ranges from today to 30 days or your own, a day
+  chart you tap to see that day's hours, projects, models, sessions,
+  machines and accounts, rows that filter the whole view, tokens or cost,
+  the change from the previous period, and a CSV export.
+- **Chat View messages**: long-press (or right-click) any message to copy
+  it with or without Markdown, share it, quote it in your reply, select
+  its text or send it to another agent. Code blocks have their own copy
+  button, and **find in the conversation** (Ctrl+F, Cmd+F) counts and
+  highlights matches and loads older messages as needed.
+- **Android widget and tile** show the dashboard: the needs-you and stuck
+  counts, up to three agent lines and both limit rings, in the app's
+  theme. Tapping a line opens that agent.
+- **Safe SFTP saves**: an edited file is written to a temporary file and
+  renamed over the original, so a dropped connection never leaves it half
+  written.
+- Host companion **1.0.0**, with `turns`, `diff`, `undo` and `redo`, and
+  usage by range, hour and session.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/37-review-cards.png" width="200" alt="Review mode: a file card with a coloured diff, accept and reject"><br><sub>Review a turn file by file</sub></td>
+    <td align="center"><img src="docs/screenshots/38-usage-explorer-day.png" width="200" alt="Usage explorer: one day by hour, project and session"><br><sub>Usage explorer: one day</sub></td>
+    <td align="center"><img src="docs/screenshots/39-chat-message-menu.png" width="200" alt="Chat View message menu: copy, share, quote, send to another agent"><br><sub>A message's menu</sub></td>
+    <td align="center"><img src="docs/screenshots/40-chat-find.png" width="200" alt="Chat View find bar with highlighted matches"><br><sub>Find in the conversation</sub></td>
+  </tr>
+</table>
+
+## New in preview 16
+
+- **Agents dashboard**, from the home bar (and above the sessions on the
+  desktop): what each agent did since your last look, grouped as Needs
+  you, Stuck, Working and Done, with its facts (files and lines changed,
+  test runs, failed commands, tokens and cost), a flag when an agent looks
+  stuck, and approval, Answer, Chat and Terminal buttons on each card. A one- or
+  two-sentence Claude summary is made only when you open it and only for
+  agents that changed; Settings › Agents › Dashboard turns summaries off
+  and sets when an agent counts as stuck. Ask the voice guide to "catch me
+  up" to hear it.
+- **Sent messages show at once** in Chat View as a pending bubble
+  (Sending…, then Sent) until Claude's transcript has them; a refused send
+  offers Retry and Edit.
+- **The default view everywhere**: a workspace opens in Chat View or the
+  terminal, as set in Settings › Terminal › Open Claude sessions in, from
+  the home screen, the switcher, notifications and the dashboard alike.
+- Fixes from the code review's leftovers: live preview keeps working after
+  a reconnect, Talk no longer sends a cut-off phrase when another mic takes
+  over and follows the thread while it listens, agents in a named
+  (non-default) Herdr session can be sent prompts, and builds can set a
+  mirror for the local shell's rootfs
+  ([Local-shell rootfs mirror](#local-shell-rootfs-mirror)).
+- Host companion **0.9.0**, with `digest` for the dashboard.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/35-agents-dashboard.png" width="200" alt="Agents dashboard: needs you, stuck and done cards with facts and summaries"><br><sub>The agents dashboard</sub></td>
+    <td align="center"><img src="docs/screenshots/36-chat-pending-bubble.png" width="200" alt="Chat View with a just-sent message as a pending bubble"><br><sub>A sent message, pending</sub></td>
+  </tr>
+</table>
+
+## New in preview 15
+
+- **Voice guide**: talk to the app hands-free. Common phrases ("what's
+  waiting", "open api", "approve", "read the last reply") work offline in
+  English and Portuguese; anything else goes to Claude through the
+  companion's `guide` command. It answers aloud and asks before it acts,
+  and a high-risk approval is always confirmed. Start it with the
+  headset-mic button on the home screen, the Quick Settings tile, a long
+  press on Talk, or the headset's assistant button. Settings › Chat &
+  Voice › Voice guide.
+- **Smart approvals** (companion 0.8):
+  - a Low, Medium or High risk label, with a reason, on every approval;
+  - **Trust…** allows exactly that call for N minutes, and **Always**
+    saves a rule in Claude Code's `Tool(pattern)` syntax;
+  - **Approve all safe** for the low-risk ones, and a list of what was
+    auto-approved, with Undo;
+  - Settings › Agents › Approval rules lists, edits and revokes each
+    machine's rules;
+  - high risk always asks, and the terminal prompt is unchanged.
+- **Voice on iPhone**: dictation, read-aloud and Talk. A call pauses
+  reading and it resumes afterwards; AirPods work for both.
+- **Every cswap account in Usage**: an Accounts section with each Claude
+  account's limits, a "+N accounts" chip on the usage bar, and switching
+  the account for new sessions, after a confirmation.
+- **This computer**: the PC recognises its own synced machine entry and
+  folds it into *This computer*.
+- **Chat View**: the mic and Talk on every way in; messages from other
+  Claude sessions show as their own rows, never as yours, and "*X*
+  finished" rows carry a teammate's result.
+- **Security and reliability** from a full code review:
+  - approving from a lock-screen notification needs an unlock, and the app
+    lock locks again after a time in the background you choose
+    (Settings › Security);
+  - a changed host key is replaced in two steps, with SHA256 fingerprints;
+  - reconnecting no longer leaks the old connection, SSH handshakes time
+    out, and a sync never loses edits made while it runs;
+  - remote commands are safe under fish, and Android backup is off;
+  - the companion no longer crashes under load, checks the pane before it
+    types, and keeps its socket in one place.
+- Host companion **0.8.1**, with `guide`, `trust`, `rules`, `approve-low`,
+  `approvals` and `cswap-switch`.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/30-approval-risk.png" width="200" alt="Chat View approval card with a Low risk label, Trust… and Always"><br><sub>A risk label, Trust… and Always</sub></td>
+    <td align="center"><img src="docs/screenshots/31-approval-rules.png" width="200" alt="Approval rules for the workstation: a timed trust and standing rules"><br><sub>Settings › Agents › Approval rules</sub></td>
+    <td align="center"><img src="docs/screenshots/32-voice-guide.png" width="200" alt="Voice guide card on the home screen asking to confirm an approval"><br><sub>The voice guide asks before it approves</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/33-usage-accounts.png" width="200" alt="Usage explorer with an Accounts section for two cswap accounts"><br><sub>Usage for every cswap account</sub></td>
+    <td align="center"><img src="docs/screenshots/34-chat-peer-messages.png" width="200" alt="Chat View with a message from another session and a finished row"><br><sub>Another session's message, a teammate finished</sub></td>
+  </tr>
+</table>
+
 ## New in preview 14
 
 - **Desktop shell** on desktops and tablets (900 dp and wider):
@@ -78,7 +200,7 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 <table>
   <tr>
     <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
-    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage breakdown: limits per machine, cost per day, tokens per project"><br><sub>Usage breakdown</sub></td>
+    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage explorer: limit rings, ranges, a week by day and tokens per project"><br><sub>Usage in detail (the explorer since preview 17)</sub></td>
     <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Tool activity collapsed</sub></td>
     <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>The Chat View menu</sub></td>
   </tr>
@@ -145,15 +267,30 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   reply from a composer, instead of reading the raw TUI.
   - A live working indicator says what Claude is doing and for how long.
   - Markdown tables render as tables, scrollable and full screen.
-  - Messages from other agents, task notices, shell and slash commands each
-    get their own card.
+  - Messages from other agents and Claude sessions, task notices, shell and
+    slash commands each get their own card, never shown as yours; a
+    teammate that finished gets one "*X* finished" row.
   - Scrolled up, the thread stays still. New messages wait behind a pill.
-- **Voice** (Android): read Claude's final answer aloud, and hands-free
-  **Talk mode** that listens, sends after a pause, reads the answer and
-  answers approvals by voice. Dictation keeps listening across pauses.
+  - What you send shows at once as a pending bubble.
+  - Long-press a message to copy, share, quote it or send it to another
+    agent; find in the conversation with Ctrl+F (Cmd+F).
+- **Voice** (Android and iPhone): read Claude's final answer aloud, and
+  hands-free **Talk mode** that listens, sends after a pause, reads the
+  answer and answers approvals by voice. Dictation keeps listening across
+  pauses. The mic and Talk are in Chat View whichever way you open it.
+- **Voice guide**: talk to the whole app hands-free: ask what is waiting,
+  open an agent, approve, read a reply or switch accounts. Common phrases
+  work offline in English and Portuguese, the rest goes to Claude through
+  the companion (0.8). It confirms aloud before it acts, always for high
+  risk.
 - **Read-aloud length** (Brief, Full or a Claude summary) and **tool
   activity** in Chat View (Show all, Collapsed or Hidden), from the header
   menu or Settings.
+- **Agents dashboard**: since your last look, each agent's facts (files,
+  lines, tests, failed commands, tokens and cost), stuck flags, and a Claude
+  summary made only when you open it (companion 0.9).
+- **Review mode and undo** (companion 1.0): every turn is snapshotted;
+  review it file by file, reject one file, send feedback, or undo the turn.
 - **Inbox** of every agent across your machines, with permission requests you
   answer with Allow, Deny or Always, and a Usage tab.
 - **Smarter approvals** (companion with `smart-approvals`): every request
@@ -168,14 +305,19 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 - **Usage** (companion 0.6 or newer): Claude's 5-hour and weekly limits,
   tokens and an estimated cost per day, machine, project and model, Codex
   too. On the home screen, the widget and the Quick Settings tile, with an
-  optional alert at 80% of the 5-hour window.
+  optional alert at 80% of the 5-hour window. The usage explorer (companion
+  1.0) shows any range, a day by the hour, filters and a CSV export. With
+  [cswap](https://github.com/realiti4/claude-swap) on the machine
+  (companion 0.8), every Claude account's limits, and a confirmed switch.
 - **Notifications with actions**: one notification per agent, updated in place
   with what it needs now ("api · VTM needs you: Approve Bash: npm test · +2
   more"). Approve or deny the first request, or jump to the agent's exact
-  pane, straight from the notification. It alerts only when an agent newly
-  needs you, goes away once everything is answered, and all agents stack
-  under one summary that opens the dashboard.
-- **Home screen widget and Quick Settings tile** showing agents that need you.
+  pane, straight from the notification; approving from the lock screen asks
+  you to unlock first. It alerts only when an agent newly needs you, goes away
+  once everything is answered, and all agents stack under one summary that
+  opens the dashboard.
+- **Home screen widget and Quick Settings tile** (Android) showing the
+  dashboard: agents that need you or are stuck, and the limit rings.
 - Agent attention dashboard that polls Herdr and shows which agents are
   working, waiting, or finished.
 
@@ -232,7 +374,8 @@ tmux.
 - **Recent directories** per machine, from OSC 7, tmux and the companion, to
   open a shell, tmux window or Herdr tab in one.
 - **SFTP browser** with bookmarks, a file viewer and editor, uploads and
-  downloads.
+  downloads. Saves go through a temporary file and a rename, so a dropped
+  connection never leaves a half-written file.
 - **Git diff view** of a repository's working tree.
 - **Live preview** of a dev server running on the host.
   - A **Preview ready** chip appears when a new dev server starts, found by
@@ -252,7 +395,9 @@ tmux.
 - Hardware security keys (`ed25519-sk`, `ecdsa-sk`) over USB or NFC, several
   per host (phones only).
 - Optional per-host SSH agent forwarding.
-- Host key trust you review and manage yourself.
+- Host key trust you review and manage yourself, with SHA256
+  fingerprints. A changed key is never trusted silently: you confirm the
+  new fingerprint in a second step.
 - Works over Tailscale like any other network: point a host at its tailnet
   name or IP.
 - Plain connection errors: "Can't reach" (with a Tailscale hint for
@@ -264,7 +409,10 @@ tmux.
   (desktops paste the code). Passwords and keys sync only if you turn that
   on ([docs/sync.md](docs/sync.md)).
 - Encrypted backups of settings, machines and trusted keys (same format as
-  sync), and an optional device-auth app lock.
+  sync), and an optional device-auth app lock that locks again after a
+  time in the background you choose (Settings › Security). Android's own
+  cloud backup and device transfer are off: machines move with these
+  backups or sync.
 
 ### Desktop
 
@@ -328,9 +476,26 @@ Rendered from the app's own widgets with demo data by
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
-    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage breakdown: limits per machine, cost per day, tokens per project"><br><sub>Usage: per machine, day and project</sub></td>
+    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage explorer: limit rings, ranges, a week by day and tokens per project"><br><sub>Usage explorer: a week by day and project</sub></td>
     <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Chat View: tool calls collapsed</sub></td>
     <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>Read-aloud length and tool activity</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/30-approval-risk.png" width="200" alt="Chat View approval card with a Low risk label, Trust… and Always"><br><sub>Approvals: risk label, Trust… and Always</sub></td>
+    <td align="center"><img src="docs/screenshots/31-approval-rules.png" width="200" alt="Approval rules for the workstation: a timed trust and standing rules"><br><sub>Approval rules per machine</sub></td>
+    <td align="center"><img src="docs/screenshots/32-voice-guide.png" width="200" alt="Voice guide card on the home screen asking to confirm an approval"><br><sub>Voice guide: a spoken confirmation</sub></td>
+    <td align="center"><img src="docs/screenshots/33-usage-accounts.png" width="200" alt="Usage explorer with an Accounts section for two cswap accounts"><br><sub>Usage: every cswap account</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/34-chat-peer-messages.png" width="200" alt="Chat View with a message from another session and a finished row"><br><sub>Chat View: other sessions and teammates</sub></td>
+    <td align="center"><img src="docs/screenshots/35-agents-dashboard.png" width="200" alt="Agents dashboard: needs you, stuck and done cards with facts and summaries"><br><sub>Agents dashboard: facts and summaries</sub></td>
+    <td align="center"><img src="docs/screenshots/36-chat-pending-bubble.png" width="200" alt="Chat View with a just-sent message as a pending bubble"><br><sub>A sent message shows at once</sub></td>
+    <td align="center"><img src="docs/screenshots/37-review-cards.png" width="200" alt="Review mode: a file card with a coloured diff, accept and reject"><br><sub>Review mode: one card per file</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/38-usage-explorer-day.png" width="200" alt="Usage explorer: one day by hour, project and session"><br><sub>Usage explorer: a day by the hour</sub></td>
+    <td align="center"><img src="docs/screenshots/39-chat-message-menu.png" width="200" alt="Chat View message menu: copy, share, quote, send to another agent"><br><sub>Message menu</sub></td>
+    <td align="center"><img src="docs/screenshots/40-chat-find.png" width="200" alt="Chat View find bar with highlighted matches"><br><sub>Find in the conversation</sub></td>
   </tr>
 </table>
 
@@ -343,7 +508,7 @@ Rendered from the app's own widgets with demo data by
 ## Install
 
 Builds are previews. Get them from
-[Releases](../../releases/tag/v0.1.0-conductore.14) or, for the Outsmartis
+[Releases](../../releases/tag/v0.1.0-conductore.17) or, for the Outsmartis
 team, from the store test channels. Each release lists `SHA256SUMS` files
 next to the downloads.
 
@@ -418,12 +583,31 @@ permission, ended) and lets the app answer permission prompts. The app
 talks to it only through SSH exec commands. It opens no ports and needs no
 relay.
 
-Preview 14 bundles **companion 0.7.0**. Its `usage` command (0.6) counts
-Claude and Codex tokens, limits and estimated cost from local files on the
-host, for the usage bar and tab. Its `summarize` command (0.7) turns a reply
-into one or two spoken sentences with Claude Haiku, for the Claude summary
-read-aloud length; it runs `claude -p` with no tools and stores nothing.
-The `ports` command (0.5) reports dev servers for the Preview ready chip.
+Preview 17 bundles **companion 1.0.0**. What the app asks it for, by the
+version that added it:
+
+- `turns`, `diff`, `undo` and `redo` (1.0), for Review mode. The companion
+  snapshots the repository at the start and end of every Claude turn as git
+  objects under `refs/conductore/snapshots/`, never a commit on your
+  branch, pruned after 7 days. `undo` puts the work tree, or single files,
+  back to before the turn, and is refused while the agent works.
+- `digest` (0.9), for the agents dashboard: each agent's facts and stuck
+  flags, and, only when the app asks, a short summary per agent that
+  changed.
+- `guide` (0.8), for the voice guide: what the phone did not recognise
+  becomes one action from a closed list. It gets only short ids and labels,
+  never transcripts.
+- `trust`, `rules`, `approve-low` and `approvals` (0.8), for smart
+  approvals. Rules live in `~/.conductore/rules.json`, never in Claude
+  Code's settings; the daemon allows a matching request by itself, even
+  with the phone offline, and never a high-risk one.
+- `usage` (0.6; ranges, hours and sessions in 1.0, every cswap account in
+  0.8) and `cswap-switch` (0.8), for the usage bar, tab and explorer.
+- `summarize` (0.7), for the Claude summary read-aloud length, and `ports`
+  (0.5), for the Preview ready chip.
+
+`summarize`, `guide` and `digest` summaries use Claude Haiku through
+`claude -p` with no tools, no hooks and no session saved, and store nothing.
 The app offers the update on the Agent hooks screen. Older companions keep
 working without the features they lack.
 
@@ -489,6 +673,10 @@ clipboard, chat text or transcripts. Both are on by default and each has a
 switch in **Settings › Privacy** (stored on the device, applied at once);
 the app says so once on the home screen. Development builds send nothing.
 Details: [docs/privacy-policy.md](docs/privacy-policy.md).
+
+Android's cloud backup and device transfer are off for Conductore, so none
+of its data goes to a Google backup. Your own encrypted backup file and
+device sync are the ways to move machines to a new phone.
 
 Builds from source can point elsewhere or turn either half off:
 

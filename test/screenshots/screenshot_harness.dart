@@ -137,10 +137,17 @@ Widget shotApp({
 
 /// Popup menu items use a text style without a font family, which a
 /// device draws in its system sans but flutter_test in boxes: name Roboto.
+/// Symbols Roboto lacks (✓, ✗) fall back to JetBrains Mono, as a device
+/// falls back to its symbol font.
 ThemeData _systemSans(ThemeData theme) {
+  const fallback = ['JetBrainsMonoNerdFontMono'];
   final menu = theme.popupMenuTheme;
   final style = menu.textStyle?.copyWith(fontFamily: 'Roboto');
   return theme.copyWith(
+    textTheme: theme.textTheme.apply(fontFamilyFallback: fallback),
+    primaryTextTheme: theme.primaryTextTheme.apply(
+      fontFamilyFallback: fallback,
+    ),
     popupMenuTheme: menu.copyWith(
       textStyle: style,
       labelTextStyle: WidgetStatePropertyAll(style),
