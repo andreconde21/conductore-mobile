@@ -190,7 +190,7 @@ void main() {
       expect(find.text('logs'), findsNothing);
     });
 
-    final desktops = TargetPlatformVariant({
+    const desktops = TargetPlatformVariant({
       TargetPlatform.linux,
       TargetPlatform.windows,
       TargetPlatform.macOS,
