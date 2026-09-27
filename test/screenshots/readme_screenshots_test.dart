@@ -394,6 +394,12 @@ Future<SyncController> demoSyncDevice(
   return sync;
 }
 
+/// A companion 1.0 `usage` reply: [reply] with the range end it covers.
+Map<String, Object?> companion1(
+  Map<String, Object?> reply, {
+  required String to,
+}) => {...reply, 'version': '1.0.0', 'to': to};
+
 Widget _withUsage(UsageController? usage, Widget page) =>
     usage == null ? page : UsageScope(controller: usage, child: page);
 
@@ -438,93 +444,104 @@ UsageController demoUsage({bool detailed = false, bool accounts = false}) {
   ];
   final runner = FakeUsageRunner(
     () => FakeUsageRunner.ok(
-      usageReplyJson(
-        machine: 'workstation',
-        today: day(0),
-        from: day(6),
-        limits: limits,
-        accounts: accounts
-            ? [
-                usageAccount(
-                  1,
-                  'work',
-                  active: true,
-                  fiveHour: 62,
-                  weekly: 31,
-                  fiveHourResets: now.add(
-                    const Duration(hours: 2, minutes: 14),
+      companion1(
+        usageReplyJson(
+          machine: 'workstation',
+          today: day(0),
+          from: day(6),
+          limits: limits,
+          accounts: accounts
+              ? [
+                  usageAccount(
+                    1,
+                    'work',
+                    active: true,
+                    fiveHour: 62,
+                    weekly: 31,
+                    fiveHourResets: now.add(
+                      const Duration(hours: 2, minutes: 14),
+                    ),
+                    weeklyResets: now.add(const Duration(days: 3)),
                   ),
-                  weeklyResets: now.add(const Duration(days: 3)),
-                ),
-                usageAccount(
-                  2,
-                  'personal',
-                  fiveHour: 8,
-                  weekly: 12,
-                  fiveHourResets: now.add(const Duration(hours: 4)),
-                  weeklyResets: now.add(const Duration(days: 5)),
-                ),
-              ]
-            : null,
-        rows: [
-          usageRow(day(0), output: 1840000, costUsd: 6.4),
-          usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
-          if (detailed) ...[
-            usageRow(
-              day(0),
-              project: 'todo-web',
-              model: 'claude-sonnet-5',
-              output: 610000,
-              costUsd: 1.2,
-            ),
-            usageRow(day(1), output: 1320000, costUsd: 4.6),
-            usageRow(day(2), output: 1510000, costUsd: 5.3),
-            usageRow(
-              day(2),
-              project: 'infra',
-              model: 'claude-haiku-4-5',
-              output: 380000,
-              costUsd: 0.4,
-            ),
-            usageRow(day(3), project: 'todo-web', output: 700000, costUsd: 2.5),
-            usageRow(day(4), output: 1100000, costUsd: 3.8),
-            usageRow(
-              day(5),
-              project: 'infra',
-              model: 'claude-sonnet-5',
-              output: 450000,
-              costUsd: 0.9,
-            ),
-            usageRow(day(6), output: 800000, costUsd: 2.8),
+                  usageAccount(
+                    2,
+                    'personal',
+                    fiveHour: 8,
+                    weekly: 12,
+                    fiveHourResets: now.add(const Duration(hours: 4)),
+                    weeklyResets: now.add(const Duration(days: 5)),
+                  ),
+                ]
+              : null,
+          rows: [
+            usageRow(day(0), output: 1840000, costUsd: 6.4),
+            usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
+            if (detailed) ...[
+              usageRow(
+                day(0),
+                project: 'todo-web',
+                model: 'claude-sonnet-5',
+                output: 610000,
+                costUsd: 1.2,
+              ),
+              usageRow(day(1), output: 1320000, costUsd: 4.6),
+              usageRow(day(2), output: 1510000, costUsd: 5.3),
+              usageRow(
+                day(2),
+                project: 'infra',
+                model: 'claude-haiku-4-5',
+                output: 380000,
+                costUsd: 0.4,
+              ),
+              usageRow(
+                day(3),
+                project: 'todo-web',
+                output: 700000,
+                costUsd: 2.5,
+              ),
+              usageRow(day(4), output: 1100000, costUsd: 3.8),
+              usageRow(
+                day(5),
+                project: 'infra',
+                model: 'claude-sonnet-5',
+                output: 450000,
+                costUsd: 0.9,
+              ),
+              usageRow(day(6), output: 800000, costUsd: 2.8),
+            ],
           ],
-        ],
+        ),
+        to: day(0),
       ),
     ),
   );
   final buildBoxRunner = FakeUsageRunner(
     () => FakeUsageRunner.ok(
-      usageReplyJson(
-        machine: 'build-box',
-        today: day(0),
-        from: day(6),
-        // The same Claude account as the workstation.
-        limits: limits,
-        rows: [
-          usageRow(
-            day(0),
-            project: 'ci',
-            model: 'claude-sonnet-5',
-            output: 420000,
-            costUsd: 0.8,
-          ),
-          usageRow(
-            day(3),
-            project: 'ci',
-            model: 'claude-sonnet-5',
-            output: 510000,
-            costUsd: 1.1,
-          ),
-        ],
+      companion1(
+        usageReplyJson(
+          machine: 'build-box',
+          today: day(0),
+          from: day(6),
+          // The same Claude account as the workstation.
+          limits: limits,
+          rows: [
+            usageRow(
+              day(0),
+              project: 'ci',
+              model: 'claude-sonnet-5',
+              output: 420000,
+              costUsd: 0.8,
+            ),
+            usageRow(
+              day(3),
+              project: 'ci',
+              model: 'claude-sonnet-5',
+              output: 510000,
+              costUsd: 1.1,
+            ),
+          ],
+        ),
+        to: day(0),
       ),
     ),
   );
@@ -1568,15 +1585,11 @@ void main() {
     await pumpHome(tester, usage: demoUsage(detailed: true));
     await tester.runAsync(pumpEventQueue);
     await pumpFrames(tester, 6);
+    // The bar opens the usage explorer (preview 17).
     await tester.tap(find.byType(UsageSummaryView));
     await tester.runAsync(pumpEventQueue);
     await pumpFrames(tester, 8);
-    // Up to the full sheet, the project list in view.
-    await tester.drag(
-      find.byKey(const ValueKey('usage-breakdown')),
-      const Offset(0, -500),
-    );
-    await pumpFrames(tester, 8);
+    expect(find.byKey(const ValueKey('usage-explorer-page')), findsOneWidget);
     await saveShot(tester, '26-usage-breakdown');
     await tearDownPage(tester);
   });
@@ -1962,12 +1975,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
     await tester.runAsync(pumpEventQueue);
     await pumpFrames(tester, 8);
-    // Up to the full sheet, the Accounts section in view.
-    await tester.drag(
-      find.byKey(const ValueKey('usage-breakdown')),
-      const Offset(0, -300),
-    );
-    await pumpFrames(tester, 8);
+    // The explorer: the accounts under the limit rings.
     expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
     await saveShot(tester, '33-usage-accounts');
     await tearDownPage(tester);

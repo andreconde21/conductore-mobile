@@ -76,7 +76,7 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   desktop): what each agent did since your last look, grouped as Needs
   you, Stuck, Working and Done, with its facts (files and lines changed,
   test runs, failed commands, tokens and cost), a flag when an agent looks
-  stuck, and answers, Chat and Terminal on each card. A one- or
+  stuck, and approval, Answer, Chat and Terminal buttons on each card. A one- or
   two-sentence Claude summary is made only when you open it and only for
   agents that changed; Settings › Agents › Dashboard turns summaries off
   and sets when an agent counts as stuck. Ask the voice guide to "catch me
@@ -106,11 +106,12 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 - **Voice guide**: talk to the app hands-free. Common phrases ("what's
   waiting", "open api", "approve", "read the last reply") work offline in
-  English and Portuguese; anything else goes to Claude through the companion's `guide`
-  command. It answers aloud and asks before it acts, and a high-risk
-  approval is always confirmed. Start it with the headset-mic button on the
-  home screen, the Quick Settings tile, a long press on Talk, or the
-  headset's assistant button. Settings › Chat & Voice › Voice guide.
+  English and Portuguese; anything else goes to Claude through the
+  companion's `guide` command. It answers aloud and asks before it acts,
+  and a high-risk approval is always confirmed. Start it with the
+  headset-mic button on the home screen, the Quick Settings tile, a long
+  press on Talk, or the headset's assistant button. Settings › Chat &
+  Voice › Voice guide.
 - **Smart approvals** (companion 0.8):
   - a Low, Medium or High risk label, with a reason, on every approval;
   - **Trust…** allows exactly that call for N minutes, and **Always**
@@ -150,7 +151,7 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
     <td align="center"><img src="docs/screenshots/32-voice-guide.png" width="200" alt="Voice guide card on the home screen asking to confirm an approval"><br><sub>The voice guide asks before it approves</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/33-usage-accounts.png" width="200" alt="Usage breakdown with an Accounts section for two cswap accounts"><br><sub>Usage for every cswap account</sub></td>
+    <td align="center"><img src="docs/screenshots/33-usage-accounts.png" width="200" alt="Usage explorer with an Accounts section for two cswap accounts"><br><sub>Usage for every cswap account</sub></td>
     <td align="center"><img src="docs/screenshots/34-chat-peer-messages.png" width="200" alt="Chat View with a message from another session and a finished row"><br><sub>Another session's message, a teammate finished</sub></td>
   </tr>
 </table>
@@ -199,7 +200,7 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 <table>
   <tr>
     <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
-    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage breakdown: limits per machine, cost per day, tokens per project"><br><sub>Usage breakdown</sub></td>
+    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage explorer: limit rings, ranges, a week by day and tokens per project"><br><sub>Usage in detail (the explorer since preview 17)</sub></td>
     <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Tool activity collapsed</sub></td>
     <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>The Chat View menu</sub></td>
   </tr>
@@ -471,7 +472,7 @@ Rendered from the app's own widgets with demo data by
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
-    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage breakdown: limits per machine, cost per day, tokens per project"><br><sub>Usage: per machine, day and project</sub></td>
+    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage explorer: limit rings, ranges, a week by day and tokens per project"><br><sub>Usage explorer: a week by day and project</sub></td>
     <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Chat View: tool calls collapsed</sub></td>
     <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>Read-aloud length and tool activity</sub></td>
   </tr>
@@ -479,7 +480,7 @@ Rendered from the app's own widgets with demo data by
     <td align="center"><img src="docs/screenshots/30-approval-risk.png" width="200" alt="Chat View approval card with a Low risk label, Trust… and Always"><br><sub>Approvals: risk label, Trust… and Always</sub></td>
     <td align="center"><img src="docs/screenshots/31-approval-rules.png" width="200" alt="Approval rules for the workstation: a timed trust and standing rules"><br><sub>Approval rules per machine</sub></td>
     <td align="center"><img src="docs/screenshots/32-voice-guide.png" width="200" alt="Voice guide card on the home screen asking to confirm an approval"><br><sub>Voice guide: a spoken confirmation</sub></td>
-    <td align="center"><img src="docs/screenshots/33-usage-accounts.png" width="200" alt="Usage breakdown with an Accounts section for two cswap accounts"><br><sub>Usage: every cswap account</sub></td>
+    <td align="center"><img src="docs/screenshots/33-usage-accounts.png" width="200" alt="Usage explorer with an Accounts section for two cswap accounts"><br><sub>Usage: every cswap account</sub></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/34-chat-peer-messages.png" width="200" alt="Chat View with a message from another session and a finished row"><br><sub>Chat View: other sessions and teammates</sub></td>
