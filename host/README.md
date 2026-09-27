@@ -208,7 +208,8 @@ than `seq` already exist, it prints them and exits at once. Lines:
 * `timeout`: nothing happened within `--timeout` seconds (default 55, max 600).
   Poll again from the printed `seq`.
 * `snapshot`: the cursor is not covered by the daemon's buffer (it restarted
-  or the phone was away for more than 1000 changes). Replace everything and
+  or the phone was away for more than 1000 changes, or 2 M characters of
+  them). Replace everything and
   continue from its `seq`.
 * `reason` is the hook event name, `decision:<allow|deny|always|timeout|gone>`,
   `usage` (only the `usage` field changed) or `prune`.
@@ -623,12 +624,18 @@ Measured on development-central (Ubuntu 24.04, dash as `/bin/sh`, Node 22,
 About 40 MB of the daemon's RSS is the node binary's own pages, shared with
 every other Node process (Claude Code included): a bare
 `node -e 'setInterval(()=>{},1e9)'` has 42.7 MB RSS and 6.4 MB private. The
-daemon runs with `--max-old-space-size=16 --max-semi-space-size=1
+daemon runs with `--max-old-space-size=64 --max-semi-space-size=1
 --lite-mode --no-expose-wasm --v8-pool-size=1` (`lib/paths.js`): lite mode
 (no optimizing compiler) touches about 6 MB less and costs no measurable CPU
 at this load (0.35 vs 0.37 ms per event), one V8 worker instead of four drops
 three threads; `--jitless`, `--single-threaded` and glibc
-`MALLOC_ARENA_MAX=1` saved nothing more. The heap limits mostly cap growth.
+`MALLOC_ARENA_MAX=1` saved nothing more. The heap limits mostly cap growth;
+the old-space limit is only a ceiling (idle RSS is the same at 16 and 64 MB).
+16 MB was too low: the long-poll buffer (1000 change records, each carrying
+the agent's pending prompts) aborted the daemon when a few long permission
+prompts waited during heavy subagent activity. The buffer is now also capped
+at 2 M characters, and the daemon's stderr goes to `hostd.log`, so a fatal
+V8 error leaves a line there.
 
 Idle means asleep: no polling loop, no periodic timer. The only timers are
 one-shots tied to activity (snapshot debounce, usage holds and throttle, the

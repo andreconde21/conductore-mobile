@@ -132,7 +132,7 @@ test('the hook is a sh script: it spools and returns without waiting for the dae
 
 test('the daemon runs with the memory flags and reports its footprint', async () => {
   const [ping] = await client.request({ op: 'ping' })
-  assert.ok(ping.execArgv.includes('--max-old-space-size=16'), ping.execArgv.join(' '))
+  assert.ok(ping.execArgv.includes('--max-old-space-size=64'), ping.execArgv.join(' '))
   assert.ok(ping.rss > 0)
   assert.equal(typeof ping.cpuMs, 'number')
 })

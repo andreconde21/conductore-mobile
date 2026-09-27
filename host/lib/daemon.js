@@ -23,6 +23,11 @@ const { usageFrom } = require('./statusline')
 const { log, debug } = require('./log')
 
 const CHANGE_BUFFER = 1000
+// The buffered change lines are also bounded in characters: every record
+// carries the agent's pending prompts (toolInput up to 4 KB each), so a few
+// long prompts times 1000 changes outgrew the heap. A poller whose cursor
+// fell out of the buffer resyncs with a snapshot.
+const CHANGE_BUFFER_CHARS = 2 * 1024 * 1024
 const MAX_REQUEST_BYTES = 1024 * 1024
 const DEFAULT_POLL_TIMEOUT_S = 55
 const MAX_POLL_TIMEOUT_S = 600
@@ -136,7 +141,8 @@ function writeFifo (file, text) {
 class Daemon {
   constructor () {
     this.state = loadSnapshot()
-    this.changes = []
+    this.changes = [] // { seq, line }: each change record serialized once
+    this.changeChars = 0
     this.waiters = new Map() // requestId -> { fifo, event, sessionId, timer }
     this.pollers = new Set() // { socket, since, timer }
     this.usageEmits = new Map() // sessionId -> { at, timer }
@@ -187,6 +193,9 @@ class Daemon {
     this.touch()
     for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => this.shutdown(0))
     process.on('uncaughtException', err => { log('daemon', 'uncaught', err.stack || String(err)) })
+    // Any exit that still runs JS (process.exit, a fatal error handler) frees
+    // the lock; a V8 abort cannot, and the next start sees a dead pid.
+    process.on('exit', () => this.releaseLock())
     this.commit(state.prune(this.state))
     this.schedulePrune()
     this.flushSnapshot()
@@ -429,10 +438,14 @@ class Daemon {
         this.usageSeen.delete(ch.sessionId)
       }
       if (ch.type === 'remove' || ch.reason === 'SessionEnd') pruneRelevant = true
-      this.changes.push(ch)
+      const line = JSON.stringify(ch)
+      this.changes.push({ seq: ch.seq, line })
+      this.changeChars += line.length
       debug('change', `${ch.type} ${ch.sessionId} ${ch.reason} -> ${ch.agent ? ch.agent.state : 'removed'} seq ${ch.seq}`)
     }
-    if (this.changes.length > CHANGE_BUFFER) this.changes.splice(0, this.changes.length - CHANGE_BUFFER)
+    while (this.changes.length > CHANGE_BUFFER || (this.changes.length > 1 && this.changeChars > CHANGE_BUFFER_CHARS)) {
+      this.changeChars -= this.changes.shift().line.length
+    }
     for (const p of [...this.pollers]) this.servePoller(p)
     if (pruneRelevant) this.schedulePrune()
     if (!this.snapshotTimer) {
@@ -573,7 +586,7 @@ class Daemon {
     if (!batch.length) return false
     this.pollers.delete(poller)
     clearTimeout(poller.timer)
-    for (const ch of batch) this.reply(poller.socket, ch)
+    if (!poller.socket.destroyed) poller.socket.write(batch.map(ch => ch.line).join('\n') + '\n')
     poller.socket.end()
     return true
   }

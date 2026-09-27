@@ -20,11 +20,14 @@ const PROTOCOL_VERSION = 1
 const VERSION = '0.7.0'
 
 // V8 flags the daemon runs with (measured in README "Footprint"). It holds a
-// few hundred KB of state: small heap limits keep V8 from growing, lite mode
+// few hundred KB of state, but a burst of changes while long permission
+// prompts wait peaks at several MB: the old-space limit is only a ceiling
+// (16 MB aborted there), idle RSS does not depend on it. The small semi
+// space keeps V8 from growing, lite mode
 // (no optimizing compiler; CPU per event stays far below a millisecond)
 // touches ~6 MB less of the node binary, one V8 worker thread instead of 4.
 // --no-expose-wasm only silences lite mode's startup warning.
-const DAEMON_NODE_FLAGS = ['--max-old-space-size=16', '--max-semi-space-size=1', '--lite-mode', '--no-expose-wasm', '--v8-pool-size=1']
+const DAEMON_NODE_FLAGS = ['--max-old-space-size=64', '--max-semi-space-size=1', '--lite-mode', '--no-expose-wasm', '--v8-pool-size=1']
 
 function homeDir () {
   return process.env.CONDUCTORE_HOME || path.join(os.homedir(), '.conductore')

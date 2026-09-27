@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix (H2): the daemon no longer aborts at its heap limit when a few long permission prompts wait during heavy subagent activity. The long-poll buffer keeps each change serialized once and is capped at 2 M characters as well as 1000 changes (an older cursor gets a snapshot, as after a restart); the old-space limit is 64 MB instead of 16 (a ceiling: idle RSS is unchanged); the daemon's stderr goes to `hostd.log`, so a fatal V8 error leaves a trace; any exit that still runs JS removes `hostd.pid`.
+
 ## 0.7.0 (2026-09-25)
 
 - feat: `summarize [--max-words 45] [--timeout-ms 20000]`: a one- or two-sentence spoken version of the reply on stdin (64 KB max) for the phone's "Claude summary" read-aloud mode, as one JSON line (`summary`, `ms`, `model`, or `error`: claude-missing, not-logged-in, timeout, busy, failed; exit 0). Replies under 40 words come back as they are (`passthrough: true`) without calling Claude.
