@@ -348,7 +348,13 @@ void main() {
   ) async {
     phone(tester);
     await pumpLauncher(tester, section: SettingsSection.agents);
-    expect(find.text('Host a'), findsOneWidget);
+    // Once for its agent hooks, once under Approval rules.
+    expect(find.text('Host a'), findsNWidgets(2));
+    expect(find.text('Approval rules'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-approval-rules-a')),
+      findsOneWidget,
+    );
     expect(find.text('Approvals and errors'), findsNothing);
     final dropdown = find.byKey(const ValueKey('settings-notify-a'));
     await tester.tap(dropdown);
