@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -11,6 +13,7 @@ import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
 import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_actions.dart';
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_strip.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
@@ -185,6 +188,144 @@ void main() {
       await settle(tester);
       expect(tmux.commands, contains(TmuxWindowCommands.kill('@2')));
       expect(find.text('logs'), findsNothing);
+    });
+
+    final desktops = TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    });
+
+    testWidgets('desktop: right-click opens the actions at the pointer', (
+      tester,
+    ) async {
+      await pumpStrip(tester, desktop: true);
+      await tester.tap(find.text('zsh'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('adaptive-modal-popover')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('mux-tab-rename')), findsOneWidget);
+      // A right-click does not switch.
+      expect(controller.active?.id, '@1');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(minutes: 3));
+    }, variant: desktops);
+
+    testWidgets(
+      'desktop: hover close button and middle-click close after asking',
+      (tester) async {
+        await pumpStrip(tester, desktop: true);
+        final close = find.byKey(const ValueKey('mux-tab-close-button-@2'));
+        expect(
+          tester
+              .widget<Visibility>(
+                find
+                    .ancestor(of: close, matching: find.byType(Visibility))
+                    .first,
+              )
+              .visible,
+          isFalse,
+        );
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: tester.getCenter(find.text('logs')));
+        await tester.pump();
+        expect(
+          tester
+              .widget<Visibility>(
+                find
+                    .ancestor(of: close, matching: find.byType(Visibility))
+                    .first,
+              )
+              .visible,
+          isTrue,
+        );
+        await tester.tap(close);
+        await tester.pumpAndSettle();
+        expect(find.text('Close "logs"?'), findsOneWidget);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        await mouse.removePointer();
+
+        await tester.tap(
+          find.text('zsh'),
+          buttons: kMiddleMouseButton,
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Close "zsh"?'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('mux-tab-close-confirm')));
+        await settle(tester);
+        expect(tmux.commands, contains(TmuxWindowCommands.kill('@0')));
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(minutes: 3));
+      },
+      variant: desktops,
+    );
+
+    testWidgets('desktop: a double-click renames', (tester) async {
+      await pumpStrip(tester, desktop: true);
+      await tester.tap(find.text('claude'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('claude'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mux-tab-name')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(minutes: 3));
+    }, variant: desktops);
+
+    testWidgets('phone: no close button, right-click and double-tap do '
+        'nothing extra', (tester) async {
+      await pumpStrip(tester);
+      expect(find.byTooltip('Close window'), findsNothing);
+      await tester.tap(find.text('zsh'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mux-tab-rename')), findsNothing);
+      await tester.tap(find.text('claude'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('claude'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mux-tab-name')), findsNothing);
+    });
+
+    Future<void> openSheet(WidgetTester tester) async {
+      await pumpStrip(tester);
+      final context = tester.element(strip);
+      unawaited(
+        showMultiplexerTabsSheet(context, controller, sessionLabel: 'work'),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'desktop: list rows have a more button and a right-click menu',
+      (tester) async {
+        await openSheet(tester);
+        expect(find.byTooltip('Window actions'), findsNWidgets(3));
+        await tester.tap(
+          find.byKey(const ValueKey('mux-tabs-sheet-@0')),
+          buttons: kSecondaryButton,
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('mux-tab-rename')), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(minutes: 3));
+      },
+      variant: desktops,
+    );
+
+    testWidgets('phone: list rows keep long-press only', (tester) async {
+      await openSheet(tester);
+      expect(find.byTooltip('Window actions'), findsNothing);
+      await tester.tap(
+        find.byKey(const ValueKey('mux-tabs-sheet-@0')),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mux-tab-rename')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(minutes: 3));
     });
 
     testWidgets('dragging a chip reorders on a desktop', (tester) async {
