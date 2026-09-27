@@ -8,6 +8,7 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -194,6 +195,72 @@ void main() {
     await tester.tap(find.text('Show 1 hidden'));
     await tester.pump();
     expect(find.text('web'), findsOneWidget);
+  });
+
+  group('desktop hide (no swipe needed)', () {
+    const desktops = TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    });
+    final done = status([agentJson('s-1', state: 'ended')]);
+    const hide = ValueKey('agent-row-hide-h/s-1');
+
+    testWidgets('hovering a finished row shows Hide, which hides it', (
+      tester,
+    ) async {
+      await pumpPanel(tester, {
+        'h': [done],
+      });
+      expect(find.byKey(hide), findsNothing);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.text('api')));
+      await tester.pump();
+      expect(find.byKey(hide), findsOneWidget);
+      expect(tester.widget<IconButton>(find.byKey(hide)).tooltip, 'Hide');
+      await tester.tap(find.byKey(hide));
+      await tester.pumpAndSettle();
+      expect(find.text('api'), findsNothing);
+      expect(find.text('Show 1 hidden'), findsOneWidget);
+    }, variant: desktops);
+
+    testWidgets('right-click offers Open and Hide', (tester) async {
+      final harness = await pumpPanel(tester, {
+        'h': [done],
+      });
+      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('agent-row-menu-Open')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('agent-row-menu-Open')));
+      await tester.pumpAndSettle();
+      expect(harness.opened.single.id, 's-1');
+
+      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('agent-row-menu-Hide')));
+      await tester.pumpAndSettle();
+      expect(find.text('api'), findsNothing);
+    }, variant: desktops);
+
+    testWidgets('phones keep swipe only: no Hide button, no menu', (
+      tester,
+    ) async {
+      await pumpPanel(tester, {
+        'h': [done],
+      });
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.text('api')));
+      await tester.pump();
+      expect(find.byKey(hide), findsNothing);
+      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('agent-row-menu-Open')), findsNothing);
+      expect(find.byType(Dismissible), findsOneWidget);
+    });
   });
 
   testWidgets('groups by host and project with several machines', (

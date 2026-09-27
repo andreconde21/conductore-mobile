@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -32,7 +33,9 @@ Future<TrustChoice?> showTrustSheet(
   TrustDuration initialDuration = const TrustDuration.minutes(15),
   bool offerClaudeCodeAlways = false,
 }) {
-  return showModalBottomSheet<TrustChoice>(
+  return showAdaptiveModal<TrustChoice>(
+    kind: AdaptiveModalKind.dialog,
+    desktopMaxWidth: 520,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -97,10 +100,23 @@ class _TrustSheetState extends State<TrustSheet> {
     final request = widget.request;
     final valid = isValidApprovalRule(_rule.text);
     final forever = widget.initialDuration.isForever;
+    final save = valid
+        ? () => Navigator.of(context).pop(
+            TrustChoiceSave(
+              ApprovalRuleDraft(
+                rule: _rule.text.trim(),
+                scope: _scope == ApprovalScopeKind.repo && request.repo != null
+                    ? ApprovalScope.repo(request.repo!)
+                    : ApprovalScope.ofKind(_scope),
+                duration: _duration,
+              ),
+            ),
+          )
+        : null;
     return Padding(
       padding: EdgeInsets.fromLTRB(
         20,
-        0,
+        approvalSheetTopPadding(context),
         20,
         16 + MediaQuery.viewInsetsOf(context).bottom,
       ),
@@ -157,6 +173,11 @@ class _TrustSheetState extends State<TrustSheet> {
               key: const ValueKey('trust-rule-field'),
               controller: _rule,
               style: const TextStyle(fontFamily: 'monospace'),
+              // Enter saves in the desktop dialog; phones keep the keyboard's
+              // plain Done.
+              onSubmitted: useDesktopModals(context)
+                  ? (_) => save?.call()
+                  : null,
               decoration: InputDecoration(
                 isDense: true,
                 border: const OutlineInputBorder(),
@@ -209,37 +230,16 @@ class _TrustSheetState extends State<TrustSheet> {
               ],
             ),
             const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    key: const ValueKey('trust-save'),
-                    onPressed: valid
-                        ? () => Navigator.of(context).pop(
-                            TrustChoiceSave(
-                              ApprovalRuleDraft(
-                                rule: _rule.text.trim(),
-                                scope:
-                                    _scope == ApprovalScopeKind.repo &&
-                                        request.repo != null
-                                    ? ApprovalScope.repo(request.repo!)
-                                    : ApprovalScope.ofKind(_scope),
-                                duration: _duration,
-                              ),
-                            ),
-                          )
-                        : null,
-                    child: const Text('Allow and trust'),
-                  ),
-                ),
-              ],
+            ApprovalSheetActions(
+              cancel: OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              confirm: FilledButton(
+                key: const ValueKey('trust-save'),
+                onPressed: save,
+                child: const Text('Allow and trust'),
+              ),
             ),
             if (widget.offerClaudeCodeAlways)
               TextButton(
@@ -373,7 +373,9 @@ Future<bool> showBatchApproveSheet(
   BuildContext context,
   List<PendingApproval> safe,
 ) async {
-  final confirmed = await showModalBottomSheet<bool>(
+  final confirmed = await showAdaptiveModal<bool>(
+    kind: AdaptiveModalKind.dialog,
+    desktopMaxWidth: 520,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -381,7 +383,12 @@ Future<bool> showBatchApproveSheet(
     builder: (context) {
       final theme = Theme.of(context);
       return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        padding: EdgeInsets.fromLTRB(
+          20,
+          approvalSheetTopPadding(context),
+          20,
+          16,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -408,23 +415,16 @@ Future<bool> showBatchApproveSheet(
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    key: const ValueKey('batch-confirm'),
-                    onPressed: () => Navigator.of(context).pop(true),
-                    child: Text('Approve ${safe.length}'),
-                  ),
-                ),
-              ],
+            ApprovalSheetActions(
+              cancel: OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              confirm: FilledButton(
+                key: const ValueKey('batch-confirm'),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text('Approve ${safe.length}'),
+              ),
             ),
           ],
         ),
@@ -432,4 +432,40 @@ Future<bool> showBatchApproveSheet(
     },
   );
   return confirmed ?? false;
+}
+
+/// Space above a sheet's title: phones have the drag handle there, the
+/// desktop dialog has none.
+double approvalSheetTopPadding(BuildContext context) =>
+    useDesktopModals(context) ? 20 : 0;
+
+/// A sheet's Cancel / confirm pair: two equal full-width buttons on phones,
+/// right-aligned buttons at their own size in a desktop dialog. [cancel]
+/// may be null (a lone Save).
+class ApprovalSheetActions extends StatelessWidget {
+  const ApprovalSheetActions({required this.confirm, this.cancel, super.key});
+
+  final Widget? cancel;
+  final Widget confirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final cancel = this.cancel;
+    if (useDesktopModals(context)) {
+      return OverflowBar(
+        alignment: MainAxisAlignment.end,
+        spacing: 8,
+        overflowAlignment: OverflowBarAlignment.end,
+        children: [?cancel, confirm],
+      );
+    }
+    if (cancel == null) return confirm;
+    return Row(
+      children: [
+        Expanded(child: cancel),
+        const SizedBox(width: 8),
+        Expanded(child: confirm),
+      ],
+    );
+  }
 }
