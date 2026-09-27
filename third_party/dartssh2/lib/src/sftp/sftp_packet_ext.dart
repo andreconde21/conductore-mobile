@@ -57,6 +57,39 @@ class SftpFstatVfsRequest extends SftpExtendedRequest {
   }
 }
 
+/// Renames with POSIX semantics: an existing target is replaced atomically.
+class SftpPosixRenameRequest extends SftpExtendedRequest {
+  SftpPosixRenameRequest({required this.oldPath, required this.newPath});
+
+  @override
+  final String name = 'posix-rename@openssh.com';
+
+  final String oldPath;
+
+  final String newPath;
+
+  @override
+  void writeTo(SSHMessageWriter writer) {
+    writer.writeUtf8(oldPath);
+    writer.writeUtf8(newPath);
+  }
+}
+
+/// Flushes an open file to stable storage, like fsync(2).
+class SftpFsyncRequest extends SftpExtendedRequest {
+  SftpFsyncRequest({required this.handle});
+
+  @override
+  final String name = 'fsync@openssh.com';
+
+  final Uint8List handle;
+
+  @override
+  void writeTo(SSHMessageWriter writer) {
+    writer.writeString(handle);
+  }
+}
+
 /// uint64		f_bsize		/* file system block size */
 /// uint64		f_frsize	/* fundamental fs block size */
 /// uint64		f_blocks	/* number of blocks (unit f_frsize) */

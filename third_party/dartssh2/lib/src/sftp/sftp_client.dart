@@ -168,6 +168,28 @@ class SftpClient {
     SftpStatusError.check(reply);
   }
 
+  /// Renames [oldPath] to [newPath], atomically replacing [newPath] if it
+  /// exists. Unlike [rename], which follows SFTP v3 and fails when the target
+  /// exists.
+  ///
+  /// **Note**: This is an extension to the SFTP protocol, supported by most
+  /// openssh servers. A [SftpExtensionError] is thrown if the server does not
+  /// support this extension.
+  Future<void> posixRename(String oldPath, String newPath) async {
+    await _checkExtension('posix-rename@openssh.com', '1');
+    final payload = SftpPosixRenameRequest(oldPath: oldPath, newPath: newPath);
+    final reply = await _sendExtended(payload);
+    if (reply is! SftpStatusPacket) throw SftpError('Unexpected reply');
+    SftpStatusError.check(reply);
+  }
+
+  /// Whether the server advertised extension [name] at [version] in its
+  /// version handshake.
+  Future<bool> supportsExtension(String name, String version) async {
+    final handshake = await this.handshake;
+    return handshake.extensions[name] == version;
+  }
+
   /// Reads the target of a symbolic link.
   Future<String> readlink(String path) async {
     final reply = await _sendReadLink(path);
@@ -741,6 +763,20 @@ class SftpFile {
     if (reply is! SftpExtendedReplyPacket) throw SftpError('Unexpected reply');
     final stat = SftpStatVfsReply.decode(reply.payload);
     return SftpStatVfs.fromReply(stat);
+  }
+
+  /// Flushes the file's data to stable storage on the server.
+  ///
+  /// **Note**: This is an extension to the SFTP protocol, supported by most
+  /// openssh servers. A [SftpExtensionError] is thrown if the server does not
+  /// support this extension.
+  Future<void> fsync() async {
+    _mustNotBeClosed();
+    await _client._checkExtension('fsync@openssh.com', '1');
+    final payload = SftpFsyncRequest(handle: _handle);
+    final reply = await _client._sendExtended(payload);
+    if (reply is! SftpStatusPacket) throw SftpError('Unexpected reply');
+    SftpStatusError.check(reply);
   }
 
   Future<void> _writeChunk(Uint8List data, {int offset = 0}) async {
