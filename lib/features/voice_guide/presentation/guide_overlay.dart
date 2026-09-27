@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 
 /// The guide's only UI while it runs: a small card at the bottom of every
 /// screen with what it heard or says, and a stop button. Nothing is
-/// needed from it; it is there for a glance.
+/// needed from it; it is there for a glance. It sits in the app's
+/// builder, above the navigator (so it stays across routes).
 class GuideOverlay extends StatelessWidget {
   const GuideOverlay({required this.controller, super.key});
 
@@ -64,10 +65,14 @@ class GuideOverlay extends StatelessWidget {
                             style: theme.textTheme.bodyMedium,
                           ),
                         ),
+                        // No tooltip: the card sits above the navigator,
+                        // outside any Overlay.
                         IconButton(
                           key: const ValueKey('guide-stop'),
-                          tooltip: 'Stop the guide',
-                          icon: const Icon(Icons.close_rounded),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            semanticLabel: 'Stop the guide',
+                          ),
                           onPressed: controller.stop,
                         ),
                       ],

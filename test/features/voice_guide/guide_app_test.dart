@@ -257,9 +257,16 @@ void main() {
       speaker.dispose();
       dictation.dispose();
     });
+    // Where the app puts it: above the navigator, outside its Overlay.
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: GuideOverlay(controller: guide)),
+        builder: (context, child) => Stack(
+          children: [
+            ?child,
+            GuideOverlay(controller: guide),
+          ],
+        ),
+        home: const Scaffold(body: Text('home')),
       ),
     );
     expect(find.byKey(const ValueKey('guide-overlay')), findsNothing);
