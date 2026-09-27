@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:conduit/features/voice_guide/domain/guide_preferences.dart';
+
 /// How much of Claude's final answer is read aloud.
 enum ReadAloudLength {
   /// The first two or three sentences, then "More on screen."
@@ -54,6 +56,7 @@ class VoicePreferences {
     this.talkSendSilenceSeconds = defaultTalkSendSeconds,
     this.readAloudLength = ReadAloudLength.brief,
     this.toolActivity = ToolActivity.collapsed,
+    this.guide = GuidePreferences.defaults,
   });
 
   static const defaults = VoicePreferences();
@@ -120,6 +123,9 @@ class VoicePreferences {
   /// How Chat View shows tool calls.
   final ToolActivity toolActivity;
 
+  /// The voice guide (Settings › Chat & Voice › Voice guide).
+  final GuidePreferences guide;
+
   Duration get dictationSilence => Duration(seconds: dictationSilenceSeconds);
   Duration get dictationMaxSession => Duration(minutes: dictationMaxMinutes);
 
@@ -157,6 +163,7 @@ class VoicePreferences {
     int? talkSendSilenceSeconds,
     ReadAloudLength? readAloudLength,
     ToolActivity? toolActivity,
+    GuidePreferences? guide,
   }) {
     return VoicePreferences(
       readAloudByDefault: readAloudByDefault ?? this.readAloudByDefault,
@@ -183,6 +190,7 @@ class VoicePreferences {
           ),
       readAloudLength: readAloudLength ?? this.readAloudLength,
       toolActivity: toolActivity ?? this.toolActivity,
+      guide: guide ?? this.guide,
     );
   }
 
@@ -201,6 +209,7 @@ class VoicePreferences {
     'talkSendSilenceSeconds': talkSendSilenceSeconds,
     'readAloudLength': readAloudLength.name,
     'toolActivity': toolActivity.name,
+    'guide': guide.toJson(),
     if (includeSessions) 'readAloudSessions': readAloudSessions,
   };
 
@@ -273,6 +282,9 @@ class VoicePreferences {
         ToolActivity.values,
         fallback.toolActivity,
       ),
+      guide: raw['guide'] is Map
+          ? GuidePreferences.fromJson(raw['guide'])
+          : fallback.guide,
       readAloudSessions: rawSessions is Map
           ? {
               for (final entry in rawSessions.entries)
