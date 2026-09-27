@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
@@ -93,6 +94,9 @@ class _LockPageState extends State<LockPage> {
                             SizedBox(
                               width: double.infinity,
                               child: FilledButton.icon(
+                                key: const ValueKey('lock-unlock'),
+                                // Desktop: Enter unlocks straight away.
+                                autofocus: PlatformFeatures.isDesktop,
                                 onPressed: checking
                                     ? null
                                     : widget.controller.unlock,
