@@ -9,6 +9,7 @@
 - fix (M18): the prompt relay (`send`, `interrupt`, `focus`) can no longer type into the wrong pane. Agents' `tmux` records carry the server `socket` (from `$TMUX`) and the `panePid`; every tmux command goes to that server (`-S`), and right before typing the pane must still run that process, a Herdr pane must still run this Claude session (`herdr pane list`), and Claude Code must still run. Otherwise nothing is typed and the error says why. Records from older daemons are refused until the agent's next event.
 - fix (M22): `install` / `uninstall` rewrite `~/.claude/settings.json` through its symlink (a dotfiles link stays a link and its target is updated) and keep the file's mode, 0600 when new, instead of the process umask (a 0600 file holding an API key became 0644).
 - fix (L18): a PermissionRequest spool file over 8 MB is answered at once (the terminal asks) instead of leaving its hook waiting the full timeout; the daemon reads only its header and logs the drop. An unparseable one already was.
+- fix (L20): two `summarize` calls clearing the same stale lock can no longer both run `claude -p`: the lock is created with its pid in one step (hard link of a finished temp file), only the caller that creates a takeover marker for a stale holder may drop that lock, after checking it still names that holder, and release removes only our own lock.
 
 ## 0.7.0 (2026-09-25)
 
