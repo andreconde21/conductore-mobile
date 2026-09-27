@@ -548,7 +548,7 @@ class Daemon {
       if (ch.type === 'remove' || ch.reason === 'SessionEnd' || ch.reason === 'expired') pruneRelevant = true
       this.activity.onChange(ch)
       const line = JSON.stringify(ch)
-      this.changes.push({ seq: ch.seq, line })
+      this.changes.push({ seq: ch.seq, sessionId: ch.sessionId, line })
       this.changeChars += line.length
       debug('change', `${ch.type} ${ch.sessionId} ${ch.reason} -> ${ch.agent ? ch.agent.state : 'removed'} seq ${ch.seq}`)
     }
@@ -744,10 +744,21 @@ class Daemon {
     c.on('close', () => { this.pollers.delete(poller); clearTimeout(poller.timer) })
   }
 
-  // Writes all buffered changes after poller.since and closes; true if it did.
+  // Writes the buffered changes after poller.since and closes; true if it
+  // did. Each change carries the whole agent, so only the last one per
+  // session is sent (in seq order): a phone back after a few minutes gets
+  // one line per busy agent, not one per tool call.
   servePoller (poller) {
-    const batch = this.changes.filter(ch => ch.seq > poller.since)
+    const seen = new Set()
+    const batch = []
+    for (let i = this.changes.length - 1; i >= 0 && this.changes[i].seq > poller.since; i--) {
+      const ch = this.changes[i]
+      if (seen.has(ch.sessionId)) continue
+      seen.add(ch.sessionId)
+      batch.push(ch)
+    }
     if (!batch.length) return false
+    batch.reverse()
     this.pollers.delete(poller)
     clearTimeout(poller.timer)
     if (!poller.socket.destroyed) poller.socket.write(batch.map(ch => ch.line).join('\n') + '\n')

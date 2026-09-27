@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- perf: an `events` backlog sends only the newest change of each session (each change carries the whole agent, and the phone keeps only the last one anyway). A phone back after a few minutes with 20 busy agents gets 20 lines instead of one per tool call: 50.5 KB → 15 KB on the benchmark's 80-change backlog, and at most one agent's worth per session however long the backlog.
 - perf: `status` carries an `etag`; `status --etag <etag>` answers only `{version, seq, etag, unchanged: true, source, capabilities}` while nothing changed, so the phone's 15 s background poll of an idle machine is ~150 bytes instead of the whole state (15.5 KB for 20 agents). The etag names the daemon instance too, so a restart (same `seq`, pending requests dropped) never matches. Older companions ignore the flag and answer in full.
 
 ## 1.0.0 (2026-09-27)

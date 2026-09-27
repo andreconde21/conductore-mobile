@@ -241,8 +241,8 @@ Every command prints one JSON document on stdout and exits 0, or prints
 * `etag` (daemon only) names this exact state. `status --etag <etag>` answers
   `{"version":1,"seq":42,"etag":"…","unchanged":true,"source":"daemon","capabilities":[…]}`
   (no `agents`) when the state is still the one that etag named; keep your
-  copy. A restarted daemon never matches an older etag. Companions before
-  1.1 ignore the flag and always answer in full.
+  copy. A restarted daemon never matches an older etag. Older
+  companions ignore the flag and always answer in full.
 
 ### `conductore-hostd events --since <seq> [--timeout 55]`
 
@@ -258,6 +258,8 @@ than `seq` already exist, it prints them and exits at once. Lines:
 ```
 
 * `change` carries the complete agent; replace the phone's copy by `sessionId`.
+  A backlog holds only the newest change of each session (older ones are
+  superseded), in `seq` order; the last line's `seq` is the new cursor.
 * `timeout`: nothing happened within `--timeout` seconds (default 55, max 600).
   Poll again from the printed `seq`.
 * `snapshot`: the cursor is not covered by the daemon's buffer (it restarted
