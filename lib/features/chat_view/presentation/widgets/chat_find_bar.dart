@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:conduit/features/chat_view/presentation/chat_search.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -64,72 +66,101 @@ class ChatFindBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: CallbackShortcuts(
-                        bindings: {
-                          const SingleActivator(LogicalKeyboardKey.enter):
-                              onOlder,
-                          const SingleActivator(
-                            LogicalKeyboardKey.enter,
-                            shift: true,
-                          ): onNewer,
-                          const SingleActivator(LogicalKeyboardKey.escape):
-                              onClose,
-                        },
-                        child: TextField(
-                          key: const ValueKey('chat-find-field'),
-                          controller: controller,
-                          focusNode: focusNode,
-                          autofocus: true,
-                          textInputAction: TextInputAction.search,
-                          onChanged: (value) => search.query = value,
-                          onSubmitted: (_) => onOlder(),
-                          // Keep the field focused for the next Enter.
-                          onEditingComplete: () {},
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            border: InputBorder.none,
-                            prefixIcon: Icon(Icons.search_rounded, size: 20),
-                            prefixIconConstraints: BoxConstraints(minWidth: 32),
-                            hintText: 'Find in conversation',
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: CallbackShortcuts(
+                            bindings: {
+                              const SingleActivator(LogicalKeyboardKey.enter):
+                                  onOlder,
+                              const SingleActivator(
+                                LogicalKeyboardKey.enter,
+                                shift: true,
+                              ): onNewer,
+                              const SingleActivator(LogicalKeyboardKey.escape):
+                                  onClose,
+                            },
+                            child: TextField(
+                              key: const ValueKey('chat-find-field'),
+                              controller: controller,
+                              focusNode: focusNode,
+                              autofocus: true,
+                              textInputAction: TextInputAction.search,
+                              onChanged: (value) => search.query = value,
+                              onSubmitted: (_) => onOlder(),
+                              // Keep the field focused for the next Enter.
+                              onEditingComplete: () {},
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                border: InputBorder.none,
+                                prefixIcon: Icon(
+                                  Icons.search_rounded,
+                                  size: 20,
+                                ),
+                                prefixIconConstraints: BoxConstraints(
+                                  minWidth: 32,
+                                ),
+                                hintText: 'Find in conversation',
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    if (search.searchingEarlier)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 8),
-                        child: SizedBox.square(
-                          dimension: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                        if (search.searchingEarlier)
+                          const Padding(
+                            padding: EdgeInsets.only(right: 8),
+                            child: SizedBox.square(
+                              dimension: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        // Clear of the field; a long state ellipsises rather
+                        // than squeeze the field on a narrow phone.
+                        Padding(
+                          padding: const EdgeInsets.only(left: 12, right: 4),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: math.min(120, width * 0.22),
+                            ),
+                            child: Text(
+                              status,
+                              key: const ValueKey('chat-find-count'),
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    Text(
-                      status,
-                      key: const ValueKey('chat-find-count'),
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    IconButton(
-                      key: const ValueKey('chat-find-older'),
-                      tooltip: older,
-                      onPressed: search.active ? onOlder : null,
-                      icon: const Icon(Icons.keyboard_arrow_up_rounded),
-                    ),
-                    IconButton(
-                      key: const ValueKey('chat-find-newer'),
-                      tooltip: 'Next match (newer)',
-                      onPressed: search.active && count > 0 ? onNewer : null,
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                    ),
-                    IconButton(
-                      key: const ValueKey('chat-find-close'),
-                      tooltip: 'Close search (Esc)',
-                      onPressed: onClose,
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
+                        IconButton(
+                          key: const ValueKey('chat-find-older'),
+                          tooltip: older,
+                          onPressed: search.active ? onOlder : null,
+                          icon: const Icon(Icons.keyboard_arrow_up_rounded),
+                        ),
+                        IconButton(
+                          key: const ValueKey('chat-find-newer'),
+                          tooltip: 'Next match (newer)',
+                          onPressed: search.active && count > 0
+                              ? onNewer
+                              : null,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                        ),
+                        IconButton(
+                          key: const ValueKey('chat-find-close'),
+                          tooltip: 'Close search (Esc)',
+                          onPressed: onClose,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    );
+                  },
                 ),
                 if (note != null)
                   Padding(
