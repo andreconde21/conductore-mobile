@@ -25,6 +25,8 @@ Map<String, Object?> usageReplyJson({
   List<Map<String, Object?>> rows = const [],
   Map<String, Object?>? codex,
   bool partial = false,
+  List<Map<String, Object?>>? accounts,
+  bool cswap = true,
 }) {
   Map<String, Object?> totals(Iterable<Map<String, Object?>> rows) {
     num sum(String key) =>
@@ -62,6 +64,11 @@ Map<String, Object?> usageReplyJson({
       'today': totals(rows.where((r) => r['date'] == today)),
       'range': totals(rows),
       'rows': rows,
+      // Companions before cswap support send neither field.
+      if (accounts != null) ...{
+        'accounts': accounts,
+        'cswap': {'present': cswap, 'activeSlot': 1},
+      },
     },
     'codex': codex ?? {'present': false},
     'pricing': {
@@ -73,6 +80,46 @@ Map<String, Object?> usageReplyJson({
     'scan': {'partial': partial},
   };
 }
+
+/// One `claude.accounts` entry (the companion's cswap shape).
+Map<String, Object?> usageAccount(
+  int slot,
+  String label, {
+  bool active = false,
+  bool disabled = false,
+  bool stale = false,
+  num? fiveHour,
+  num? weekly,
+  DateTime? fiveHourResets,
+  DateTime? weeklyResets,
+  DateTime? usageAt,
+}) => {
+  'slot': slot,
+  'alias': label.contains('*') ? null : label,
+  'label': label,
+  'active': active,
+  'disabled': disabled,
+  'status': stale ? 'unavailable' : 'ok',
+  'limits': {
+    if (fiveHour != null)
+      '5h': {
+        'usedPct': fiveHour,
+        'resetsAt': fiveHourResets?.millisecondsSinceEpoch,
+        'expired': false,
+      },
+    if (weekly != null)
+      '7d': {
+        'usedPct': weekly,
+        'resetsAt': weeklyResets?.millisecondsSinceEpoch,
+        'expired': false,
+      },
+  },
+  if (stale) 'stale': true,
+  if (usageAt != null) 'usageAt': usageAt.millisecondsSinceEpoch,
+  'perModel': [
+    {'model': 'Fable', 'usedPct': 7, 'resetsAt': null, 'expired': false},
+  ],
+};
 
 Map<String, Object?> usageRow(
   String date, {

@@ -21,6 +21,7 @@ const spoolMod = lazy('./spool')
 const portsMod = lazy('./ports')
 const usageMod = lazy('./usage')
 const summarizeMod = lazy('./summarize')
+const cswapMod = lazy('./cswap')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -42,7 +43,10 @@ const USAGE = `usage: conductore-hostd <command>
   usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]
                                   Claude Code / Codex limits, context per
                                   session, tokens and estimated cost per
-                                  day, project and model (incremental scan)
+                                  day, project and model (incremental scan);
+                                  with cswap, every Claude account's limits
+  cswap-switch <slot> | --best    switch the Claude account for new
+                                  sessions (cswap switch)
   summarize [--max-words 45] [--timeout-ms 20000]
                                   a spoken one- or two-sentence summary of
                                   the reply on stdin (claude -p, no tools)
@@ -307,9 +311,38 @@ async function usageCmd (args) {
     paths.ensureDirs()
     opts.agents = await knownAgents()
     opts.cacheFile = paths.usageCachePath()
-    return out({ version: paths.VERSION, ...usageMod().compute(opts) })
+    const result = usageMod().compute(opts)
+    // Every cswap account's limits; nothing at all without cswap.
+    let cswap = null
+    try { cswap = await cswapMod().accounts({ cacheFile: cswapCachePath() }) } catch {}
+    if (cswap) {
+      const { accounts, ...meta } = cswap
+      result.claude.accounts = accounts
+      result.claude.cswap = meta
+    }
+    return out({ version: paths.VERSION, ...result })
   } catch (err) {
     return fail(`usage failed: ${err.message}`)
+  }
+}
+
+const cswapCachePath = () => path.join(paths.homeDir(), 'cswap-cache.json')
+
+async function cswapSwitchCmd (args) {
+  const { flags, positional } = parseFlags(args)
+  const best = flags.best === true
+  const slot = positional[0]
+  if (best === (slot !== undefined) || (slot !== undefined && !/^[1-9][0-9]{0,3}$/.test(slot))) {
+    return fail('usage: cswap-switch <slot> | --best')
+  }
+  try { os.setPriority(0, 10) } catch {}
+  try {
+    paths.ensureDirs()
+    const r = await cswapMod().switchAccount({ slot: best ? undefined : Number(slot), best, cacheFile: cswapCachePath() })
+    if (!r.ok) return fail(r.message)
+    return out(r)
+  } catch (err) {
+    return fail(`cswap-switch failed: ${err.message}`)
   }
 }
 
@@ -577,6 +610,7 @@ async function main (argv) {
     case 'ports': return portsCmd(args)
     case 'usage': return usageCmd(args)
     case 'summarize': return summarizeCmd(args)
+    case 'cswap-switch': return cswapSwitchCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()

@@ -66,6 +66,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
 | `~/.conductore/ports.json` | listening ports and the seq each first appeared at (`ports`) |
 | `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets and daily token sums, last 31 days (about 1.3 MB for 1,100 transcripts) |
+| `~/.conductore/cswap-cache.json` | `usage` with cswap: the last `cswap list` answer (masked rows only), 60 s |
 | `~/.conductore/summarize.lock` | pid of the running `summarize` (one at a time; never the text) |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
@@ -414,6 +415,56 @@ project and model.
   the daemon's event path, and a second concurrent call answers from the
   cache with `scan.busy: true` instead of scanning too.
 
+#### Every Claude account (cswap)
+
+With [cswap](https://github.com/realiti4/claude-swap) (a Claude Code
+multi-account switcher) on PATH or at `~/.local/bin/cswap`, `claude` also
+carries the limits of every account it manages, from `cswap list --json`:
+
+```json
+"claude":{…,
+  "cswap":{"present":true,"activeSlot":1,"fetchedAt":1790497409198},
+  "accounts":[
+    {"slot":1,"alias":"work","label":"work","active":true,"disabled":false,"status":"ok",
+     "limits":{"5h":{"usedPct":17,"resetsAt":1790513999667,"expired":false},
+               "7d":{"usedPct":5,"resetsAt":1791064799667,"expired":false}},
+     "usageAt":1790497196000,
+     "perModel":[{"model":"Fable","usedPct":7,"resetsAt":1791064799667,"expired":false}]},
+    {"slot":2,"alias":null,"label":"b***@e***.org","active":false,"disabled":true,
+     "status":"unavailable","limits":{"7d":{"usedPct":98,"resetsAt":1790542799559,"expired":false}},
+     "stale":true,"usageAt":1790457113000}]}
+```
+
+* Without cswap, neither field exists (older companions never send them).
+  `$CONDUCTORE_CSWAP` overrides the lookup (a path, or empty for none).
+* `label` is the alias, else a masked email (first letters and top-level
+  domain). No email, organisation, uuid or token is ever printed or cached.
+* `status` is cswap's `usageStatus` (`ok`, `unavailable`, `token_expired`,
+  `api_key`, …). Without fresh usage the last good measurement is shown
+  with `stale: true`; `usageAt` is when it was measured.
+* Cost: one `cswap list --json` per minute at most (0.1–1 s; cswap reads
+  its own usage store), 3 s timeout, its own process group killed on
+  timeout, nice 10. The answer, a failure too, is cached 60 s in
+  `~/.conductore/cswap-cache.json`; after a failure the last good rows are
+  served for 15 minutes with `cswap.stale: true` and `cswap.error`
+  (`timeout`, `unavailable`), then `accounts: []`.
+
+### `conductore-hostd cswap-switch <slot> | --best`
+
+Switches the Claude Code account for new sessions on this machine: `cswap
+switch <slot> --json`, or `cswap switch --strategy best --json` (the
+account with the most headroom). Running sessions keep their account.
+
+```json
+{"ok":true,"switched":true,"reason":"switched","strategy":"explicit",
+ "from":{"slot":1,"label":"work"},"to":{"slot":2,"label":"b***@e***.org"}}
+```
+
+`switched: false` with `reason: "already-active"` (or cswap's other no-op
+reasons) when nothing changed. Errors exit 1 with `{"error"}` (emails
+masked): cswap missing, a bad slot, cswap's own error, or no answer in 20 s.
+The account cache is dropped so the next `usage` shows the new state.
+
 ### `conductore-hostd summarize [--max-words 45] [--timeout-ms 20000]`
 
 A spoken version of an assistant reply for the phone's "Claude summary"
@@ -671,6 +722,9 @@ park throttle, `--chain` passthrough) through a real daemon,
 `tmux`/`herdr` binaries that record their arguments),
 `test/summarize.test.js` the `summarize` command with a fake `claude`
 (argv, passthrough, markdown and word cap, timeout kill, busy, truncation),
+`test/cswap.test.js` cswap accounts with a fake `cswap` and a fixture of
+the real `list --json` shape (email masking, timeout kill, 60 s cache and
+stale fallback, `cswap-switch`),
 and
 `test/daemon.test.js` spawns a real daemon on a temp socket and drives the sh
 hook and the CLI through spool handoff (daemon down, ordering, staging

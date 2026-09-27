@@ -53,6 +53,14 @@ class MachineUsage {
 
   List<UsageLimit> get codexLimits => report?.codex.limits ?? const [];
 
+  /// Every Claude account cswap manages here; empty without cswap (and
+  /// from companions before it).
+  List<UsageAccount> get accounts => report?.claude.accounts ?? const [];
+
+  /// The companion found cswap and lists accounts: it can switch them.
+  bool get canSwitchAccounts =>
+      (report?.claude.cswap ?? false) && accounts.isNotEmpty;
+
   MachineUsage copyWith({
     String? hostName,
     UsageReport? report,
@@ -70,6 +78,78 @@ class MachineUsage {
     needsUpdate: needsUpdate ?? this.needsUpdate,
     fetchedAt: fetchedAt ?? this.fetchedAt,
   );
+}
+
+/// One machine's view of a [UsageAccountSummary].
+class UsageAccountPlacement {
+  const UsageAccountPlacement({
+    required this.hostId,
+    required this.hostName,
+    required this.account,
+    this.canSwitch = false,
+  });
+
+  final String hostId;
+  final String hostName;
+  final UsageAccount account;
+
+  /// The machine's companion can run `cswap switch`.
+  final bool canSwitch;
+}
+
+/// One Claude account across machines, merged by its label: the freshest
+/// windows any machine reported, and where it is active.
+class UsageAccountSummary {
+  const UsageAccountSummary({
+    required this.label,
+    required this.placements,
+    this.fiveHour,
+    this.weekly,
+  });
+
+  final String label;
+  final UsageLimit? fiveHour;
+  final UsageLimit? weekly;
+  final List<UsageAccountPlacement> placements;
+
+  /// New Claude sessions use it on at least one machine.
+  bool get active => placements.any((p) => p.account.active);
+
+  /// Held out of rotation wherever it is configured.
+  bool get disabled => placements.every((p) => p.account.disabled);
+
+  /// No machine has a fresh measurement.
+  bool get stale => placements.every((p) => p.account.stale);
+
+  /// Machines it is active on.
+  List<String> get activeOn => [
+    for (final p in placements)
+      if (p.account.active) p.hostName,
+  ];
+
+  /// Machines where it can be made the active account.
+  List<UsageAccountPlacement> get switchTargets => [
+    for (final p in placements)
+      if (p.canSwitch && !p.account.active && !p.account.disabled) p,
+  ];
+
+  /// When the windows were measured (the newest machine's).
+  DateTime? get usageAt {
+    DateTime? newest;
+    for (final p in placements) {
+      final at = p.account.usageAt;
+      if (at != null && (newest == null || at.isAfter(newest))) {
+        newest = at;
+      }
+    }
+    return newest;
+  }
+
+  /// The fuller of its two windows, 0 to 100; null when neither is known.
+  double? usedPct(DateTime now) {
+    final values = [?fiveHour?.effectivePct(now), ?weekly?.effectivePct(now)];
+    return values.isEmpty ? null : values.reduce((a, b) => a > b ? a : b);
+  }
 }
 
 /// How the Usage tab groups rows.
@@ -131,6 +211,89 @@ class UsageSummary {
       claudeLimits.where((limit) => limit.isWeekly).firstOrNull;
 
   bool get codexPresent => _reports.any((report) => report.codex.present);
+
+  /// Every cswap account across machines, merged by label, active ones
+  /// first. Empty without cswap.
+  List<UsageAccountSummary> get accounts {
+    final byLabel = <String, List<UsageAccountPlacement>>{};
+    for (final machine in machines) {
+      for (final account in machine.accounts) {
+        (byLabel[account.label] ??= []).add(
+          UsageAccountPlacement(
+            hostId: machine.hostId,
+            hostName: machine.hostName,
+            account: account,
+            canSwitch: machine.canSwitchAccounts,
+          ),
+        );
+      }
+    }
+    final merged = [
+      for (final MapEntry(key: label, value: placements) in byLabel.entries)
+        UsageAccountSummary(
+          label: label,
+          placements: placements,
+          fiveHour: _freshest([
+            for (final p in placements) ?p.account.fiveHour,
+          ]),
+          weekly: _freshest([for (final p in placements) ?p.account.weekly]),
+        ),
+    ];
+    // Stable: active first, otherwise in the machines' slot order.
+    final active = merged.where((a) => a.active);
+    final rest = merged.where((a) => !a.active);
+    return [...active, ...rest];
+  }
+
+  static UsageLimit? _freshest(List<UsageLimit> limits) =>
+      limits.isEmpty ? null : limits.reduce(fresherLimit);
+
+  /// Accounts no machine uses right now (the home bar's "+N accounts").
+  int get otherAccountCount => accounts.where((a) => !a.active).length;
+
+  /// Another account with clearly more headroom than the active one, once
+  /// the active one is at least half used: what "Switch to best" would
+  /// likely pick. Null otherwise.
+  UsageAccountSummary? bestAccount(DateTime now) {
+    final all = accounts;
+    double? activeUsed;
+    for (final account in all.where((a) => a.active)) {
+      final used = account.usedPct(now);
+      if (used != null && (activeUsed == null || used > activeUsed)) {
+        activeUsed = used;
+      }
+    }
+    activeUsed ??= [
+      ?fiveHour?.effectivePct(now),
+      ?weekly?.effectivePct(now),
+    ].fold<double?>(null, (m, v) => m == null || v > m ? v : m);
+    if (activeUsed == null || activeUsed < 50) {
+      return null;
+    }
+    UsageAccountSummary? best;
+    double? bestUsed;
+    for (final account in all) {
+      final used = account.usedPct(now);
+      if (account.active || account.disabled || used == null) {
+        continue;
+      }
+      if (bestUsed == null || used < bestUsed) {
+        best = account;
+        bestUsed = used;
+      }
+    }
+    return bestUsed != null && bestUsed + 10 <= activeUsed ? best : null;
+  }
+
+  /// Account names crash reports must never carry (telemetry scrubber).
+  Iterable<String> get accountTerms sync* {
+    for (final machine in machines) {
+      for (final account in machine.accounts) {
+        yield account.label;
+        if (account.alias case final alias?) yield alias;
+      }
+    }
+  }
 
   /// Today on each machine, every agent.
   UsageTotals get today {

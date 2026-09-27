@@ -191,6 +191,18 @@ void main() {
       terms.add('zorro');
       expect(s.scrub('hello zorro'), 'hello <redacted>');
     });
+
+    test('runtime terms: Claude account labels and masked emails', () {
+      final labels = <String>[];
+      addTelemetryTerms(() => labels);
+      final s = TelemetryScrubber(sensitiveTerms: () => [...runtimeTerms()]);
+      labels.addAll(['moonbase', 'q***@z***.com']);
+      clean(
+        'StateError: no rings for moonbase (q***@z***.com)',
+        ['moonbase', 'q***@z***.com'],
+        s,
+      );
+    });
   });
 
   group('limits', () {

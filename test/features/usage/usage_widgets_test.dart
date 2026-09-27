@@ -196,4 +196,243 @@ void main() {
       const UsageLimit(label: '5h', usedPct: 12),
     );
   });
+
+  group('cswap accounts', () {
+    Map<String, Object?> reply({bool cswap = true}) => usageReplyJson(
+      limits: [
+        {
+          'label': '5h',
+          'usedPct': 83,
+          'resetsAt': resets.millisecondsSinceEpoch,
+        },
+      ],
+      accounts: [
+        usageAccount(
+          1,
+          'work',
+          active: true,
+          fiveHour: 83,
+          weekly: 20,
+          fiveHourResets: resets,
+          weeklyResets: resets.add(const Duration(days: 3)),
+        ),
+        usageAccount(
+          2,
+          'home',
+          fiveHour: 12,
+          weekly: 40,
+          stale: true,
+          usageAt: now.subtract(const Duration(hours: 11)),
+        ),
+        usageAccount(3, 'o***@e***.com', disabled: true, weekly: 99),
+      ],
+      cswap: cswap,
+    );
+
+    setUp(() {
+      runner.reply = () => runner.commands.last.contains('cswap-switch')
+          ? FakeUsageRunner.ok({
+              'ok': true,
+              'switched': true,
+              'from': {'slot': 1, 'label': 'work'},
+              'to': {'slot': 2, 'label': 'home'},
+            })
+          : FakeUsageRunner.ok(reply());
+    });
+
+    testWidgets('the breakdown lists every account with its rings', (
+      tester,
+    ) async {
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
+      expect(find.text('Accounts'), findsOneWidget);
+      for (final label in ['work', 'home', 'o***@e***.com']) {
+        expect(find.byKey(ValueKey('usage-account-$label')), findsOneWidget);
+      }
+      expect(
+        find.byKey(const ValueKey('usage-account-active-work')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-active-home')),
+        findsNothing,
+      );
+      // Two rings per account.
+      final homeRings = find.descendant(
+        of: find.byKey(const ValueKey('usage-account-home')),
+        matching: find.byType(UsageRing),
+      );
+      expect(homeRings, findsNWidgets(2));
+      expect(tester.widget<UsageRing>(homeRings.first).percent, 12);
+      expect(tester.widget<UsageRing>(homeRings.last).percent, 40);
+      expect(
+        find.textContaining('resets 5h in 3h 0m · week in 3d 3h'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('as of 11h ago'), findsOneWidget);
+      // Disabled: greyed, no switch.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('usage-account-o***@e***.com')),
+          matching: find.byType(Opacity),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('disabled'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('usage-account-switch-o***@e***.com')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-switch-work')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-switch-home')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('usage-switch-best')), findsOneWidget);
+    });
+
+    testWidgets('switching asks first, then runs cswap-switch and refreshes', (
+      tester,
+    ) async {
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+      await tester.pump();
+      final before = runner.commands.length;
+
+      await tester.tap(find.byKey(const ValueKey('usage-account-switch-home')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('usage-switch-confirm')),
+        findsOneWidget,
+      );
+      expect(find.text('Switch to home?'), findsOneWidget);
+      expect(find.textContaining('new Claude sessions on Box'), findsOneWidget);
+      // Cancel: nothing runs.
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(runner.commands, hasLength(before));
+
+      await tester.tap(find.byKey(const ValueKey('usage-account-switch-home')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('usage-switch-confirm-box')));
+      await tester.pumpAndSettle();
+      expect(runner.commands[before], contains('cswap-switch 2'));
+      // The machine is asked for usage again.
+      expect(runner.commands.last, contains('usage --days'));
+      expect(find.text('New Claude sessions now use home'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('usage-switch-best')));
+      await tester.pumpAndSettle();
+      expect(find.text('Switch to best account?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('usage-switch-confirm-box')));
+      await tester.pumpAndSettle();
+      expect(
+        runner.commands.where((c) => c.contains('cswap-switch --best')),
+        hasLength(1),
+      );
+    });
+
+    testWidgets('no switching when the companion does not report cswap', (
+      tester,
+    ) async {
+      runner.reply = () => FakeUsageRunner.ok(reply(cswap: false));
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
+      expect(find.text('Switch'), findsNothing);
+      expect(find.byKey(const ValueKey('usage-switch-best')), findsNothing);
+    });
+
+    testWidgets('the home bar keeps the rings and adds +N accounts', (
+      tester,
+    ) async {
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageHomeBar(controller: usage, now: now)));
+      await tester.pump();
+      expect(
+        tester
+            .widget<UsageRing>(find.byKey(const ValueKey('usage-ring-5h')))
+            .percent,
+        83,
+      );
+      final chip = find.byKey(const ValueKey('usage-accounts-chip'));
+      expect(chip, findsOneWidget);
+      // The disabled account counts in "+2"; "best" measures the fuller
+      // window (home: 40 % weekly) against the active one's 83 %.
+      expect(find.text('+2 accounts · best: home 40%'), findsOneWidget);
+      await tester.tap(chip);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
+    });
+
+    testWidgets('the home bar hints at an account with more headroom', (
+      tester,
+    ) async {
+      runner.reply = () => FakeUsageRunner.ok(
+        usageReplyJson(
+          accounts: [
+            usageAccount(1, 'work', active: true, fiveHour: 90, weekly: 20),
+            usageAccount(2, 'home', fiveHour: 12, weekly: 4),
+          ],
+        ),
+      );
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageHomeBar(controller: usage, now: now)));
+      await tester.pump();
+      expect(find.text('+1 account · best: home 12%'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('usage-bar-toggle')));
+      await tester.pump();
+      // Collapsed: the count only.
+      expect(find.text('+1'), findsOneWidget);
+    });
+
+    testWidgets('the compact summary shows the count', (tester) async {
+      final usage = controller(tester);
+      var tapped = 0;
+      await tester.pumpWidget(
+        app(
+          SizedBox(
+            width: 220,
+            child: UsageSummaryView(
+              controller: usage,
+              layout: UsageSummaryLayout.compact,
+              now: now,
+              onTap: () => tapped++,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('+2'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
+      expect(tapped, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('an old companion without accounts changes nothing', (
+      tester,
+    ) async {
+      runner.reply = () => FakeUsageRunner.ok(usageReplyJson());
+      final usage = controller(tester);
+      await tester.pumpWidget(
+        app(
+          Column(
+            children: [
+              UsageHomeBar(controller: usage, now: now),
+              UsageBreakdown(controller: usage, now: now),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('usage-accounts')), findsNothing);
+      expect(find.byKey(const ValueKey('usage-accounts-chip')), findsNothing);
+    });
+  });
 }

@@ -7,6 +7,7 @@ import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
 import 'package:conduit/core/telemetry/telemetry_setup.dart';
+import 'package:conduit/core/telemetry/telemetry_terms.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -202,6 +203,9 @@ void main() {
     preferences: const SecureUsagePreferencesStore(secureStorage),
     notifier: const PlatformAgentAttentionNotifier(),
   );
+  // Crash reports never carry Claude account names (cswap aliases, masked
+  // emails).
+  addTelemetryTerms(() => usage.summary.accountTerms);
   AgentStatusWidgetPusher.forController(
     agentAttention,
     usage: usage,
