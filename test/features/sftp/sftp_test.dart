@@ -1,6 +1,9 @@
 import 'dart:io';
 
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
+import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/sftp/presentation/sftp_browser_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../support/test_doubles.dart';
@@ -188,5 +191,37 @@ void main() {
       expect(failing.status, SftpBrowserStatus.failed);
       expect(failing.errorMessage, isNotNull);
     });
+
+    test('Retry closes the session that could not list', () async {
+      // Connects, but listing the home directory fails.
+      final sessions = <FakeSftpSession>[];
+      final retrying = SftpBrowserController(
+        host: buildHost('files'),
+        repository: _NewSessionSftpRepository(sessions),
+        fileExport: export,
+      );
+      addTearDown(retrying.dispose);
+      await retrying.connect();
+      expect(retrying.status, SftpBrowserStatus.failed);
+
+      await retrying.connect();
+      expect(sessions, hasLength(2));
+      expect(sessions.first.closeCalls, 1);
+      expect(sessions.last.closeCalls, 0);
+    });
   });
+}
+
+/// A new session per connection, with nothing to list.
+class _NewSessionSftpRepository implements SftpRepository {
+  _NewSessionSftpRepository(this.sessions);
+
+  final List<FakeSftpSession> sessions;
+
+  @override
+  Future<SftpSession> connect(SavedHost host) async {
+    final session = FakeSftpSession(home: '/home/user', tree: {});
+    sessions.add(session);
+    return session;
+  }
 }

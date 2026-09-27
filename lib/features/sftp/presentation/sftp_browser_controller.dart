@@ -139,6 +139,13 @@ class SftpBrowserController extends ChangeNotifier {
   }
 
   Future<void> connect() async {
+    // Retry after a failure: the session that connected but could not
+    // list is closed, not leaked.
+    final previous = _session;
+    _session = null;
+    if (previous != null) {
+      unawaited(previous.close().catchError((Object _) {}));
+    }
     _status = SftpBrowserStatus.connecting;
     _errorMessage = null;
     _securityKeyMessage = null;
