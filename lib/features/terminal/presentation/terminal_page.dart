@@ -1202,6 +1202,7 @@ class _TerminalPageState extends State<TerminalPage>
   /// [_desktopShortcuts], which sees the key after the terminal does).
   bool _keepFromSession(KeyEvent event) {
     if (isQuickSwitcherShortcut(event)) return true;
+    if (widget.shell?.keepKey?.call(event) ?? false) return true;
     final match = matchDesktopShortcut(event);
     if (match == null) return false;
     return switch (match.action) {

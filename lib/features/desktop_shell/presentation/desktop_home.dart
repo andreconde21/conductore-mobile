@@ -16,6 +16,7 @@ import 'package:conduit/features/command_palette/domain/palette_entry.dart';
 import 'package:conduit/features/command_palette/presentation/command_palette.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/desktop_shell/domain/layout_presets.dart';
+import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
@@ -23,6 +24,7 @@ import 'package:conduit/features/desktop_shell/presentation/desktop_shell_contro
 import 'package:conduit/features/desktop_shell/presentation/shell_palette.dart';
 import 'package:conduit/features/desktop_shell/presentation/terminal_shell_embedding.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/layout_picker.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_sidebar.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_dashboard.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_sidebar.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -31,6 +33,11 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action_plan.dart';
+import 'package:conduit/features/quick_actions/presentation/project_files_controller.dart';
+import 'package:conduit/features/quick_actions/presentation/quick_action_form.dart';
+import 'package:conduit/features/quick_actions/presentation/quick_action_runner.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_actions.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -46,6 +53,9 @@ import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts
 import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+part 'shell_projects.dart';
 
 /// Whether a window of [size] gets the desktop shell: desktops always,
 /// and tablets at least 900 dp wide. Phones (in landscape too) and
@@ -155,7 +165,12 @@ class DesktopHomeState extends State<DesktopHome> {
       if (mounted) setState(() => _fullscreen = value);
     },
     onViewsChanged: _handleViewsChanged,
-    headerActions: () => [_layoutPicker(), _previewToggle()],
+    headerActions: () => [
+      ..._quickActionButtons(),
+      _layoutPicker(),
+      _previewToggle(),
+    ],
+    keepKey: (event) => _quickActionForKey(event) != null,
     onToggleAgents: () =>
         widget.controller.toggleRightPanel(ShellRightPanel.agents),
     onOpenPalette: () => unawaited(openPalette()),
@@ -168,6 +183,33 @@ class DesktopHomeState extends State<DesktopHome> {
   );
 
   List<SidebarNode> _tree = const [];
+
+  /// The machine tree grouped by project (the Projects tab).
+  List<ProjectGroup> _projects = const [];
+
+  /// Each project's icon and `.code-workspace` quick actions.
+  late final ProjectFilesController _projectFiles = ProjectFilesController(
+    runnerFor: widget.agentAttention.runnerFor,
+    hostFor: widget.hostsController.findById,
+  )..addListener(_handleProjectFilesChanged);
+  late final QuickActionRunner _quickActions = QuickActionRunner(
+    workspace: widget.workspace,
+    attention: widget.agentAttention,
+  );
+
+  void _handleProjectFilesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// A quick action's keys, for the focused project.
+  bool _handleQuickActionKey(KeyEvent event) {
+    if (!mounted || !(_route?.isCurrent ?? true)) return false;
+    final match = _quickActionForKey(event);
+    if (match == null) return false;
+    unawaited(_runQuickAction(match.$1, match.$2));
+    return true;
+  }
+
   Set<String> _unreadKeys = const {};
   bool _fullscreen = false;
   bool _appResumed = true;
@@ -230,6 +272,9 @@ class DesktopHomeState extends State<DesktopHome> {
       },
     );
     _shortcuts.attach();
+    if (PlatformFeatures.isDesktop) {
+      HardwareKeyboard.instance.addHandler(_handleQuickActionKey);
+    }
     _watchSessions();
     _rebuildTree();
   }
@@ -253,6 +298,8 @@ class DesktopHomeState extends State<DesktopHome> {
   @override
   void dispose() {
     _shortcuts.detach();
+    HardwareKeyboard.instance.removeHandler(_handleQuickActionKey);
+    _projectFiles.dispose();
     widget.hostsController.removeListener(_rebuildTree);
     widget.workspace.removeListener(_handleWorkspaceChanged);
     widget.agentAttention.removeListener(_rebuildTree);
@@ -522,6 +569,7 @@ class DesktopHomeState extends State<DesktopHome> {
         ? null
         : (from: self.id, to: thisComputerHostId);
     _tree = SidebarTreeBuilder.build(_inputs(), _controller.prefs);
+    _projects = _buildProjects();
     _refreshListedWindows();
     _feedUnread();
     setState(() => _unreadKeys = _controller.unread.unreadKeys);
@@ -996,6 +1044,7 @@ class DesktopHomeState extends State<DesktopHome> {
         setVoice: theme.setVoice,
         nextUnread: openNextUnread,
         lock: widget.actions.lock,
+        extra: _projectPaletteEntries(),
         closeFocused: switch ((host, host?.activeViewId)) {
           (final host?, final view?) => () => host.closeView(view),
           _ => null,
@@ -1346,6 +1395,9 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   Widget _sidebar() {
+    if (_controller.sidebarTab == ShellSidebarTab.projects) {
+      return _projectSidebar();
+    }
     return ShellSidebar(
       key: const ValueKey('shell-sidebar'),
       controller: _controller,
@@ -1358,7 +1410,13 @@ class DesktopHomeState extends State<DesktopHome> {
       onGroupMenu: (group, position) =>
           unawaited(showGroupMenu(group, position)),
       onExpand: _expand,
-      header: _sidebarHeader(),
+      header: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _sidebarHeader(),
+          SidebarTabs(controller: _controller),
+        ],
+      ),
       footer: _sidebarFooter(),
     );
   }

@@ -78,7 +78,12 @@ class TerminalShellEmbedding {
     this.onOpenPalette,
     this.onDropNode,
     this.onFillPane,
+    this.keepKey,
   });
+
+  /// Keys the shell answers itself (a quick action's), kept from the
+  /// terminal.
+  final bool Function(KeyEvent event)? keepKey;
 
   /// The switcher button and keys: the shell's command palette instead.
   final VoidCallback? onOpenPalette;
