@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
@@ -107,6 +108,46 @@ void main() {
         String.fromCharCodes(export.saved.single.$2),
         contains('nested.txt'),
       );
+    });
+
+    test('download refuses a file too large to hold in memory', () async {
+      const huge = SftpEntry(
+        name: 'disk.img',
+        path: '/home/user/disk.img',
+        kind: SftpEntryKind.file,
+        size: SftpBrowserController.downloadMaxBytes + 1,
+      );
+      await controller.connect();
+      await expectLater(
+        controller.download(huge),
+        throwsA(
+          isA<AppFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('the most the app can download'),
+          ),
+        ),
+      );
+      expect(session.readCalls, isEmpty);
+      expect(export.saved, isEmpty);
+      expect(controller.transfer, isNull);
+    });
+
+    test('download refuses a folder whose files add up past the cap', () async {
+      const half = SftpBrowserController.downloadMaxBytes ~/ 2 + 1;
+      session.tree['/home/user/docs'] = [
+        for (final name in ['a.bin', 'b.bin'])
+          SftpEntry(
+            name: name,
+            path: '/home/user/docs/$name',
+            kind: SftpEntryKind.file,
+            size: half,
+          ),
+      ];
+      session.files['/home/user/docs/a.bin'] = List.filled(16, 0);
+      await controller.connect();
+      await expectLater(controller.download(dir), throwsA(isA<AppFailure>()));
+      expect(export.saved, isEmpty);
     });
 
     test('makeDirectory issues the join under the current path', () async {
