@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
@@ -17,6 +18,10 @@ import 'package:dartssh2/dartssh2.dart';
 /// [SshClientFactory]) but its own connection, opened lazily on first use
 /// and kept for subsequent polls; a broken connection is dropped so the
 /// next call reconnects. Never touches the interactive PTY.
+///
+/// Commands are POSIX shell scripts, as for the local runner; each is sent
+/// through [posixShellCommand] so the account's login shell (fish, csh)
+/// never parses them, or any path or name quoted into them.
 class SshAgentCommandRunner implements StdinAgentCommandRunner {
   SshAgentCommandRunner(this._hostKeyVerifier, this._host);
 
@@ -33,7 +38,9 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
   }) async {
     final client = await _connect();
     try {
-      final result = await client.runWithResult(command).timeout(timeout);
+      final result = await client
+          .runWithResult(posixShellCommand(command))
+          .timeout(timeout);
       return AgentCommandResult(
         stdout: utf8.decode(result.stdout, allowMalformed: true),
         stderr: utf8.decode(result.stderr, allowMalformed: true),
@@ -84,7 +91,7 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
     final client = await _connect();
     final SSHSession session;
     try {
-      session = await client.execute(command);
+      session = await client.execute(posixShellCommand(command));
     } catch (error) {
       await _dropClient();
       throw ConnectionFailure(

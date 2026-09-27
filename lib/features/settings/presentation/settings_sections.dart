@@ -8,6 +8,8 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
+import 'package:conduit/features/app_lock/domain/app_lock_preferences.dart';
+import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
@@ -528,6 +530,10 @@ class SettingsSectionBody extends StatelessWidget {
           ),
         ),
       ),
+      if (services.appLock case final appLock?) ...[
+        _gap,
+        SettingsCard(child: _RelockDelayTile(controller: appLock)),
+      ],
       if (lockNow != null) ...[
         _gap,
         SettingsCard(
@@ -728,6 +734,43 @@ class _AgentMachineCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// "Lock again": how long Conductore may stay in the background before it
+/// asks for the fingerprint, face or PIN again.
+class _RelockDelayTile extends StatelessWidget {
+  const _RelockDelayTile({required this.controller});
+
+  final AppLockController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+        child: Row(
+          children: [
+            const Icon(Icons.timer_outlined, size: 22),
+            const SizedBox(width: 16),
+            const Expanded(child: Text('Lock again in the background')),
+            DropdownButton<RelockDelay>(
+              key: const ValueKey('settings-relock-delay'),
+              value: controller.relockDelay,
+              underline: const SizedBox.shrink(),
+              items: [
+                for (final delay in RelockDelay.values)
+                  DropdownMenuItem(value: delay, child: Text(delay.label)),
+              ],
+              onChanged: (delay) {
+                if (delay != null) unawaited(controller.setRelockDelay(delay));
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

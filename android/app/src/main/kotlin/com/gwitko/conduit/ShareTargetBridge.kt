@@ -92,13 +92,15 @@ class ShareTargetBridge(private val context: Context) {
 
     @Suppress("DEPRECATION")
     private fun collectUris(intent: Intent, action: String): List<Uri> {
-        return if (action == Intent.ACTION_SEND_MULTIPLE) {
+        val uris = if (action == Intent.ACTION_SEND_MULTIPLE) {
             intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
                 ?.filterNotNull()
                 ?: emptyList()
         } else {
             listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
         }
+        // No file:// and none of the app's own files (see SharedUriPolicy).
+        return uris.filter { SharedUriPolicy.accepts(it.scheme, it.authority, context.packageName) }
     }
 
     private fun copyToCache(uri: Uri, intentMimeType: String?): Map<String, Any?>? {

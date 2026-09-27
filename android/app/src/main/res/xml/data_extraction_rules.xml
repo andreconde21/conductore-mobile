@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing leaves the device through Android backup or device transfer
+     (Android 12+; allowBackup="false" covers older versions). Secure storage
+     ciphertext is bound to this device's Keystore and cannot be read after a
+     restore, and the rest (widget state, queued notification actions) is not
+     meant to travel in clear. Conductore has its own encrypted backup and
+     sync for moving machines to a new phone. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>
