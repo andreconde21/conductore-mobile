@@ -106,5 +106,9 @@ module.exports = {
   // `ports`: listening ports with the seq each first appeared at.
   portsPath: () => path.join(homeDir(), 'ports.json'),
   // `usage`: per-file offsets and daily token buckets of the transcripts.
-  usageCachePath: () => path.join(homeDir(), 'usage-cache.json')
+  usageCachePath: () => path.join(homeDir(), 'usage-cache.json'),
+  // The daemon's per-agent activity log (what `digest` counts).
+  activityPath: () => path.join(homeDir(), 'activity.json'),
+  // `digest --summaries`: rolling summary per agent and its token use.
+  digestPath: () => path.join(homeDir(), 'digest.json')
 }

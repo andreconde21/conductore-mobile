@@ -24,6 +24,8 @@ printf 'main\t2\t%s\t/work/t\tfixer\t4242\n' "$6"
 `, { mode: 0o755 })
 // A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9.
 // It also logs which Herdr server (HERDR_SOCKET_PATH) each call went to.
+// A fake claude: `install` registers the newer hooks for this version.
+fs.writeFileSync(path.join(fakeBin, 'claude'), '#!/bin/sh\necho "2.1.280 (Claude Code)"\n', { mode: 0o755 })
 const herdrLog = path.join(fakeBin, 'herdr.log')
 const herdrSocketLog = path.join(fakeBin, 'herdr-sockets.log')
 fs.writeFileSync(path.join(fakeBin, 'herdr'), `#!/bin/sh
@@ -383,13 +385,13 @@ test('install and uninstall edit the settings file idempotently', async () => {
   assert.equal(i1.json.ok, true)
   const i2 = await cli('install')
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), JSON.parse(fs.readFileSync(file, 'utf8')))
-  assert.equal(i2.json.events.length, 9)
+  assert.equal(i2.json.events.length, 11)
   const cfg = JSON.parse(fs.readFileSync(file, 'utf8'))
   assert.equal(cfg.hooks.Stop.length, 2)
   assert.equal(cfg.hooks.PermissionRequest.length, 1)
   assert.match(cfg.hooks.PermissionRequest[0].hooks[0].command, /conductore-hook' PermissionRequest$/)
   const u = await cli('uninstall')
-  assert.equal(u.json.removed.length, 9)
+  assert.equal(u.json.removed.length, 11)
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo other' }] }] } })
 })
 

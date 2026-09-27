@@ -7,6 +7,7 @@ import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
 import 'package:conduit/features/voice_guide/domain/approval_actions.dart';
 import 'package:conduit/features/voice_guide/domain/guide_brain.dart';
+import 'package:conduit/features/voice_guide/domain/guide_ports.dart';
 import 'package:conduit/features/voice_guide/domain/guide_preferences.dart';
 import 'package:conduit/features/voice_guide/domain/guide_world.dart';
 import 'package:conduit/features/voice_guide/presentation/guide_controller.dart';
@@ -36,6 +37,7 @@ void main() {
     FakeApprovals? approvalActions,
     FakeBrain? withBrain,
     FakeAccounts? accounts,
+    GuideCatchUpText? catchUp,
   }) async {
     mic = FakeSpeechRecognizer();
     tts = FakeTts();
@@ -66,6 +68,7 @@ void main() {
       speechLanguage: () => 'en-US',
       brain: brain,
       usage: (_) => 'Five hour limit at 42 percent.',
+      catchUp: catchUp,
       accounts: accounts,
       locked: () => locked,
       afterSpeechPause: Duration.zero,
@@ -117,6 +120,33 @@ void main() {
     mic.emit(const SpeechError(code: SpeechError.speechTimeout, message: ''));
     await settle(tester);
     expect(guide.phase, GuidePhase.off);
+  });
+
+  testWidgets('catch me up speaks the dashboard, in the guide language', (
+    tester,
+  ) async {
+    final asked = <String>[];
+    await setUpGuide(
+      tester,
+      catchUp: (code) async {
+        asked.add(code);
+        return '1 needs you, 0 stuck, 2 working, 3 done.';
+      },
+    );
+    await begin(tester);
+    await talk(tester, 'catch me up');
+    expect(await hear(tester), '1 needs you, 0 stuck, 2 working, 3 done.');
+    expect(asked, ['en']);
+    expect(guide.phase, GuidePhase.listening);
+  });
+
+  testWidgets('without a dashboard, catch me up says what is waiting', (
+    tester,
+  ) async {
+    await setUpGuide(tester);
+    await begin(tester);
+    await talk(tester, 'catch me up');
+    expect(await hear(tester), 'One approval: api on VTM wants npm test.');
   });
 
   testWidgets('approve asks for a yes, then approves exactly that request', (

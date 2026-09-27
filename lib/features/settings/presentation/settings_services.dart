@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
@@ -18,6 +19,7 @@ class SettingsServices {
     this.hostsController,
     this.hostKeyVerifier,
     this.agentAttention,
+    this.digest,
     this.appLock,
     this.onLockNow,
     this.hasSync = false,
@@ -35,6 +37,9 @@ class SettingsServices {
 
   /// Agents' usage (Agents).
   final AgentAttentionController? agentAttention;
+
+  /// The agents dashboard's settings (Agents › Dashboard).
+  final DigestController? digest;
 
   /// The app lock, for when it locks again; null where there is none.
   final AppLockController? appLock;
@@ -58,6 +63,7 @@ class SettingsServices {
     hostsController: hostsController,
     hostKeyVerifier: hostKeyVerifier,
     agentAttention: agentAttention,
+    digest: digest,
     appLock: appLock,
     onLockNow: onLockNow ?? this.onLockNow,
     hasSync: hasSync ?? this.hasSync,

@@ -26,6 +26,10 @@ abstract class GuideMessenger {
 /// Spoken usage: the Claude limits, or null when nothing is known.
 typedef GuideUsageText = String? Function(String languageCode);
 
+/// Spoken catch-up: the agents dashboard's counts and its Needs you and
+/// Stuck agents, briefly (fetched fresh; summaries when they are on).
+typedef GuideCatchUpText = Future<String> Function(String languageCode);
+
 /// One Claude account (cswap) across machines, as the guide names it.
 class GuideAccount {
   const GuideAccount({

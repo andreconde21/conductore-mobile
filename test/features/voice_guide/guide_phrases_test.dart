@@ -155,6 +155,31 @@ void main() {
       expect(GuidePhrases.match('help'), isA<GuideHelp>());
     });
 
+    test('catch me up', () {
+      for (final phrase in [
+        'Catch me up',
+        'catch me up please',
+        'what did I miss',
+        'what happened while I was away',
+        'give me a recap',
+        'brief me',
+        'summarize the agents',
+      ]) {
+        expect(GuidePhrases.match(phrase), isA<GuideCatchUp>(), reason: phrase);
+      }
+      for (final phrase in [
+        'põe-me a par',
+        'poe me a par',
+        'o que é que perdi',
+        'faz-me um resumo',
+        'dá-me um ponto de situação',
+      ]) {
+        expect(GuidePhrases.match(phrase), isA<GuideCatchUp>(), reason: phrase);
+      }
+      // A sentence that merely contains the words is not the command.
+      expect(GuidePhrases.match('the recap job failed'), isNull);
+    });
+
     test('anything else goes to the brain', () {
       for (final phrase in [
         'ask web how far it is',

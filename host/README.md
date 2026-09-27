@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|trust|rules|transcript|send|ports|usage|summarize|guide"
+    phone ──ssh user@host "conductore-hostd status|events|decide|trust|rules|transcript|send|ports|usage|summarize|guide|digest"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -34,7 +34,8 @@ host/install.sh --uninstall
 ```
 
 `install.sh` ends by running `conductore-hostd install`, which merges nine
-hook handlers into `~/.claude/settings.json` (backup in `settings.json.bak`),
+hook handlers (eleven on a Claude Code that knows the two newer events, see
+How it works) into `~/.claude/settings.json` (backup in `settings.json.bak`),
 wires the statusline (see Usage below) and records the path of `node` for
 the sh clients (`~/.conductore/node`: hooks may run with a PATH without node).
 Existing hooks are left untouched; running it again changes nothing and does
@@ -69,6 +70,9 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/cswap-cache.json` | `usage` with cswap: the last `cswap list` answer (masked rows only), 60 s |
 | `~/.conductore/summarize.lock` | pid of the running `summarize` (one at a time; never the text) |
 | `~/.conductore/guide.lock` | pid of the running `guide` (one at a time; never the request) |
+| `~/.conductore/activity.json` | per-agent activity log for `digest` (compact entries, no tool input; see `digest`), mode 0600 |
+| `~/.conductore/digest.json` | `digest --summaries`: the rolling summary per agent and today's token use of those calls, mode 0600 |
+| `~/.conductore/digest.lock` | pid of the running `digest --summaries` (one at a time) |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 | `~/.conductore/rules.json` | approval rules and time-boxed trust the hook answers by itself (see Approval rules), mode 0600 |
@@ -93,8 +97,20 @@ The phone should run commands as
 ## How it works
 
 `conductore-hostd install` registers `conductore-hook <Event>` for
-SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest,
-Notification, Stop, SubagentStop and SessionEnd, all with an empty matcher.
+SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure,
+PermissionRequest, Notification, Stop, StopFailure, SubagentStop and
+SessionEnd, all with an empty matcher. PostToolUseFailure (a failed tool
+call, e.g. a command that exited non-zero) and StopFailure (a turn that
+ended on an API error) feed `digest`, and are registered only when
+`claude --version` says the local Claude Code knows them: 2.1.119 or newer
+for PostToolUseFailure (the first release its changelog names it in),
+2.1.78 for StopFailure. Before 2.1.101 Claude Code ignored the whole
+settings.json over one unknown hook event name, so with no `claude`, no
+answer in 5 s or an unreadable version neither is registered. Running
+`install` again after a Claude Code update (or downgrade) adds (or takes
+off) them; `install` prints them in `skipped` with the reason, `doctor`
+reports them as `optional hooks`, `uninstall` removes them. Without them
+`digest` reads failures and API errors from the transcripts instead.
 Every handler except PermissionRequest is `async: true`, so it can never stall
 Claude Code; SessionEnd gets a 5 s timeout because Claude Code only waits
 briefly on exit.
@@ -137,7 +153,7 @@ Without `/proc` (macOS) an agent ends after 24 h without any event.
 | state | set by |
 | --- | --- |
 | `working` | UserPromptSubmit, PreToolUse, PostToolUse, a permission decision |
-| `waiting_input` | SessionStart, Stop, Notification `idle_prompt` / `agent_needs_input`, PreToolUse of AskUserQuestion or ExitPlanMode |
+| `waiting_input` | SessionStart, Stop, StopFailure, Notification `idle_prompt` / `agent_needs_input`, PreToolUse of AskUserQuestion or ExitPlanMode |
 | `needs_permission` | PermissionRequest (until decided), Notification `permission_prompt`, a PermissionRequest that timed out (the prompt is now in the terminal) |
 | `ended` | SessionEnd; its Claude Code process gone, or 24 h without an event when the process is unknown (`expired`) |
 
@@ -189,7 +205,7 @@ Every command prints one JSON document on stdout and exits 0, or prints
       ]
     }
   ],
-  "capabilities": ["smart-approvals"]
+  "capabilities": ["smart-approvals", "digest"]
 }
 ```
 
@@ -216,7 +232,7 @@ Every command prints one JSON document on stdout and exits 0, or prints
   agent's requests; the phone refreshes its `approvals` list when it moves.
 * `capabilities`: what this companion supports, for the phone to gate on
   (also in `version`). `smart-approvals`: risk labels, `rules`, `trust`,
-  `approve-low`, `approvals`, `classify`.
+  `approve-low`, `approvals`, `classify`. `digest`: the `digest` command.
 * `source` is `daemon`, `snapshot` (daemon down, read from `state.json`, with
   `writtenAt`) or `none` (never ran). Timestamps are Unix milliseconds.
 * Agents are sorted by `updatedAt`, newest first.
@@ -636,7 +652,8 @@ every case:
 ```
 
 * `action` is one of `open`, `chat`, `terminal`, `approve`, `deny`,
-  `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`;
+  `approveAllSafe`, `trust`, `send`, `read`, `usage`, `catchUp`, `home`,
+  `say`;
   `target` is an id from the context or empty, `text` the prompt for
   `send`, `minutes` (1–480) for `trust`, `speak` one short sentence to say.
 * The answer is checked here too: an action outside the list, an id the
@@ -660,6 +677,129 @@ every case:
 * Older companions answer `unknown command guide`: the phone then asks the
   next machine, or says the guide's brain needs an update.
 
+### `conductore-hostd digest [--since <ms>] [--summaries] [--max-agents 10] [--max-ms 30000] [--lang en|pt] [--stuck-working-min 30] [--stuck-errors 3] [--stuck-repeats 5] [--stuck-approval-min 60]`
+
+The phone's agents dashboard: for every agent, what it did since `--since`
+(epoch ms, the user's last look; default two hours ago), whether it looks
+stuck, and a one- or two-sentence summary. Exactly one JSON document on
+stdout and exit 0 in every case (bad flags: `{"schema":1,"error":"failed","message":…}`).
+
+```json
+{"version":"0.8.0","schema":1,"machine":"devbox","generatedAt":1790516991122,"since":1790509791122,
+ "source":"daemon","activity":true,
+ "thresholds":{"workingMin":30,"sameError":3,"sameCommand":5,"approvalMin":60,"windowMin":60},
+ "counts":{"needsYou":1,"stuck":1,"working":2,"done":3,"total":7},
+ "agents":[{"sessionId":"0f2c…","name":"api","machine":"devbox","project":"api","cwd":"/home/andre/api",
+   "state":"needs_permission","attention":"permission","live":true,"startedAt":…,"endedAt":null,
+   "lastActivityAt":1790516900000,"headline":"Tests pass; pushing the branch next.","lastError":null,
+   "pending":[{"id":"3671d8715ac1","toolName":"Bash","summary":"git push","createdAt":…,"risk":{"level":"medium","reason":"…"}}],
+   "facts":{"turns":3,"files":["lib/a.js","test/a.test.js"],"filesEdited":2,"linesAdded":48,"linesRemoved":9,"lines":"git",
+            "commands":14,"failedCommands":2,"testRuns":4,"testsPassed":3,"testsFailed":1,
+            "lastTest":{"ok":true,"at":…,"command":"npm test"},
+            "waitingPermissionMs":120000,"waitingInputMs":0,
+            "tokens":{"input":210,"output":9800,"cacheWrite":42000,"cacheRead":910000,"total":962010},"costUsd":0.41,"partial":false},
+   "stuck":[],
+   "summary":{"text":"Fixed the date parsing bug and the tests pass. It wants to push the branch: approve or deny.","at":…,"fresh":true},
+   "summaryPending":false}],
+ "summaries":{"enabled":true,"pending":0,"done":1,"calls":1,"ms":4100,
+              "tokens":{"input":2900,"output":60,"cacheWrite":0,"cacheRead":0,"total":2960},"costUsd":0.0032,"model":"claude-haiku-4-5-20251001"},
+ "summaryUsageToday":{"runs":3,"calls":4,"tokens":{…},"costUsd":0.011},
+ "ms":4180}
+```
+
+Facts (free; no Claude):
+
+* The daemon keeps a per-agent activity log from the hook events it
+  already parses (`lib/activity.js`): prompts, turn ends, API-error stops,
+  edits (file path and an estimate of lines added and removed), Bash
+  commands (first line, cut to 120 characters, and whether it is a test
+  runner), failed tool calls (PostToolUseFailure: the command or tool and
+  the first line of its error) and state changes. Never tool input. At most
+  300 entries, 200 file paths and 60 command labels per agent and 64
+  agents; an agent stays 24 h after its last entry, so agents the state
+  pruned an hour after they ended still show under "done". In memory,
+  written to `activity.json` (0600) with the state snapshot's 1 s debounce;
+  nothing runs at idle.
+* `turns` counts prompts; `files` (relative to the agent's cwd, at most 12)
+  and `filesEdited` the edited files; `linesAdded` / `linesRemoved` come
+  from `git diff --numstat HEAD` of those files (uncommitted changes, one
+  call per repository, 1.5 s cap), else from the edit estimate
+  (`lines`: `git`, `mixed`, `estimate`, or null without edits);
+  `testRuns`, `testsPassed`, `testsFailed` and `lastTest` from Bash
+  commands that run a test runner (npm/yarn/pnpm/bun test, pytest, go test,
+  cargo test, flutter/dart test, node --test, jest, vitest, rspec, …) and
+  whether they succeeded (PostToolUse) or failed (PostToolUseFailure);
+  `failedCommands` every failed tool call; `waitingPermissionMs` /
+  `waitingInputMs` the time spent in those states within the window.
+* `tokens` and `costUsd` (estimate, `lib/pricing.js`): the assistant
+  messages of the window, from the last 2 MB of the agent's transcript
+  (`partial: true` when the window starts before that, or before the
+  activity log's oldest entry). Only for agents active in the window.
+* `attention`: `permission` (a pending request or a terminal prompt),
+  `question` (it asked something: AskUserQuestion, ExitPlanMode, or its
+  last reply ends with a question mark) or null (working, done, idle). `headline`: the first line of the last assistant
+  message (markdown stripped, 160 characters). `live: false`: the agent
+  is only in the activity log (it ended and was pruned); nothing can be
+  sent to it. `lastError`: `{type, at}` when the last turn ended on an API
+  error (also on `status`).
+* Agents that ended before `--since` and were quiet since are left out.
+  `counts`: needsYou (attention), stuck, working, done (the rest).
+* `sources`: where failures and API errors come from: `hooks`, or
+  `transcript` when PostToolUseFailure / StopFailure are not registered.
+  Then the Bash calls and failed tool calls in the transcript tail (the
+  last 2 MB, `partial` when the window starts before it) replace the log's
+  command entries, and an API error message the last turn ended on (with
+  no prompt after it) counts as an error stop.
+* `activity: false`: the daemon predates `digest` (only `status` facts).
+  `source` as in `status`.
+
+Stuck flags (free), each `{rule, reason}`:
+
+| rule | when (defaults; flags change them) |
+| --- | --- |
+| `no-progress` | working for 30 min (`--stuck-working-min`) without editing a file |
+| `same-failure` | the same failed command, or the same error, 3 times (`--stuck-errors`) |
+| `repeating` | the same command 5 times (`--stuck-repeats`; `git status`, `ls`, `cat` and similar are ignored) |
+| `waiting-approval` | a permission request waiting 60 min (`--stuck-approval-min`) |
+| `error` | the last turn ended on an API error (rate limit, overload, auth, …) and nobody prompted since |
+
+Repeats count within the last 60 minutes and since the last prompt.
+
+Summaries (`--summaries` only, never on a schedule):
+
+* Without the flag, `digest` answers at once with the facts and the cached
+  summaries (`summary.fresh: false` when the agent did something since),
+  and sets `summaryPending` on the agents a `--summaries` call would
+  summarise: active in the window, changed since their last summary. The
+  phone shows the facts, then makes the second call.
+* With it, up to `--max-agents` (1–30, default 10) of those, most recently
+  active first, are summarised: five agents per `claude -p` call, at most
+  two calls at once, all within `--max-ms` (5–120 s, default 30 s,
+  counted from the start). Each agent goes in as its facts, stuck reasons,
+  what it waits for, its previous summary, its last prompt (500
+  characters) and its last three replies since that summary (1,500
+  characters each; at most 12,000 characters per agent), never a whole
+  transcript. The answer (`--json-schema`: one `{id, summary}` per agent,
+  in `--lang`) is stored in `digest.json` (0600) with the activity time it
+  covers; the next run of an agent with nothing new reuses it without a
+  call. Entries of agents gone for 24 h are dropped, at most 64 are kept.
+* It runs `claude -p --tools "" --safe-mode --no-session-persistence
+  --output-format json --model haiku --system-prompt <fixed instruction>
+  --json-schema <fixed schema>` with the agents on stdin between random
+  delimiters, `MAX_THINKING_TOKENS=0`: the same lock-down as `summarize`
+  and `guide`. Nice 10, claude in its own process group killed on timeout
+  or a signal, one run per user at a time (`digest.lock`; a second run
+  gets `summaries.error: "busy"` and the facts).
+* `summaries`: `done`, `pending` (still to do: over the cap or failed),
+  `calls`, `ms`, `tokens` and `costUsd` as claude reported them, `error`
+  (`claude-missing`, `not-logged-in`, `timeout`, `busy`, `failed`).
+  `summaryUsageToday` adds up today's runs; `usage` reports the same as
+  `companion.digest` (these calls write no transcript, so the transcript
+  scan never sees them).
+* Cost: one call for five changed agents sends about 2–3k tokens per agent
+  (plus ~600 of instruction) and gets ~60 back per agent. See CHANGELOG
+  for the measured numbers.
+
 ### `conductore-hostd statusline [--chain '<cmd>']`
 
 Not for the phone: the Node statusline of 0.3, kept so a not yet migrated
@@ -674,7 +814,7 @@ instead. See Usage.
   latency is measured around the spawn from Node, so it includes a little
   process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1","capabilities":["smart-approvals"]}`
+* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1","capabilities":["smart-approvals","digest"]}`
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 
@@ -955,6 +1095,10 @@ tool calls) and the shell reader, `test/rules.test.js` rule syntax,
 matching, scopes, expiry and suggestions, `test/approvals.test.js` trust,
 rules, `approve-low`, the auto-approved log and the hook's auto-answer
 latency through a real daemon, `test/audit.test.js` the log's byte cap,
+`test/digest.test.js` the activity log (facts from synthetic events, caps,
+pruning), the stuck rules and `digest` with a fake `claude` (argv, stdin,
+schema, only changed agents, rolling summaries, batches and caps, timeout
+kill, lock, the 0600 store) and through a real daemon,
 `test/summarize.test.js` the `summarize` command with a fake `claude`
 (argv, passthrough, markdown and word cap, timeout kill, busy, truncation),
 `test/cswap.test.js` cswap accounts with a fake `cswap` and a fixture of

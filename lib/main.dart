@@ -21,6 +21,8 @@ import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.d
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
+import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/data/secure_app_lock_preferences.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
@@ -215,6 +217,22 @@ void main() {
     ),
     preferences: const SecureUsagePreferencesStore(secureStorage),
     notifier: const PlatformAgentAttentionNotifier(),
+  );
+  // The agents dashboard (companion `digest`): facts, stuck flags and
+  // Claude summaries per agent, asked only while it is on screen.
+  final digest = DigestController(
+    source: AttentionDigestHostSource(
+      attention: agentAttention,
+      hosts: hostsController,
+    ),
+    preferences: const SecureDigestPreferencesStore(secureStorage),
+    language: () {
+      final own = themeController.voice.guide.language;
+      final speech = own.isNotEmpty ? own : themeController.speechLanguage;
+      return speech.isNotEmpty
+          ? speech
+          : WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+    },
   );
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
@@ -417,6 +435,7 @@ void main() {
         runnerFor: agentAttention.runnerFor,
       ),
       usage: (code) => guideUsageText(usage.summary, code),
+      catchUp: digest.catchUp,
       accounts: UsageGuideAccounts(usage),
       locked: () => !lockController.isUnlocked,
     );
@@ -430,6 +449,7 @@ void main() {
     hostsController: hostsController,
     hostKeyVerifier: hostKeyVerifier,
     agentAttention: agentAttention,
+    digest: digest,
     appLock: PlatformFeatures.appLock ? lockController : null,
     onLockNow: () async {
       // Locking closes every session; unlocking brings them back.
@@ -453,29 +473,32 @@ void main() {
               agentAttention: agentAttention,
               child: UsageScope(
                 controller: usage,
-                child: ConduitApp(
-                  themeController: themeController,
-                  lockController: lockController,
-                  hostsController: hostsController,
-                  terminalRepository: terminalRepository,
-                  workspaceController: workspaceController,
-                  localShellController: localShellController,
-                  hostKeyVerifier: hostKeyVerifier,
-                  promptCoordinator: promptCoordinator,
-                  sftpRepository: sftpRepository,
-                  sftpBookmarksRepository: sftpBookmarksRepository,
-                  agentAttention: agentAttention,
-                  backupService: backupService,
-                  fileExport: fileExport,
-                  connectFlow: connectFlow,
-                  shareTarget: shareTarget,
-                  sessionRestore: sessionRestore,
-                  localDataChanges: localDataChanges,
-                  hostChannels: hostChannels,
-                  navigatorKey: navigatorKey,
-                  voice: voice,
-                  guide: guide,
-                  guideWake: guide == null ? null : GuideWakeChannel(),
+                child: DigestScope(
+                  controller: digest,
+                  child: ConduitApp(
+                    themeController: themeController,
+                    lockController: lockController,
+                    hostsController: hostsController,
+                    terminalRepository: terminalRepository,
+                    workspaceController: workspaceController,
+                    localShellController: localShellController,
+                    hostKeyVerifier: hostKeyVerifier,
+                    promptCoordinator: promptCoordinator,
+                    sftpRepository: sftpRepository,
+                    sftpBookmarksRepository: sftpBookmarksRepository,
+                    agentAttention: agentAttention,
+                    backupService: backupService,
+                    fileExport: fileExport,
+                    connectFlow: connectFlow,
+                    shareTarget: shareTarget,
+                    sessionRestore: sessionRestore,
+                    localDataChanges: localDataChanges,
+                    hostChannels: hostChannels,
+                    navigatorKey: navigatorKey,
+                    voice: voice,
+                    guide: guide,
+                    guideWake: guide == null ? null : GuideWakeChannel(),
+                  ),
                 ),
               ),
             ),

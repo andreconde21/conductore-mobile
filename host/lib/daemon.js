@@ -23,6 +23,7 @@ const { permissionOutput } = require('./permission')
 const { Approvals, CAPABILITIES } = require('./approvals')
 const approvalOps = require('./approval-ops')
 const { usageFrom } = require('./statusline')
+const { Activity } = require('./activity')
 const { log, debug } = require('./log')
 
 const CHANGE_BUFFER = 1000
@@ -136,6 +137,19 @@ function loadSnapshot () {
   return st
 }
 
+function loadActivity () {
+  try { return new Activity(JSON.parse(fs.readFileSync(paths.activityPath(), 'utf8'))) } catch { return new Activity() }
+}
+
+function writeActivitySync (activity) {
+  if (!activity.dirty) return
+  const file = paths.activityPath()
+  const tmp = `${file}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(activity), { mode: 0o600 })
+  fs.renameSync(tmp, file)
+  activity.dirty = false
+}
+
 function writeSnapshotSync (st) {
   const file = paths.statePath()
   const tmp = `${file}.${process.pid}.tmp`
@@ -192,6 +206,7 @@ function writeFifo (file, text) {
 class Daemon {
   constructor () {
     this.state = loadSnapshot()
+    this.activity = loadActivity()
     this.changes = [] // { seq, line }: each change record serialized once
     this.changeChars = 0
     this.waiters = new Map() // requestId -> { fifo, event, sessionId, timer }
@@ -360,6 +375,7 @@ class Daemon {
     await context.enrich(event, header)
     if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout)
     this.commit(state.reduce(this.state, event))
+    this.activity.onEvent(event)
     if (event.hook_event_name === 'SessionEnd') this.approvals.endSession(event.session_id)
   }
 
@@ -507,6 +523,7 @@ class Daemon {
         this.usageSeen.delete(ch.sessionId)
       }
       if (ch.type === 'remove' || ch.reason === 'SessionEnd' || ch.reason === 'expired') pruneRelevant = true
+      this.activity.onChange(ch)
       const line = JSON.stringify(ch)
       this.changes.push({ seq: ch.seq, line })
       this.changeChars += line.length
@@ -552,6 +569,7 @@ class Daemon {
 
   flushSnapshot () {
     try { writeSnapshotSync(this.state) } catch (err) { log('daemon', 'snapshot failed', err.message) }
+    try { writeActivitySync(this.activity) } catch (err) { log('daemon', 'activity snapshot failed', err.message) }
   }
 
   // --- socket -----------------------------------------------------------------
@@ -605,6 +623,13 @@ class Daemon {
         this.expireAgents()
         this.commit(state.prune(this.state))
         this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES }); c.end(); return
+      case 'digest':
+        // Everything `digest` needs in one answer: the agents and their activity.
+        await this.drain()
+        this.expireAgents()
+        this.commit(state.prune(this.state))
+        this.activity.prune()
+        this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES, activity: this.activity.toJSON(), now: Date.now() }); c.end(); return
       case 'events':
         await this.drain()
         this.expireAgents()

@@ -5,7 +5,10 @@
 // State shape (also what `status` prints):
 //   { version: 1, seq: N, agents: { [sessionId]: Agent } }
 //   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, process, state, lastEvent, lastToolName,
-//             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest] }
+//             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest],
+//             lastError? }
+//   lastError = { type, at }: the last turn ended on an API error (StopFailure),
+//   until the next prompt
 //   process = { pid, startTime } of Claude Code when the daemon could identify it
 //   PendingRequest = { id, toolName, summary, toolInput, createdAt,
 //                      risk: { level, reason }, batchable, suggestedRules, repo }
@@ -145,6 +148,7 @@ function reduce (state, event, now = Date.now()) {
       next = 'working'
       agent.lastMessage = null
       agent.pending = []
+      delete agent.lastError
       break
     case 'PreToolUse':
       if (!isSubagent && QUESTION_TOOLS.has(event.tool_name)) {
@@ -192,6 +196,13 @@ function reduce (state, event, now = Date.now()) {
     }
     case 'Stop':
       if (typeof event.last_assistant_message === 'string') agent.lastMessage = truncate(event.last_assistant_message, MESSAGE_MAX)
+      next = agent.pending.length ? 'needs_permission' : 'waiting_input'
+      break
+    case 'StopFailure':
+      // The turn ended on an API error (rate limit, auth, overload, ...).
+      if (isSubagent) break
+      agent.lastError = { type: typeof event.error === 'string' ? truncate(event.error, 40) : 'unknown', at: now }
+      if (typeof event.last_assistant_message === 'string' && event.last_assistant_message.trim()) agent.lastMessage = truncate(event.last_assistant_message, MESSAGE_MAX)
       next = agent.pending.length ? 'needs_permission' : 'waiting_input'
       break
     case 'SubagentStop':

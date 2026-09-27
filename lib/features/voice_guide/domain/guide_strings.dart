@@ -158,8 +158,8 @@ class _English extends GuideStrings {
   @override
   String get help =>
       "Say: what's waiting, open and a name, approve, deny, tell an agent to "
-      'do something, read the last reply, go to chat, go to terminal, home, '
-      "what's my usage, or stop.";
+      'do something, read the last reply, catch me up, go to chat, go to '
+      "terminal, home, what's my usage, or stop.";
   @override
   String get nothingMore => "That's all.";
   @override
@@ -387,8 +387,8 @@ class _Portuguese extends GuideStrings {
   @override
   String get help =>
       'Diz: o que está à espera, abre e um nome, aprova, nega, diz a um agente '
-      'para fazer algo, lê a última resposta, vai para o chat, vai para o '
-      'terminal, início, qual é o meu uso, ou pára.';
+      'para fazer algo, lê a última resposta, põe-me a par, vai para o chat, '
+      'vai para o terminal, início, qual é o meu uso, ou pára.';
   @override
   String get nothingMore => 'É tudo.';
   @override
