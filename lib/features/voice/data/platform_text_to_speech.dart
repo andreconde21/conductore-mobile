@@ -71,12 +71,22 @@ class PlatformTextToSpeech implements TextToSpeech {
 
   @override
   Stream<TtsEvent> get events {
-    return _events ??= _eventChannel
-        .receiveBroadcastStream()
-        .map(TtsEvent.fromMap)
-        .where((event) => event != null)
-        .cast<TtsEvent>();
+    return _events ??= _shared.putIfAbsent(
+      _eventChannel,
+      () => _eventChannel
+          .receiveBroadcastStream()
+          .map(TtsEvent.fromMap)
+          .where((event) => event != null)
+          .cast<TtsEvent>(),
+    );
   }
+
+  /// One stream per event channel for every instance: a platform event
+  /// channel has a single Dart handler, so a second
+  /// `receiveBroadcastStream` would take the events from the first
+  /// listener, and cancelling either would silence both (a chat's own
+  /// voice and the voice guide share the platform side).
+  static final Map<EventChannel, Stream<TtsEvent>> _shared = {};
 
   Future<void> _call(String method, [Object? arguments]) async {
     try {
