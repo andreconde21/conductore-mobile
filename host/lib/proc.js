@@ -33,4 +33,36 @@ function isDaemon (pid) {
   return commandLine(pid).includes(DAEMON_TITLE)
 }
 
-module.exports = { DAEMON_TITLE, pidAlive, commandLine, isDaemon, hasProc }
+// /proc/<pid>/stat as { comm, ppid, startTime } (start in clock ticks since
+// boot: with the pid, it names one process), or null.
+function stat (pid) {
+  let text
+  try { text = fs.readFileSync(`/proc/${pid}/stat`, 'latin1') } catch { return null }
+  const open = text.indexOf('(')
+  const close = text.lastIndexOf(')')
+  if (open === -1 || close === -1) return null
+  const fields = text.slice(close + 2).split(' ')
+  return { comm: text.slice(open + 1, close), ppid: Number(fields[1]), startTime: fields[19] }
+}
+
+// The Claude Code process a hook reported, as { pid, startTime }, or null
+// when it cannot be identified (no /proc, gone, or not Claude Code: a
+// short-lived wrapper must never be mistaken for the agent).
+function identifyClaude (pid) {
+  pid = Number(pid)
+  if (!Number.isInteger(pid) || pid <= 1 || !hasProc()) return null
+  const st = stat(pid)
+  if (!st || !/claude/i.test(st.comm) || !st.startTime) return null
+  return { pid, startTime: st.startTime }
+}
+
+// Whether a process recorded by identifyClaude is still running (the same
+// one: a reused pid has another start time).
+function sameProcess (p) {
+  if (!p || !Number.isInteger(p.pid)) return false
+  if (!hasProc()) return pidAlive(p.pid)
+  const st = stat(p.pid)
+  return !!st && st.startTime === p.startTime
+}
+
+module.exports = { DAEMON_TITLE, pidAlive, commandLine, isDaemon, hasProc, stat, identifyClaude, sameProcess }

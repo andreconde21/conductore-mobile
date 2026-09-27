@@ -4,8 +4,9 @@
 //
 // State shape (also what `status` prints):
 //   { version: 1, seq: N, agents: { [sessionId]: Agent } }
-//   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, state, lastEvent, lastToolName,
+//   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, process, state, lastEvent, lastToolName,
 //             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest] }
+//   process = { pid, startTime } of Claude Code when the daemon could identify it
 //   PendingRequest = { id, toolName, summary, toolInput, createdAt }
 //
 // Every mutation bumps `seq` and yields a change record
@@ -19,6 +20,9 @@ const SUMMARY_MAX = 200
 const MESSAGE_MAX = 500
 const TOOL_INPUT_MAX = 4096
 const PRUNE_AFTER_MS = 60 * 60 * 1000
+// An agent whose Claude Code process is unknown (no /proc) ends after this
+// long without any event: it may have been killed without a SessionEnd.
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000
 
 // Tools that put a question to the human in the terminal.
 const QUESTION_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
@@ -97,6 +101,7 @@ function applyContext (agent, event) {
   if (typeof event.transcript_path === 'string' && event.transcript_path) agent.transcriptPath = event.transcript_path
   if (event.tmux) agent.tmux = { session: event.tmux.session, window: event.tmux.window, paneId: event.tmux.paneId, windowName: event.tmux.windowName || null }
   if (event.herdr) agent.herdr = event.herdr
+  if (event.process) agent.process = event.process
   const name = pickName(event, agent.cwd)
   if (name) agent.name = name
 }
@@ -268,6 +273,23 @@ function prune (state, now = Date.now(), maxAge = PRUNE_AFTER_MS) {
   return changes
 }
 
+// Ends agents that will never send SessionEnd: their Claude Code process is
+// gone (killed, crashed, the SSH session or the machine went down), or,
+// with no known process, nothing was heard from them for STALE_AFTER_MS.
+// isAlive(process) says whether a recorded process still runs.
+function expire (state, isAlive, now = Date.now(), staleAfter = STALE_AFTER_MS) {
+  const changes = []
+  for (const agent of Object.values(state.agents)) {
+    if (agent.state === 'ended') continue
+    if (agent.process ? isAlive(agent.process) : now - agent.updatedAt <= staleAfter) continue
+    agent.state = 'ended'
+    agent.endedAt = now
+    agent.pending = []
+    changes.push(record(state, 'change', agent, 'expired'))
+  }
+  return changes
+}
+
 function record (state, type, agent, reason) {
   state.seq += 1
   return { seq: state.seq, type, sessionId: agent.sessionId, reason, agent: type === 'remove' ? null : clone(agent) }
@@ -289,6 +311,7 @@ function snapshot (state) {
 module.exports = {
   STATES,
   PRUNE_AFTER_MS,
+  STALE_AFTER_MS,
   createState,
   reduce,
   resolvePermission,
@@ -296,6 +319,7 @@ module.exports = {
   setUsage,
   usageChange,
   prune,
+  expire,
   snapshot,
   summarize,
   cleanName,

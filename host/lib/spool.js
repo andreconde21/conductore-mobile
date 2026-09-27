@@ -12,6 +12,8 @@
 //   kind=hook                 hook | usage
 //   event=PreToolUse          argv[1] of conductore-hook
 //   pid=12345
+//   claude_pid=12340          Claude Code's pid (the hook's parent, or its
+//                             grandparent through `sh -c`)
 //   tmp=h.12345               the staging name in tmp/
 //   tmux=/tmp/tmux-1000/default,123,0      only when set
 //   tmux_pane=%5

@@ -196,6 +196,7 @@ class Daemon {
     // Any exit that still runs JS (process.exit, a fatal error handler) frees
     // the lock; a V8 abort cannot, and the next start sees a dead pid.
     process.on('exit', () => this.releaseLock())
+    this.expireAgents()
     this.commit(state.prune(this.state))
     this.schedulePrune()
     this.flushSnapshot()
@@ -292,6 +293,11 @@ class Daemon {
       return
     }
     await context.enrich(event, header)
+    const known = this.state.agents[event.session_id]
+    if (header.claude_pid && !(known && known.process && known.process.pid === Number(header.claude_pid))) {
+      const claude = proc.identifyClaude(header.claude_pid)
+      if (claude) event.process = claude
+    }
     if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout)
     this.commit(state.reduce(this.state, event))
   }
@@ -437,7 +443,7 @@ class Daemon {
         if (e) { clearTimeout(e.timer); this.usageEmits.delete(ch.sessionId) }
         this.usageSeen.delete(ch.sessionId)
       }
-      if (ch.type === 'remove' || ch.reason === 'SessionEnd') pruneRelevant = true
+      if (ch.type === 'remove' || ch.reason === 'SessionEnd' || ch.reason === 'expired') pruneRelevant = true
       const line = JSON.stringify(ch)
       this.changes.push({ seq: ch.seq, line })
       this.changeChars += line.length
@@ -454,6 +460,12 @@ class Daemon {
     }
   }
 
+  // Agents that will never send SessionEnd (their Claude Code is gone). Runs
+  // at start and whenever the phone asks, so it costs nothing at idle.
+  expireAgents () {
+    this.commit(state.expire(this.state, proc.sameProcess))
+  }
+
   // One timer for the next ended agent to fall out of the list.
   schedulePrune () {
     clearTimeout(this.pruneTimer)
@@ -465,6 +477,7 @@ class Daemon {
     if (next === Infinity) return
     this.pruneTimer = setTimeout(() => {
       this.pruneTimer = null
+      this.expireAgents()
       this.commit(state.prune(this.state))
       this.schedulePrune()
     }, Math.max(1000, next - Date.now() + 1000))
@@ -523,10 +536,12 @@ class Daemon {
       }
       case 'status':
         await this.drain()
+        this.expireAgents()
         this.commit(state.prune(this.state))
         this.reply(c, { ...state.snapshot(this.state), source: 'daemon' }); c.end(); return
       case 'events':
         await this.drain()
+        this.expireAgents()
         return this.handleEvents(req, c)
       case 'decide':
         return this.handleDecide(req, c)

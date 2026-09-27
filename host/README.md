@@ -120,6 +120,14 @@ cost one `tmux`. It reduces events into one record per `session_id`, bumps a
 long-polling, and writes `state.json` (debounced 1 s, atomic rename). Agents
 whose session ended more than an hour ago are pruned.
 
+Not every session sends SessionEnd (Claude Code killed, crashed, its SSH
+session dropped, a reboot). The hook passes Claude Code's pid (its parent, or
+its grandparent through `sh -c`, read from `/proc` without a fork); the daemon
+records it with the process start time when the process really is Claude
+Code, and ends the agent (`reason: expired`) once that process is gone. It
+checks at start and on every `status` / `events`, so nothing runs at idle.
+Without `/proc` (macOS) an agent ends after 24 h without any event.
+
 ### Agent states
 
 | state | set by |
@@ -127,7 +135,7 @@ whose session ended more than an hour ago are pruned.
 | `working` | UserPromptSubmit, PreToolUse, PostToolUse, a permission decision |
 | `waiting_input` | SessionStart, Stop, Notification `idle_prompt` / `agent_needs_input`, PreToolUse of AskUserQuestion or ExitPlanMode |
 | `needs_permission` | PermissionRequest (until decided), Notification `permission_prompt`, a PermissionRequest that timed out (the prompt is now in the terminal) |
-| `ended` | SessionEnd |
+| `ended` | SessionEnd; its Claude Code process gone, or 24 h without an event when the process is unknown (`expired`) |
 
 Events carrying `agent_id` (subagents) never move the parent to a waiting state.
 
@@ -151,6 +159,7 @@ Every command prints one JSON document on stdout and exits 0, or prints
       "transcriptPath": "/home/andre/.claude/projects/-home-andre-Projects-Foo/0f2c….jsonl",
       "tmux": { "session": "main", "window": 2, "paneId": "%5", "windowName": "reviewer" },
       "herdr": { "workspaceId": "w1", "tabId": "w1:t1", "paneId": "w1:p1", "name": null },
+      "process": { "pid": 31515, "startTime": "81423907" },
       "state": "needs_permission",
       "lastEvent": "PermissionRequest",
       "lastToolName": "Bash",
@@ -180,6 +189,8 @@ Every command prints one JSON document on stdout and exits 0, or prints
   spinner dots) are stripped first.
 * `tmux` / `herdr` are `null` when unknown. `transcriptPath` is the
   `transcript_path` of the latest hook event (null until one carried it).
+* `process` (Claude Code's pid and start time in clock ticks) is present
+  once the daemon identified it (Linux).
 * `lastMessage`: last assistant text (Stop), notification text, or the
   question of an AskUserQuestion; capped at 500 chars.
 * `pending[].summary`: one line (command, file path, URL, …) capped at 200
@@ -212,7 +223,8 @@ than `seq` already exist, it prints them and exits at once. Lines:
   them). Replace everything and
   continue from its `seq`.
 * `reason` is the hook event name, `decision:<allow|deny|always|timeout|gone>`,
-  `usage` (only the `usage` field changed) or `prune`.
+  `usage` (only the `usage` field changed), `expired` (ended without
+  SessionEnd) or `prune`.
 
 Suggested loop on the phone: `status` once, then `events --since <seq>` in a
 loop, reconnecting on SSH errors.

@@ -58,9 +58,21 @@ publish() {
   ln "$tmp" "$out" || mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
 }
 
+# Claude Code's pid: our parent, or its parent when Claude Code ran us
+# through a shell (`sh -c`). Read from /proc without a fork; elsewhere the
+# parent as is (the daemon only records a process it can identify).
+cpid=$PPID
+if [ -r "/proc/$PPID/stat" ] && read -r st <"/proc/$PPID/stat"; then
+  case ${st#*\(} in sh\)* | dash\)* | bash\)* | zsh\)* | ksh\)* | mksh\)*)
+    st=${st##*\) }
+    st=${st#* }
+    cpid=${st%% *} ;;
+  esac
+fi
+
 # Header, then Claude Code's JSON untouched.
 header() {
-  printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\ntmp=%s\n' "$ev" "$$" "${tmp##*/}"
+  printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\nclaude_pid=%s\ntmp=%s\n' "$ev" "$$" "$cpid" "${tmp##*/}"
   if [ -n "${TMUX:-}" ]; then printf 'tmux=%s\ntmux_pane=%s\n' "$TMUX" "${TMUX_PANE:-}"; fi
   if [ -n "${HERDR_WORKSPACE_ID:-}${HERDR_PANE_ID:-}" ]; then
     printf 'herdr_workspace=%s\nherdr_tab=%s\nherdr_pane=%s\nherdr_name=%s\n' \
