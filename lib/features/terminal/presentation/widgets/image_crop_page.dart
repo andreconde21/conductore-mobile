@@ -2,14 +2,29 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/features/share_target/domain/shared_payload.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-/// Shows [image] full screen with a crop frame. Resolves to the normalized
-/// crop (the whole image when untouched), or null when cancelled.
+/// Shows [image] full screen with a crop frame (a large dialog over the
+/// window on desktop). Resolves to the normalized crop (the whole image
+/// when untouched), or null when cancelled.
 Future<Rect?> showImageCropPage(BuildContext context, SharedFile image) {
-  return Navigator.of(context, rootNavigator: true).push<Rect>(
+  final navigator = Navigator.of(context, rootNavigator: true);
+  if (useDesktopPages(context)) {
+    return navigator.push<Rect>(
+      DesktopPageRoute(
+        builder: (context) => ImageCropPage(image: image),
+        barrierLabel: MaterialLocalizations.of(
+          context,
+        ).modalBarrierDismissLabel,
+      ),
+    );
+  }
+  return navigator.push<Rect>(
     MaterialPageRoute(
       fullscreenDialog: true,
       builder: (context) => ImageCropPage(image: image),
@@ -39,6 +54,8 @@ class _ImageCropPageState extends State<ImageCropPage> {
   Object? _loadError;
   Rect _crop = fullImageCrop;
   _DragTarget? _dragTarget;
+  // Desktop: the resize or move cursor for what the mouse is over.
+  MouseCursor _cursor = MouseCursor.defer;
 
   @override
   void initState() {
@@ -88,8 +105,13 @@ class _ImageCropPageState extends State<ImageCropPage> {
   );
 
   void _handlePanStart(DragStartDetails details, Rect frame) {
+    _dragTarget = _targetAt(details.localPosition, frame);
+  }
+
+  /// The corner within reach of [point], else the frame when [point] is
+  /// inside it, else null.
+  _DragTarget? _targetAt(Offset point, Rect frame) {
     final rect = _toScreen(frame);
-    final point = details.localPosition;
     final corners = {
       _DragTarget.topLeft: rect.topLeft,
       _DragTarget.topRight: rect.topRight,
@@ -105,9 +127,24 @@ class _ImageCropPageState extends State<ImageCropPage> {
         nearest = target;
       }
     });
-    _dragTarget =
-        nearest ?? (rect.inflate(8).contains(point) ? _DragTarget.move : null);
+    return nearest ??
+        (rect.inflate(8).contains(point) ? _DragTarget.move : null);
   }
+
+  void _handleHover(PointerHoverEvent event, Rect frame) {
+    final cursor = switch (_targetAt(event.localPosition, frame)) {
+      _DragTarget.topLeft ||
+      _DragTarget.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
+      _DragTarget.topRight ||
+      _DragTarget.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
+      _DragTarget.move => SystemMouseCursors.move,
+      null => MouseCursor.defer,
+    };
+    if (cursor != _cursor) setState(() => _cursor = cursor);
+  }
+
+  void _attach() =>
+      Navigator.of(context).pop(_loadError != null ? fullImageCrop : _crop);
 
   void _handlePanUpdate(DragUpdateDetails details, Rect frame) {
     final target = _dragTarget;
@@ -158,7 +195,7 @@ class _ImageCropPageState extends State<ImageCropPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final imageSize = _imageSize;
-    return Scaffold(
+    final page = Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: const Text('Attach image'),
@@ -191,7 +228,7 @@ class _ImageCropPageState extends State<ImageCropPage> {
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final frame = _fitted(constraints.biggest, imageSize);
-                          return GestureDetector(
+                          final area = GestureDetector(
                             key: const ValueKey('image-crop-area'),
                             onPanStart: (details) =>
                                 _handlePanStart(details, frame),
@@ -220,6 +257,12 @@ class _ImageCropPageState extends State<ImageCropPage> {
                               ],
                             ),
                           );
+                          if (!PlatformFeatures.isDesktop) return area;
+                          return MouseRegion(
+                            cursor: _cursor,
+                            onHover: (event) => _handleHover(event, frame),
+                            child: area,
+                          );
                         },
                       ),
                     ),
@@ -242,9 +285,7 @@ class _ImageCropPageState extends State<ImageCropPage> {
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
-                    onPressed: () => Navigator.of(
-                      context,
-                    ).pop(_loadError != null ? fullImageCrop : _crop),
+                    onPressed: _attach,
                     icon: const Icon(Icons.attach_file_rounded),
                     label: const Text('Attach'),
                   ),
@@ -254,6 +295,17 @@ class _ImageCropPageState extends State<ImageCropPage> {
           ],
         ),
       ),
+    );
+    if (!PlatformFeatures.isDesktop) return page;
+    // Desktop: Enter attaches, Esc cancels.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter): _attach,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): _attach,
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.of(context).maybePop(),
+      },
+      child: Focus(autofocus: true, child: page),
     );
   }
 }

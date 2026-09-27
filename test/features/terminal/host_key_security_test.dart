@@ -1,13 +1,14 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:conduit/features/terminal/data/host_key_capture.dart';
 import 'package:conduit/features/terminal/data/secure_host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_dialog.dart';
+import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:conduit/features/this_computer/domain/self_machine.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
@@ -284,6 +285,81 @@ void main() {
       await tester.pumpAndSettle();
       expect(await result, HostKeyDecision.reject);
     });
+
+    HostKeyPromptRequest firstTrust() => const HostKeyPromptRequest(
+      host: 'a',
+      port: 22,
+      type: 'ssh-ed25519',
+      fingerprint: _md5,
+      sha256Fingerprint: _sha256,
+      kind: HostKeyPromptKind.firstTrust,
+    );
+
+    testWidgets(
+      'desktop: Enter picks the safe answer, never Trust',
+      (tester) async {
+        var result = await open(tester, firstTrust());
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(await result, HostKeyDecision.reject);
+
+        result = await open(tester, mismatch());
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(await result, HostKeyDecision.reject);
+
+        result = await open(tester, mismatch());
+        await tester.tap(find.text('Review replacement…'));
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(await result, HostKeyDecision.reject);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
+
+    testWidgets('phone: no button takes the focus', (tester) async {
+      await open(tester, firstTrust());
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('Trust this host?'), findsOneWidget);
+    });
+  });
+
+  Future<void> pumpTrustedKeys(WidgetTester tester) async {
+    final verifier = SecureHostKeyVerifier(
+      InMemorySecureStorage(),
+      StubPrompt(decision: HostKeyDecision.reject),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: TrustedKeysPage(verifier: verifier)),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'desktop: the trusted keys back button has a tooltip',
+    (tester) async {
+      await pumpTrustedKeys(tester);
+      expect(find.byTooltip('Back'), findsOneWidget);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
+
+  testWidgets('phone: the trusted keys back button is unchanged', (
+    tester,
+  ) async {
+    await pumpTrustedKeys(tester);
+    expect(find.byTooltip('Back'), findsNothing);
+    expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
   });
 
   test('withInteractiveHostKeyCheck marks only its own zone', () async {

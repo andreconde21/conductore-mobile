@@ -8,6 +8,7 @@ import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.d
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -354,5 +355,91 @@ void main() {
     expect(result!.top, 0);
     expect(result!.right, closeTo(0.5, 0.05));
     expect(result!.bottom, closeTo(0.5, 0.05));
+  });
+
+  Future<void> openCrop(WidgetTester tester) async {
+    await tester.tap(find.text('go'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final area = find.byKey(const ValueKey('image-crop-area'));
+    for (var i = 0; i < 50 && area.evaluate().isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+  }
+
+  testWidgets(
+    'desktop: the crop page is a dialog; Enter attaches, Esc cancels',
+    (tester) async {
+      final temp = Directory.systemTemp.createTempSync('crop-desktop');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final file = File(p.join(temp.path, 'shot.png'));
+      await tester.runAsync(
+        () async => file.writeAsBytesSync(await _png(40, 40)),
+      );
+      final image = SharedFile(path: file.path, name: 'shot.png');
+      Rect? result;
+      var done = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                done = false;
+                result = await showImageCropPage(context, image);
+                done = true;
+              },
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      );
+      await openCrop(tester);
+      expect(find.byKey(const ValueKey('desktop-page-frame')), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(done, isTrue);
+      expect(result, fullImageCrop);
+
+      await openCrop(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(done, isTrue);
+      expect(result, isNull);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
+
+  testWidgets('phone: the crop page is a full-screen page', (tester) async {
+    final temp = Directory.systemTemp.createTempSync('crop-phone');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final file = File(p.join(temp.path, 'shot.png'));
+    await tester.runAsync(
+      () async => file.writeAsBytesSync(await _png(40, 40)),
+    );
+    final image = SharedFile(path: file.path, name: 'shot.png');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showImageCropPage(context, image),
+            child: const Text('go'),
+          ),
+        ),
+      ),
+    );
+    await openCrop(tester);
+    expect(find.byType(ImageCropPage), findsOneWidget);
+    expect(find.byKey(const ValueKey('desktop-page-frame')), findsNothing);
+    expect(
+      ModalRoute.of(tester.element(find.byType(ImageCropPage))),
+      isA<MaterialPageRoute<Rect>>(),
+    );
   });
 }
