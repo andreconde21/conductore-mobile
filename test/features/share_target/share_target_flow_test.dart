@@ -117,6 +117,25 @@ void main() {
     await tester.pump();
   }
 
+  /// Confirms the upload by picking [hostName] in the picker.
+  Future<void> confirmUpload(WidgetTester tester, String hostName) async {
+    await settle(tester);
+    expect(controller.phase, ShareTargetPhase.choosingSession);
+    expect(find.text('Upload to which machine?'), findsOneWidget);
+    await tester.tap(find.text(hostName));
+    // The upload starts in the test's fake-async zone: pump it along.
+    for (var i = 0; i < 200; i += 1) {
+      await tester.pump(const Duration(milliseconds: 5));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 2)),
+      );
+      if (controller.pending == null ||
+          controller.phase == ShareTargetPhase.failed) {
+        break;
+      }
+    }
+  }
+
   setUp(() {
     workspace = TerminalWorkspaceController(
       ImmediateTerminalRepository(TrackableTerminalSession()),
@@ -157,6 +176,9 @@ void main() {
         files: [SharedFile(path: cached.path, name: 'photo.png', size: 3)],
       ),
     );
+    // Files never go anywhere without the user picking the machine.
+    expect(sftpSession.writtenFiles, isEmpty);
+    await confirmUpload(tester, 'Host a');
 
     expect(controller.phase, ShareTargetPhase.idle);
     expect(sftpSession.madeDirectories, ['/home/user/conductore-inbox']);
@@ -209,6 +231,7 @@ void main() {
         files: [SharedFile(path: cached.path, name: 'x', size: 2)],
       ),
     );
+    await confirmUpload(tester, 'Host a');
 
     expect(sftpSession.madeDirectories, isEmpty);
     expect(sftpSession.writtenFiles.keys, ['/home/user/drop/x (2)']);
@@ -297,6 +320,7 @@ void main() {
         files: [SharedFile(path: '/nope/file.bin', name: 'file.bin')],
       ),
     );
+    await confirmUpload(tester, 'Host a');
     await settle(tester);
 
     expect(controller.phase, ShareTargetPhase.failed);
@@ -323,10 +347,37 @@ void main() {
         files: [SharedFile(path: '/data/cache/shared/1/a.txt', name: 'a.txt')],
       ),
     );
+    await confirmUpload(tester, 'Local');
     await settle(tester);
 
     expect(sftpSession.writtenFiles, isEmpty);
     // Once in the inline bar's draft, once in the composer sheet.
     expect(find.text('/data/cache/shared/1/a.txt'), findsNWidgets(2));
+  });
+
+  testWidgets('dismissing the upload picker uploads nothing', (tester) async {
+    final temp = Directory.systemTemp.createTempSync('conductore-share');
+    addTearDown(() {
+      if (temp.existsSync()) temp.deleteSync(recursive: true);
+    });
+    final cached = File('${temp.path}/id_ed25519')..writeAsStringSync('k');
+    await openSession(tester, 'a');
+    await pumpHost(tester);
+
+    await share(
+      tester,
+      SharedPayload(
+        files: [SharedFile(path: cached.path, name: 'id_ed25519', size: 1)],
+      ),
+    );
+    await settle(tester);
+    expect(find.text('Upload to which machine?'), findsOneWidget);
+
+    await tester.tapAt(const Offset(5, 5));
+    await settle(tester);
+
+    expect(sftpSession.writtenFiles, isEmpty);
+    expect(controller.pending, isNull);
+    expect(controller.phase, ShareTargetPhase.idle);
   });
 }

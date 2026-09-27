@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
@@ -17,6 +18,7 @@ class SettingsServices {
     this.hostsController,
     this.hostKeyVerifier,
     this.agentAttention,
+    this.appLock,
     this.onLockNow,
     this.hasSync = false,
     this.hasSessionViews = false,
@@ -33,6 +35,9 @@ class SettingsServices {
 
   /// Agents' usage (Agents).
   final AgentAttentionController? agentAttention;
+
+  /// The app lock, for when it locks again; null where there is none.
+  final AppLockController? appLock;
 
   /// Locks the app now (closing sessions first); null hides "Lock now".
   final Future<void> Function()? onLockNow;
@@ -53,6 +58,7 @@ class SettingsServices {
     hostsController: hostsController,
     hostKeyVerifier: hostKeyVerifier,
     agentAttention: agentAttention,
+    appLock: appLock,
     onLockNow: onLockNow ?? this.onLockNow,
     hasSync: hasSync ?? this.hasSync,
     hasSessionViews: hasSessionViews ?? this.hasSessionViews,

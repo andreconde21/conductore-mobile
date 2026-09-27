@@ -1,14 +1,19 @@
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/diff_view/domain/git_diff_source.dart';
 import 'package:conduit/features/diff_view/domain/git_status.dart';
 import 'package:conduit/features/diff_view/domain/unified_diff.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 
-/// Quotes [value] for a POSIX shell.
-String shellQuote(String value) => "'${value.replaceAll("'", "'\\''")}'";
+/// Quotes [value] for the shell, always in quotes (see
+/// [shellQuoteArgument], which fish reads back unchanged too).
+String shellQuote(String value) {
+  final quoted = shellQuoteArgument(value);
+  return quoted == value ? "'$value'" : quoted;
+}
 
 /// Double-quotes [value] for use inside a single-quoted `sh -c` script,
 /// so the script itself stays readable (no nested single-quote escapes).

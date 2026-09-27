@@ -70,6 +70,25 @@ class TelemetryScrubber {
     r'(?<![\w.<])(?=[\w\-]*[A-Za-z])[\w\-]+(?:\.[\w\-]+)+(?![\w])',
   );
   static final _quoted = RegExp(r'"[^"\n]{1,300}"');
+  // Single quotes, but not apostrophes ("can't ... don't").
+  static final _singleQuoted = RegExp(
+    r"(?<![A-Za-z0-9])'([^'\n]{1,300})'(?![A-Za-z0-9])",
+  );
+  // Dart quotes identifiers and types in its own messages: `'_field@123'`,
+  // `'String'`, `'List<int>'`, `'dispose()'`. Placeholders stay too.
+  static final _codeLike = RegExp(
+    r'^(?:_\w*|[\w$]+@\d+|[A-Z]\w*(?:<[\w<>, ?]*>)?\??|[\w.$]+\(\)|<\w+(?:@\w+)?>)$',
+  );
+  // Paths without a leading slash: `src/app/main.dart`, `feature/acme`.
+  static final _relativePath = RegExp(
+    r'(?<![\w.~/\-<>:@])[\w.\-]+(?:/[\w.\-]+)+/?',
+  );
+  // A machine name without dots, where a message names one.
+  static final _namedHost = RegExp(
+    r"(\b(?:host\s*lookup|hostname|host)\s*[:=]\s*'?)"
+    r'(?!<)([A-Za-z0-9][\w\-]*)',
+    caseSensitive: false,
+  );
 
   /// [input] with every sensitive part replaced by a `<placeholder>`,
   /// capped at [maxLines] lines and [maxLength] characters.
@@ -97,12 +116,18 @@ class TelemetryScrubber {
         .replaceAll(_userAtHost, '<user@host>')
         .replaceAll(_uncPath, '<path>')
         .replaceAll(_windowsPath, '<path>')
-        .replaceAll(_unixPath, '<path>');
+        .replaceAll(_unixPath, '<path>')
+        .replaceAll(_relativePath, '<path>');
     for (final term in terms) {
       out = out.replaceAll(term, '<redacted>');
     }
     out = out
         .replaceAll(_quoted, '"<text>"')
+        .replaceAllMapped(
+          _singleQuoted,
+          (m) => _codeLike.hasMatch(m[1]!) ? m[0]! : "'<text>'",
+        )
+        .replaceAllMapped(_namedHost, (m) => '${m[1]}<host>')
         .replaceAll(_colonHex, '<hex>')
         .replaceAll(_ipv4, '<ip>')
         .replaceAllMapped(

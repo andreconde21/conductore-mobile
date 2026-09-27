@@ -112,6 +112,7 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
         builder: (context) => _SessionPickerSheet(
           workspace: widget.workspace,
           summary: widget.controller.pending?.summary ?? '',
+          uploads: widget.controller.pending?.files.isNotEmpty ?? false,
         ),
       );
       if (!mounted) {
@@ -168,7 +169,12 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
   void _closeProgress() {
     final dialogContext = _progressContext;
     if (dialogContext != null && dialogContext.mounted) {
-      Navigator.of(dialogContext).pop();
+      // Remove the dialog itself: the terminal page may already have been
+      // pushed above it, and pop() would close that instead.
+      final route = ModalRoute.of(dialogContext);
+      if (route != null) {
+        Navigator.of(dialogContext).removeRoute(route);
+      }
     }
     _progressContext = null;
   }
@@ -283,10 +289,17 @@ class _WaitingBanner extends StatelessWidget {
 }
 
 class _SessionPickerSheet extends StatelessWidget {
-  const _SessionPickerSheet({required this.workspace, required this.summary});
+  const _SessionPickerSheet({
+    required this.workspace,
+    required this.summary,
+    required this.uploads,
+  });
 
   final TerminalWorkspaceController workspace;
   final String summary;
+
+  /// The share carries files, which are uploaded to the chosen machine.
+  final bool uploads;
 
   @override
   Widget build(BuildContext context) {
@@ -302,7 +315,9 @@ class _SessionPickerSheet extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
                 child: Text(
-                  'Send to which session?',
+                  uploads
+                      ? 'Upload to which machine?'
+                      : 'Send to which session?',
                   style: theme.textTheme.titleMedium,
                 ),
               ),

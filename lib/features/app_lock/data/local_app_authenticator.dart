@@ -12,6 +12,8 @@ class LocalAppAuthenticator implements AppAuthenticator {
   Future<bool> canAuthenticate() async {
     try {
       return await _localAuthentication.isDeviceSupported();
+    } on LocalAuthException {
+      return false;
     } on PlatformException {
       return false;
     } on MissingPluginException {
@@ -28,8 +30,24 @@ class LocalAppAuthenticator implements AppAuthenticator {
       return authenticated
           ? AppAuthenticationResult.success
           : AppAuthenticationResult.cancelled;
+    } on LocalAuthException catch (error) {
+      // local_auth 3 reports failures this way, not as PlatformException.
+      return _unavailableCodes.contains(error.code)
+          ? AppAuthenticationResult.unavailable
+          : AppAuthenticationResult.cancelled;
     } on PlatformException {
       return AppAuthenticationResult.unavailable;
     }
   }
+
+  /// The device cannot authenticate at all (no screen lock, no hardware):
+  /// the lock page then offers "Continue without auth". Cancels, timeouts
+  /// and lockouts stay locked.
+  static const _unavailableCodes = {
+    LocalAuthExceptionCode.noCredentialsSet,
+    LocalAuthExceptionCode.noBiometricHardware,
+    LocalAuthExceptionCode.noBiometricsEnrolled,
+    LocalAuthExceptionCode.uiUnavailable,
+    LocalAuthExceptionCode.deviceError,
+  };
 }

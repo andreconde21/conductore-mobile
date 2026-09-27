@@ -264,18 +264,22 @@ class ShareTargetController extends ChangeNotifier {
       _setPhase(ShareTargetPhase.waitingForSession);
       return;
     }
+    // Files leave the phone: the user always confirms the machine they go
+    // to, even with a single session open (another app chose what to
+    // share).
+    final confirm = _pending!.files.isNotEmpty;
     if (_phase == ShareTargetPhase.waitingForSession) {
       // Parked until something connects: deliver to a lone connected
       // session, ask when several are up, keep waiting otherwise.
       final connected = sessions.where((s) => s.isConnected).toList();
-      if (connected.length == 1) {
+      if (connected.length == 1 && !confirm) {
         unawaited(deliverTo(connected.first));
       } else if (connected.length > 1) {
         _setPhase(ShareTargetPhase.choosingSession);
       }
       return;
     }
-    if (sessions.length == 1) {
+    if (sessions.length == 1 && !confirm) {
       unawaited(deliverTo(sessions.first));
     } else {
       _setPhase(ShareTargetPhase.choosingSession);

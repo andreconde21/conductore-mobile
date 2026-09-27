@@ -3,10 +3,12 @@ import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
+import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/mosh_server_cleanup.dart';
 import 'package:conduit/features/terminal/domain/predictive_terminal_session.dart';
@@ -38,7 +40,10 @@ class MoshTerminalRepository implements SshTerminalRepository {
   }) async {
     SSHClient? client;
     try {
-      client = await _clientFactory.connect(host);
+      // Opened by the user, who may decide on a changed host key.
+      client = await withInteractiveHostKeyCheck<SSHClient>(
+        () => _clientFactory.connect(host),
+      );
       final server = await _bootstrap(client, host);
       final socket = client.socket;
       final address = socket is TcpSshSocket ? socket.remoteAddress : null;
@@ -108,10 +113,11 @@ class MoshTerminalRepository implements SshTerminalRepository {
       '$moshServerTimeoutEnv ${_bootstrapFor(host).command()}';
 
   Future<MoshServerConfig> _bootstrap(SSHClient client, SavedHost host) async {
+    // Through sh, so the `VAR=value cmd` prefix works under any login shell.
     final session = await SshClientFactory.withinSetupTimeout(
       host,
       client,
-      client.execute(bootstrapCommand(host)),
+      client.execute(posixShellCommand(bootstrapCommand(host))),
     );
     final output = StringBuffer();
 

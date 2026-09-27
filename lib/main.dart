@@ -22,7 +22,9 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
 import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
+import 'package:conduit/features/app_lock/data/secure_app_lock_preferences.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
+import 'package:conduit/features/app_lock/presentation/app_lock_gate.dart';
 import 'package:conduit/features/app_lock/presentation/lock_page.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
@@ -115,7 +117,9 @@ void main() {
   final lockController = AppLockController(
     LocalAppAuthenticator(),
     enabled: PlatformFeatures.appLock,
+    preferences: const SecureAppLockPreferences(secureStorage),
   );
+  unawaited(lockController.loadPreferences());
   // "This computer" (desktops): the device itself as a machine, with
   // per-device settings that never join the synced machine list.
   final hostsController = HostsController(
@@ -426,6 +430,7 @@ void main() {
     hostsController: hostsController,
     hostKeyVerifier: hostKeyVerifier,
     agentAttention: agentAttention,
+    appLock: PlatformFeatures.appLock ? lockController : null,
     onLockNow: () async {
       // Locking closes every session; unlocking brings them back.
       await sessionRestore.holdForLock();
@@ -788,17 +793,28 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
               ),
             );
             // The builder sits above the Navigator, so pushed routes (the
-            // terminal page) can read the share-target controller.
-            return _wrapShareTargetScope(content);
+            // terminal page) can read the share-target controller. The lock
+            // covers every route, so locking again after the app was away
+            // hides a terminal or dialog left open.
+            return _wrapShareTargetScope(
+              AppLockGate(
+                controller: widget.lockController,
+                lockPage: (_) => LockPage(
+                  controller: widget.lockController,
+                  themeController: widget.themeController,
+                ),
+                child: content,
+              ),
+            );
           },
           home: ListenableBuilder(
             listenable: widget.lockController,
             builder: (context, _) {
               if (!widget.lockController.isUnlocked) {
-                return LockPage(
-                  controller: widget.lockController,
-                  themeController: widget.themeController,
-                );
+                // AppLockGate shows the lock page above every route; the
+                // home page (and its share and notification handlers) is
+                // gone until unlocked.
+                return const Scaffold();
               }
 
               final home = HostsPage(
