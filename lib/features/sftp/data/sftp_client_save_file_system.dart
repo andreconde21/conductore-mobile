@@ -55,10 +55,9 @@ class SftpClientSaveFileSystem implements SafeSaveFileSystem {
 
   @override
   Future<SafeSaveHandle> createExclusive(String path) async {
-    final file = await _sftp.open(
+    final file = await _create(
       path,
-      mode:
-          SftpFileOpenMode.create |
+      SftpFileOpenMode.create |
           SftpFileOpenMode.exclusive |
           SftpFileOpenMode.write,
     );
@@ -88,10 +87,9 @@ class SftpClientSaveFileSystem implements SafeSaveFileSystem {
   Future<void> copy(String from, String to, {int? mode}) async {
     final source = await _sftp.open(from);
     try {
-      final destination = await _sftp.open(
+      final destination = await _create(
         to,
-        mode:
-            SftpFileOpenMode.create |
+        SftpFileOpenMode.create |
             SftpFileOpenMode.write |
             SftpFileOpenMode.truncate,
       );
@@ -111,6 +109,20 @@ class SftpClientSaveFileSystem implements SafeSaveFileSystem {
       }
     } finally {
       await source.close();
+    }
+  }
+
+  /// Opens [path] with [mode], reporting a refusal from the server as a
+  /// [CannotCreateFileError]. Transport failures stay as they are.
+  Future<SftpFile> _create(String path, SftpFileOpenMode mode) async {
+    try {
+      return await _sftp.open(path, mode: mode);
+    } on SftpStatusError catch (error) {
+      if (error.code == SftpStatusCode.permissionDenied ||
+          error.code == SftpStatusCode.failure) {
+        throw CannotCreateFileError(error);
+      }
+      rethrow;
     }
   }
 

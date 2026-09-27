@@ -23,6 +23,19 @@ class RemoteFileInfo {
   final int? groupId;
 }
 
+/// Thrown by [SafeSaveFileSystem.createExclusive] and
+/// [SafeSaveFileSystem.copy] when the new file itself cannot be created,
+/// typically a folder we may not add files to. Anything else going wrong
+/// (a dropped connection) is a different error.
+class CannotCreateFileError implements Exception {
+  const CannotCreateFileError(this.cause);
+
+  final Object cause;
+
+  @override
+  String toString() => describeSaveError(cause);
+}
+
 /// The remote operations [SafeRemoteSaver] is built from.
 /// [SftpClientSaveFileSystem] maps them onto an SFTP connection.
 abstract class SafeSaveFileSystem {
@@ -41,7 +54,8 @@ abstract class SafeSaveFileSystem {
   /// Fails when the file at [path] cannot be opened for writing.
   Future<void> checkWritable(String path);
 
-  /// Creates a new file, failing if [path] already exists.
+  /// Creates a new file, failing if [path] already exists; with a
+  /// [CannotCreateFileError] when the file cannot be created.
   Future<SafeSaveHandle> createExclusive(String path);
 
   /// Truncates the file at [path] (creating it when missing) and writes
@@ -49,7 +63,8 @@ abstract class SafeSaveFileSystem {
   Future<void> writeInPlace(String path, Uint8List bytes);
 
   /// Copies [from] to [to], replacing [to]; [mode] is applied to [to] before
-  /// any content lands in it.
+  /// any content lands in it. Fails with a [CannotCreateFileError] when [to]
+  /// cannot be created.
   Future<void> copy(String from, String to, {int? mode});
 
   Future<void> setAttributes(
@@ -167,7 +182,7 @@ class SafeRemoteSaver {
     final SafeSaveHandle handle;
     try {
       handle = await _fs.createExclusive(temp);
-    } catch (_) {
+    } on CannotCreateFileError {
       // The file is writable but its folder takes no new files.
       try {
         await _fs.writeInPlace(target, bytes);
@@ -260,8 +275,16 @@ class SafeRemoteSaver {
       try {
         await _fs.copy(target, candidate, mode: _plainMode(original.mode));
         backup = candidate;
-      } catch (_) {
+      } on CannotCreateFileError {
+        // A folder that takes no new files: write in place without one.
+      } catch (error) {
+        // Whatever broke the copy would likely break the write too, and
+        // nothing has touched the original yet.
         await _removeQuietly(candidate);
+        throw AppFailure(
+          'Could not save $name. The file on the server is unchanged.',
+          describeSaveError(error),
+        );
       }
     }
     try {

@@ -88,7 +88,7 @@ void main() {
   });
 
   test('writes the target of a symlink and keeps the link', () async {
-    fs.addFile('/etc/real.conf', 'old', mode: 0x1A4);
+    fs.addFile('/etc/real.conf', 'old');
     fs.addLink('/home/me/app.conf', '/etc/real.conf');
 
     final result = await saver.save('/home/me/app.conf', bytes('new'));
@@ -163,6 +163,51 @@ void main() {
     expect(fs.text('/srv/.app.conf.conductore-bak'), 'old');
   });
 
+  test('a backup that cannot be copied stops the save untouched', () async {
+    fs.atomicReplace = false;
+    fs.addFile('/srv/app.conf', 'old');
+    fs.failCopy = true;
+
+    await expectLater(
+      saver.save('/srv/app.conf', bytes('new')),
+      throwsA(
+        isA<AppFailure>().having(
+          (f) => f.message,
+          'message',
+          contains('unchanged'),
+        ),
+      ),
+    );
+    expect(fs.text('/srv/app.conf'), 'old');
+    expect(fs.paths, ['/srv/app.conf']);
+  });
+
+  test(
+    'without a writable folder or an atomic rename, saves without a backup',
+    () async {
+      fs.atomicReplace = false;
+      fs.addFile('/srv/app.conf', 'old');
+      fs.lockedDirs.add('/srv');
+
+      final result = await saver.save('/srv/app.conf', bytes('new'));
+
+      expect(result.method, SftpSaveMethod.inPlace);
+      expect(result.notice, contains('No backup copy'));
+      expect(fs.text('/srv/app.conf'), 'new');
+    },
+  );
+
+  test('a temp file lost to the connection does not fall back', () async {
+    fs.addFile('/srv/app.conf', 'old');
+    fs.failCreate = true;
+
+    await expectLater(
+      saver.save('/srv/app.conf', bytes('new')),
+      throwsA(isA<AppFailure>()),
+    );
+    expect(fs.text('/srv/app.conf'), 'old');
+  });
+
   test('keeps a foreign owner by writing in place when chown fails', () async {
     fs.addFile('/srv/shared.txt', 'old', mode: 0x1B6, userId: 0, groupId: 50);
 
@@ -178,13 +223,13 @@ void main() {
 
   test('as root, restores the owner on the replacement', () async {
     fs.root = true;
-    fs.addFile('/srv/shared.txt', 'old', mode: 0x1A4, userId: 33, groupId: 33);
+    fs.addFile('/srv/shared.txt', 'old', mode: 0x1A0, userId: 33, groupId: 33);
 
     final result = await saver.save('/srv/shared.txt', bytes('new'));
 
     expect(result.method, SftpSaveMethod.atomic);
     final node = fs.node('/srv/shared.txt');
-    expect((node.userId, node.groupId, node.mode), (33, 33, 0x1A4));
+    expect((node.userId, node.groupId, node.mode), (33, 33, 0x1A0));
   });
 
   test('refuses a file an in-place write could not change', () async {
@@ -259,6 +304,8 @@ class _MemoryFs implements SafeSaveFileSystem {
   bool atomicReplace = true;
   bool root = false;
   bool failRename = false;
+  bool failCreate = false;
+  bool failCopy = false;
   bool synced = false;
   int openHandles = 0;
 
@@ -343,14 +390,12 @@ class _MemoryFs implements SafeSaveFileSystem {
 
   @override
   Future<SafeSaveHandle> createExclusive(String path) async {
-    if (lockedDirs.contains(_dir(path))) throw StateError('Permission denied');
+    if (lockedDirs.contains(_dir(path))) {
+      throw const CannotCreateFileError('Permission denied');
+    }
+    if (failCreate) throw StateError('connection lost');
     if (files.containsKey(path)) throw StateError('Exists');
-    files[path] = _Node(
-      [],
-      mode: 0x1A4,
-      userId: root ? 0 : 1000,
-      groupId: root ? 0 : 1000,
-    );
+    files[path] = _Node([], userId: root ? 0 : 1000, groupId: root ? 0 : 1000);
     openHandles++;
     return _MemoryHandle(this, path);
   }
@@ -368,6 +413,13 @@ class _MemoryFs implements SafeSaveFileSystem {
 
   @override
   Future<void> copy(String from, String to, {int? mode}) async {
+    if (lockedDirs.contains(_dir(to))) {
+      throw const CannotCreateFileError('Permission denied');
+    }
+    if (failCopy) {
+      files[to] = _Node([]);
+      throw StateError('connection lost');
+    }
     files[to] = _Node(List.of(files[from]!.content), mode: mode ?? 0x1A4);
   }
 
