@@ -42,6 +42,11 @@ abstract interface class LocalSyncStore {
     LocalSyncOptions options, {
     bool replace = true,
   });
+
+  /// Moves this device's per-host data (connect memory, recent
+  /// directories, the machine whose theme is followed) from each old id in
+  /// [renamed] to its new one, after saved machines changed id.
+  Future<void> renameHosts(Map<String, String> renamed);
 }
 
 class LocalSyncUnavailable implements Exception {

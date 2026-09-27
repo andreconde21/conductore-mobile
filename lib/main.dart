@@ -8,6 +8,7 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
 import 'package:conduit/core/telemetry/telemetry_setup.dart';
 import 'package:conduit/core/telemetry/telemetry_terms.dart';
+import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -233,6 +234,11 @@ void main() {
       await hostsController.firstLoad;
       return hostsController.machines;
     },
+    // A synced machine that is this desktop reads as "This computer".
+    findHost: (id) async {
+      await hostsController.selfMachineKnown();
+      return hostsController.findById(id);
+    },
     runnerFactory: hostChannels.runner,
   );
   themeController.omarchySync = omarchyThemeSync;
@@ -299,13 +305,6 @@ void main() {
     ready: themeLoaded,
     changes: localDataChanges,
   );
-  final backupService = AppBackupService(
-    hostsController: hostsController,
-    themeController: themeController,
-    hostKeyVerifier: hostKeyVerifier,
-    localStore: localSyncStore,
-    changes: localDataChanges,
-  );
   // Settings › Sync: this device's data, end-to-end encrypted, through
   // one saved machine (the hub) over the same SSH/SFTP stack.
   final syncController = SyncController(
@@ -329,6 +328,14 @@ void main() {
     defaultDeviceName: defaultSyncDeviceName(),
   );
   unawaited(themeLoaded.then((_) => syncController.start()));
+  final backupService = AppBackupService(
+    hostsController: hostsController,
+    themeController: themeController,
+    hostKeyVerifier: hostKeyVerifier,
+    localStore: localSyncStore,
+    changes: localDataChanges,
+    syncHubHostId: () => syncController.config?.hubHostId,
+  );
   unawaited(shareTarget.start());
 
   // "Open Claude sessions in" and the per-session choices, for every page.
@@ -618,22 +625,33 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     );
   }
 
+  AppPalette? _themedPalette;
+  late ThemeData _lightTheme;
+  late ThemeData _darkTheme;
+
+  /// Builds the two app themes only when the palette changed: the theme
+  /// controller also notifies for settings that change no colours.
+  void _updateThemes(AppPalette palette) {
+    if (palette == _themedPalette) return;
+    _themedPalette = palette;
+    _lightTheme = AppTheme.build(
+      brightness: Brightness.light,
+      palette: palette,
+    );
+    _darkTheme = AppTheme.build(brightness: Brightness.dark, palette: palette);
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.themeController,
       builder: (context, _) {
+        _updateThemes(widget.themeController.palette);
         return MaterialApp(
           title: 'Conductore',
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.build(
-            brightness: Brightness.light,
-            palette: widget.themeController.palette,
-          ),
-          darkTheme: AppTheme.build(
-            brightness: Brightness.dark,
-            palette: widget.themeController.palette,
-          ),
+          theme: _lightTheme,
+          darkTheme: _darkTheme,
           themeMode: widget.themeController.effectiveThemeMode,
           builder: (context, child) {
             final overlayStyle = AppTheme.systemUiOverlayStyle(
