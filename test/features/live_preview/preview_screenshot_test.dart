@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:conduit/core/theme/app_palette.dart';
@@ -12,8 +11,10 @@ import 'package:conduit/features/live_preview/presentation/live_preview_controll
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/live_preview/presentation/preview_annotate_page.dart';
 import 'package:conduit/features/share_target/domain/shared_payload.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 
@@ -340,6 +341,8 @@ void main() {
       }
       final canvas = find.byKey(const ValueKey('annotate-canvas'));
       expect(canvas, findsOneWidget);
+      // Phones: a full-screen page, not the desktop dialog.
+      expect(find.byKey(const ValueKey('desktop-page-frame')), findsNothing);
       await tester.tap(find.byTooltip('Arrow'));
       await tester.pump();
       final center = tester.getCenter(canvas);
@@ -363,5 +366,77 @@ void main() {
       expect(result?.note, 'This arrow');
       expect(result?.png, isNot(png));
     });
+    testWidgets(
+      'desktop: a dialog; Ctrl/Cmd+Z undoes, Ctrl/Cmd+Enter sends',
+      (tester) async {
+        tester.view.physicalSize = const Size(1400, 1000);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final png = (await tester.runAsync(
+          () => _png(400, 300, const Color(0xFF3366FF)),
+        ))!;
+        PreviewAnnotateResult? result;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async =>
+                    result = await showPreviewAnnotatePage(context, png),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        for (var i = 0; i < 5; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+        expect(
+          find.byKey(const ValueKey('desktop-page-frame')),
+          findsOneWidget,
+        );
+        final canvas = find.byKey(const ValueKey('annotate-canvas'));
+        IconButton undo() => tester.widget<IconButton>(
+          find.ancestor(
+            of: find.byIcon(Icons.undo_rounded),
+            matching: find.byType(IconButton),
+          ),
+        );
+        await tester.dragFrom(tester.getCenter(canvas), const Offset(80, 40));
+        await tester.pump();
+        expect(undo().onPressed, isNotNull);
+        final modifier = defaultTargetPlatform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        Future<void> chord(LogicalKeyboardKey key) async {
+          await tester.sendKeyDownEvent(modifier);
+          await tester.sendKeyEvent(key);
+          await tester.sendKeyUpEvent(modifier);
+          await tester.pump();
+        }
+
+        await chord(LogicalKeyboardKey.keyZ);
+        expect(undo().onPressed, isNull);
+        await chord(LogicalKeyboardKey.enter);
+        for (var i = 0; i < 100 && result == null; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 100)),
+          );
+          await tester.pump();
+        }
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(result?.png, png);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
   });
 }
