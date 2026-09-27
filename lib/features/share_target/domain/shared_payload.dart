@@ -46,11 +46,21 @@ class SharedFile {
 
 /// What arrived from the share sheet: text and/or files.
 class SharedPayload {
-  const SharedPayload({this.text, this.subject, this.files = const []});
+  const SharedPayload({
+    this.text,
+    this.subject,
+    this.files = const [],
+    this.unreadable = const [],
+  });
 
   final String? text;
   final String? subject;
   final List<SharedFile> files;
+
+  /// Names of shared streams the phone could not copy when the share
+  /// arrived (the sending app revoked or never granted read access), so
+  /// the user hears about them instead of the share vanishing.
+  final List<String> unreadable;
 
   bool get hasText => text != null && text!.trim().isNotEmpty;
   bool get hasFiles => files.isNotEmpty;
@@ -65,6 +75,7 @@ class SharedPayload {
     final text = raw['text'];
     final subject = raw['subject'];
     final rawFiles = raw['files'];
+    final rawUnreadable = raw['unreadable'];
     final files = rawFiles is List
         ? rawFiles.map(SharedFile.fromMap).whereType<SharedFile>().toList()
         : const <SharedFile>[];
@@ -77,8 +88,11 @@ class SharedPayload {
           ? subject.trim()
           : null,
       files: files,
+      unreadable: rawUnreadable is List
+          ? rawUnreadable.whereType<String>().toList()
+          : const [],
     );
-    return payload.isEmpty ? null : payload;
+    return payload.isEmpty && payload.unreadable.isEmpty ? null : payload;
   }
 
   /// Short description for banners and pickers, e.g. "2 files and text".

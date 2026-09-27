@@ -33,6 +33,12 @@ class ShareTargetHost extends StatefulWidget {
 class _ShareTargetHostState extends State<ShareTargetHost> {
   bool _pickerOpen = false;
   bool _errorOpen = false;
+
+  /// Set when the progress dialog is asked for, before its route builds:
+  /// two notifications in one frame must not open two dialogs, the first
+  /// of which nothing would ever close.
+  bool _progressOpen = false;
+  int _progressDialogs = 0;
   BuildContext? _progressContext;
 
   @override
@@ -89,7 +95,7 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
           unawaited(_pickSession());
         }
       case ShareTargetPhase.uploading:
-        if (_progressContext == null) {
+        if (!_progressOpen) {
           unawaited(_showProgress());
         }
       case ShareTargetPhase.failed:
@@ -129,24 +135,35 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
   }
 
   Future<void> _showProgress() async {
+    _progressOpen = true;
+    final dialog = ++_progressDialogs;
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         _progressContext = dialogContext;
+        // Closed while the route was still being built.
+        if (!_progressOpen) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _closeProgress());
+        }
         return PopScope(
           canPop: false,
           child: ListenableBuilder(
             listenable: widget.controller,
             builder: (context, _) {
-              final progress = widget.controller.progress;
+              final controller = widget.controller;
+              final progress = controller.progress;
+              final target = controller.targetName;
               final label = progress == null
-                  ? 'Connecting…'
+                  ? target == null
+                        ? 'Connecting…'
+                        : 'Connecting to $target…'
                   : progress.count == 1
                   ? progress.fileName
                   : '${progress.fileName} (${progress.index + 1}/'
                         '${progress.count})';
               return AlertDialog(
+                key: const ValueKey('share-progress'),
                 title: const Text('Sending to agent'),
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -155,24 +172,43 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
                     Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 12),
                     LinearProgressIndicator(value: progress?.fraction),
+                    if (progress != null && progress.total > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '${formatShareBytes(progress.sent)} of '
+                        '${formatShareBytes(progress.total)}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ],
                 ),
+                actions: [
+                  TextButton(
+                    onPressed: controller.cancel,
+                    child: const Text('Cancel'),
+                  ),
+                ],
               );
             },
           ),
         );
       },
     );
-    _progressContext = null;
+    // A newer dialog may already be up once this one's future completes.
+    if (dialog == _progressDialogs) {
+      _progressContext = null;
+      _progressOpen = false;
+    }
   }
 
   void _closeProgress() {
+    _progressOpen = false;
     final dialogContext = _progressContext;
     if (dialogContext != null && dialogContext.mounted) {
       // Remove the dialog itself: the terminal page may already have been
       // pushed above it, and pop() would close that instead.
       final route = ModalRoute.of(dialogContext);
-      if (route != null) {
+      if (route != null && route.isActive) {
         Navigator.of(dialogContext).removeRoute(route);
       }
     }
@@ -182,6 +218,7 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
   Future<void> _showError() async {
     _errorOpen = true;
     try {
+      final canRetry = widget.controller.canRetry;
       final retry = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -192,10 +229,11 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
               onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Discard'),
             ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Retry'),
-            ),
+            if (canRetry)
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Retry'),
+              ),
           ],
         ),
       );
@@ -353,4 +391,11 @@ class _SessionPickerSheet extends StatelessWidget {
       },
     );
   }
+}
+
+/// `840 KB`, `2.3 MB`: the progress dialog's byte counts.
+String formatShareBytes(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }

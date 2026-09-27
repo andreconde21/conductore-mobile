@@ -1,13 +1,18 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/features/terminal/data/keyboard_image_file.dart';
+import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
 
 /// The chat view's input row: a field where Enter sends, voice dictation,
-/// the full composer for multiline prompts, and Esc to interrupt.
+/// the full composer for multiline prompts, and Esc to interrupt. Images
+/// come in through the attach icon in the field, "Paste image" in its
+/// menu, and a keyboard's image insertion (its clipboard panel, GIFs).
 class ChatComposer extends StatefulWidget {
   const ChatComposer({
     required this.onSend,
@@ -25,6 +30,9 @@ class ChatComposer extends StatefulWidget {
     this.initialText = '',
     this.onPasteImage,
     this.clipboardHasImage,
+    this.onAttachImage,
+    this.attachingImage = false,
+    this.onInsertContent,
     super.key,
   });
 
@@ -67,8 +75,22 @@ class ChatComposer extends StatefulWidget {
   final VoidCallback? onPasteImage;
 
   /// Whether the clipboard holds an image; asked when the field gains
-  /// focus and when the app comes back to the front.
+  /// focus, when the app comes back to the front, and again each time the
+  /// field's menu opens (the earlier answers can be stale: Android only
+  /// lets the focused app read the clipboard, and the image may have been
+  /// copied since).
   final Future<bool> Function()? clipboardHasImage;
+
+  /// The attach icon's choices (clipboard, photo picker, camera); null
+  /// hides it.
+  final ValueChanged<PromptImageOrigin>? onAttachImage;
+
+  /// An image is being uploaded: the attach icon shows progress.
+  final bool attachingImage;
+
+  /// An image the keyboard inserted (its clipboard panel, a GIF); null
+  /// leaves the keyboard's image insertion off.
+  final ValueChanged<KeyboardInsertedContent>? onInsertContent;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -117,22 +139,64 @@ class _ChatComposerState extends State<ChatComposer> {
 
   Widget _contextMenu(BuildContext context, EditableTextState state) {
     final paste = widget.onPasteImage;
-    if (paste == null || !_clipboardHasImage) {
+    final probe = widget.clipboardHasImage;
+    if (paste == null) {
       return AdaptiveTextSelectionToolbar.editableText(
         editableTextState: state,
       );
     }
-    return AdaptiveTextSelectionToolbar.buttonItems(
-      anchors: state.contextMenuAnchors,
-      buttonItems: [
-        ...state.contextMenuButtonItems,
-        ContextMenuButtonItem(
-          label: 'Paste image',
-          onPressed: () {
-            state.hideToolbar();
-            paste();
-          },
+    return _PasteImageMenu(
+      editableTextState: state,
+      initiallyHasImage: _clipboardHasImage,
+      probe: probe,
+      onHasImage: (hasImage) => _clipboardHasImage = hasImage,
+      onPasteImage: paste,
+    );
+  }
+
+  Widget _attachButton(ThemeData theme) {
+    final attach = widget.onAttachImage!;
+    if (widget.attachingImage) {
+      return const Padding(
+        padding: EdgeInsets.all(12),
+        child: SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
         ),
+      );
+    }
+    return PopupMenuButton<PromptImageOrigin>(
+      key: const ValueKey('chat-attach-image'),
+      tooltip: 'Attach image',
+      enabled: widget.enabled,
+      icon: const Icon(Icons.add_photo_alternate_outlined),
+      onSelected: attach,
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: PromptImageOrigin.clipboard,
+          child: ListTile(
+            leading: Icon(Icons.content_paste_rounded),
+            title: Text('Paste image from clipboard'),
+          ),
+        ),
+        PopupMenuItem(
+          value: PromptImageOrigin.gallery,
+          child: ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: Text(
+              PlatformFeatures.camera ? 'Pick a photo' : 'Image file',
+            ),
+          ),
+        ),
+        if (PlatformFeatures.camera)
+          const PopupMenuItem(
+            value: PromptImageOrigin.camera,
+            child: ListTile(
+              leading: Icon(Icons.photo_camera_outlined),
+              title: Text('Take a photo'),
+            ),
+          ),
       ],
     );
   }
@@ -236,6 +300,12 @@ class _ChatComposerState extends State<ChatComposer> {
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _send(),
                 contextMenuBuilder: _contextMenu,
+                contentInsertionConfiguration: widget.onInsertContent == null
+                    ? null
+                    : ContentInsertionConfiguration(
+                        allowedMimeTypes: keyboardImageMimeTypes,
+                        onContentInserted: widget.onInsertContent!,
+                      ),
                 decoration: InputDecoration(
                   isDense: true,
                   hintText: widget.enabled
@@ -249,6 +319,15 @@ class _ChatComposerState extends State<ChatComposer> {
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 10,
+                  ),
+                  // Inside the field: images are always one tap away
+                  // without taking another slot in the row.
+                  suffixIcon: widget.onAttachImage == null
+                      ? null
+                      : _attachButton(theme),
+                  suffixIconConstraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 40,
                   ),
                 ),
               ),
@@ -293,6 +372,72 @@ class _ChatComposerState extends State<ChatComposer> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The field's menu with "Paste image" while the clipboard holds one. It
+/// asks the clipboard again as it opens: the answer from when the field
+/// gained focus may predate the copy, or have been refused because the app
+/// was not focused yet.
+class _PasteImageMenu extends StatefulWidget {
+  const _PasteImageMenu({
+    required this.editableTextState,
+    required this.initiallyHasImage,
+    required this.probe,
+    required this.onHasImage,
+    required this.onPasteImage,
+  });
+
+  final EditableTextState editableTextState;
+  final bool initiallyHasImage;
+  final Future<bool> Function()? probe;
+  final ValueChanged<bool> onHasImage;
+  final VoidCallback onPasteImage;
+
+  @override
+  State<_PasteImageMenu> createState() => _PasteImageMenuState();
+}
+
+class _PasteImageMenuState extends State<_PasteImageMenu> {
+  late bool _hasImage = widget.initiallyHasImage;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_probe());
+  }
+
+  Future<void> _probe() async {
+    final probe = widget.probe;
+    if (probe == null) return;
+    final hasImage = await probe();
+    widget.onHasImage(hasImage);
+    if (mounted && hasImage != _hasImage) {
+      setState(() => _hasImage = hasImage);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.editableTextState;
+    if (!_hasImage) {
+      return AdaptiveTextSelectionToolbar.editableText(
+        editableTextState: state,
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: state.contextMenuAnchors,
+      buttonItems: [
+        ...state.contextMenuButtonItems,
+        ContextMenuButtonItem(
+          label: 'Paste image',
+          onPressed: () {
+            state.hideToolbar();
+            widget.onPasteImage();
+          },
+        ),
+      ],
     );
   }
 }

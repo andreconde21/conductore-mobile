@@ -24,6 +24,12 @@ import 'package:conduit/features/chat_view/presentation/widgets/chat_working_ind
 import 'package:conduit/features/chat_view/presentation/widgets/talk_panel.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/share_target/domain/share_inbox.dart';
+import 'package:conduit/features/share_target/domain/shared_payload.dart';
+import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
+import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
+import 'package:conduit/features/terminal/data/keyboard_image_file.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
@@ -61,6 +67,7 @@ class ChatViewPage extends StatefulWidget {
     this.imageAttacher,
     this.pasteImages = true,
     this.clipboardHasImage = PlatformPromptImageSource.clipboardHasImage,
+    this.keyboardImage = keyboardImageFile,
     this.attention,
     this.hostId,
     this.forwardTargets,
@@ -116,6 +123,11 @@ class ChatViewPage extends StatefulWidget {
 
   /// Whether the clipboard holds an image (offers "Paste image").
   final Future<bool> Function() clipboardHasImage;
+
+  /// Writes an image the keyboard inserted to a local file (tests inject
+  /// one); null when there is none.
+  final Future<SharedFile?> Function(KeyboardInsertedContent content)
+  keyboardImage;
 
   /// The agent monitor and this chat's host: when the host's companion
   /// keeps approval rules, approval cards offer "Trust…" and "Always"
@@ -255,9 +267,33 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   bool _readAloudPrimed = false;
 
+  ShareTargetController? _shareTarget;
+
+  /// A file shared into the app for this chat's machine lands in this
+  /// composer, rather than in the terminal's under the chat.
+  bool _receiveSharedDraft(String hostId, String draft) {
+    final own = widget.hostId;
+    if (!mounted || own == null || baseHostId(own) != baseHostId(hostId)) {
+      return false;
+    }
+    if (!(ModalRoute.of(context)?.isActive ?? true)) return false;
+    final merged = mergeShareDraft(_composerText.text, draft);
+    _composerText.value = TextEditingValue(
+      text: merged,
+      selection: TextSelection.collapsed(offset: merged.length),
+    );
+    composerFocus.requestFocus();
+    return true;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final shareTarget = ShareTargetScope.maybeOf(context);
+    if (!identical(shareTarget, _shareTarget)) {
+      _shareTarget?.removeDraftReceiver(_receiveSharedDraft);
+      _shareTarget = shareTarget?..addDraftReceiver(_receiveSharedDraft);
+    }
     final readAloud = _readAloud;
     // The chat on screen holds the speaker; a chat opened on top takes it
     // (this one then finishes its sentence and keeps quiet), and it comes
@@ -549,6 +585,7 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   @override
   void dispose() {
+    _shareTarget?.removeDraftReceiver(_receiveSharedDraft);
     WidgetsBinding.instance.removeObserver(this);
     _chat.removeListener(_feedReadAloud);
     _chat.removeListener(_stickToBottom);
@@ -759,6 +796,94 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
   }
 
+  /// An image is being read or uploaded (the attach icon spins).
+  bool _attaching = false;
+
+  /// The attach icon: the clipboard's image as it is (like "Paste image"),
+  /// or a photo from the system picker or the camera, cropped first.
+  Future<void> _attachImage(PromptImageOrigin origin) async {
+    final attacher = widget.imageAttacher;
+    if (attacher == null || _attaching) return;
+    if (origin == PromptImageOrigin.clipboard) {
+      return _withAttaching(_pasteImage);
+    }
+    await _withAttaching(() async {
+      try {
+        final picked = await attacher.source.pick(origin);
+        if (picked == null || !mounted) return;
+        final crop = await attacher.crop(picked);
+        if (crop == null || !mounted) return;
+        await _uploadAndInsert(() async => attacher.prepare(picked, crop));
+      } catch (error) {
+        _showImageError('Could not attach the image', error);
+      }
+    });
+  }
+
+  /// An image the keyboard inserted (its clipboard panel, a GIF): uploaded
+  /// as it is, its path put at the cursor.
+  Future<void> _insertKeyboardImage(KeyboardInsertedContent content) async {
+    final attacher = widget.imageAttacher;
+    if (attacher == null) return;
+    await _withAttaching(() async {
+      try {
+        final image = await widget.keyboardImage(content);
+        if (!mounted) return;
+        if (image == null) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(
+              content: Text('The keyboard sent no image to attach.'),
+            ),
+          );
+          return;
+        }
+        await _uploadAndInsert(() => attacher.prepare(image, fullImageCrop));
+      } catch (error) {
+        _showImageError('Could not attach the image', error);
+      }
+    });
+  }
+
+  Future<void> _uploadAndInsert(Future<SharedFile> Function() prepare) async {
+    final attacher = widget.imageAttacher!;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(
+      const SnackBar(
+        content: Text('Uploading image…'),
+        duration: Duration(minutes: 1),
+      ),
+    );
+    try {
+      final path = await attacher.upload(await prepare());
+      if (mounted) insertImagePath(path);
+    } finally {
+      messenger?.hideCurrentSnackBar();
+    }
+  }
+
+  Future<void> _withAttaching(Future<void> Function() work) async {
+    if (_attaching) return;
+    setState(() => _attaching = true);
+    try {
+      await work();
+    } finally {
+      if (mounted) setState(() => _attaching = false);
+    }
+  }
+
+  void _showImageError(String what, Object error) {
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            '$what: ${error is AppFailure ? error.userMessage : error}',
+          ),
+        ),
+      );
+  }
+
   /// Puts [path] at the composer's cursor as its own word.
   void insertImagePath(String path) {
     final value = _composerText.value;
@@ -964,9 +1089,16 @@ class _ChatViewPageState extends State<ChatViewPage>
     onExpand: _openComposer,
     dictation: _dictation,
     onPasteImage: widget.imageAttacher != null && widget.pasteImages
-        ? () => unawaited(_pasteImage())
+        ? () => unawaited(_withAttaching(_pasteImage))
         : null,
     clipboardHasImage: widget.clipboardHasImage,
+    onAttachImage: widget.imageAttacher == null
+        ? null
+        : (origin) => unawaited(_attachImage(origin)),
+    attachingImage: _attaching,
+    onInsertContent: widget.imageAttacher == null
+        ? null
+        : (content) => unawaited(_insertKeyboardImage(content)),
   );
 
   Widget _buildThread(BuildContext context) {

@@ -67,7 +67,6 @@ import 'package:conduit/features/share_target/data/sftp_share_uploader.dart';
 import 'package:conduit/features/share_target/domain/share_inbox.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
-import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
@@ -82,6 +81,7 @@ import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
+import 'package:conduit/features/terminal/presentation/prompt_image_scope.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
@@ -91,7 +91,6 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
-import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_actions.dart';
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_compact.dart';
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_strip.dart';
@@ -1465,20 +1464,14 @@ class _TerminalPageState extends State<TerminalPage>
 
   /// Images go to the same per-host inbox as files shared into the app,
   /// and the composer inserts the uploaded path for the agent to read.
-  PromptImageAttacher _promptImageAttacher(SavedHost host) {
-    final preparer = widget.promptImagePreparer ?? PromptImagePreparer();
-    return PromptImageAttacher(
-      source: widget.promptImageSource ?? PlatformPromptImageSource(),
-      crop: (image) => showImageCropPage(context, image),
-      prepare: preparer.prepare,
-      upload: (image) async {
-        final paths = await SftpShareUploader(
-          widget.sftpRepository,
-        ).upload(host, [image]);
-        return paths.single;
-      },
-    );
-  }
+  PromptImageAttacher _promptImageAttacher(SavedHost host) =>
+      sftpPromptImageAttacher(
+        repository: widget.sftpRepository,
+        host: host,
+        context: () => context,
+        source: widget.promptImageSource,
+        preparer: widget.promptImagePreparer,
+      );
 
   /// Paste with an image on the clipboard: uploads it to the host's share
   /// inbox and pastes its path (bracketed when the program asked for it, no

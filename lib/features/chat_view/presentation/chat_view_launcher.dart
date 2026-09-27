@@ -20,6 +20,7 @@ import 'package:conduit/features/companion_setup/presentation/companion_setup_pa
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
+import 'package:conduit/features/terminal/presentation/prompt_image_scope.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -422,8 +423,15 @@ Future<void> openChatView({
   String initialDraft = '',
   String initialSend = '',
   PromptImageAttacher? imageAttacher,
-  bool pasteImages = true,
+  bool? pasteImages,
 }) async {
+  // Every opener gets images: those without an attacher of their own (home,
+  // the switcher, the guide, forwards) take the app's, and the setting.
+  final images = PromptImageScope.maybeOf(context);
+  BuildContext? chatContext;
+  final attacher =
+      imageAttacher ?? images?.attacherFor(host, () => chatContext ?? context);
+  final pasteAsFiles = pasteImages ?? images?.pasteImages() ?? true;
   // Resolved per command: the monitor's connection is replaced when the
   // session reconnects, and the chat may stay open across that.
   final runner = AttentionHostRunner(attention, host);
@@ -476,8 +484,8 @@ Future<void> openChatView({
         onDispose: changes.dispose,
         dictation: dictation,
         initialDraft: initialDraft,
-        imageAttacher: imageAttacher,
-        pasteImages: pasteImages,
+        imageAttacher: attacher,
+        pasteImages: pasteAsFiles,
         attention: attention,
         onSetUpCompanion: companion == null || !context.mounted
             ? null
@@ -498,27 +506,31 @@ Future<void> openChatView({
   await navigator.push(
     MaterialPageRoute<void>(
       settings: chatRouteSettings(hostId: host.id, agentId: agent.id),
-      builder: (routeContext) => ChatViewPage(
-        controller: controller,
-        hostName: host.name,
-        dictation: dictation,
-        accessory: accessoryBuilder?.call(routeContext),
-        initialDraft: initialDraft,
-        imageAttacher: imageAttacher,
-        pasteImages: pasteImages,
-        attention: attention,
-        hostId: host.id,
-        onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
-            ? null
-            : () => showCompanionSetup(routeContext, host),
-        onEnableMonitoring: attention.monitoringEnabled(host)
-            ? null
-            : () => attention.enableMonitoring(host),
-        onOpenTerminal: () {
-          toTerminal = true;
-          Navigator.of(routeContext).pop();
-        },
-      ),
+      builder: (routeContext) {
+        // Crops open over the chat, which outlives the opener's context.
+        chatContext = routeContext;
+        return ChatViewPage(
+          controller: controller,
+          hostName: host.name,
+          dictation: dictation,
+          accessory: accessoryBuilder?.call(routeContext),
+          initialDraft: initialDraft,
+          imageAttacher: attacher,
+          pasteImages: pasteAsFiles,
+          attention: attention,
+          hostId: host.id,
+          onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
+              ? null
+              : () => showCompanionSetup(routeContext, host),
+          onEnableMonitoring: attention.monitoringEnabled(host)
+              ? null
+              : () => attention.enableMonitoring(host),
+          onOpenTerminal: () {
+            toTerminal = true;
+            Navigator.of(routeContext).pop();
+          },
+        );
+      },
     ),
   );
   changes.dispose();

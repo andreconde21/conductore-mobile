@@ -75,6 +75,7 @@ import 'package:conduit/features/terminal/data/secure_recent_directories_store.d
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
+import 'package:conduit/features/terminal/presentation/prompt_image_scope.dart';
 import 'package:conduit/features/terminal/presentation/recent_directories_controller.dart';
 import 'package:conduit/features/terminal/presentation/recent_directory_tracker.dart';
 import 'package:conduit/features/terminal/presentation/terminal_background_keepalive.dart';
@@ -758,6 +759,17 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     );
   }
 
+  /// Prompt images (attach, paste) for Chat Views opened from anywhere.
+  Widget _wrapPromptImageScope(Widget app) => PromptImageScope(
+    attacherFor: (host, context) => sftpPromptImageAttacher(
+      repository: widget.sftpRepository,
+      host: host,
+      context: context,
+    ),
+    pasteImages: () => widget.themeController.pasteImagesAsFiles,
+    child: app,
+  );
+
   Widget _wrapShareTargetScope(Widget app) {
     final shareTarget = widget.shareTarget;
     if (shareTarget == null) {
@@ -840,14 +852,16 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
             // terminal page) can read the share-target controller. The lock
             // covers every route, so locking again after the app was away
             // hides a terminal or dialog left open.
-            return _wrapShareTargetScope(
-              AppLockGate(
-                controller: widget.lockController,
-                lockPage: (_) => LockPage(
+            return _wrapPromptImageScope(
+              _wrapShareTargetScope(
+                AppLockGate(
                   controller: widget.lockController,
-                  themeController: widget.themeController,
+                  lockPage: (_) => LockPage(
+                    controller: widget.lockController,
+                    themeController: widget.themeController,
+                  ),
+                  child: content,
                 ),
-                child: content,
               ),
             );
           },
