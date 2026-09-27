@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
 
-final _desktops = TargetPlatformVariant({
+const _desktops = TargetPlatformVariant({
   TargetPlatform.linux,
   TargetPlatform.windows,
   TargetPlatform.macOS,

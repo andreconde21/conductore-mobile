@@ -13,6 +13,7 @@ import 'package:conduit/features/sessions/data/remote_session_lister.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -106,6 +107,9 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
   late bool _remember = widget.preferences.rememberChoice;
   late final RemoteSessionLister _lister = RemoteSessionLister(widget.runner);
 
+  /// The desktop filter: only rows whose name contains it (any case).
+  String _query = '';
+
   Future<RemoteListing<TmuxSessionInfo>>? _tmux;
   Future<RemoteListing<HerdrWorkspaceInfo>>? _herdr;
 
@@ -126,6 +130,30 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
       _tmux = _lister.listTmux();
       _herdr = _lister.listHerdr();
     });
+  }
+
+  bool _matches(Iterable<String> texts) {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    return texts.any((text) => text.toLowerCase().contains(query));
+  }
+
+  /// Desktop: Ctrl+1/2/3 (Cmd on macOS) switch between the tabs.
+  Map<ShortcutActivator, VoidCallback> get _tabShortcuts {
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    return {
+      for (final (index, tab) in ConnectPickerTab.values.indexed)
+        SingleActivator(
+          [
+            LogicalKeyboardKey.digit1,
+            LogicalKeyboardKey.digit2,
+            LogicalKeyboardKey.digit3,
+          ][index],
+          control: !mac,
+          meta: mac,
+        ): () =>
+            setState(() => _tab = tab),
+    };
   }
 
   void _pick(ConnectTarget target) {
@@ -153,7 +181,8 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
     final bottomInset = shouldApplyBottomSafeArea(context)
         ? MediaQuery.viewPaddingOf(context).bottom
         : 0.0;
-    return Column(
+    final desktop = useDesktopModals(context);
+    final column = Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
@@ -260,6 +289,19 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
             ],
           ),
         ),
+        if (desktop)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              key: const ValueKey('connect-picker-filter'),
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.search_rounded, size: 18),
+                hintText: 'Filter',
+              ),
+              onChanged: (value) => setState(() => _query = value),
+            ),
+          ),
         const Divider(height: 1),
         Expanded(
           child: ListView(
@@ -274,6 +316,8 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
         ),
       ],
     );
+    if (!desktop) return column;
+    return CallbackShortcuts(bindings: _tabShortcuts, child: column);
   }
 
   List<Widget> _buildTmux() {
@@ -317,18 +361,19 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                     : Column(
                         children: [
                           for (final session in items)
-                            _TargetTile(
-                              title: session.name,
-                              subtitle: _tmuxSubtitle(session),
-                              active: widget.activeTargetKeys.contains(
-                                ConnectTarget.tmux(session.name).key,
+                            if (_matches([session.name]))
+                              _TargetTile(
+                                title: session.name,
+                                subtitle: _tmuxSubtitle(session),
+                                active: widget.activeTargetKeys.contains(
+                                  ConnectTarget.tmux(session.name).key,
+                                ),
+                                trailingLabel: session.isAttached
+                                    ? 'Attached'
+                                    : null,
+                                onTap: () =>
+                                    _pick(ConnectTarget.tmux(session.name)),
                               ),
-                              trailingLabel: session.isAttached
-                                  ? 'Attached'
-                                  : null,
-                              onTap: () =>
-                                  _pick(ConnectTarget.tmux(session.name)),
-                            ),
                         ],
                       ),
             };
@@ -414,7 +459,14 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                     )
                   : Column(
                       children: [
-                        for (final workspace in items) ...[
+                        for (final workspace in items.where(
+                          (workspace) => _matches([
+                            workspace.displayLabel,
+                            for (final (position, tab)
+                                in workspace.tabs.indexed)
+                              tab.displayLabel(position + 1),
+                          ]),
+                        )) ...[
                           _TargetTile(
                             key: ValueKey(
                               'herdr-workspace-${workspace.session}:'
@@ -508,20 +560,21 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
     }
     return [
       for (final target in recents)
-        _TargetTile(
-          title: target.title,
-          subtitle: switch (target.kind) {
-            ConnectTargetKind.tmux => 'tmux session',
-            ConnectTargetKind.herdr =>
-              target.tabId.isEmpty
-                  ? 'Herdr workspace ${target.name}'
-                  : 'Herdr tab ${target.tabId}',
-            ConnectTargetKind.shell => 'Plain shell',
-            ConnectTargetKind.directory => target.name,
-          },
-          active: widget.activeTargetKeys.contains(target.key),
-          onTap: () => _pick(target),
-        ),
+        if (_matches([target.title, target.name]))
+          _TargetTile(
+            title: target.title,
+            subtitle: switch (target.kind) {
+              ConnectTargetKind.tmux => 'tmux session',
+              ConnectTargetKind.herdr =>
+                target.tabId.isEmpty
+                    ? 'Herdr workspace ${target.name}'
+                    : 'Herdr tab ${target.tabId}',
+              ConnectTargetKind.shell => 'Plain shell',
+              ConnectTargetKind.directory => target.name,
+            },
+            active: widget.activeTargetKeys.contains(target.key),
+            onTap: () => _pick(target),
+          ),
       if (directories.isNotEmpty) ...[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -535,14 +588,15 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
           ),
         ),
         for (final directory in directories)
-          _TargetTile(
-            title: ConnectTarget.directory(directory).title,
-            subtitle: directory,
-            active: widget.activeTargetKeys.contains(
-              ConnectTarget.directory(directory).key,
+          if (_matches([directory]))
+            _TargetTile(
+              title: ConnectTarget.directory(directory).title,
+              subtitle: directory,
+              active: widget.activeTargetKeys.contains(
+                ConnectTarget.directory(directory).key,
+              ),
+              onTap: () => _pick(ConnectTarget.directory(directory)),
             ),
-            onTap: () => _pick(ConnectTarget.directory(directory)),
-          ),
       ],
     ];
   }
