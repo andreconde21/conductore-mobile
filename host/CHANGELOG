@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: the prompt relay (`send`, `interrupt`, `focus`) works for an agent in a named (non-default) Herdr session. The hook passes `$HERDR_SOCKET_PATH`, the daemon records it as the agent's `herdr.socket`, and every herdr command for that agent (the M18 `pane list` check, `agent prompt`, `pane send-text` / `send-keys`, `agent focus`, and the location lookup) goes to that server. Records without it use the default server, as before, and are still checked pane by pane.
+
 ## 0.8.0 (2026-09-27)
 
 - feat: `guide [--timeout-ms 15000]`: the phone's voice guide. `{utterance, context}` JSON on stdin (32 KB max; short ids and labels of machines, projects, agents, pending requests and the screen, never transcripts), one action out of a closed list on stdout (`open`, `chat`, `terminal`, `approve`, `deny`, `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`) with a short sentence to speak, or `error` (claude-missing, not-logged-in, timeout, busy, failed); exit 0.

@@ -23,9 +23,12 @@ printf '%s\n' "$*" >> '${tmuxLog}'
 printf 'main\t2\t%s\t/work/t\tfixer\t4242\n' "$6"
 `, { mode: 0o755 })
 // A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9.
+// It also logs which Herdr server (HERDR_SOCKET_PATH) each call went to.
 const herdrLog = path.join(fakeBin, 'herdr.log')
+const herdrSocketLog = path.join(fakeBin, 'herdr-sockets.log')
 fs.writeFileSync(path.join(fakeBin, 'herdr'), `#!/bin/sh
 printf '%s\n' "$*" >> '${herdrLog}'
+printf '%s\n' "\${HERDR_SOCKET_PATH:-default}" >> '${herdrSocketLog}'
 [ "$1 $2" = "pane list" ] || exit 1
 cat <<'JSON'
 {"id":"cli:pane:list","result":{"type":"pane_list","panes":[
@@ -151,8 +154,22 @@ test('tmux location is resolved by the daemon from the variables in the spool he
   // Herdr comes straight from the header.
   await hook(ev('t2', 'SessionStart'), { HERDR_WORKSPACE_ID: 'w1', HERDR_TAB_ID: 'w1:t1', HERDR_PANE_ID: 'w1:p1', HERDR_AGENT_NAME: 'rev' })
   const b = (await status()).agents.find(a => a.sessionId === 't2')
-  assert.deepEqual(b.herdr, { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p1', name: 'rev' })
+  assert.deepEqual(b.herdr, { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p1', name: 'rev', socket: null })
   assert.equal(b.name, 'rev')
+})
+
+test("an agent in a named Herdr session records that session's socket", async () => {
+  const sock = path.join(home, 'herdr-other.sock')
+  await hook(ev('t3', 'SessionStart'), { HERDR_WORKSPACE_ID: 'w1', HERDR_TAB_ID: 'w1:t1', HERDR_PANE_ID: 'w1:p1', HERDR_SOCKET_PATH: sock })
+  const a = (await status()).agents.find(a => a.sessionId === 't3')
+  assert.deepEqual(a.herdr, { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p1', name: null, socket: sock })
+
+  // Only the pane id known: its location is asked of that session's server.
+  fs.writeFileSync(herdrSocketLog, '')
+  await hook(ev('t4', 'SessionStart'), { HERDR_PANE_ID: 'w3:p9', HERDR_SOCKET_PATH: sock })
+  const b = (await status()).agents.find(a => a.sessionId === 't4')
+  assert.deepEqual(b.herdr, { workspaceId: 'w3', tabId: 'w3:t4', paneId: 'w3:p9', name: null, socket: sock })
+  assert.equal(fs.readFileSync(herdrSocketLog, 'utf8'), `${sock}\n`)
 })
 
 test('Herdr location without HERDR_* comes from one cached `herdr pane list`, never from the cwd', async () => {
@@ -169,8 +186,8 @@ test('Herdr location without HERDR_* comes from one cached `herdr pane list`, ne
   }
   const agents = (await status()).agents
   const byId = id => agents.find(a => a.sessionId === id)
-  assert.deepEqual(byId('h1').herdr, { workspaceId: 'w3', tabId: 'w3:t2', paneId: 'w3:p2', name: null })
-  assert.deepEqual(byId('h2').herdr, { workspaceId: 'w3', tabId: 'w3:t4', paneId: 'w3:p9', name: null })
+  assert.deepEqual(byId('h1').herdr, { workspaceId: 'w3', tabId: 'w3:t2', paneId: 'w3:p2', name: null, socket: null })
+  assert.deepEqual(byId('h2').herdr, { workspaceId: 'w3', tabId: 'w3:t4', paneId: 'w3:p9', name: null, socket: null })
   assert.equal(byId('n1').herdr, null)
   assert.equal(byId('h1').name, 'h1') // cwd basename is a name, not a location
   // Nine events, at most one herdr call (none if an earlier test's list is still cached).
