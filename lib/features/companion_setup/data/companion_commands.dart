@@ -26,7 +26,7 @@ abstract final class CompanionCommands {
     final inner =
         'PATH="${remoteToolExtraPathDirs.join(':')}:\$PATH"; export PATH; '
         '$script';
-    return "sh -c '${inner.replaceAll("'", "'\\''")}'";
+    return 'sh -c ${shellQuoteArgument(inner)}';
   }
 
   /// `mkdir -p` for the upload directories.

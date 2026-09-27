@@ -1,5 +1,6 @@
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
@@ -325,12 +326,7 @@ abstract final class HerdrNavigator {
     }
   }
 
-  static String _quote(String value) {
-    if (RegExp(r'^[A-Za-z0-9._:\-]+$').hasMatch(value)) {
-      return value;
-    }
-    return "'${value.replaceAll("'", "'\\''")}'";
-  }
+  static String _quote(String value) => shellQuoteArgument(value);
 }
 
 /// Last pane listing per host, so the navigator opens with something to

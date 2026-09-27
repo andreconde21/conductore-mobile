@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
@@ -108,7 +109,10 @@ class MoshTerminalRepository implements SshTerminalRepository {
       '$moshServerTimeoutEnv ${_bootstrapFor(host).command()}';
 
   Future<MoshServerConfig> _bootstrap(SSHClient client, SavedHost host) async {
-    final session = await client.execute(bootstrapCommand(host));
+    // Through sh, so the `VAR=value cmd` prefix works under any login shell.
+    final session = await client.execute(
+      posixShellCommand(bootstrapCommand(host)),
+    );
     final output = StringBuffer();
 
     Future<void> drain(Stream<List<int>> stream) => stream.forEach(

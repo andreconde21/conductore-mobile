@@ -6,6 +6,7 @@ import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
@@ -670,9 +671,8 @@ class TerminalSessionController extends ChangeNotifier {
 
   static final _unquotedPath = RegExp(r'^[A-Za-z0-9_~./:=+-]+$');
 
-  static String _shellQuote(String value) => _unquotedPath.hasMatch(value)
-      ? value
-      : "'${value.replaceAll("'", r"'\''")}'";
+  static String _shellQuote(String value) =>
+      _unquotedPath.hasMatch(value) ? value : shellQuoteArgument(value);
 
   void _configureTerminal() {
     terminal.inputHandler = keyboard;

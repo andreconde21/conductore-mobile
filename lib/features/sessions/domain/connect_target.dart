@@ -1,3 +1,4 @@
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 
 /// What a terminal session should attach to once the shell is up.
@@ -276,8 +277,10 @@ class ConnectTarget {
 
   static final _unquoted = RegExp(r'^[A-Za-z0-9_~./:=+-]+$');
 
+  /// Typed into the login shell, which may be fish: see
+  /// [shellQuoteArgument].
   static String shellQuote(String value) =>
-      _unquoted.hasMatch(value) ? value : "'${value.replaceAll("'", r"'\''")}'";
+      _unquoted.hasMatch(value) ? value : shellQuoteArgument(value);
 
   @override
   bool operator ==(Object other) {
