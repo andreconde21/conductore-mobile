@@ -103,6 +103,7 @@ bool _homeWidget(SettingsServices _) => PlatformFeatures.homeWidget;
 bool _backup(SettingsServices s) => s.backupService != null;
 bool _machines(SettingsServices s) => s.hostsController != null;
 bool _usage(SettingsServices s) => s.agentAttention != null;
+bool _digest(SettingsServices s) => s.digest != null;
 bool _trustedKeys(SettingsServices s) => s.hostKeyVerifier != null;
 bool _lock(SettingsServices s) => s.onLockNow != null;
 bool _sessionViews(SettingsServices s) => s.hasSessionViews;
@@ -340,7 +341,7 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.agents,
     'Dashboard',
     keywords: ['digest', 'summaries', 'stuck', 'catch up', 'while away'],
-    availableWhen: _usage,
+    availableWhen: _digest,
   ),
   SettingsEntry(
     SettingsSection.agents,

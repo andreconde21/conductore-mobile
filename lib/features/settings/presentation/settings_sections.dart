@@ -8,7 +8,6 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
-import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_settings.dart';
 import 'package:conduit/features/app_lock/domain/app_lock_preferences.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
@@ -421,7 +420,7 @@ class SettingsSectionBody extends StatelessWidget {
             );
           },
         ),
-      if (DigestScope.maybeOf(context) case final digest?) ...[
+      if (services.digest case final digest?) ...[
         _gap,
         const SettingsHeading('Dashboard'),
         const SettingsNote(

@@ -1352,6 +1352,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       hostsController: widget.hostsController,
       hostKeyVerifier: widget.hostKeyVerifier,
       agentAttention: widget.agentAttention,
+      digest: DigestScope.maybeOf(context),
       onLockNow: _lock,
     ),
   );

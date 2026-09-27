@@ -449,6 +449,7 @@ void main() {
     hostsController: hostsController,
     hostKeyVerifier: hostKeyVerifier,
     agentAttention: agentAttention,
+    digest: digest,
     appLock: PlatformFeatures.appLock ? lockController : null,
     onLockNow: () async {
       // Locking closes every session; unlocking brings them back.

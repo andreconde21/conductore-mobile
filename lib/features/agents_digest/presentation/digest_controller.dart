@@ -250,8 +250,13 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
         final opened = _openedAt;
         _openSince = null;
         _openedAt = null;
+        // Views detach while the tree is torn down: not in this frame.
         if (opened != null && !_disposed) {
-          unawaited(_save(_preferences.copyWith(lastSeen: opened)));
+          scheduleMicrotask(() {
+            if (!_disposed) {
+              unawaited(_save(_preferences.copyWith(lastSeen: opened)));
+            }
+          });
         }
       }
     };
