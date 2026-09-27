@@ -27,6 +27,10 @@ enum ShareTargetPhase {
   failed,
 }
 
+/// Takes a delivered draft for [hostId] straight into an open composer
+/// (Chat View); false leaves it to the terminal page.
+typedef ShareDraftReceiver = bool Function(String hostId, String draft);
+
 /// Drives a shared payload from the Android share sheet into a session's
 /// Chat composer.
 ///
@@ -59,12 +63,24 @@ class ShareTargetController extends ChangeNotifier {
   TerminalSessionController? _lastTarget;
   String? _readyHostId;
   final Map<String, String> _drafts = {};
+  final List<ShareDraftReceiver> _receivers = [];
   bool _disposed = false;
+  bool _canRetry = true;
+
+  /// Bumped when an upload is cancelled, so its late result is ignored.
+  int _attempt = 0;
 
   SharedPayload? get pending => _pending;
   ShareTargetPhase get phase => _phase;
   String? get error => _error;
   ShareUploadProgress? get progress => _progress;
+
+  /// Whether [retry] can help after a failure: not when the shared file
+  /// itself is gone from the phone.
+  bool get canRetry => _canRetry;
+
+  /// The machine the current (or failed) upload goes to.
+  String? get targetName => _lastTarget?.host.name;
 
   /// Whether a terminal page is on screen to receive drafts.
   bool get terminalPageAttached => _attachedTerminalPages > 0;
@@ -80,7 +96,11 @@ class ShareTargetController extends ChangeNotifier {
   /// Accepts a payload. A share arriving while one is parked merges into it
   /// so nothing the user sent is lost.
   void receive(SharedPayload payload) {
-    if (_disposed || payload.isEmpty) {
+    if (_disposed) {
+      return;
+    }
+    if (payload.isEmpty) {
+      if (payload.unreadable.isNotEmpty) _failUnreadable(payload.unreadable);
       return;
     }
     final current = _pending;
@@ -104,6 +124,7 @@ class ShareTargetController extends ChangeNotifier {
       _pending = payload;
     }
     _error = null;
+    _canRetry = true;
     if (_phase == ShareTargetPhase.failed ||
         _phase == ShareTargetPhase.choosingSession) {
       _phase = ShareTargetPhase.idle;
@@ -132,16 +153,27 @@ class ShareTargetController extends ChangeNotifier {
     }
   }
 
-  /// Uploads the pending files (if any) to [session]'s host and stores the
-  /// composer draft for it.
+  /// Registers an open composer that takes delivered drafts for its own
+  /// host; the latest registered is asked first.
+  void addDraftReceiver(ShareDraftReceiver receiver) =>
+      _receivers.add(receiver);
+
+  void removeDraftReceiver(ShareDraftReceiver receiver) =>
+      _receivers.remove(receiver);
+
+  /// Uploads the pending files (if any) to [session]'s host and hands the
+  /// composer draft to an open Chat View of that host, else stores it for
+  /// the terminal page.
   Future<void> deliverTo(TerminalSessionController session) async {
     final payload = _pending;
     if (payload == null || _phase == ShareTargetPhase.uploading) {
       return;
     }
+    final attempt = ++_attempt;
     _lastTarget = session;
     _phase = ShareTargetPhase.uploading;
     _error = null;
+    _canRetry = true;
     _progress = null;
     notifyListeners();
     List<String> remotePaths;
@@ -150,43 +182,90 @@ class ShareTargetController extends ChangeNotifier {
         session.host,
         payload.files,
         onProgress: (progress) {
+          if (_disposed || attempt != _attempt) return;
           _progress = progress;
-          if (!_disposed) {
-            notifyListeners();
-          }
+          notifyListeners();
         },
       );
     } catch (error) {
-      if (_disposed) {
+      if (_disposed || attempt != _attempt) {
         return;
       }
       _phase = ShareTargetPhase.failed;
-      _error = error is AppFailure ? error.message : 'Upload failed.';
+      _error = switch (error) {
+        AppFailure() => error.userMessage,
+        TimeoutException() =>
+          '${session.host.name} did not answer in time. Check the '
+              'connection and retry.',
+        _ => 'Upload failed: $error',
+      };
+      _canRetry = error is! ShareFileUnavailable;
       _progress = null;
       notifyListeners();
       return;
     }
-    if (_disposed) {
+    if (_disposed || attempt != _attempt) {
       return;
     }
     final hostId = session.host.id;
     final draft = buildShareDraft(text: payload.text, remotePaths: remotePaths);
-    _drafts[hostId] = mergeShareDraft(_drafts[hostId] ?? '', draft);
     _pending = null;
     _progress = null;
     _phase = ShareTargetPhase.idle;
-    _readyHostId = hostId;
     if (_workspace.sessions.contains(session)) {
       _workspace.activate(session);
+    }
+    if (!_offerToReceivers(hostId, draft)) {
+      _drafts[hostId] = mergeShareDraft(_drafts[hostId] ?? '', draft);
+      _readyHostId = hostId;
     }
     notifyListeners();
     _drainQueue();
   }
 
+  bool _offerToReceivers(String hostId, String draft) {
+    for (final receiver in _receivers.reversed.toList()) {
+      if (receiver(hostId, draft)) return true;
+    }
+    return false;
+  }
+
+  /// Gives up on the running upload (the progress dialog's Cancel): the
+  /// share is kept, failed, for Retry or Discard. A late result of the
+  /// abandoned upload is ignored.
+  void cancel() {
+    if (_phase != ShareTargetPhase.uploading) {
+      return;
+    }
+    _attempt += 1;
+    _phase = ShareTargetPhase.failed;
+    _error = 'The upload was cancelled.';
+    _canRetry = true;
+    _progress = null;
+    notifyListeners();
+  }
+
+  /// Nothing of a share could be read on arrival: say so rather than
+  /// dropping it silently. Only Discard is offered.
+  void _failUnreadable(List<String> names) {
+    if (_phase == ShareTargetPhase.uploading || _pending != null) {
+      return;
+    }
+    _pending = const SharedPayload();
+    _phase = ShareTargetPhase.failed;
+    _canRetry = false;
+    _error = names.length == 1
+        ? 'Could not read ${names.single} from the app that shared it. '
+              'Share it again.'
+        : 'Could not read the ${names.length} shared files from the app '
+              'that shared them. Share them again.';
+    notifyListeners();
+  }
+
   /// Retries the failed delivery against the same session when it is still
   /// open; otherwise re-runs session selection.
   Future<void> retry() async {
-    if (_phase != ShareTargetPhase.failed) {
+    if (_phase != ShareTargetPhase.failed || !_canRetry) {
       return;
     }
     final target = _lastTarget;
@@ -204,6 +283,7 @@ class ShareTargetController extends ChangeNotifier {
     _pending = null;
     _phase = ShareTargetPhase.idle;
     _error = null;
+    _canRetry = true;
     _progress = null;
     notifyListeners();
     if (payload != null) {
@@ -269,12 +349,13 @@ class ShareTargetController extends ChangeNotifier {
     // share).
     final confirm = _pending!.files.isNotEmpty;
     if (_phase == ShareTargetPhase.waitingForSession) {
-      // Parked until something connects: deliver to a lone connected
-      // session, ask when several are up, keep waiting otherwise.
+      // Parked until something connects: deliver text to a lone connected
+      // session, ask when several are up or files are to be confirmed,
+      // keep waiting otherwise.
       final connected = sessions.where((s) => s.isConnected).toList();
       if (connected.length == 1 && !confirm) {
         unawaited(deliverTo(connected.first));
-      } else if (connected.length > 1) {
+      } else if (connected.length > 1 || (connected.isNotEmpty && confirm)) {
         _setPhase(ShareTargetPhase.choosingSession);
       }
       return;
@@ -311,6 +392,7 @@ class ShareTargetController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _workspace.removeListener(_handleWorkspaceChanged);
+    _receivers.clear();
     unawaited(_subscription?.cancel());
     super.dispose();
   }

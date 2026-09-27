@@ -311,13 +311,16 @@ void main() {
       uploader: SftpShareUploader(ThrowingSftpRepository()),
     );
     unawaited(controller.start());
+    final temp = Directory.systemTemp.createTempSync('conductore-share');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final cached = File('${temp.path}/file.bin')..writeAsBytesSync([1]);
     await openSession(tester, 'a');
     await pumpHost(tester);
 
     await share(
       tester,
-      const SharedPayload(
-        files: [SharedFile(path: '/nope/file.bin', name: 'file.bin')],
+      SharedPayload(
+        files: [SharedFile(path: cached.path, name: 'file.bin', size: 1)],
       ),
     );
     await confirmUpload(tester, 'Host a');
@@ -337,14 +340,17 @@ void main() {
   testWidgets('local shells receive the cached path without an upload', (
     tester,
   ) async {
+    final temp = Directory.systemTemp.createTempSync('conductore-share');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final cached = File('${temp.path}/a.txt')..writeAsStringSync('a');
     workspace.open(SavedHost.localShell(id: 'local-1', name: 'Local'));
     await tester.runAsync(workspace.sessions.single.connect);
     await pumpHost(tester);
 
     await share(
       tester,
-      const SharedPayload(
-        files: [SharedFile(path: '/data/cache/shared/1/a.txt', name: 'a.txt')],
+      SharedPayload(
+        files: [SharedFile(path: cached.path, name: 'a.txt')],
       ),
     );
     await confirmUpload(tester, 'Local');
@@ -352,7 +358,7 @@ void main() {
 
     expect(sftpSession.writtenFiles, isEmpty);
     // Once in the inline bar's draft, once in the composer sheet.
-    expect(find.text('/data/cache/shared/1/a.txt'), findsNWidgets(2));
+    expect(find.text(cached.path), findsNWidgets(2));
   });
 
   testWidgets('dismissing the upload picker uploads nothing', (tester) async {
