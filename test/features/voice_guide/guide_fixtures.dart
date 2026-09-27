@@ -178,3 +178,30 @@ String agentIdFor(Map<String, Object?> context, String project) {
   return list('agents').firstWhere((a) => a['project'] == projectId)['id']!
       as String;
 }
+
+class FakeAccounts implements GuideAccounts {
+  @override
+  bool available = true;
+  final switched = <String>[];
+
+  @override
+  List<GuideAccount> get accounts => const [
+    GuideAccount(
+      label: 'Work',
+      targets: [
+        (hostId: 'vtm', hostName: 'VTM', slot: 2),
+        (hostId: 'laptop', hostName: 'Laptop', slot: 1),
+      ],
+    ),
+    GuideAccount(label: 'Personal', active: true),
+  ];
+
+  @override
+  Future<List<GuideAccountSwitch>> switchTo(GuideAccount account) async {
+    switched.add(account.label);
+    return [
+      for (final t in account.targets)
+        (hostName: t.hostName, ok: true, error: null),
+    ];
+  }
+}

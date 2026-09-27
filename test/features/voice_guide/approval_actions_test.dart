@@ -24,6 +24,7 @@ void main() {
       riskOf: (_, request) =>
           request.id == rmRf.id ? ApprovalRisk.high : ApprovalRisk.low,
       decide: (_, _, _) async {},
+      supportedOn: (hostId) => hostId == 'vtm',
       supported: () => true,
       approveLow: (targets) async {
         batched.addAll(targets.map((t) => t.request.id));
@@ -45,5 +46,15 @@ void main() {
     );
     await actions.trust('vtm', npmTest, const Duration(minutes: 5));
     expect(trusted, ['req-npm']);
+    // A machine without the capability: nothing batched or trusted there.
+    expect(actions.canTrust('old'), isFalse);
+    expect(
+      await actions.approveAllSafe([(hostId: 'old', request: npmTest)]),
+      0,
+    );
+    expect(
+      () => actions.trust('old', npmTest, const Duration(minutes: 5)),
+      throwsUnsupportedError,
+    );
   });
 }

@@ -25,3 +25,37 @@ abstract class GuideMessenger {
 
 /// Spoken usage: the Claude limits, or null when nothing is known.
 typedef GuideUsageText = String? Function(String languageCode);
+
+/// One Claude account (cswap) across machines, as the guide names it.
+class GuideAccount {
+  const GuideAccount({
+    required this.label,
+    this.active = false,
+    this.targets = const [],
+  });
+
+  /// Alias or masked email, as the companion reports it.
+  final String label;
+
+  /// New Claude sessions use it on some machine already.
+  final bool active;
+
+  /// Machines where it can be made the active account.
+  final List<({String hostId, String hostName, int slot})> targets;
+}
+
+/// What switching did on one machine.
+typedef GuideAccountSwitch = ({String hostName, bool ok, String? error});
+
+/// Claude account switching (the companion's `cswap-switch`), where a
+/// machine reports cswap.
+abstract class GuideAccounts {
+  /// Some machine can switch accounts.
+  bool get available;
+
+  List<GuideAccount> get accounts;
+
+  /// Makes [account] the one new Claude sessions use on every machine in
+  /// its targets.
+  Future<List<GuideAccountSwitch>> switchTo(GuideAccount account);
+}

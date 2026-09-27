@@ -202,36 +202,40 @@ void main() {
     expect(find.byKey(const ValueKey('home-voice-guide')), findsNothing);
   });
 
-  testWidgets('settings: turning options on saves them', (tester) async {
-    final theme = ThemeController(InMemoryThemePreferences());
-    await theme.load();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ListenableBuilder(
-            listenable: theme,
-            builder: (context, _) =>
-                ListView(children: [GuideSettingsControls(theme: theme)]),
+  testWidgets(
+    'settings: turning options on saves them',
+    (tester) async {
+      final theme = ThemeController(InMemoryThemePreferences());
+      await theme.load();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: theme,
+              builder: (context, _) =>
+                  ListView(children: [GuideSettingsControls(theme: theme)]),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.tap(find.byKey(const ValueKey('guide-headset')));
-    await tester.pumpAndSettle();
-    expect(theme.voice.guide.headsetWake, isTrue);
-    await tester.tap(find.text(GuideConfirm.skipLowRisk.label));
-    await tester.pumpAndSettle();
-    expect(theme.voice.guide.confirm, GuideConfirm.skipLowRisk);
-    await tester.tap(find.byKey(const ValueKey('guide-language')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Português (Portugal)'));
-    await tester.pumpAndSettle();
-    expect(theme.voice.guide.language, 'pt-PT');
-    await tester.tap(find.byKey(const ValueKey('guide-enabled')));
-    await tester.pumpAndSettle();
-    expect(theme.voice.guide.enabled, isFalse);
-    expect(find.byKey(const ValueKey('guide-headset')), findsNothing);
-  });
+      );
+      await tester.tap(find.byKey(const ValueKey('guide-headset')));
+      await tester.pumpAndSettle();
+      expect(theme.voice.guide.headsetWake, isTrue);
+      await tester.tap(find.text(GuideConfirm.skipLowRisk.label));
+      await tester.pumpAndSettle();
+      expect(theme.voice.guide.confirm, GuideConfirm.skipLowRisk);
+      await tester.tap(find.byKey(const ValueKey('guide-language')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Português (Portugal)'));
+      await tester.pumpAndSettle();
+      expect(theme.voice.guide.language, 'pt-PT');
+      await tester.tap(find.byKey(const ValueKey('guide-enabled')));
+      await tester.pumpAndSettle();
+      expect(theme.voice.guide.enabled, isFalse);
+      expect(find.byKey(const ValueKey('guide-headset')), findsNothing);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
 
   testWidgets('the overlay shows what was heard and stops the guide', (
     tester,

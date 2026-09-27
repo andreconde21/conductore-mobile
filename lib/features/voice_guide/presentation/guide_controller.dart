@@ -78,6 +78,7 @@ class GuideController extends ChangeNotifier {
     required this.speechLanguage,
     this.brain,
     this.usage,
+    this.accounts,
     this.locked,
     this.afterSpeechPause = const Duration(milliseconds: 400),
     this.retryDelay = const Duration(milliseconds: 1500),
@@ -110,6 +111,9 @@ class GuideController extends ChangeNotifier {
   /// Null: only the phone's own phrases work.
   final GuideBrain? brain;
   final GuideUsageText? usage;
+
+  /// Claude account switching; null (or not available) says so.
+  final GuideAccounts? accounts;
 
   /// True while the app is locked: the guide does nothing then.
   final bool Function()? locked;
@@ -470,8 +474,8 @@ class GuideController extends ChangeNotifier {
         return usage?.call(s.code) ?? s.noUsage;
       case GuideSay(:final text):
         return text;
-      case GuideSwitchAccount():
-        return s.notAvailableAccounts;
+      case GuideSwitchAccount(:final account):
+        return _switchAccount(account, s, confirmed: confirmed != null);
       case GuideOpen(:final target):
         return _open(target, now, s);
       case GuideShowChat(:final target):
@@ -648,6 +652,7 @@ class GuideController extends ChangeNotifier {
   }) async {
     if (!approvals.supportsApproveAllSafe) return s.notAvailableApproveAll;
     bool safe(GuidePending p) =>
+        approvals.canBatch(p.hostId) &&
         approvals.riskOf(p.hostId, p.request) == ApprovalRisk.low;
     if (confirmed == null) {
       final targets = [
@@ -692,6 +697,7 @@ class GuideController extends ChangeNotifier {
       if (agent.pending.isEmpty) return s.nothingToTrust(agent.label);
       pending = GuidePending(agent, agent.pending.first);
     }
+    if (!approvals.canTrust(pending.hostId)) return s.notAvailableTrust;
     if (approvals.riskOf(pending.hostId, pending.request) ==
         ApprovalRisk.high) {
       return s.trustHighRisk;
@@ -713,6 +719,56 @@ class GuideController extends ChangeNotifier {
       Duration(minutes: minutes),
     );
     return s.trusted(pending.agent.label, minutes);
+  }
+
+  Future<String?> _switchAccount(
+    String name,
+    GuideStrings s, {
+    required bool confirmed,
+  }) async {
+    final accounts = this.accounts;
+    if (accounts == null || !accounts.available) return s.notAvailableAccounts;
+    final all = accounts.accounts;
+    var best = 0;
+    final matches = <GuideAccount>[];
+    for (final account in all) {
+      final score = GuideResolver.matchScore(name, account.label);
+      if (score == 0 || score < best) continue;
+      if (score > best) {
+        best = score;
+        matches.clear();
+      }
+      matches.add(account);
+    }
+    if (matches.isEmpty) {
+      return s.accountNotFound(name, [for (final a in all) a.label]);
+    }
+    if (matches.length > 1) {
+      return s.accountAmbiguous([for (final a in matches) a.label]);
+    }
+    final account = matches.single;
+    if (account.targets.isEmpty) {
+      return account.active
+          ? s.accountAlreadyActive(account.label)
+          : s.accountCannotSwitch(account.label);
+    }
+    final machines = [for (final t in account.targets) t.hostName];
+    if (!confirmed) {
+      // The exact label, so yes switches to this account and no other.
+      return _ask(
+        s.confirmAccount(account.label, machines),
+        _Confirm(GuideSwitchAccount(account.label)),
+      );
+    }
+    final results = await accounts.switchTo(account);
+    final failed = [
+      for (final r in results)
+        if (!r.ok) r,
+    ];
+    if (failed.isEmpty) return s.accountSwitched(account.label, machines);
+    return s.failed(
+      failed.map((r) => '${r.hostName}: ${r.error ?? 'no reply'}').join('; '),
+    );
   }
 
   Future<String?> _send(

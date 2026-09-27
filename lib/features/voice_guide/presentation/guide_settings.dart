@@ -5,6 +5,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/voice/domain/speech_languages.dart';
 import 'package:conduit/features/voice_guide/domain/guide_preferences.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Settings › Chat & Voice › Voice guide.
@@ -38,7 +39,7 @@ class GuideSettingsControls extends StatelessWidget {
               'Talk to all your agents hands-free: "what\'s waiting", "open '
               'api", "approve", "tell web to run the tests". Start it with '
               'the headset-mic button at the top of home, a long press on Talk in '
-              'Chat View, or the Voice guide quick-settings tile.',
+              'Chat View, or (Android) the Voice guide quick-settings tile.',
           value: prefs.enabled,
           onChanged: (value) => _set(prefs.copyWith(enabled: value)),
         ),
@@ -89,19 +90,22 @@ class GuideSettingsControls extends StatelessWidget {
               onTap: () => unawaited(_pickLanguage(context)),
             ),
           ),
-          _gap,
-          SettingsSwitchCard(
-            switchKey: const ValueKey('guide-headset'),
-            icon: Icons.headphones_outlined,
-            title: 'Wake with headset button',
-            subtitle:
-                'Long-press the headset\'s play button, or its assistant '
-                'button (Android asks once which app to use), to start the '
-                'guide. The play button works while no music app has '
-                'played since.',
-            value: prefs.headsetWake,
-            onChanged: (value) => _set(prefs.copyWith(headsetWake: value)),
-          ),
+          // The headset routes and the tile are Android's (GuideWakeBridge).
+          if (defaultTargetPlatform == TargetPlatform.android) ...[
+            _gap,
+            SettingsSwitchCard(
+              switchKey: const ValueKey('guide-headset'),
+              icon: Icons.headphones_outlined,
+              title: 'Wake with headset button',
+              subtitle:
+                  'Long-press the headset\'s play button, or its assistant '
+                  'button (Android asks once which app to use), to start the '
+                  'guide. The play button works while no music app has '
+                  'played since.',
+              value: prefs.headsetWake,
+              onChanged: (value) => _set(prefs.copyWith(headsetWake: value)),
+            ),
+          ],
         ],
       ],
     );

@@ -413,6 +413,7 @@ void main() {
         runnerFor: agentAttention.runnerFor,
       ),
       usage: (code) => guideUsageText(usage.summary, code),
+      accounts: UsageGuideAccounts(usage),
       locked: () => !lockController.isUnlocked,
     );
   }

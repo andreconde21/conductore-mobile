@@ -35,6 +35,7 @@ void main() {
     GuideWorld? world,
     FakeApprovals? approvalActions,
     FakeBrain? withBrain,
+    FakeAccounts? accounts,
   }) async {
     mic = FakeSpeechRecognizer();
     tts = FakeTts();
@@ -65,6 +66,7 @@ void main() {
       speechLanguage: () => 'en-US',
       brain: brain,
       usage: (_) => 'Five hour limit at 42 percent.',
+      accounts: accounts,
       locked: () => locked,
       afterSpeechPause: Duration.zero,
       thinkingNotice: const Duration(seconds: 30),
@@ -386,6 +388,36 @@ void main() {
       await talk(tester, 'trust ops for an hour');
       expect(await hear(tester), startsWith('That request is high risk'));
       expect(approvals.trusted, hasLength(1));
+    },
+  );
+
+  testWidgets(
+    'switch account: matched by label, confirmed, on the machines that can',
+    (tester) async {
+      final fake = FakeAccounts();
+      await setUpGuide(tester, accounts: fake);
+      await begin(tester);
+      await talk(tester, 'switch to the work account');
+      expect(
+        await hear(tester),
+        'Switch new Claude sessions to Work on VTM and Laptop? Say yes.',
+      );
+      await talk(tester, 'yes');
+      expect(fake.switched, ['Work']);
+      expect(
+        await hear(tester),
+        'New Claude sessions on VTM and Laptop now use Work.',
+      );
+      await talk(tester, 'switch to the personal account');
+      expect(await hear(tester), 'Personal is already the active account.');
+      await talk(tester, 'switch to the boss account');
+      expect(
+        await hear(tester),
+        "I can't find the account boss. The accounts are Work and Personal.",
+      );
+      fake.available = false;
+      await talk(tester, 'muda para a conta work');
+      expect(await hear(tester), "Switching accounts isn't available yet.");
     },
   );
 

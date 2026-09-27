@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
@@ -15,6 +16,7 @@ import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/usage/domain/usage_summary.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/voice_guide/domain/approval_actions.dart';
 import 'package:conduit/features/voice_guide/domain/guide_ports.dart';
 import 'package:conduit/features/voice_guide/domain/guide_world.dart';
@@ -63,16 +65,59 @@ SavedHost? monitoredHostFor(
     .where((host) => baseHostId(host.id) == savedHostId)
     .firstOrNull;
 
-/// Today's approvals for the guide: one request at a time through the
-/// agent monitor's `decide`.
-ApprovalActions attentionApprovalActions(AgentAttentionController attention) =>
-    DecideApprovalActions((hostId, request, verdict) {
-      final host = monitoredHostFor(attention, hostId);
-      if (host == null) {
-        throw StateError('That machine is not connected.');
-      }
-      return attention.decide(host.id, request, verdict);
-    });
+/// The guide's approvals over the agent monitor: one request at a time
+/// through `decide` everywhere, plus the companion's smart approvals
+/// (risk labels, approve all low-risk, time-boxed trust) on machines that
+/// report the `smart-approvals` capability. Host ids here are saved host
+/// ids; the monitor keys its machines by session host id.
+ApprovalActions attentionApprovalActions(AgentAttentionController attention) {
+  String session(String hostId) {
+    final host = monitoredHostFor(attention, hostId);
+    if (host == null) throw StateError('That machine is not connected.');
+    return host.id;
+  }
+
+  bool supportedOn(String hostId) {
+    final host = monitoredHostFor(attention, hostId);
+    return host != null && attention.supportsSmartApprovals(host.id);
+  }
+
+  return SmartApprovalActions(
+    riskOf: (_, request) => switch (request.risk?.level) {
+      PermissionRiskLevel.low => ApprovalRisk.low,
+      PermissionRiskLevel.medium => ApprovalRisk.medium,
+      PermissionRiskLevel.high => ApprovalRisk.high,
+      null => ApprovalRisk.unknown,
+    },
+    decide: (hostId, request, verdict) => verdict == PermissionVerdict.allow
+        ? attention.approveRequest(session(hostId), request)
+        : attention.decide(session(hostId), request, verdict),
+    supportedOn: supportedOn,
+    supported: () => attention.monitoredHosts.any(
+      (host) => attention.supportsSmartApprovals(host.id),
+    ),
+    approveLow: (targets) async {
+      final wanted = {for (final t in targets) '${t.hostId}/${t.request.id}'};
+      final only = [
+        for (final pending in attention.lowRiskPending)
+          if (wanted.contains(
+            '${baseHostId(pending.hostId)}/${pending.request.id}',
+          ))
+            pending,
+      ];
+      if (only.isEmpty) return 0;
+      final result = await attention.approveAllLowRisk(only: only);
+      return result.approved.length;
+    },
+    // No rule: the companion saves the exact call as the rule.
+    trust: (hostId, request, duration) => attention.trustRequest(
+      session(hostId),
+      request,
+      duration: TrustDuration.minutes(duration.inMinutes),
+      source: 'voice',
+    ),
+  );
+}
 
 /// Sends prompts through the companion's `send` on the agent's machine.
 class AttentionGuideMessenger implements GuideMessenger {
@@ -161,6 +206,43 @@ String? guideUsageText(UsageSummary summary, String languageCode) {
     );
   }
   return '${parts.join('. ')}.';
+}
+
+/// Claude account switching for the guide over the usage feature: the
+/// accounts cswap reports, switchable where a machine's companion has
+/// cswap.
+class UsageGuideAccounts implements GuideAccounts {
+  UsageGuideAccounts(this.usage);
+
+  final UsageController usage;
+
+  @override
+  bool get available =>
+      usage.summary.machines.any((machine) => machine.canSwitchAccounts);
+
+  @override
+  List<GuideAccount> get accounts => [
+    for (final account in usage.summary.accounts)
+      GuideAccount(
+        label: account.label,
+        active: account.active,
+        targets: [
+          for (final p in account.switchTargets)
+            (hostId: p.hostId, hostName: p.hostName, slot: p.account.slot),
+        ],
+      ),
+  ];
+
+  @override
+  Future<List<GuideAccountSwitch>> switchTo(GuideAccount account) async => [
+    for (final target in account.targets)
+      await usage
+          .switchAccount(target.hostId, slot: target.slot)
+          .then(
+            (result) =>
+                (hostName: target.hostName, ok: result.ok, error: result.error),
+          ),
+  ];
 }
 
 /// Moves the app for the guide: pops back home, then opens Chat View or

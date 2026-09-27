@@ -61,6 +61,20 @@ abstract class GuideStrings {
   String nothingToTrust(String agent);
   String get trustHighRisk;
   String confirmSend(String agent, String text);
+  String confirmAccount(String account, List<String> machines);
+  String accountSwitched(String account, List<String> machines);
+  String accountNotFound(String name, List<String> accounts);
+  String accountAmbiguous(List<String> accounts);
+  String accountAlreadyActive(String account);
+  String accountCannotSwitch(String account);
+
+  /// "VTM", "VTM and Laptop", "VTM, Laptop and Box" (with [and]).
+  String machinesList(List<String> names, String and) {
+    if (names.length <= 1) return names.join();
+    return '${names.sublist(0, names.length - 1).join(', ')} $and '
+        '${names.last}';
+  }
+
   String failed(String what);
   String waiting(GuideWorld world);
 
@@ -240,6 +254,27 @@ class _English extends GuideStrings {
       'Send to $agent: ${GuideStrings.asQuestion(text)} Say yes.';
   @override
   String failed(String what) => "That didn't work: $what";
+  @override
+  String confirmAccount(String account, List<String> machines) =>
+      'Switch new Claude sessions to $account on '
+      '${machinesList(machines, 'and')}? Say yes.';
+  @override
+  String accountSwitched(String account, List<String> machines) =>
+      'New Claude sessions on ${machinesList(machines, 'and')} now use '
+      '$account.';
+  @override
+  String accountNotFound(String name, List<String> accounts) =>
+      "I can't find the account $name. The accounts are "
+      '${machinesList(accounts, 'and')}.';
+  @override
+  String accountAmbiguous(List<String> accounts) =>
+      'Which account: ${machinesList(accounts, 'or')}?';
+  @override
+  String accountAlreadyActive(String account) =>
+      '$account is already the active account.';
+  @override
+  String accountCannotSwitch(String account) =>
+      "$account can't be switched to from here.";
 
   static String _duration(int minutes) {
     if (minutes % 60 == 0) {
@@ -452,6 +487,26 @@ class _Portuguese extends GuideStrings {
       'Enviar para $agent: ${GuideStrings.asQuestion(text)} Diz sim.';
   @override
   String failed(String what) => 'Não resultou: $what';
+  @override
+  String confirmAccount(String account, List<String> machines) =>
+      'Mudar as novas sessões do Claude para $account em '
+      '${machinesList(machines, 'e')}? Diz sim.';
+  @override
+  String accountSwitched(String account, List<String> machines) =>
+      'As novas sessões do Claude em ${machinesList(machines, 'e')} usam '
+      'agora $account.';
+  @override
+  String accountNotFound(String name, List<String> accounts) =>
+      'Não encontro a conta $name. As contas são '
+      '${machinesList(accounts, 'e')}.';
+  @override
+  String accountAmbiguous(List<String> accounts) =>
+      'Qual conta: ${machinesList(accounts, 'ou')}?';
+  @override
+  String accountAlreadyActive(String account) => '$account já é a conta ativa.';
+  @override
+  String accountCannotSwitch(String account) =>
+      'Não dá para mudar para $account daqui.';
 
   static String _duration(int minutes) {
     if (minutes % 60 == 0) {
