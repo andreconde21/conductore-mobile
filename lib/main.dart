@@ -300,13 +300,6 @@ void main() {
     ready: themeLoaded,
     changes: localDataChanges,
   );
-  final backupService = AppBackupService(
-    hostsController: hostsController,
-    themeController: themeController,
-    hostKeyVerifier: hostKeyVerifier,
-    localStore: localSyncStore,
-    changes: localDataChanges,
-  );
   // Settings › Sync: this device's data, end-to-end encrypted, through
   // one saved machine (the hub) over the same SSH/SFTP stack.
   final syncController = SyncController(
@@ -330,6 +323,14 @@ void main() {
     defaultDeviceName: defaultSyncDeviceName(),
   );
   unawaited(themeLoaded.then((_) => syncController.start()));
+  final backupService = AppBackupService(
+    hostsController: hostsController,
+    themeController: themeController,
+    hostKeyVerifier: hostKeyVerifier,
+    localStore: localSyncStore,
+    changes: localDataChanges,
+    syncHubHostId: () => syncController.config?.hubHostId,
+  );
   unawaited(shareTarget.start());
 
   // "Open Claude sessions in" and the per-session choices, for every page.
