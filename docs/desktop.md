@@ -256,7 +256,7 @@ saved machine over SSH, as before.
 | Hardware security keys (`sk-` SSH keys) | no | no | no | FIDO runs over NFC (flutter_nfc_kit) or Android USB. Use a regular OpenSSH key on desktop. Connecting with an `sk-` key says so |
 | This computer (local terminal) | yes | yes | yes | The machine list starts with *This computer*: the login shell in a flutter_pty PTY (`$SHELL -l`; PowerShell, cmd or WSL on Windows, from the machine menu's *Shell…*). Local tmux sessions and Herdr workspaces, the companion (Agent hooks installs it locally), git diff, files and live preview (127.0.0.1 directly) all work without SSH. Commands run with `sh -c` and the usual tool directories on PATH; on Windows only through WSL. Per device: never backed up or synced |
 | Proot local shell | no | no | no | Android's proot Linux section (arm64 binaries) |
-| Dictation, read-aloud (Talk) | no | no | no | Android `conduit/speech` and `conduit/tts` channels |
+| Dictation, read-aloud (Talk) | no | no | no | `conduit/speech` and `conduit/tts` channels, implemented on Android and iOS |
 | Live preview screenshot to Claude | no | no | yes | Needs the embedded page. Android uses PixelCopy |
 | Paste a clipboard image as a file | no | no | no | Android `conduit/clipboard_image` bridge. Paste falls back to text |
 | Sync setup | paste code | paste code | paste code | The QR scanner (mobile_scanner) is phone-only. Desktops paste the setup code |

@@ -23,6 +23,10 @@ class FakeHubServer {
   /// another device win the race).
   Future<void> Function()? beforeNextCommit;
 
+  /// Runs inside the next bundle download (to change a device's data
+  /// while its sync is running).
+  Future<void> Function()? duringNextBundleRead;
+
   SyncHubFactory get factory =>
       (host, deviceId) => FakeSyncHub(this, host);
 }
@@ -62,6 +66,11 @@ class FakeSyncHub implements SyncHub {
   Future<Uint8List> readBundle(String vaultId) async {
     _authenticate();
     server.bundleReads++;
+    final hook = server.duringNextBundleRead;
+    if (hook != null) {
+      server.duringNextBundleRead = null;
+      await hook();
+    }
     final bundle = server.bundles[vaultId];
     if (bundle == null) throw const AppFailure('No such file');
     return bundle;

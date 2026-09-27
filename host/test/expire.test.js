@@ -92,3 +92,64 @@ test('a Claude Code killed without SessionEnd is ended by the daemon', { skip: !
     fs.rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('an auto-approved agent carries its process; expiry ends its session rules', { skip: !proc.hasProc() }, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-exp-'))
+  const env = { ...process.env, CONDUCTORE_HOME: home, CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'), CONDUCTORE_PERMISSION_TIMEOUT: '30' }
+  for (const k of Object.keys(env)) if (/^(TMUX|HERDR_)/.test(k)) delete env[k]
+  env.TMUX_TMPDIR = home
+  const cli = (...args) => new Promise((resolve, reject) => {
+    execFile(process.execPath, [HOSTD, ...args], { env, timeout: 20000 }, (err, stdout) => {
+      if (err && err.code === undefined) return reject(err)
+      resolve(JSON.parse(stdout.trim().split('\n').pop()))
+    })
+  })
+  // A stand-in Claude Code: runs one hook (through `sh -c`) per stdin line,
+  // printing the hook's stdout as one JSON line.
+  const script = `
+    process.title = 'claude'
+    const { spawn } = require('child_process')
+    require('readline').createInterface({ input: process.stdin }).on('line', line => {
+      const ev = JSON.parse(line)
+      const c = spawn("'" + ${JSON.stringify(HOOK)} + "' " + ev.hook_event_name, { shell: true, stdio: ['pipe', 'pipe', 'ignore'] })
+      let out = ''
+      c.stdout.on('data', d => { out += d })
+      c.on('exit', () => process.stdout.write(JSON.stringify({ out }) + '\\n'))
+      c.stdin.end(line)
+    })`
+  const claude = spawn(process.execPath, ['-e', script], { env, stdio: ['pipe', 'pipe', 'ignore'] })
+  const replies = require('readline').createInterface({ input: claude.stdout })
+  const answers = []
+  const waiting = []
+  replies.on('line', l => { const r = JSON.parse(l); const w = waiting.shift(); w ? w(r) : answers.push(r) })
+  const run = ev => new Promise(resolve => { waiting.push(resolve); claude.stdin.write(JSON.stringify({ session_id: 'k7', cwd: home, ...ev }) + '\n') })
+  const read = { hook_event_name: 'PermissionRequest', tool_name: 'Read', tool_input: { file_path: path.join(home, 'notes.txt') } }
+  try {
+    await run({ hook_event_name: 'SessionStart' })
+    const first = run(read)
+    let req
+    for (let i = 0; i < 100 && !req; i++) {
+      await new Promise(r => setTimeout(r, 50))
+      const a = (await cli('status')).agents.find(a => a.sessionId === 'k7')
+      req = a && a.pending[0]
+    }
+    const t = await cli('trust', req.id, '--scope', 'session', '--until-session-end')
+    assert.equal(t.rule.endsWithSession, 'k7')
+    await first
+    // Answered by the rule, before the phone sees it.
+    const auto = await run(read)
+    assert.equal(JSON.parse(auto.out).hookSpecificOutput.decision.behavior, 'allow')
+    const agent = (await cli('status')).agents.find(a => a.sessionId === 'k7')
+    assert.equal(agent.process.pid, claude.pid)
+    assert.ok(agent.lastAutoApprovedAt)
+    claude.kill('SIGKILL')
+    await new Promise(r => claude.on('exit', r))
+    assert.equal((await cli('status')).agents.find(a => a.sessionId === 'k7').state, 'ended')
+    assert.ok(!(await cli('rules')).rules.some(r => r.id === t.rule.id))
+  } finally {
+    claude.kill('SIGKILL')
+    await cli('stop').catch(() => {})
+    await new Promise(r => setTimeout(r, 200))
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})

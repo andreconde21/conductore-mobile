@@ -610,6 +610,9 @@ class HomeBoardController extends ChangeNotifier {
       if (_fetchingGeneration == generation) {
         _fetchingGeneration = null;
       }
+      // A refresh while the board is hidden (the quick switcher, a sync
+      // pull) must not leave its channel open in the background.
+      if (!_disposed && !_visible) unawaited(_closeRunner());
       if (!_disposed && generation == _generation) notifyListeners();
     }
   }

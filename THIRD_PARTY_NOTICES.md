@@ -1,14 +1,17 @@
 # Third-party notices
 
-Conduit's own source code is licensed under Apache-2.0. This file covers
-third-party components that are redistributed with Android builds of Conduit and
-remain under their own licenses.
+Conductore's own source code is licensed under Apache-2.0, as is Conduit's
+(Conductore is based on [Conduit](https://github.com/gwitko/Conduit) by
+gwitko). This file covers third-party components that are redistributed with
+Android builds of Conductore that include the optional on-device local shell,
+and remain under their own licenses.
 
-Conduit release builds generate native binaries to provide the on-device local
-Arch Linux shell. They are placed in `android/app/src/main/jniLibs/arm64-v8a/`
+Those builds generate native binaries to provide the on-device local Arch
+Linux shell. They are placed in `android/app/src/main/jniLibs/arm64-v8a/`
 (renamed to `lib*.so` so Android packages and extracts them) and are built from
 the pinned [Termux](https://github.com/termux) package recipes for Android's
-bionic libc.
+bionic libc. The material in `third_party/source-offer` was prepared upstream by
+Conduit.
 
 GPL/LGPL license texts are included under
 [`third_party/licenses`](third_party/licenses). Component-specific notices for
@@ -38,33 +41,35 @@ image distributed by Termux's
 [proot-distro](https://github.com/termux/proot-distro) as a GitHub release
 asset. Arch Linux ARM itself is maintained by the
 [Arch Linux ARM](https://archlinuxarm.org) project; its packages carry their own
-respective licenses. Conduit downloads this image to the device on first use and
-does not redistribute it inside the app package.
+respective licenses. The app downloads this image to the device on first use
+and does not redistribute it inside the app package.
 
 ## GPL/LGPL source offer
 
 `proot` and `busybox` are GPL-2.0, GNU `tar` is GPL-3.0-or-later, and several
-support libraries are LGPL. If you distribute Conduit with these binaries, make
-the corresponding source available for the exact versions shipped. Conduit's
+support libraries are LGPL. If you distribute Conductore with these binaries,
+make the corresponding source available for the exact versions shipped. The
 source-offer index is in
 [`third_party/source-offer/README.md`](third_party/source-offer/README.md).
 
 **Written offer.** This is a written offer, valid for at least three years from
-the date Conduit distributes these binaries, to give any third party — for a
+the date Conductore distributes these binaries, to give any third party — for a
 charge no more than the cost of physically performing source distribution — a
 complete machine-readable copy of the corresponding source for the GPL- and
 LGPL-licensed binaries listed above, for the exact versions shipped. The
-corresponding source is published at <https://github.com/gwitko/Conduit> under
+corresponding source is published at
+<https://github.com/andreconde21/conductore-mobile> under
 [`third_party/source-offer`](third_party/source-offer); requests may also be
-sent to the repository maintainer there. For the GPL-3.0 component (GNU `tar`)
-this offer is additionally satisfied by access to the same Corresponding Source
-from that network server at no charge (GPL-3.0 §6(d)).
+sent to Conductore's maintainer through that repository's issues. For the
+GPL-3.0 component (GNU `tar`) this offer is additionally satisfied by access to
+the same Corresponding Source from that network server at no charge (GPL-3.0 §6(d)).
 
-Conduit includes a snapshot of the relevant Termux build recipes and patches at
+The source includes (from Conduit) a snapshot of the relevant Termux build
+recipes and patches at
 [`third_party/source-offer/termux-recipes`](third_party/source-offer/termux-recipes),
 pinned to Termux `termux-packages` commit
-`ac296452b8ebec390cad3bce9060577c96099b10`. Conduit makes no source-code
-changes to those projects. The only Conduit-side binary change is an in-place
+`ac296452b8ebec390cad3bce9060577c96099b10`. Neither Conductore nor Conduit
+makes source-code changes to those projects. The only binary change is an in-place
 rewrite of three `DT_NEEDED`/`SONAME` strings
 (`libtalloc.so.2` -> `libtalloc.so`, `libbusybox.so.1.38.0` -> `libbusybox.so`,
 `liblzma.so.5` -> `liblzma.so`)
@@ -73,7 +78,7 @@ source-offer index for the exact transformation and verification command.
 
 ## PDFium
 
-Conduit's PDF viewer uses the [`pdfrx`](https://github.com/espresso3389/pdfrx)
+The PDF viewer uses the [`pdfrx`](https://github.com/espresso3389/pdfrx)
 Flutter package, whose build downloads and bundles a prebuilt
 [PDFium](https://pdfium.googlesource.com/pdfium/) binary (`libpdfium.so` /
 `Pdfium.framework`) from

@@ -10,16 +10,24 @@ import 'package:flutter/foundation.dart';
 /// Comparing today's local value with [localHash] (not with the record)
 /// tells a real local edit apart from a value the app stores differently,
 /// like a hub machine whose login stays on each device.
+///
+/// While the record's category is turned off here, [localHash] keeps the
+/// hash of the value last synced and [pausedClock] the clock of the record
+/// it was synced as, so turning the category back on tells an edit made
+/// here meanwhile from one made elsewhere.
 @immutable
 class SyncBaseEntry {
-  const SyncBaseEntry({required this.record, this.localHash});
+  const SyncBaseEntry({required this.record, this.localHash, this.pausedClock});
 
   final SyncRecord record;
   final String? localHash;
+  final SyncClock? pausedClock;
 
   Map<String, Object?> toJson() => {
     'r': record.toJson(),
     if (localHash != null) 'h': localHash,
+    if (pausedClock case final clock?)
+      'p': {'t': clock.time, 'c': clock.counter, 'd': clock.device},
   };
 
   static SyncBaseEntry? fromJson(Object? json) {
@@ -27,9 +35,17 @@ class SyncBaseEntry {
     final record = SyncRecord.fromJson(json['r']);
     if (record == null) return null;
     final hash = json['h'];
+    final paused = json['p'];
     return SyncBaseEntry(
       record: record,
       localHash: hash is String ? hash : null,
+      pausedClock: paused is Map && paused['t'] is int && paused['c'] is int
+          ? SyncClock(
+              time: paused['t'] as int,
+              counter: paused['c'] as int,
+              device: paused['d'] is String ? paused['d'] as String : '',
+            )
+          : null,
     );
   }
 }
@@ -119,6 +135,12 @@ class SyncMergeResult {
 /// lacks it) while the hub has data stamps the local copies with
 /// [SyncClock.unknown]: the hub's version wins on overlap, and the local
 /// one is kept in a [SyncConflictKind.firstSync] conflict.
+///
+/// A category turned back on ([SyncBaseEntry.pausedClock]) keeps an edit
+/// made here while it was off, unless another device changed the same item
+/// meanwhile: which came first is unknown, so the hub's version wins and
+/// this device's is kept in a restorable
+/// [SyncConflictKind.concurrentEdit] conflict. Nothing is lost silently.
 SyncMergeResult mergeSync({
   required Map<String, SyncBaseEntry> base,
   required Map<String, Object?> local,
@@ -163,6 +185,9 @@ SyncMergeResult mergeSync({
   final localRecords = <String, SyncRecord>{};
   final localEdits = <String>{};
   final unknownAge = <String>{};
+  // Edits made while the key's category was off: the clock it was synced
+  // as before.
+  final pausedEdits = <String, SyncClock>{};
   for (final key in {...base.keys, ...local.keys}) {
     final baseEntry = base[key];
     if (!isEnabled(key)) {
@@ -195,9 +220,13 @@ SyncMergeResult mergeSync({
       }
       localEdits.add(key);
       localRecords[key] = SyncRecord(key: key, value: value, clock: stamp(key));
+      if (baseEntry?.pausedClock case final paused?) pausedEdits[key] = paused;
     } else if (baseEntry != null) {
       if (!baseEntry.record.deleted && baseEntry.localHash != null) {
         localEdits.add(key);
+        if (baseEntry.pausedClock case final paused?) {
+          pausedEdits[key] = paused;
+        }
         localRecords[key] = SyncRecord(
           key: key,
           value: null,
@@ -224,11 +253,16 @@ SyncMergeResult mergeSync({
       merged[key] = mine;
       continue;
     }
-    final winner = SyncRecord.newer(mine, theirs);
+    final paused = pausedEdits[key];
+    final winner = paused != null && theirs.clock != paused
+        ? theirs
+        : SyncRecord.newer(mine, theirs);
     merged[key] = winner;
     final differs = mine.hash != theirs.hash;
     if (!differs) continue;
-    if (localEdits.contains(key) && theirs.clock != base[key]?.record.clock) {
+    if (localEdits.contains(key) &&
+        (theirs.clock != base[key]?.record.clock ||
+            (paused != null && theirs.clock != paused))) {
       conflicts.add(
         SyncConflict(
           key: key,

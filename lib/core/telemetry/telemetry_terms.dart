@@ -43,3 +43,22 @@ Iterable<String> deviceTerms() sync* {
     // Not available on this platform.
   }
 }
+
+final _runtimeSources = <Iterable<String> Function()>[];
+
+/// Adds words a feature only learns at run time, such as the Claude account
+/// labels and aliases cswap reports through the companion. Read with the
+/// rest for every report.
+void addTelemetryTerms(Iterable<String> Function() source) =>
+    _runtimeSources.add(source);
+
+/// The words of every source given to [addTelemetryTerms].
+Iterable<String> runtimeTerms() sync* {
+  for (final source in _runtimeSources) {
+    try {
+      yield* source();
+    } on Object {
+      // A source that fails must not stop the report.
+    }
+  }
+}

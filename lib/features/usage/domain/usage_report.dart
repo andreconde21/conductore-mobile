@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 
@@ -278,6 +279,100 @@ class UsageSession {
   }
 }
 
+/// One Claude account cswap (claude-swap) manages on a machine: its 5-hour
+/// and weekly windows. The companion sends the alias, else a masked email,
+/// as [label]; never the email itself.
+class UsageAccount {
+  const UsageAccount({
+    required this.slot,
+    required this.label,
+    this.alias,
+    this.active = false,
+    this.disabled = false,
+    this.stale = false,
+    this.status,
+    this.fiveHour,
+    this.weekly,
+    this.perModel = const [],
+    this.usageAt,
+  });
+
+  /// cswap's account number on that machine (`cswap switch <slot>`).
+  final int slot;
+  final String label;
+  final String? alias;
+
+  /// The account new Claude sessions on the machine use.
+  final bool active;
+
+  /// Held out of cswap's rotation.
+  final bool disabled;
+
+  /// No fresh measurement: the windows are the last good ones.
+  final bool stale;
+
+  /// cswap's `usageStatus` (`ok`, `unavailable`, `token_expired`, …).
+  final String? status;
+  final UsageLimit? fiveHour;
+  final UsageLimit? weekly;
+
+  /// Per-model weekly windows (label = model name).
+  final List<UsageLimit> perModel;
+
+  /// When the windows were measured.
+  final DateTime? usageAt;
+
+  /// The fuller of its two windows, 0 to 100; null when neither is known.
+  double? usedPct(DateTime now) {
+    final values = [?fiveHour?.effectivePct(now), ?weekly?.effectivePct(now)];
+    return values.isEmpty ? null : values.reduce(math.max);
+  }
+
+  static UsageAccount? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final slot = json['slot'];
+    final label = json['label'];
+    if (slot is! num || label is! String || label.isEmpty) {
+      return null;
+    }
+    UsageLimit? window(String key) {
+      final limits = json['limits'];
+      if (limits is! Map) {
+        return null;
+      }
+      return UsageLimit.fromJson(
+        limits[key] is Map ? {...limits[key] as Map, 'label': key} : null,
+      );
+    }
+
+    final alias = json['alias'];
+    final status = json['status'];
+    final usageAt = json['usageAt'];
+    return UsageAccount(
+      slot: slot.toInt(),
+      label: label,
+      alias: alias is String && alias.isNotEmpty ? alias : null,
+      active: json['active'] == true,
+      disabled: json['disabled'] == true,
+      stale: json['stale'] == true,
+      status: status is String ? status : null,
+      fiveHour: window('5h'),
+      weekly: window('7d'),
+      perModel: [
+        if (json['perModel'] case final List<Object?> models)
+          for (final model in models)
+            if (model is Map && model['model'] is String)
+              ?UsageLimit.fromJson({...model, 'label': model['model']}),
+      ],
+      usageAt: usageAt is num
+          ? DateTime.fromMillisecondsSinceEpoch(usageAt.toInt(), isUtc: true)
+          : null,
+    );
+  }
+}
+
 /// One agent's section of a report.
 class UsageSection {
   const UsageSection({
@@ -288,6 +383,8 @@ class UsageSection {
     this.today = UsageTotals.zero,
     this.range = UsageTotals.zero,
     this.rows = const [],
+    this.accounts = const [],
+    this.cswap = false,
   });
 
   final UsageAgent agent;
@@ -299,6 +396,13 @@ class UsageSection {
   final UsageTotals today;
   final UsageTotals range;
   final List<UsageRow> rows;
+
+  /// Claude only: every account cswap manages on the machine. Empty
+  /// without cswap and from companions before it.
+  final List<UsageAccount> accounts;
+
+  /// Claude only: the companion found cswap, so it can switch accounts.
+  final bool cswap;
 
   static UsageSection fromJson(Object? json, UsageAgent agent) {
     if (json is! Map) {
@@ -317,6 +421,8 @@ class UsageSection {
       today: UsageTotals.fromJson(json['today']),
       range: UsageTotals.fromJson(json['range']),
       rows: list('rows', (item) => UsageRow.fromJson(item, agent)),
+      accounts: list('accounts', UsageAccount.fromJson),
+      cswap: json['cswap'] is Map && (json['cswap'] as Map)['present'] == true,
     );
   }
 }
@@ -355,6 +461,69 @@ class UsageReport {
   final bool partial;
 
   Iterable<UsageSection> get agents => [claude, codex];
+}
+
+/// A `conductore-hostd cswap-switch` reply.
+class UsageAccountSwitchResult {
+  const UsageAccountSwitchResult({
+    required this.ok,
+    this.switched = false,
+    this.toLabel,
+    this.error,
+  });
+
+  const UsageAccountSwitchResult.failed(String this.error)
+    : ok = false,
+      switched = false,
+      toLabel = null;
+
+  final bool ok;
+
+  /// False when the account was already active.
+  final bool switched;
+
+  /// The account now active (alias or masked email).
+  final String? toLabel;
+  final String? error;
+
+  /// One line for a snackbar.
+  String get message {
+    if (!ok) {
+      return 'Could not switch: ${error ?? 'no reply'}';
+    }
+    final to = toLabel ?? 'the account';
+    return switched
+        ? 'New Claude sessions now use $to'
+        : '$to was already the active account';
+  }
+}
+
+/// Parses `conductore-hostd cswap-switch` output.
+UsageAccountSwitchResult parseAccountSwitchResult(String stdout) {
+  Object? decoded;
+  final text = stdout.trim();
+  try {
+    decoded = text.isEmpty ? null : jsonDecode(text.split('\n').last);
+  } on FormatException {
+    decoded = null;
+  }
+  if (decoded is! Map) {
+    return const UsageAccountSwitchResult.failed(
+      'the companion on this machine cannot switch accounts',
+    );
+  }
+  if (decoded['ok'] != true) {
+    final error = decoded['error'];
+    return UsageAccountSwitchResult.failed(
+      error is String ? error : 'cswap failed',
+    );
+  }
+  final to = decoded['to'];
+  return UsageAccountSwitchResult(
+    ok: true,
+    switched: decoded['switched'] == true,
+    toLabel: to is Map && to['label'] is String ? to['label'] as String : null,
+  );
 }
 
 /// The command that asks for [days] of usage.

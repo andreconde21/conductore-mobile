@@ -21,6 +21,7 @@ import 'package:conduit/features/sync/domain/sync_category.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -158,9 +159,16 @@ void main() {
 
   // Built inside each test body: futures made in setUp live outside the
   // test's fake-async zone and would never complete in it.
-  Future<void> createDevice() async {
+  Future<void> createDevice({bool desktop = false}) async {
     final home = machine('a').copyWith(lastConnectedAt: DateTime.utc(2026));
-    hosts = HostsController(FakeHostsRepository()..persisted = [home]);
+    hosts = HostsController(
+      FakeHostsRepository()..persisted = [home],
+      thisComputerStore: desktop
+          ? InMemoryThisComputerStore(
+              ThisComputerSettings(host: SavedHost.thisComputer()),
+            )
+          : null,
+    );
     await hosts.load();
     verifier = MemoryVerifier([keyOf(home)]);
     theme = ThemeController(InMemoryThemePreferences());
@@ -237,5 +245,28 @@ void main() {
 
     expect(workspaceOf('c', 'w1'), findsOneWidget);
     expect((await homePreferences.load()).machineFilter, isEmpty);
+  });
+
+  testWidgets('a sync pull keeps a "This computer" machine filter', (
+    tester,
+  ) async {
+    await createDevice(desktop: true);
+    await homePreferences.save(
+      const HomePreferences(machineFilter: {thisComputerHostId}),
+    );
+    await pumpHome(tester);
+    await settle(tester);
+
+    final applied = store.apply(
+      {
+        'host:c': {...machine('c').toJson()..remove('password')},
+      },
+      {'host:c'},
+      const LocalSyncOptions(categories: SyncCategory.defaults),
+    );
+    await pumpUntilDone(tester, applied);
+    await settle(tester);
+
+    expect((await homePreferences.load()).machineFilter, {thisComputerHostId});
   });
 }

@@ -113,6 +113,7 @@ Conductore connects only to:
 | Network access | To connect to the machines you add. |
 | Local network (iOS) | To reach machines on your home or office network. |
 | Microphone (Android) | For dictation into the terminal. The app asks Android for its on-device recognizer. If that is not available, Android's speech service handles the audio under its own policy. The app itself never sends audio anywhere. |
+| Microphone and speech recognition (iOS) | For dictation and Talk. The app uses Apple's speech recognizer on the iPhone when it supports your language; otherwise Apple's speech service handles the audio under Apple's policy. The app itself never sends audio anywhere. Replies are read aloud by the iPhone's own voices. |
 | Camera and photos | To take or pick a picture that you upload to your machine or attach to a coding agent prompt. On Android the system photo picker and camera app are used, so the app gets only the picture you choose. |
 | Notifications (Android) | To show that sessions are kept alive in the background and to tell you when a coding agent on your machine needs you. |
 | Foreground service (Android) | To keep your terminal sessions connected while the app is in the background. |

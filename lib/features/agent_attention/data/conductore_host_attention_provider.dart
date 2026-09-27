@@ -5,6 +5,7 @@ import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 
 /// Reads agent state from the Conductore host companion daemon
 /// (`conductore-hostd`), which watches Claude Code sessions through their
@@ -42,7 +43,17 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 /// `docs/usage-proposal.md`); a daemon without them still parses. An
 /// agent in `needs_permission` with an empty `pending` list has a prompt
 /// waiting in the terminal that the phone can no longer answer.
-class ConductoreHostAttentionProvider extends AgentAttentionProvider {
+///
+/// Smart approvals (companion capability `smart-approvals` in `status`
+/// and `version`): each pending request also carries `risk` (`{"level":
+/// "low|medium|high", "reason"}`), `batchable`, `suggestedRules` and
+/// `repo`; agents carry `lastAutoApprovedAt`. Commands:
+/// `approve-low --ids a,b`,
+/// `trust ID --rule R --scope repo|session|any [--path P] --minutes N`
+/// (or `--until-session-end` / `--forever`), `rules add|edit|remove`,
+/// `approvals` (rules plus the auto-approved log).
+class ConductoreHostAttentionProvider extends AgentAttentionProvider
+    implements SmartApprovalsProvider {
   const ConductoreHostAttentionProvider();
 
   static const _commandTimeout = Duration(seconds: 10);
@@ -305,9 +316,16 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
         agents.add(agent);
       }
     }
+    final capabilities = decoded['capabilities'];
     return AgentAttentionSnapshot(
       agents: agents,
       sequence: _int(decoded['seq']),
+      capabilities: capabilities is List
+          ? {
+              for (final name in capabilities)
+                if (name is String) name,
+            }
+          : null,
     );
   }
 
@@ -366,6 +384,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       // The inbox groups by project: the cwd's basename stands in for one.
       project: _string(item['project']) ?? _basename(cwd),
       usage: parseUsage(item['usage']),
+      lastAutoApprovedAt: _timestamp(item['lastAutoApprovedAt']),
     );
   }
 
@@ -431,13 +450,169 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       return null;
     }
     final toolName = _string(entry['toolName']) ?? 'tool';
+    final info = parsePendingApprovalInfo(entry);
     return PendingPermissionRequest(
       id: id,
       toolName: toolName,
       summary: _string(entry['summary']) ?? toolName,
       toolInput: formatToolInput(entry['toolInput']),
       createdAt: _timestamp(entry['createdAt']),
+      risk: info.risk,
+      batchable: info.batchable,
+      suggestedRules: info.suggestedRules,
+      repo: info.repo,
     );
+  }
+
+  // --- smart approvals ------------------------------------------------------
+
+  @override
+  String approveLowCommand(List<String> requestIds) => remoteCommand(
+    requestIds.isEmpty
+        ? 'approve-low'
+        : 'approve-low --ids ${shellQuoteArgument(requestIds.join(','))}',
+  );
+
+  /// `--rule R --scope K [--path P | --session S] --minutes N|…`.
+  static String _draftArgs(ApprovalRuleDraft draft, {bool withSession = true}) {
+    final scope = draft.scope;
+    final duration = draft.duration;
+    return [
+      // No rule: the companion picks the narrowest (trust only).
+      if (draft.rule.trim().isNotEmpty)
+        '--rule ${shellQuoteArgument(draft.rule.trim())}',
+      '--scope ${scope.kind.name}',
+      if (scope.kind == ApprovalScopeKind.repo && scope.path != null)
+        '--path ${shellQuoteArgument(scope.path!)}',
+      if (withSession &&
+          scope.kind == ApprovalScopeKind.session &&
+          scope.sessionId != null)
+        '--session ${shellQuoteArgument(scope.sessionId!)}',
+      if (duration.minutes case final minutes?)
+        '--minutes $minutes'
+      else if (duration.untilSessionEnd)
+        '--until-session-end'
+      else
+        '--forever',
+    ].join(' ');
+  }
+
+  @override
+  String trustCommand(
+    PendingPermissionRequest request,
+    ApprovalRuleDraft draft, {
+    String source = 'trust',
+  }) => remoteCommand(
+    'trust ${shellQuoteArgument(request.id)} '
+    '${_draftArgs(draft, withSession: false)} '
+    '--source ${shellQuoteArgument(source)}',
+  );
+
+  @override
+  String approvalsCommand() => remoteCommand('approvals');
+
+  @override
+  String addRuleCommand(ApprovalRuleDraft draft, {String source = 'cli'}) {
+    // `rules add` takes the rule as its first argument.
+    final args = _draftArgs(draft).replaceFirst('--rule ', '');
+    return remoteCommand(
+      'rules add $args '
+      '--source ${shellQuoteArgument(source)}',
+    );
+  }
+
+  @override
+  String editRuleCommand(String ruleId, ApprovalRuleDraft draft) =>
+      remoteCommand(
+        'rules edit ${shellQuoteArgument(ruleId)} ${_draftArgs(draft)}',
+      );
+
+  @override
+  String removeRuleCommand(String ruleId) =>
+      remoteCommand('rules remove ${shellQuoteArgument(ruleId)}');
+
+  static Map<Object?, Object?> _reply(String stdout) {
+    final trimmed = stdout.trim();
+    if (trimmed.isEmpty) {
+      throw const AppFailure('The Conductore companion returned no output.');
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(trimmed.split('\n').last);
+    } catch (_) {
+      throw const AppFailure(
+        'The Conductore companion returned output that is not JSON.',
+      );
+    }
+    if (decoded is! Map) {
+      throw const AppFailure(
+        'The Conductore companion returned JSON in an unexpected shape.',
+      );
+    }
+    if (decoded['error'] is String) {
+      throw failureFrom(trimmed, '');
+    }
+    return decoded;
+  }
+
+  static List<String> _ids(Object? raw) => [
+    if (raw is List)
+      for (final id in raw)
+        if (id is String)
+          id
+        else if (id is Map && id['id'] is String)
+          id['id'] as String,
+  ];
+
+  @override
+  ApprovalsSnapshot parseApprovals(String stdout) {
+    final reply = _reply(stdout);
+    final rules = reply['rules'];
+    final auto = reply['autoApproved'];
+    return ApprovalsSnapshot(
+      rules: [
+        if (rules is List)
+          for (final raw in rules) ?ApprovalRule.parse(raw),
+      ],
+      autoApproved: [
+        if (auto is List)
+          for (final raw in auto) ?AutoApprovedEntry.parse(raw),
+      ],
+      fetchedAt: DateTime.now(),
+    );
+  }
+
+  @override
+  BatchApprovalResult parseBatch(String stdout) {
+    final reply = _reply(stdout);
+    final skipped = reply['skipped'];
+    return BatchApprovalResult(
+      approved: _ids(reply['approved']),
+      skipped: [
+        if (skipped is List)
+          for (final entry in skipped)
+            if (entry is Map && entry['id'] is String)
+              (
+                id: entry['id'] as String,
+                reason: _string(entry['reason']) ?? 'skipped',
+              ),
+      ],
+    );
+  }
+
+  @override
+  TrustResult parseTrust(String stdout) => parseRuleReply(stdout);
+
+  @override
+  TrustResult parseRuleReply(String stdout) {
+    final reply = _reply(stdout);
+    final rule = ApprovalRule.parse(reply['rule']);
+    if (rule == null) {
+      throw const AppFailure(
+        'The Conductore companion returned JSON in an unexpected shape.',
+      );
+    }
+    return TrustResult(rule: rule, approved: _ids(reply['approved']));
   }
 
   /// Pretty-prints a tool input for the sheet, capped so a large file write

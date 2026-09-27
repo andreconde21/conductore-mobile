@@ -70,6 +70,18 @@ abstract final class ChatUserInput {
   static final _systemReminder = RegExp(
     r'<system-reminder>[\s\S]*?</system-reminder>',
   );
+
+  /// A reminder cut off by the host's line cap (no closing tag).
+  static final _openSystemReminder = RegExp(r'<system-reminder>[\s\S]*$');
+
+  /// The paragraph Claude Code appends to a message from another session
+  /// ("This came from another Claude session — not typed by your user…"):
+  /// its opening sentence up to the end of the paragraph, whatever
+  /// follows the first sentence.
+  static final _peerTrailer = RegExp(
+    r'(^|\n)[ \t]*This came from another Claude session\b[^\n]*'
+    r'(\n[ \t]*\S[^\n]*)*',
+  );
   static final _agentMessage = RegExp(
     r'<(teammate-message|cross-session-message)\b([^>]*)>([\s\S]*?)</\1>',
   );
@@ -107,7 +119,9 @@ abstract final class ChatUserInput {
       return const [];
     }
     final parts = <UserInputPart>[];
-    var text = raw.replaceAll(_systemReminder, '');
+    var text = raw
+        .replaceAll(_systemReminder, '')
+        .replaceAll(_openSystemReminder, '');
 
     // Messages from other agents (several may share one line).
     if (_agentMessage.hasMatch(text)) {
@@ -121,7 +135,7 @@ abstract final class ChatUserInput {
       parts.add(_agentPart(open));
       text = text.substring(0, open.start);
     }
-    text = text.replaceAll(_agentPrefix, '');
+    text = text.replaceAll(_agentPrefix, '').replaceAll(_peerTrailer, '');
 
     for (final match in _task.allMatches(text)) {
       final body = match[1]!;
@@ -178,7 +192,8 @@ abstract final class ChatUserInput {
     };
     final from =
         attributes['teammate_id'] ?? attributes['from'] ?? 'another agent';
-    final body = match[3]!.trim();
+    // A cut-off message runs to the end of the line, trailer included.
+    final body = match[3]!.replaceAll(_peerTrailer, '').trim();
     if (body.startsWith('{')) {
       try {
         final json = jsonDecode(body);

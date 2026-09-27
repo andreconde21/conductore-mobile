@@ -21,6 +21,9 @@ const spoolMod = lazy('./spool')
 const portsMod = lazy('./ports')
 const usageMod = lazy('./usage')
 const summarizeMod = lazy('./summarize')
+const cswapMod = lazy('./cswap')
+const rulesMod = lazy('./rules')
+const riskMod = lazy('./risk')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -28,6 +31,23 @@ const USAGE = `usage: conductore-hostd <command>
   events --since <seq> [--timeout 55]
                                   long-poll: one JSON line per change
   decide <requestId> allow|deny|always [--message "..."]
+  approve-low [--ids <id,id,...>] [--session <sessionId>]
+                                  allow every waiting low-risk request (only
+                                  the listed ones with --ids); others skipped
+  trust <requestId> [--rule 'Tool(pattern)'] [--scope repo|session|any]
+        [--minutes 60 | --until-session-end | --forever] [--path <dir>]
+                                  save a rule from a waiting request, allow it
+                                  and every waiting request the rule covers
+  rules [list]                    approval rules and time-boxed trust
+  rules add 'Tool(pattern)' [--scope any|repo|session] [--path <dir>]
+            [--session <id>] [--minutes N | --until-session-end]
+  rules edit <ruleId> [--rule '…'] [--scope …] [--path …] [--minutes N | --forever]
+  rules remove <ruleId>           revoke a rule (also: rm, revoke)
+  approvals [--hours 24]          rules plus what they auto-approved
+  classify [--tool Bash] [--command '…' | --file <path> | --url <url>]
+           [--cwd <dir>]          risk label and rule suggestions for a tool
+                                  call (JSON {tool_name, tool_input, cwd} on
+                                  stdin when no --tool); runs no daemon
   focus <sessionId>               select the agent's tmux window / Herdr pane
   transcript <sessionId> [--since <offset> | --before <offset>]
              [--tail-bytes N] [--max-bytes 262144]
@@ -42,7 +62,10 @@ const USAGE = `usage: conductore-hostd <command>
   usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]
                                   Claude Code / Codex limits, context per
                                   session, tokens and estimated cost per
-                                  day, project and model (incremental scan)
+                                  day, project and model (incremental scan);
+                                  with cswap, every Claude account's limits
+  cswap-switch <slot> | --best    switch the Claude account for new
+                                  sessions (cswap switch)
   summarize [--max-words 45] [--timeout-ms 20000]
                                   a spoken one- or two-sentence summary of
                                   the reply on stdin (claude -p, no tools)
@@ -139,6 +162,125 @@ async function decide (args) {
   } catch (err) {
     return fail(`daemon not reachable: ${err.message}`)
   }
+}
+
+// One request to the daemon (started when needed); prints its reply.
+async function daemonOp (req, timeoutMs = 5000) {
+  try {
+    await client.ensureDaemon()
+    const [res] = await client.request(req, { timeoutMs })
+    if (!res || res.error) return fail(res ? res.error : 'no reply')
+    return out(res)
+  } catch (err) {
+    return fail(`daemon not reachable: ${err.message}`)
+  }
+}
+
+function minutesFlag (flags) {
+  if (flags.minutes === undefined) return undefined
+  const m = Number(flags.minutes)
+  return Number.isFinite(m) ? m : NaN
+}
+
+function scopeFlags (flags, fallbackKind) {
+  const kind = typeof flags.scope === 'string' ? flags.scope : fallbackKind
+  if (kind === 'repo' || kind === 'path' || kind === 'workspace') {
+    const dir = typeof flags.path === 'string' ? path.resolve(flags.path) : rulesMod().repoRoot(process.cwd())
+    return { kind: 'repo', path: dir }
+  }
+  if (kind === 'session') return { kind: 'session', sessionId: typeof flags.session === 'string' ? flags.session : undefined }
+  return { kind: kind || 'any' }
+}
+
+async function approveLow (args) {
+  const { flags } = parseFlags(args)
+  const ids = typeof flags.ids === 'string' ? flags.ids.split(',').map(x => x.trim()).filter(Boolean) : undefined
+  return daemonOp({ op: 'approve-low', ids, sessionId: typeof flags.session === 'string' ? flags.session : undefined })
+}
+
+async function trustCmd (args) {
+  const { flags, positional } = parseFlags(args)
+  const [requestId] = positional
+  if (!requestId) return fail("usage: trust <requestId> [--rule 'Tool(pattern)'] [--scope repo|session|any] [--minutes N | --until-session-end | --forever]")
+  const minutes = minutesFlag(flags)
+  if (Number.isNaN(minutes)) return fail('--minutes must be a number')
+  return daemonOp({
+    op: 'trust',
+    requestId,
+    rule: typeof flags.rule === 'string' ? flags.rule : undefined,
+    scope: typeof flags.scope === 'string' ? flags.scope : undefined,
+    path: typeof flags.path === 'string' ? path.resolve(flags.path) : undefined,
+    minutes,
+    untilSessionEnd: !!flags['until-session-end'],
+    forever: !!flags.forever,
+    source: typeof flags.source === 'string' ? flags.source : undefined
+  })
+}
+
+async function rulesCmd (args) {
+  const [action = 'list', ...rest] = args
+  const { flags, positional } = parseFlags(rest)
+  const minutes = minutesFlag(flags)
+  if (Number.isNaN(minutes)) return fail('--minutes must be a number')
+  switch (action) {
+    case 'list': case 'ls':
+      return daemonOp({ op: 'rules', action: 'list' })
+    case 'add': {
+      const rule = positional[0] || flags.rule
+      if (typeof rule !== 'string') return fail("usage: rules add 'Tool(pattern)' [--scope any|repo|session] [--path <dir>] [--minutes N]")
+      const scope = scopeFlags(flags, 'any')
+      return daemonOp({
+        op: 'rules',
+        action: 'add',
+        spec: { rule, scope, minutes, untilSessionEnd: !!flags['until-session-end'], sessionId: typeof flags.session === 'string' ? flags.session : undefined, note: typeof flags.note === 'string' ? flags.note : undefined, source: typeof flags.source === 'string' ? flags.source : 'cli' }
+      })
+    }
+    case 'edit': {
+      const [id] = positional
+      if (!id) return fail("usage: rules edit <ruleId> [--rule '…'] [--scope …] [--minutes N | --forever]")
+      const patch = {}
+      if (typeof flags.rule === 'string') patch.rule = flags.rule
+      if (typeof flags.scope === 'string') patch.scope = scopeFlags(flags, flags.scope)
+      if (minutes !== undefined) patch.minutes = minutes
+      if (flags.forever) { patch.forever = true; patch.minutes = null }
+      if (typeof flags.note === 'string') patch.note = flags.note
+      return daemonOp({ op: 'rules', action: 'edit', id, patch })
+    }
+    case 'remove': case 'rm': case 'revoke': case 'delete': {
+      const [id] = positional
+      if (!id) return fail('usage: rules remove <ruleId>')
+      return daemonOp({ op: 'rules', action: 'remove', id })
+    }
+    default:
+      return fail(`unknown rules action ${action} (list, add, edit, remove)`)
+  }
+}
+
+async function approvalsCmd (args) {
+  const { flags } = parseFlags(args)
+  return daemonOp({ op: 'approvals', hours: flags.hours !== undefined ? Number(flags.hours) : 24 })
+}
+
+// Pure: risk label and suggestions, no daemon.
+async function classifyCmd (args) {
+  const { flags } = parseFlags(args)
+  let event
+  if (typeof flags.tool === 'string') {
+    const input = {}
+    if (typeof flags.command === 'string') input.command = flags.command
+    if (typeof flags.file === 'string') input.file_path = flags.file
+    if (typeof flags.url === 'string') input.url = flags.url
+    if (typeof flags.pattern === 'string') input.pattern = flags.pattern
+    event = { tool_name: flags.tool, tool_input: input, cwd: typeof flags.cwd === 'string' ? path.resolve(flags.cwd) : process.cwd() }
+  } else {
+    try { event = JSON.parse(await readStdin()) } catch { return fail('classify: pass --tool, or JSON {tool_name, tool_input, cwd} on stdin') }
+    if (!event || typeof event !== 'object') return fail('classify: expected a JSON object')
+    if (typeof event.cwd !== 'string') event.cwd = process.cwd()
+  }
+  const root = rulesMod().repoRoot(event.cwd)
+  const ctx = { cwd: event.cwd, root, home: os.homedir() }
+  const r = riskMod().classify(event.tool_name, event.tool_input, ctx)
+  return out({ risk: r, batchable: riskMod().batchable(event.tool_name, r), suggestedRules: rulesMod().suggest(event.tool_name, event.tool_input, ctx), repo: root })
 }
 
 function run (cmd, args) {
@@ -296,9 +438,38 @@ async function usageCmd (args) {
     opts.cacheFile = paths.usageCachePath()
     // --max-ms caps the whole call, Node's start included.
     opts.startedAt = Math.round(performance.timeOrigin)
-    return out({ version: paths.VERSION, ...usageMod().compute(opts) })
+    const result = usageMod().compute(opts)
+    // Every cswap account's limits; nothing at all without cswap.
+    let cswap = null
+    try { cswap = await cswapMod().accounts({ cacheFile: cswapCachePath() }) } catch {}
+    if (cswap) {
+      const { accounts, ...meta } = cswap
+      result.claude.accounts = accounts
+      result.claude.cswap = meta
+    }
+    return out({ version: paths.VERSION, ...result })
   } catch (err) {
     return fail(`usage failed: ${err.message}`)
+  }
+}
+
+const cswapCachePath = () => path.join(paths.homeDir(), 'cswap-cache.json')
+
+async function cswapSwitchCmd (args) {
+  const { flags, positional } = parseFlags(args)
+  const best = flags.best === true
+  const slot = positional[0]
+  if (best === (slot !== undefined) || (slot !== undefined && !/^[1-9][0-9]{0,3}$/.test(slot))) {
+    return fail('usage: cswap-switch <slot> | --best')
+  }
+  try { os.setPriority(0, 10) } catch {}
+  try {
+    paths.ensureDirs()
+    const r = await cswapMod().switchAccount({ slot: best ? undefined : Number(slot), best, cacheFile: cswapCachePath() })
+    if (!r.ok) return fail(r.message)
+    return out(r)
+  } catch (err) {
+    return fail(`cswap-switch failed: ${err.message}`)
   }
 }
 
@@ -559,6 +730,11 @@ async function main (argv) {
     case 'status': return status()
     case 'events': return events(args)
     case 'decide': return decide(args)
+    case 'approve-low': return approveLow(args)
+    case 'trust': return trustCmd(args)
+    case 'rules': return rulesCmd(args)
+    case 'approvals': return approvalsCmd(args)
+    case 'classify': return classifyCmd(args)
     case 'focus': return focus(args)
     case 'transcript': return transcriptCmd(args)
     case 'send': return send(args)
@@ -566,12 +742,13 @@ async function main (argv) {
     case 'ports': return portsCmd(args)
     case 'usage': return usageCmd(args)
     case 'summarize': return summarizeCmd(args)
+    case 'cswap-switch': return cswapSwitchCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()
     case 'doctor': return doctor()
     case 'stop': return stop()
-    case 'version': return out({ version: paths.VERSION, protocol: paths.PROTOCOL_VERSION, node: process.versions.node })
+    case 'version': return out({ version: paths.VERSION, protocol: paths.PROTOCOL_VERSION, node: process.versions.node, capabilities: require('./approvals').CAPABILITIES })
     case 'help': case '--help': case '-h': case undefined:
       process.stdout.write(USAGE); return cmd === undefined ? 1 : 0
     default: return fail(`unknown command ${cmd}\n${USAGE}`)

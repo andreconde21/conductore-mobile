@@ -31,7 +31,9 @@ void main() {
         'diff --git a/s.txt b/s.txt\n--- a/s.txt\n+++ b/s.txt\n'
         '@@ -1 +1 @@\n-old\n+new\n',
       ),
-      status: GitStatus.parse('# branch.head main\n# branch.ab +2 -0\n? notes.txt\n'),
+      status: GitStatus.parse(
+        '# branch.head main\n# branch.ab +2 -0\n? notes.txt\n',
+      ),
     );
     controller = DiffViewController(source);
   });
@@ -79,7 +81,9 @@ void main() {
     expect(removed, findsWidgets);
   });
 
-  testWidgets('word-level changes are highlighted inside a pair', (tester) async {
+  testWidgets('word-level changes are highlighted inside a pair', (
+    tester,
+  ) async {
     await pumpReady(tester);
     final rich = tester
         .widgetList<Text>(find.byType(Text))
@@ -95,7 +99,9 @@ void main() {
     expect(highlighted, containsAll(['Old', 'New']));
   });
 
-  testWidgets('the chevron collapses a file and its lines disappear', (tester) async {
+  testWidgets('the chevron collapses a file and its lines disappear', (
+    tester,
+  ) async {
     await pumpReady(tester);
     expect(find.text('@@ -1,6 +1,7 @@ class App {'), findsOneWidget);
     await tester.tap(find.byTooltip('Collapse').first);
@@ -104,7 +110,9 @@ void main() {
     expect(find.byTooltip('Expand'), findsOneWidget);
   });
 
-  testWidgets('tapping a file header opens it at its absolute path', (tester) async {
+  testWidgets('tapping a file header opens it at its absolute path', (
+    tester,
+  ) async {
     await pumpReady(tester);
     await tester.tap(find.text('lib/app.dart'));
     await tester.pump();
@@ -119,7 +127,9 @@ void main() {
     expect(find.text('lib/app.dart'), findsNothing);
   });
 
-  testWidgets('the file list sheet lists changed and untracked files', (tester) async {
+  testWidgets('the file list sheet lists changed and untracked files', (
+    tester,
+  ) async {
     // Tall enough that the sheet shows every entry without scrolling.
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1;
@@ -162,7 +172,9 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
   });
 
-  testWidgets('an empty diff explains what is on the other side', (tester) async {
+  testWidgets('an empty diff explains what is on the other side', (
+    tester,
+  ) async {
     source.snapshots['/home/u/app'] = GitDiffSnapshot(
       path: '/home/u/app',
       repositoryRoot: '/home/u/app',

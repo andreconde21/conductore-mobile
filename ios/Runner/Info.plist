@@ -30,6 +30,10 @@
 	<string>Conductore lets you choose files and photos to upload to your machines over SFTP or attach to a coding agent prompt.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Conductore lets you take a photo to upload to your machines over SFTP or attach to a coding agent prompt, and scan the QR code that adds this device to sync.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Conductore uses the microphone when you tap the mic or Talk, to dictate prompts and answers to your coding agent.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Conductore turns what you say into text for your coding agent. Recognition runs on this iPhone when it supports your language; otherwise Apple's speech service handles it.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Conductore does not use your location, but file selection providers may require this permission.</string>
 	<key>CFBundlePackageType</key>
@@ -42,6 +46,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

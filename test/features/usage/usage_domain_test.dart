@@ -225,6 +225,146 @@ void main() {
     });
   });
 
+  group('cswap accounts', () {
+    final now = DateTime.utc(2026, 9, 25, 12);
+    MachineUsage machine(
+      String id,
+      List<Map<String, Object?>>? accounts, {
+      bool cswap = true,
+    }) => MachineUsage(
+      hostId: id,
+      hostName: id.toUpperCase(),
+      report: parseUsageReport(
+        jsonEncode(usageReplyJson(accounts: accounts, cswap: cswap)),
+      ),
+    );
+
+    test('parses claude.accounts and claude.cswap', () {
+      final m = machine('a', [
+        usageAccount(
+          1,
+          'work',
+          active: true,
+          fiveHour: 17,
+          weekly: 5,
+          fiveHourResets: resets,
+          usageAt: now,
+        ),
+        usageAccount(2, 'b***@e***.org', disabled: true, stale: true),
+      ]);
+      expect(m.canSwitchAccounts, isTrue);
+      final [work, masked] = m.accounts;
+      expect(work.slot, 1);
+      expect(work.label, 'work');
+      expect(work.alias, 'work');
+      expect(work.active, isTrue);
+      expect(
+        work.fiveHour,
+        UsageLimit(label: '5h', usedPct: 17, resetsAt: resets),
+      );
+      expect(work.weekly?.usedPct, 5);
+      expect(work.perModel.single.label, 'Fable');
+      expect(work.usageAt, now);
+      expect(work.usedPct(now), 17);
+      expect(masked.alias, isNull);
+      expect(masked.disabled, isTrue);
+      expect(masked.stale, isTrue);
+      expect(masked.fiveHour, isNull);
+      expect(masked.usedPct(now), isNull);
+    });
+
+    test('an old companion without accounts means no cswap', () {
+      final old = machine('a', null);
+      expect(old.accounts, isEmpty);
+      expect(old.canSwitchAccounts, isFalse);
+      final summary = UsageSummary([old]);
+      expect(summary.accounts, isEmpty);
+      expect(summary.otherAccountCount, 0);
+      expect(summary.bestAccount(now), isNull);
+      expect(summary.accountTerms, isEmpty);
+    });
+
+    test('cswap without switch support still lists, never switches', () {
+      final m = machine('a', [usageAccount(1, 'work')], cswap: false);
+      expect(m.accounts, hasLength(1));
+      expect(m.canSwitchAccounts, isFalse);
+      expect(UsageSummary([m]).accounts.single.switchTargets, isEmpty);
+    });
+
+    test('merges across machines by label, active first', () {
+      final summary = UsageSummary([
+        machine('a', [
+          usageAccount(1, 'home', fiveHour: 10, fiveHourResets: resets),
+          usageAccount(2, 'work', active: true, fiveHour: 60, weekly: 30),
+        ]),
+        machine('b', [
+          usageAccount(
+            1,
+            'home',
+            active: true,
+            fiveHour: 25,
+            fiveHourResets: resets,
+          ),
+          usageAccount(3, 'spare', disabled: true, weekly: 1),
+        ]),
+      ]);
+      final accounts = summary.accounts;
+      expect(accounts.map((a) => a.label), ['home', 'work', 'spare']);
+      final home = accounts.first;
+      expect(home.placements.map((p) => p.hostId), ['a', 'b']);
+      // The same window: the higher use wins.
+      expect(home.fiveHour?.usedPct, 25);
+      expect(home.activeOn, ['B']);
+      expect(home.switchTargets.map((p) => p.hostId), ['a']);
+      expect(accounts.last.disabled, isTrue);
+      expect(accounts.last.switchTargets, isEmpty);
+      expect(summary.otherAccountCount, 1);
+      expect(summary.accountTerms.toSet(), {'home', 'work', 'spare'});
+    });
+
+    test('best: another account with clearly more headroom', () {
+      UsageSummary summaryWith(num activeUsed, num otherUsed) => UsageSummary([
+        machine('a', [
+          usageAccount(1, 'work', active: true, fiveHour: activeUsed),
+          usageAccount(2, 'home', fiveHour: otherUsed, weekly: 3),
+          usageAccount(3, 'off', disabled: true, fiveHour: 0),
+        ]),
+      ]);
+      expect(summaryWith(80, 12).bestAccount(now)?.label, 'home');
+      // The active one has room left: no hint.
+      expect(summaryWith(30, 0).bestAccount(now), isNull);
+      // Not clearly better.
+      expect(summaryWith(80, 75).bestAccount(now), isNull);
+    });
+
+    test('parseAccountSwitchResult', () {
+      final ok = parseAccountSwitchResult(
+        jsonEncode({
+          'ok': true,
+          'switched': true,
+          'from': {'slot': 1, 'label': 'work'},
+          'to': {'slot': 2, 'label': 'home'},
+        }),
+      );
+      expect(ok.ok, isTrue);
+      expect(ok.message, 'New Claude sessions now use home');
+      final same = parseAccountSwitchResult(
+        jsonEncode({
+          'ok': true,
+          'switched': false,
+          'to': {'slot': 1, 'label': 'work'},
+        }),
+      );
+      expect(same.message, 'work was already the active account');
+      final failed = parseAccountSwitchResult(
+        jsonEncode({'error': 'No account 9'}),
+      );
+      expect(failed.ok, isFalse);
+      expect(failed.message, 'Could not switch: No account 9');
+      expect(parseAccountSwitchResult('unknown command').ok, isFalse);
+    });
+  });
+
   group('UsageAlertPolicy', () {
     const policy = UsageAlertPolicy();
     final now = DateTime.utc(2026, 9, 25, 12);

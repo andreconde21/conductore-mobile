@@ -47,6 +47,8 @@ class ChatViewTab extends TerminalFileTab {
         pasteImages: request.pasteImages,
         onSetUpCompanion: request.onSetUpCompanion,
         onEnableMonitoring: request.onEnableMonitoring,
+        attention: request.attention,
+        hostId: host.id,
         onOpenTerminal: request.onOpenTerminal,
       );
 

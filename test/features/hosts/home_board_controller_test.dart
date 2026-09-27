@@ -426,4 +426,30 @@ void main() {
       expect(boards['n']!.state.phase, HomeBoardPhase.ready);
     });
   });
+
+  test('a refresh while hidden closes its channel afterwards', () async {
+    final runner = HerdrFakeRunner();
+    var created = 0;
+    final boards = HomeBoards(
+      runnerFactory: (_) {
+        created += 1;
+        return runner;
+      },
+      pollInterval: const Duration(days: 1),
+    );
+    boards.sync([
+      HomeBoardEntry(
+        buildHost('a').copyWith(lastConnectedAt: DateTime.utc(2026, 9, 2)),
+      ),
+    ]);
+    // The home page is covered by the terminal; the quick switcher
+    // refreshes the boards from there.
+    boards.setVisible(false);
+    await boards.refresh();
+    await pumpEventQueue();
+    expect(created, 1);
+    expect(runner.commands, isNotEmpty);
+    expect(runner.closeCount, 1);
+    boards.dispose();
+  });
 }

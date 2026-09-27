@@ -67,6 +67,46 @@ class SshClientFactory {
     }
   }
 
+  /// How long [host] gets from the TCP connection to its first channel:
+  /// the SSH handshake, the sign-in and opening a shell, exec or SFTP. A
+  /// hardware-key sign-in waits for a touch or a PIN, an external one
+  /// (Tailscale SSH's check) for a browser login, so those get longer.
+  static Duration setupTimeoutFor(SavedHost host) {
+    final configured = Duration(seconds: host.connectionTimeoutSeconds);
+    return switch (host.authMethod) {
+      SshAuthMethod.hardwareKey || SshAuthMethod.external =>
+        configured > interactiveSetupTimeout
+            ? configured
+            : interactiveSetupTimeout,
+      _ => configured,
+    };
+  }
+
+  /// [setupTimeoutFor] a sign-in that waits on the user.
+  static const interactiveSetupTimeout = Duration(minutes: 5);
+
+  /// Awaits [firstChannel] (which waits on the handshake and sign-in of
+  /// [client] too) within [setupTimeoutFor] [host]. A server that accepts
+  /// the connection but never speaks SSH would otherwise hang it forever;
+  /// on timeout [client] is closed and a [TimeoutException] thrown.
+  static Future<T> withinSetupTimeout<T>(
+    SavedHost host,
+    SSHClient client,
+    Future<T> firstChannel,
+  ) {
+    final timeout = setupTimeoutFor(host);
+    return firstChannel.timeout(
+      timeout,
+      onTimeout: () {
+        client.close();
+        throw TimeoutException(
+          'The SSH server did not finish the handshake and sign-in in time.',
+          timeout,
+        );
+      },
+    );
+  }
+
   List<SSHKeyPair>? _identitiesFor(SavedHost host) {
     if (host.authMethod == SshAuthMethod.external &&
         host.externalAuthOfferKey) {

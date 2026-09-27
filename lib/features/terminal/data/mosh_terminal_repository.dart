@@ -108,7 +108,11 @@ class MoshTerminalRepository implements SshTerminalRepository {
       '$moshServerTimeoutEnv ${_bootstrapFor(host).command()}';
 
   Future<MoshServerConfig> _bootstrap(SSHClient client, SavedHost host) async {
-    final session = await client.execute(bootstrapCommand(host));
+    final session = await SshClientFactory.withinSetupTimeout(
+      host,
+      client,
+      client.execute(bootstrapCommand(host)),
+    );
     final output = StringBuffer();
 
     Future<void> drain(Stream<List<int>> stream) => stream.forEach(

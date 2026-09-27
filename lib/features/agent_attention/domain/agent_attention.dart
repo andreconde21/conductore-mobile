@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// The attention-relevant state of one remote agent, normalized across
 /// providers.
 enum AgentAttentionState {
@@ -50,6 +52,93 @@ extension PermissionVerdictDetails on PermissionVerdict {
   };
 }
 
+/// How much damage a permission request could do, as the companion rates
+/// it (`host/lib/risk.js`).
+enum PermissionRiskLevel {
+  /// Read-only tools and commands, tests and linters.
+  low,
+
+  /// Edits in the repo, installs, builds, anything unknown.
+  medium,
+
+  /// Recursive deletes, force pushes, `curl | sh`, sudo, writes outside
+  /// the repo, secrets, network to unknown hosts. Always asks.
+  high;
+
+  String get label => switch (this) {
+    PermissionRiskLevel.low => 'Low risk',
+    PermissionRiskLevel.medium => 'Medium risk',
+    PermissionRiskLevel.high => 'High risk',
+  };
+
+  static PermissionRiskLevel? parse(Object? raw) => switch (raw) {
+    'low' => PermissionRiskLevel.low,
+    'medium' => PermissionRiskLevel.medium,
+    'high' => PermissionRiskLevel.high,
+    _ => null,
+  };
+}
+
+/// A risk label with its one-line reason ("Deletes recursively: dist").
+class PermissionRisk {
+  const PermissionRisk(this.level, this.reason);
+
+  final PermissionRiskLevel level;
+  final String reason;
+
+  /// Parses the companion's `{"level", "reason"}`; null when absent or
+  /// malformed (an older companion).
+  static PermissionRisk? parse(Object? raw) {
+    if (raw is! Map) {
+      return null;
+    }
+    final level = PermissionRiskLevel.parse(raw['level']);
+    if (level == null) {
+      return null;
+    }
+    final reason = raw['reason'];
+    return PermissionRisk(
+      level,
+      reason is String && reason.trim().isNotEmpty ? reason.trim() : '',
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is PermissionRisk && other.level == level && other.reason == reason;
+
+  @override
+  int get hashCode => Object.hash(level, reason);
+}
+
+/// The smart-approval fields of one pending request, as the companion
+/// reports them (all absent from an older companion).
+typedef PendingApprovalInfo = ({
+  PermissionRisk? risk,
+  bool batchable,
+  List<String> suggestedRules,
+  String? repo,
+});
+
+/// Reads [PendingApprovalInfo] from one `pending[]` entry.
+PendingApprovalInfo parsePendingApprovalInfo(Map<Object?, Object?> entry) {
+  final risk = PermissionRisk.parse(entry['risk']);
+  final rules = entry['suggestedRules'];
+  final repo = entry['repo'];
+  return (
+    risk: risk,
+    // Only a low rating may go into a batch, whatever the flag says.
+    batchable:
+        entry['batchable'] == true && risk?.level == PermissionRiskLevel.low,
+    suggestedRules: [
+      if (rules is List)
+        for (final rule in rules)
+          if (rule is String && rule.trim().isNotEmpty) rule.trim(),
+    ],
+    repo: repo is String && repo.startsWith('/') ? repo : null,
+  );
+}
+
 /// One tool call an agent is waiting to have approved, as reported by a
 /// provider that can relay permission prompts (the Conductore host
 /// companion). Herdr agents never carry these.
@@ -60,6 +149,10 @@ class PendingPermissionRequest {
     required this.summary,
     this.toolInput = '',
     this.createdAt,
+    this.risk,
+    this.batchable = false,
+    this.suggestedRules = const [],
+    this.repo,
   });
 
   /// Provider-issued request id, passed back verbatim with the decision.
@@ -75,6 +168,23 @@ class PendingPermissionRequest {
 
   final DateTime? createdAt;
 
+  /// The companion's risk rating; null from an older companion.
+  final PermissionRisk? risk;
+
+  /// Whether "Approve all safe" may include it (low risk only).
+  final bool batchable;
+
+  /// Approval rules that would cover it, most specific first
+  /// (Claude Code syntax, e.g. `Bash(npm test *)`).
+  final List<String> suggestedRules;
+
+  /// The git work tree the agent works in (a rule's "this repo" scope).
+  final String? repo;
+
+  /// Whether a trust or rule may answer requests like this one (high risk
+  /// always asks).
+  bool get trustable => risk != null && risk!.level != PermissionRiskLevel.high;
+
   /// Longest tool input kept on the phone; anything beyond is truncated
   /// with a marker so a huge file write cannot bloat the dashboard.
   static const maxToolInputLength = 4000;
@@ -86,11 +196,25 @@ class PendingPermissionRequest {
         other.toolName == toolName &&
         other.summary == summary &&
         other.toolInput == toolInput &&
-        other.createdAt == createdAt;
+        other.createdAt == createdAt &&
+        other.risk == risk &&
+        other.batchable == batchable &&
+        listEquals(other.suggestedRules, suggestedRules) &&
+        other.repo == repo;
   }
 
   @override
-  int get hashCode => Object.hash(id, toolName, summary, toolInput, createdAt);
+  int get hashCode => Object.hash(
+    id,
+    toolName,
+    summary,
+    toolInput,
+    createdAt,
+    risk,
+    batchable,
+    Object.hashAll(suggestedRules),
+    repo,
+  );
 }
 
 /// One remote agent as reported by a provider.
@@ -109,6 +233,7 @@ class AgentInfo {
     this.lastMessage,
     this.project,
     this.usage,
+    this.lastAutoApprovedAt,
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -150,6 +275,10 @@ class AgentInfo {
   /// companion's optional `usage` field). Null means "not reported".
   final AgentUsage? usage;
 
+  /// When an approval rule last answered one of this agent's requests on
+  /// the host (the companion's `lastAutoApprovedAt`).
+  final DateTime? lastAutoApprovedAt;
+
   /// The project the inbox groups this agent under: the provider's
   /// [project], else the basename of a path-like [workspace] (the
   /// companion puts the agent's cwd there). Herdr's opaque workspace ids
@@ -186,6 +315,7 @@ class AgentInfo {
       lastMessage: lastMessage,
       project: project,
       usage: usage,
+      lastAutoApprovedAt: lastAutoApprovedAt,
     );
   }
 
@@ -204,6 +334,7 @@ class AgentInfo {
         other.lastMessage == lastMessage &&
         other.project == project &&
         other.usage == usage &&
+        other.lastAutoApprovedAt == lastAutoApprovedAt &&
         _sameRequests(other.pendingRequests, pendingRequests);
   }
 
@@ -236,6 +367,7 @@ class AgentInfo {
     lastMessage,
     project,
     usage,
+    lastAutoApprovedAt,
     Object.hashAll(pendingRequests),
   );
 }
@@ -319,9 +451,17 @@ class AgentRateLimit {
 
 /// One poll's worth of agent information for a host.
 class AgentAttentionSnapshot {
-  const AgentAttentionSnapshot({required this.agents, this.sequence});
+  const AgentAttentionSnapshot({
+    required this.agents,
+    this.sequence,
+    this.capabilities,
+  });
 
   final List<AgentInfo> agents;
+
+  /// Features the provider reported (the companion's `capabilities`, e.g.
+  /// `smart-approvals`); null when it reports none (older versions).
+  final Set<String>? capabilities;
 
   /// Monotonic snapshot sequence, when the provider numbers its snapshots
   /// (used to resume a change stream and to drop stale results).

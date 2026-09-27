@@ -5,9 +5,12 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/usage_update_hint.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
@@ -83,6 +86,25 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
   // Swap the content as soon as a tab is picked, not after the indicator
   // animation.
   void _onTab() => setState(() {});
+
+  /// The pending ids the user chose to review one by one: the batch card
+  /// stays hidden until that set changes.
+  Set<String>? _reviewing;
+  bool _batching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // The auto-approved list: once per opening, then kept fresh by the
+    // controller whenever a rule answers something.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final host in controller.monitoredHosts) {
+        if (controller.supportsSmartApprovals(host.id)) {
+          unawaited(controller.loadApprovals(host).catchError((_) => null));
+        }
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -248,10 +270,28 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
         ),
       ];
     }
+    final waiting = controller.pendingApprovals;
+    final safe = controller.lowRiskPending;
+    final waitingIds = {for (final p in waiting) p.request.id};
+    final reviewing = _reviewing;
+    final showBatch =
+        waiting.length >= 2 &&
+        safe.isNotEmpty &&
+        (reviewing == null ||
+            !(reviewing.length == waitingIds.length &&
+                reviewing.containsAll(waitingIds)));
     return [
       for (final MapEntry(key: section, value: groups)
           in inbox.sections.entries) ...[
         _SectionHeader(section: section, count: inbox.countIn(section)),
+        if (section == AgentInboxSection.needsApproval && showBatch)
+          BatchApprovalCard(
+            waiting: waiting.length,
+            safe: safe.length,
+            busy: _batching,
+            onReviewEach: () => setState(() => _reviewing = waitingIds),
+            onApproveSafe: () => _approveSafe(context, safe),
+          ),
         for (final group in groups) ...[
           if (grouped)
             Padding(
@@ -270,7 +310,63 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
               _row(context, host, entry, section, showHost: !grouped),
         ],
       ],
+      for (final host in controller.monitoredHosts)
+        if (controller.approvalsFor(host.id) case final approvals?)
+          AutoApprovedSection(
+            key: ValueKey('auto-approved-${host.id}'),
+            hostName: host.name,
+            showHost: grouped,
+            approvals: approvals,
+            onRevoke: (rule) => _revoke(context, host, rule),
+          ),
     ];
+  }
+
+  Future<void> _approveSafe(
+    BuildContext context,
+    List<PendingApproval> safe,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (!await showBatchApproveSheet(context, safe) || !mounted) {
+      return;
+    }
+    setState(() => _batching = true);
+    try {
+      final result = await controller.approveAllLowRisk(only: safe);
+      final skipped = result.skipped.length;
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Approved ${result.approved.length}'
+            '${skipped > 0 ? '; $skipped left to review' : ''}.',
+          ),
+        ),
+      );
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Could not approve: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _batching = false);
+    }
+  }
+
+  Future<void> _revoke(
+    BuildContext context,
+    SavedHost host,
+    ApprovalRule rule,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await controller.removeRule(host, rule.id);
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Revoked ${rule.rule}. It asks again.')),
+      );
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Could not revoke ${rule.rule}: $error')),
+      );
+    }
   }
 
   Widget _row(
@@ -298,8 +394,21 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
                     key: ValueKey('request-${request.id}'),
                     request: request,
                     busy: controller.isDeciding(request.id),
-                    onDecide: (verdict) =>
-                        _decide(context, host, request, verdict),
+                    onDecide: (verdict) => answerPermissionRequest(
+                      context,
+                      controller: controller,
+                      hostId: host.id,
+                      request: request,
+                      verdict: verdict,
+                    ),
+                    onTrust: controller.supportsSmartApprovals(host.id)
+                        ? () => trustPermissionRequest(
+                            context,
+                            controller: controller,
+                            hostId: host.id,
+                            request: request,
+                          )
+                        : null,
                   ),
               ],
             ),
@@ -326,27 +435,6 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
           controller.inboxDismissals.dismiss(entry.hostId, agent),
       child: row,
     );
-  }
-
-  Future<void> _decide(
-    BuildContext context,
-    SavedHost host,
-    PendingPermissionRequest request,
-    PermissionVerdict verdict,
-  ) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    try {
-      await controller.decide(host.id, request, verdict);
-    } catch (error) {
-      messenger?.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not ${verdict.label.toLowerCase()} ${request.toolName}: '
-            '$error',
-          ),
-        ),
-      );
-    }
   }
 }
 
