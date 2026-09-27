@@ -29,6 +29,7 @@ import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
 import 'package:conduit/features/voice/presentation/talk_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// A native chat over one live Claude Code session: the transcript as
@@ -81,7 +82,8 @@ class ChatViewPage extends StatefulWidget {
   final Future<void> Function()? onEnableMonitoring;
 
   /// Speaks replies when "Read replies aloud" is on; defaults to the
-  /// on-device engine on Android and to none elsewhere (tests inject one).
+  /// on-device engine on Android and iOS and to none elsewhere (tests
+  /// inject one).
   final TextToSpeech? textToSpeech;
 
   /// A small widget pinned above the composer (the "Preview ready" chip).
@@ -294,8 +296,12 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (readAloud == null) return;
     if (!readAloud.isAvailable) {
       _tell(
-        'Reading aloud needs a text-to-speech engine. Install or turn one '
-        'on in Android Settings › Accessibility › Text-to-speech output.',
+        defaultTargetPlatform == TargetPlatform.iOS
+            ? 'Reading aloud needs a voice. Download one in Settings › '
+                  'Accessibility › Spoken Content › Voices.'
+            : 'Reading aloud needs a text-to-speech engine. Install or turn '
+                  'one on in Android Settings › Accessibility › '
+                  'Text-to-speech output.',
       );
       // It may have been installed since the chat opened.
       unawaited(readAloud.checkAvailability());

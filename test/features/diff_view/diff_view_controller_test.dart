@@ -140,7 +140,9 @@ void main() {
     await controller.load('/home/u/app');
     expect(controller.phase, DiffViewPhase.ready);
     // The stale request lands after the newer one and must be ignored.
-    gate.complete(const GitDiffSnapshot(path: '/slow', repositoryRoot: '/slow'));
+    gate.complete(
+      const GitDiffSnapshot(path: '/slow', repositoryRoot: '/slow'),
+    );
     await slow;
     expect(controller.snapshot?.path, '/home/u/app');
     expect(controller.path, '/home/u/app');

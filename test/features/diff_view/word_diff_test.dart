@@ -41,12 +41,8 @@ diff --git a/x b/x
 ''').files.single.hunks.single;
     final spans = wordDiffHunk(hunk);
     expect(spans.keys, unorderedEquals([0, 1, 2, 3]));
-    expect(spans[0]!.where((span) => span.changed).map((s) => s.text), [
-      'one',
-    ]);
-    expect(spans[2]!.where((span) => span.changed).map((s) => s.text), [
-      'uno',
-    ]);
+    expect(spans[0]!.where((span) => span.changed).map((s) => s.text), ['one']);
+    expect(spans[2]!.where((span) => span.changed).map((s) => s.text), ['uno']);
     // "beta two" is unchanged on both sides.
     expect(spans[1]!.any((span) => span.changed), isFalse);
     expect(spans[3]!.any((span) => span.changed), isFalse);
@@ -64,7 +60,11 @@ diff --git a/x b/x
       newCount: 1,
       lines: [
         DiffLine(kind: DiffLineKind.deletion, text: long, oldLineNumber: 1),
-        DiffLine(kind: DiffLineKind.addition, text: '${long}y', newLineNumber: 1),
+        DiffLine(
+          kind: DiffLineKind.addition,
+          text: '${long}y',
+          newLineNumber: 1,
+        ),
       ],
     );
     expect(wordDiffHunk(hunk), isEmpty);

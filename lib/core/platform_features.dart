@@ -4,10 +4,10 @@ import 'package:flutter/foundation.dart';
 /// silently do nothing (or throw MissingPluginException) instead of offering
 /// them.
 ///
-/// The first group is backed by Conductore's own Android platform channels
-/// (MainActivity and friends): iOS and the desktops have no native side for
-/// them. The second group follows the plugins' platform support
-/// (docs/desktop.md has the audit).
+/// The first group is backed by Conductore's own platform channels
+/// (Android's MainActivity and friends; for voice also iOS's AppDelegate):
+/// elsewhere there is no native side for them. The second group follows
+/// the plugins' platform support (docs/desktop.md has the audit).
 ///
 /// Every getter reads [defaultTargetPlatform], so widget tests (which run as
 /// Android by default) keep exercising the Android UI, and a test can flip
@@ -25,11 +25,17 @@ abstract final class PlatformFeatures {
     _ => false,
   };
 
-  /// On-device dictation (`conduit/speech`).
-  static bool get dictation => _android;
+  /// On-device dictation (`conduit/speech`): Android's SpeechRecognizer,
+  /// iOS's SFSpeechRecognizer. Talk needs this and [textToSpeech].
+  static bool get dictation => _mobile;
 
-  /// On-device text-to-speech for Chat View replies (`conduit/tts`).
-  static bool get textToSpeech => _android;
+  /// On-device text-to-speech for Chat View replies (`conduit/tts`):
+  /// Android's TextToSpeech, iOS's AVSpeechSynthesizer.
+  static bool get textToSpeech => _mobile;
+
+  /// Muting the recognizer's start/stop beeps between phrases: only
+  /// Android's recognizer beeps.
+  static bool get muteRestartBeeps => _android;
 
   /// Receiving text and files from the system share sheet
   /// (`conduit/share_target`).
