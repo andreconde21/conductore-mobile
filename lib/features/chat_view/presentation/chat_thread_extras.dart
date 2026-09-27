@@ -248,7 +248,12 @@ mixin ChatThreadExtras on State<ChatViewPage> {
             ? child
             : ChatMessageActions(
                 content: content,
-                selectable: item is ChatAssistantText || item is ChatPlan,
+                // Mouse selection (desktop only): replies, plans and the
+                // user's own prompts.
+                selectable:
+                    item is ChatAssistantText ||
+                    item is ChatPlan ||
+                    item is ChatUserMessage,
                 child: child,
               ),
       ),
@@ -260,6 +265,7 @@ mixin ChatThreadExtras on State<ChatViewPage> {
       ChatMessageActions(
         key: ValueKey(outgoing.id),
         content: ChatMessageContent.outgoing(outgoing),
+        selectable: true,
         child: child,
       );
 
