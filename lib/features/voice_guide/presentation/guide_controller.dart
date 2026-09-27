@@ -679,16 +679,40 @@ class GuideController extends ChangeNotifier {
     required bool confirmed,
   }) async {
     if (!approvals.supportsTrust) return s.notAvailableTrust;
-    final (agent, problem) = _agent(target, now, s);
-    if (agent == null) return problem;
+    // Trust answers a waiting request and lets its kind through for a
+    // while (the companion derives the rule from it).
+    GuidePending pending;
+    if (target is GuideRequestRef) {
+      final found = now.request(target.hostId, target.requestId);
+      if (found == null) return s.requestGone;
+      pending = found;
+    } else {
+      final (agent, problem) = _agent(target, now, s);
+      if (agent == null) return problem;
+      if (agent.pending.isEmpty) return s.nothingToTrust(agent.label);
+      pending = GuidePending(agent, agent.pending.first);
+    }
+    if (approvals.riskOf(pending.hostId, pending.request) ==
+        ApprovalRisk.high) {
+      return s.trustHighRisk;
+    }
     if (!confirmed) {
       return _ask(
-        s.confirmTrust(agent.label, minutes),
-        _Confirm(GuideTrust(minutes, GuideAgentRef(agent.hostId, agent.id))),
+        s.confirmTrust(pending, minutes),
+        _Confirm(
+          GuideTrust(
+            minutes,
+            GuideRequestRef(pending.hostId, pending.request.id),
+          ),
+        ),
       );
     }
-    await approvals.trust(agent.hostId, agent.id, Duration(minutes: minutes));
-    return s.trusted(agent.label, minutes);
+    await approvals.trust(
+      pending.hostId,
+      pending.request,
+      Duration(minutes: minutes),
+    );
+    return s.trusted(pending.agent.label, minutes);
   }
 
   Future<String?> _send(

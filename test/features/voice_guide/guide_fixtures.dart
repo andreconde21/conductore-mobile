@@ -100,8 +100,11 @@ class FakeApprovals extends ApprovalActions {
   bool get supportsTrust => smart;
 
   @override
-  Future<void> trust(String hostId, String agentId, Duration duration) async =>
-      trusted.add((hostId, agentId, duration));
+  Future<void> trust(
+    String hostId,
+    PendingPermissionRequest request,
+    Duration duration,
+  ) async => trusted.add((hostId, request.id, duration));
 }
 
 class FakeNavigator implements GuideNavigator {

@@ -350,6 +350,45 @@ void main() {
     },
   );
 
+  testWidgets(
+    'trust with smart approvals: the request and its kind, confirmed; never high risk',
+    (tester) async {
+      await setUpGuide(
+        tester,
+        world: GuideWorld(
+          machines: const [vtm],
+          agents: [
+            agent('s-api', project: 'api', pending: const [npmTest]),
+            agent('s-ops', project: 'ops', pending: const [rmRf]),
+          ],
+          screen: const GuideScreen(
+            GuideView.chat,
+            hostId: 'vtm',
+            agentId: 's-api',
+          ),
+        ),
+        approvalActions: FakeApprovals(
+          smart: true,
+          risks: {npmTest.id: ApprovalRisk.low, rmRf.id: ApprovalRisk.high},
+        ),
+      );
+      await begin(tester);
+      await talk(tester, 'trust this for 15 minutes');
+      expect(
+        await hear(tester),
+        'Trust api to run npm test and the like for 15 minutes? Say yes.',
+      );
+      await talk(tester, 'yes');
+      expect(approvals.trusted, [
+        ('vtm', 'req-npm', const Duration(minutes: 15)),
+      ]);
+      expect(await hear(tester), 'Trusting api for 15 minutes.');
+      await talk(tester, 'trust ops for an hour');
+      expect(await hear(tester), startsWith('That request is high risk'));
+      expect(approvals.trusted, hasLength(1));
+    },
+  );
+
   testWidgets('open, chat, terminal, home, read and more', (tester) async {
     await setUpGuide(tester);
     await begin(tester);

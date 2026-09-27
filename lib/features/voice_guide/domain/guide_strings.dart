@@ -57,7 +57,9 @@ abstract class GuideStrings {
   String confirmApprove(GuidePending pending);
   String confirmDeny(GuidePending pending);
   String confirmApproveAll(int count);
-  String confirmTrust(String agent, int minutes);
+  String confirmTrust(GuidePending pending, int minutes);
+  String nothingToTrust(String agent);
+  String get trustHighRisk;
   String confirmSend(String agent, String text);
   String failed(String what);
   String waiting(GuideWorld world);
@@ -222,8 +224,17 @@ class _English extends GuideStrings {
       ? 'Approve one low-risk request? Say yes.'
       : 'Approve $count low-risk requests? Say yes.';
   @override
-  String confirmTrust(String agent, int minutes) =>
-      'Trust $agent for ${_duration(minutes)}? Say yes.';
+  String confirmTrust(GuidePending pending, int minutes) =>
+      'Trust ${pending.agent.label} to run '
+      '${GuideStrings.requestLabel(pending.request)} and the like for '
+      '${_duration(minutes)}? Say yes.';
+  @override
+  String nothingToTrust(String agent) =>
+      '$agent has no request waiting to trust.';
+  @override
+  String get trustHighRisk =>
+      "That request is high risk, so it can't be trusted. Say approve to "
+      'answer just this one.';
   @override
   String confirmSend(String agent, String text) =>
       'Send to $agent: ${GuideStrings.asQuestion(text)} Say yes.';
@@ -425,8 +436,17 @@ class _Portuguese extends GuideStrings {
       ? 'Aprovar um pedido de baixo risco? Diz sim.'
       : 'Aprovar $count pedidos de baixo risco? Diz sim.';
   @override
-  String confirmTrust(String agent, int minutes) =>
-      'Confiar em $agent durante ${_duration(minutes)}? Diz sim.';
+  String confirmTrust(GuidePending pending, int minutes) =>
+      'Confiar em ${pending.agent.label} para '
+      '${GuideStrings.requestLabel(pending.request)} e semelhantes durante '
+      '${_duration(minutes)}? Diz sim.';
+  @override
+  String nothingToTrust(String agent) =>
+      '$agent não tem nenhum pedido à espera para confiar.';
+  @override
+  String get trustHighRisk =>
+      'Esse pedido é de alto risco, não dá para confiar. Diz aprova para '
+      'responder só a este.';
   @override
   String confirmSend(String agent, String text) =>
       'Enviar para $agent: ${GuideStrings.asQuestion(text)} Diz sim.';
