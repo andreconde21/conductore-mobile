@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
@@ -21,10 +23,11 @@ Future<void> showCompanionSetup(
 }) async {
   final resolved = controller ?? CompanionSetupScope.maybeOf(context);
   if (resolved == null) return;
-  await Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => CompanionSetupPage(host: host, controller: resolved),
-    ),
+  // A dialog over the shell on desktop, a full-screen page on phones.
+  await pushAdaptivePage<void>(
+    context,
+    desktopMaxWidth: 760,
+    builder: (_) => CompanionSetupPage(host: host, controller: resolved),
   );
 }
 
@@ -362,7 +365,11 @@ class _CompanionSetupPageState extends State<CompanionSetupPage> {
     ];
 
     return [
-      SizedBox(width: double.infinity, child: primary),
+      // Full width on phones; a normal-sized button on desktop.
+      if (PlatformFeatures.isDesktop)
+        Align(alignment: Alignment.centerLeft, child: primary)
+      else
+        SizedBox(width: double.infinity, child: primary),
       if (!status.nodeSupported && status.state.needsInstall)
         Padding(
           padding: const EdgeInsets.only(top: 8),
