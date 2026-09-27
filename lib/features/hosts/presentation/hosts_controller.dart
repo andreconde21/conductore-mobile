@@ -180,20 +180,26 @@ class HostsController extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
+    // Asked for together: the list, its order and This computer are
+    // independent reads, and the home page waits for all of them.
     final thisComputerStore = _thisComputerStore;
-    if (thisComputerStore != null) {
+    final thisComputer = thisComputerStore?.load()?..ignore();
+    final loadedHosts = _repository.loadHosts()..ignore();
+    final sortMode = _repository.loadSortMode()..ignore();
+    final manualOrder = _repository.loadManualOrder()..ignore();
+    if (thisComputer != null) {
       try {
-        _thisComputer = await thisComputerStore.load();
+        _thisComputer = await thisComputer;
       } catch (_) {
         // Defaults stay: the machine itself always works.
       }
     }
     try {
-      final hosts = (await _repository.loadHosts())
+      final hosts = (await loadedHosts)
           .where((host) => !host.isThisComputer)
           .toList(growable: false);
-      _sortMode = await _repository.loadSortMode();
-      _manualOrder = await _repository.loadManualOrder();
+      _sortMode = await sortMode;
+      _manualOrder = await manualOrder;
       _setHosts(hosts);
     } on AppFailure catch (failure) {
       _errorMessage = failure.toString();

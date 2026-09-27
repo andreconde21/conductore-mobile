@@ -143,71 +143,78 @@ class ThemePreferencesRepository {
       'conductore.restore_sessions_on_launch.v1';
   static const _multiplexerTabsKey = 'conductore.multiplexer_tabs_phone.v1';
 
+  static const _loadKeys = [
+    _themeModeKey,
+    _paletteKey,
+    _terminalFontKey,
+    _omarchySyncHostKey,
+    _omarchySyncedThemeKey,
+    _terminalFontSizeKey,
+    _terminalKeyboardActionsKey,
+    _terminalKeyboardRowsKey,
+    _terminalKeyboardSeenActionsKey,
+    _terminalSnippetsKey,
+    _showLocalShellKey,
+    _terminalMouseInputKey,
+    _terminalEnterSequenceKey,
+    _touchModeHintSeenKey,
+    _chatButtonHintSeenKey,
+    _composeSubmitEnterKey,
+    _terminalToolbarStyleKey,
+    _terminalPillItemsKey,
+    _menuButtonsEnabledKey,
+    _terminalGesturesKey,
+    _speechLanguageKey,
+    _voiceKey,
+    _remoteClipboardEnabledKey,
+    _restoreSessionsOnLaunchKey,
+    _multiplexerTabsKey,
+    _pasteImagesAsFilesKey,
+  ];
+
   final FlutterSecureStorage _storage;
 
   Future<ThemePreferences> load() async {
-    final rawMode = await _storage.read(key: _themeModeKey);
+    // Every setting is asked for at once: the platform answers them back
+    // to back instead of one round trip at a time (about 30 reads at
+    // launch). The legacy keys are read only when needed.
+    final pending = <String, Future<String?>>{
+      for (final key in _loadKeys) key: _storage.read(key: key)..ignore(),
+    };
+    Future<String?> read(String key) => pending[key]!;
+    final rawMode = await read(_themeModeKey);
     final rawPalette =
-        await _storage.read(key: _paletteKey) ??
-        await _storage.read(key: _legacyPaletteKey);
-    final rawTerminalFont = await _storage.read(key: _terminalFontKey);
+        await read(_paletteKey) ?? await _storage.read(key: _legacyPaletteKey);
+    final rawTerminalFont = await read(_terminalFontKey);
     final rawLegacyTerminalFont = rawTerminalFont == null
         ? await _storage.read(key: _legacyTerminalFontKey)
         : null;
-    final rawOmarchySyncHost = await _storage.read(key: _omarchySyncHostKey);
-    final rawOmarchySyncedTheme = await _storage.read(
-      key: _omarchySyncedThemeKey,
+    final rawOmarchySyncHost = await read(_omarchySyncHostKey);
+    final rawOmarchySyncedTheme = await read(_omarchySyncedThemeKey);
+    final rawTerminalFontSize = await read(_terminalFontSizeKey);
+    final rawTerminalKeyboardActions = await read(_terminalKeyboardActionsKey);
+    final rawTerminalKeyboardRows = await read(_terminalKeyboardRowsKey);
+    final rawTerminalKeyboardSeenActions = await read(
+      _terminalKeyboardSeenActionsKey,
     );
-    final rawTerminalFontSize = await _storage.read(key: _terminalFontSizeKey);
-    final rawTerminalKeyboardActions = await _storage.read(
-      key: _terminalKeyboardActionsKey,
-    );
-    final rawTerminalKeyboardRows = await _storage.read(
-      key: _terminalKeyboardRowsKey,
-    );
-    final rawTerminalKeyboardSeenActions = await _storage.read(
-      key: _terminalKeyboardSeenActionsKey,
-    );
-    final rawTerminalSnippets = await _storage.read(key: _terminalSnippetsKey);
-    final rawShowLocalShell = await _storage.read(key: _showLocalShellKey);
-    final rawTerminalMouseInput = await _storage.read(
-      key: _terminalMouseInputKey,
-    );
-    final rawTerminalEnterSequence = await _storage.read(
-      key: _terminalEnterSequenceKey,
-    );
-    final rawTouchModeHintSeen = await _storage.read(
-      key: _touchModeHintSeenKey,
-    );
-    final rawChatButtonHintSeen = await _storage.read(
-      key: _chatButtonHintSeenKey,
-    );
-    final rawComposeSubmitEnter = await _storage.read(
-      key: _composeSubmitEnterKey,
-    );
-    final rawTerminalToolbarStyle = await _storage.read(
-      key: _terminalToolbarStyleKey,
-    );
-    final rawTerminalPillItems = await _storage.read(
-      key: _terminalPillItemsKey,
-    );
+    final rawTerminalSnippets = await read(_terminalSnippetsKey);
+    final rawShowLocalShell = await read(_showLocalShellKey);
+    final rawTerminalMouseInput = await read(_terminalMouseInputKey);
+    final rawTerminalEnterSequence = await read(_terminalEnterSequenceKey);
+    final rawTouchModeHintSeen = await read(_touchModeHintSeenKey);
+    final rawChatButtonHintSeen = await read(_chatButtonHintSeenKey);
+    final rawComposeSubmitEnter = await read(_composeSubmitEnterKey);
+    final rawTerminalToolbarStyle = await read(_terminalToolbarStyleKey);
+    final rawTerminalPillItems = await read(_terminalPillItemsKey);
 
-    final rawMenuButtonsEnabled = await _storage.read(
-      key: _menuButtonsEnabledKey,
-    );
-    final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
-    final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
-    final rawVoice = await _storage.read(key: _voiceKey);
-    final rawRemoteClipboardEnabled = await _storage.read(
-      key: _remoteClipboardEnabledKey,
-    );
-    final rawRestoreSessionsOnLaunch = await _storage.read(
-      key: _restoreSessionsOnLaunchKey,
-    );
-    final rawMultiplexerTabs = await _storage.read(key: _multiplexerTabsKey);
-    final rawPasteImagesAsFiles = await _storage.read(
-      key: _pasteImagesAsFilesKey,
-    );
+    final rawMenuButtonsEnabled = await read(_menuButtonsEnabledKey);
+    final rawTerminalGestures = await read(_terminalGesturesKey);
+    final rawSpeechLanguage = await read(_speechLanguageKey);
+    final rawVoice = await read(_voiceKey);
+    final rawRemoteClipboardEnabled = await read(_remoteClipboardEnabledKey);
+    final rawRestoreSessionsOnLaunch = await read(_restoreSessionsOnLaunchKey);
+    final rawMultiplexerTabs = await read(_multiplexerTabsKey);
+    final rawPasteImagesAsFiles = await read(_pasteImagesAsFilesKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(

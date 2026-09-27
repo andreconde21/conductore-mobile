@@ -154,8 +154,12 @@ void main() {
       'reads_total_2s': storage.reads.length,
       'duplicate_reads': duplicates,
     });
-    expect(themeAt, isNotNull);
-    expect(homeAt, isNotNull);
+    // Before: the theme's 30 reads one after another (180 ms in this
+    // model), the hosts' three in turn behind the rest (32 ms), and the
+    // trusted keys read twice.
+    expect(themeAt, lessThanOrEqualTo(140));
+    expect(homeAt, lessThanOrEqualTo(20));
+    expect(duplicates, 0);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(minutes: 1));
