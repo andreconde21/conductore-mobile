@@ -1,5 +1,10 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: `transcript` returns prompts typed while the agent was working. Claude Code absorbs them into the running turn and records them only as a `queued_command` attachment (`commandMode: prompt`, `origin.kind: human`), never as a `user` line, so the chat view never showed them although the agent read them. They now come back as `user` entries with `queued: true`; queued task notifications and teammate or coordinator messages are still dropped.
+- fix: `transcript` no longer skips a line longer than `--max-bytes`. A prompt with pasted images is a line of several MB (the image bytes), so it was dropped whole and never reached the chat view; such a line is now read on its own and reduced as usual (images dropped), with `oversized: true`. Only a line over 64 MB is still skipped.
+
 ## 0.8.0 (2026-09-27)
 
 - feat: `guide [--timeout-ms 15000]`: the phone's voice guide. `{utterance, context}` JSON on stdin (32 KB max; short ids and labels of machines, projects, agents, pending requests and the screen, never transcripts), one action out of a closed list on stdout (`open`, `chat`, `terminal`, `approve`, `deny`, `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`) with a short sentence to speak, or `error` (claude-missing, not-logged-in, timeout, busy, failed); exit 0.
