@@ -294,6 +294,8 @@ async function usageCmd (args) {
     paths.ensureDirs()
     opts.agents = await knownAgents()
     opts.cacheFile = paths.usageCachePath()
+    // --max-ms caps the whole call, Node's start included.
+    opts.startedAt = Math.round(performance.timeOrigin)
     return out({ version: paths.VERSION, ...usageMod().compute(opts) })
   } catch (err) {
     return fail(`usage failed: ${err.message}`)
