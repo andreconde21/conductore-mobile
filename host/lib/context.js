@@ -10,7 +10,7 @@ const { log } = require('./log')
 
 const TTL_MS = 5000
 const CACHE_MAX = 64
-const FORMAT = '#{session_name}\t#{window_index}\t#{pane_id}\t#{pane_current_path}\t#{window_name}'
+const FORMAT = '#{session_name}\t#{window_index}\t#{pane_id}\t#{pane_current_path}\t#{window_name}\t#{pane_pid}'
 
 const cache = new Map() // `${socket}\0${pane}` -> { at, value }
 
@@ -38,8 +38,10 @@ function tmuxContext (header, now = Date.now()) {
       let value = null
       if (err) log('context', 'tmux context failed', err.message)
       else {
-        const [session, window, paneId, currentPath, windowName] = String(stdout).replace(/\n$/, '').split('\t')
-        value = { session, window: Number(window), paneId, currentPath, windowName }
+        const [session, window, paneId, currentPath, windowName, panePid] = String(stdout).replace(/\n$/, '').split('\t')
+        // The server's socket and the pane's process let the prompt relay
+        // check, before typing, that the pane still is this agent's.
+        value = { session, window: Number(window), paneId, currentPath, windowName, socket, panePid: Number(panePid) || null }
       }
       cache.delete(key)
       cache.set(key, { at: Date.now(), value })

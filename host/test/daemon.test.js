@@ -20,7 +20,7 @@ const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-bin-'))
 const tmuxLog = path.join(fakeBin, 'tmux.log')
 fs.writeFileSync(path.join(fakeBin, 'tmux'), `#!/bin/sh
 printf '%s\n' "$*" >> '${tmuxLog}'
-printf 'main\t2\t%s\t/work/t\tfixer\n' "$6"
+printf 'main\t2\t%s\t/work/t\tfixer\t4242\n' "$6"
 `, { mode: 0o755 })
 // A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9.
 const herdrLog = path.join(fakeBin, 'herdr.log')
@@ -40,6 +40,10 @@ const env = {
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json')
 }
+// Even a tmux call without -S (the fake on PATH aside) can only reach a
+// private "default" server, never the real one.
+env.TMUX_TMPDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tmux-'))
+for (const k of Object.keys(env)) if (/^(TMUX$|TMUX_PANE$|HERDR_)/.test(k)) delete env[k]
 for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_AGENT_NAME']) delete env[k]
 
 process.env.CONDUCTORE_HOME = env.CONDUCTORE_HOME
@@ -132,7 +136,7 @@ test('the hook is a sh script: it spools and returns without waiting for the dae
 
 test('the daemon runs with the memory flags and reports its footprint', async () => {
   const [ping] = await client.request({ op: 'ping' })
-  assert.ok(ping.execArgv.includes('--max-old-space-size=16'), ping.execArgv.join(' '))
+  assert.ok(ping.execArgv.includes('--max-old-space-size=64'), ping.execArgv.join(' '))
   assert.ok(ping.rss > 0)
   assert.equal(typeof ping.cpuMs, 'number')
 })
@@ -141,7 +145,7 @@ test('tmux location is resolved by the daemon from the variables in the spool he
   const r = await hook(ev('t1', 'SessionStart'), { TMUX: '/tmp/fake-tmux-sock,123,0', TMUX_PANE: '%7' })
   assert.equal(r.code, 0)
   const a = (await status()).agents.find(a => a.sessionId === 't1')
-  assert.deepEqual(a.tmux, { session: 'main', window: 2, paneId: '%7', windowName: 'fixer' })
+  assert.deepEqual(a.tmux, { session: 'main', window: 2, paneId: '%7', windowName: 'fixer', socket: '/tmp/fake-tmux-sock', panePid: 4242 })
   assert.equal(a.name, 'fixer')
   assert.match(fs.readFileSync(tmuxLog, 'utf8'), /^-S \/tmp\/fake-tmux-sock display-message -p -t %7 /m)
   // Herdr comes straight from the header.
@@ -390,6 +394,16 @@ test('version matches package.json', async () => {
   assert.equal(v.json.protocol, 1)
 })
 
+test('an oversized PermissionRequest is answered at once, leaving the prompt to the terminal', async () => {
+  const t0 = Date.now()
+  const r = await hook(ev('s1', 'PermissionRequest', { tool_name: 'Write', tool_input: { file_path: '/x', content: 'y'.repeat(9 * 1024 * 1024) } }),
+    { CONDUCTORE_PERMISSION_TIMEOUT: '60' })
+  assert.equal(r.code, 0)
+  assert.equal(r.stdout, '')
+  assert.ok(Date.now() - t0 < 5000, `${Date.now() - t0} ms`)
+  assert.deepEqual(fs.readdirSync(path.join(home, 'tmp')).filter(n => n.startsWith('p.')), [])
+})
+
 test('a PermissionRequest with no daemon that can start gives up after 5 s, printing nothing', async () => {
   const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lone-'))
   fs.writeFileSync(path.join(lone, 'node'), '/bin/false\n')
@@ -411,4 +425,5 @@ test.after(async () => {
   await sleep(200)
   fs.rmSync(home, { recursive: true, force: true })
   fs.rmSync(fakeBin, { recursive: true, force: true })
+  fs.rmSync(env.TMUX_TMPDIR, { recursive: true, force: true })
 })

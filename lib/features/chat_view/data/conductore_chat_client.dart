@@ -67,8 +67,23 @@ class ConductoreChatClient {
     return ConductoreHostAttentionProvider.remoteCommand(args.join(' '));
   }
 
-  /// The text travels base64-encoded so no quoting, newline or length quirk
-  /// of the exec channel's shell can alter it.
+  /// `send` with the text on stdin, what [send] uses when the runner can
+  /// feed stdin: a long prompt in the command line hits the host's 128 KiB
+  /// single-argument limit (E2BIG). Every companion that has `send` reads
+  /// stdin when no text flag is given; it strips one trailing newline, so
+  /// [sendStdin] adds one.
+  static String sendStdinCommand(String sessionId, {bool enter = true}) =>
+      ConductoreHostAttentionProvider.remoteCommand(
+        'send ${shellQuoteArgument(sessionId)}${enter ? '' : ' --no-enter'}',
+      );
+
+  /// The stdin for [sendStdinCommand]: [text] exactly, after the newline
+  /// the companion strips.
+  static String sendStdin(String text) => '$text\n';
+
+  /// For a runner without stdin: the text travels base64-encoded in the
+  /// command line so no quoting or newline quirk of the exec channel's
+  /// shell can alter it (up to about 96 KB).
   static String sendCommand(
     String sessionId,
     String text, {
@@ -127,10 +142,17 @@ class ConductoreChatClient {
   }
 
   Future<void> send(String sessionId, String text, {bool enter = true}) async {
-    final result = await _runner.run(
-      sendCommand(sessionId, text, enter: enter),
-      timeout: _timeout,
-    );
+    final runner = _runner;
+    final result = runner is StdinAgentCommandRunner
+        ? await runner.runWithStdin(
+            sendStdinCommand(sessionId, enter: enter),
+            stdin: sendStdin(text),
+            timeout: _timeout,
+          )
+        : await runner.run(
+            sendCommand(sessionId, text, enter: enter),
+            timeout: _timeout,
+          );
     _check(result);
   }
 

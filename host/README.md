@@ -56,11 +56,11 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 
 | Path | Purpose |
 | --- | --- |
-| `$XDG_RUNTIME_DIR/conductore/hostd.sock` (else `~/.conductore/hostd.sock`) | socket, mode 0600 |
+| `~/.conductore/hostd.sock` | socket, mode 0600 (up to 0.7 it was `$XDG_RUNTIME_DIR/conductore/hostd.sock` when the starter had that variable; the CLI still finds a daemon running there) |
 | `~/.conductore/spool/` | events and statusline reports waiting for the daemon |
 | `~/.conductore/tmp/` | staging files of the sh clients, FIFOs of waiting permission prompts |
 | `~/.conductore/usage/` | statusline holds and parked reports (see Usage) |
-| `~/.conductore/hostd.pid` | lock and pid of the running daemon |
+| `~/.conductore/hostd.pid` | lock and pid of the running daemon (ignored when that pid is not a running `conductore-hostd`) |
 | `~/.conductore/node` | node binary the sh clients start the daemon with |
 | `~/.conductore/spawn.at` | time of the last start attempt |
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
@@ -78,9 +78,9 @@ phone, default 120, read by the hook), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
 exit, default 21600 = 6 h, 0 = never), `CONDUCTORE_USAGE_THROTTLE_MS`
 (default 10000, see Usage), `CONDUCTORE_LOG=debug` (log every state change),
 `CONDUCTORE_HOME`, `CONDUCTORE_SOCKET`, `CONDUCTORE_CLAUDE_SETTINGS`
-(overrides, mainly for tests; with `CONDUCTORE_HOME` set the socket defaults
-to `<home>/hostd.sock`). The daemon reads its environment when it starts, from
-whichever client started it.
+(overrides, mainly for tests; the socket defaults to `<home>/hostd.sock`).
+The daemon reads its environment when it starts, from whichever client
+started it.
 
 ### PATH for the phone's SSH shell
 
@@ -123,6 +123,14 @@ cost one `tmux`. It reduces events into one record per `session_id`, bumps a
 long-polling, and writes `state.json` (debounced 1 s, atomic rename). Agents
 whose session ended more than an hour ago are pruned.
 
+Not every session sends SessionEnd (Claude Code killed, crashed, its SSH
+session dropped, a reboot). The hook passes Claude Code's pid (its parent, or
+its grandparent through `sh -c`, read from `/proc` without a fork); the daemon
+records it with the process start time when the process really is Claude
+Code, and ends the agent (`reason: expired`) once that process is gone. It
+checks at start and on every `status` / `events`, so nothing runs at idle.
+Without `/proc` (macOS) an agent ends after 24 h without any event.
+
 ### Agent states
 
 | state | set by |
@@ -130,7 +138,7 @@ whose session ended more than an hour ago are pruned.
 | `working` | UserPromptSubmit, PreToolUse, PostToolUse, a permission decision |
 | `waiting_input` | SessionStart, Stop, Notification `idle_prompt` / `agent_needs_input`, PreToolUse of AskUserQuestion or ExitPlanMode |
 | `needs_permission` | PermissionRequest (until decided), Notification `permission_prompt`, a PermissionRequest that timed out (the prompt is now in the terminal) |
-| `ended` | SessionEnd |
+| `ended` | SessionEnd; its Claude Code process gone, or 24 h without an event when the process is unknown (`expired`) |
 
 Events carrying `agent_id` (subagents) never move the parent to a waiting state.
 
@@ -152,8 +160,10 @@ Every command prints one JSON document on stdout and exits 0, or prints
       "name": "reviewer",
       "cwd": "/home/andre/Projects/Foo",
       "transcriptPath": "/home/andre/.claude/projects/-home-andre-Projects-Foo/0f2c….jsonl",
-      "tmux": { "session": "main", "window": 2, "paneId": "%5", "windowName": "reviewer" },
+      "tmux": { "session": "main", "window": 2, "paneId": "%5", "windowName": "reviewer",
+                "socket": "/tmp/tmux-1000/default", "panePid": 48213 },
       "herdr": { "workspaceId": "w1", "tabId": "w1:t1", "paneId": "w1:p1", "name": null },
+      "process": { "pid": 31515, "startTime": "81423907" },
       "state": "needs_permission",
       "lastEvent": "PermissionRequest",
       "lastToolName": "Bash",
@@ -188,6 +198,8 @@ Every command prints one JSON document on stdout and exits 0, or prints
   spinner dots) are stripped first.
 * `tmux` / `herdr` are `null` when unknown. `transcriptPath` is the
   `transcript_path` of the latest hook event (null until one carried it).
+* `process` (Claude Code's pid and start time in clock ticks) is present
+  once the daemon identified it (Linux).
 * `lastMessage`: last assistant text (Stop), notification text, or the
   question of an AskUserQuestion; capped at 500 chars.
 * `pending[].summary`: one line (command, file path, URL, …) capped at 200
@@ -225,10 +237,12 @@ than `seq` already exist, it prints them and exits at once. Lines:
 * `timeout`: nothing happened within `--timeout` seconds (default 55, max 600).
   Poll again from the printed `seq`.
 * `snapshot`: the cursor is not covered by the daemon's buffer (it restarted
-  or the phone was away for more than 1000 changes). Replace everything and
+  or the phone was away for more than 1000 changes, or 2 M characters of
+  them). Replace everything and
   continue from its `seq`.
 * `reason` is the hook event name, `decision:<allow|deny|always|auto|timeout|gone>`,
-  `usage` (only the `usage` field changed) or `prune`.
+  `usage` (only the `usage` field changed), `expired` (ended without
+  SessionEnd) or `prune`.
 
 Suggested loop on the phone: `status` once, then `events --since <seq>` in a
 loop, reconnecting on SSH errors.
@@ -305,8 +319,8 @@ The risk label and rule suggestions for one tool call, without the daemon
 ### `conductore-hostd focus <sessionId>`
 
 Runs `herdr agent focus <paneId>` when the agent has a Herdr pane, else
-`tmux select-window -t <session>:<window>` and `tmux select-pane -t <paneId>`.
-Prints `{"ok":true,"via":"tmux","target":"main:2","paneId":"%5"}`.
+`tmux -S <socket> select-window -t <paneId>` and `select-pane -t <paneId>`,
+after the same pane check as `send`. Prints `{"ok":true,"via":"tmux","target":"main:2","paneId":"%5"}`.
 
 ### `conductore-hostd transcript <sessionId> [--since <offset> | --before <offset>] [--tail-bytes N] [--max-bytes 262144]`
 
@@ -373,7 +387,7 @@ issues) or stdin; at most 100 000 characters.
   submit, multiline-safe; it refuses an agent that is blocked on a prompt).
   With `--no-enter`: `herdr pane send-text`. If Herdr fails for another
   reason and the agent also has a tmux pane, tmux is tried.
-* tmux: single line `tmux send-keys -t <pane> -l -- <text>`; multiline
+* tmux (always `tmux -S <socket> …`): single line `tmux send-keys -t <pane> -l -- <text>`; multiline
   `tmux load-buffer -b conductore-<rand> -` (text on stdin) then
   `tmux paste-buffer -p -d -b … -t <pane>` (bracketed paste, so newlines do
   not submit). Enter follows as a separate `send-keys … Enter` after 150 ms
@@ -381,9 +395,23 @@ issues) or stdin; at most 100 000 characters.
   read as a paste and would insert a newline instead of submitting.
 * Everything goes through `execFile`/`spawn` with an argument array; the
   text never passes through a shell.
+* Pane check, right before typing (also for `interrupt` and `focus`): a
+  recorded pane id can belong to someone else by now (tmux reuses ids after
+  a pane closes or its server restarts; the agent may run on another tmux
+  server). tmux commands go to the agent's own server (`-S`, the socket from
+  the hook's `$TMUX`), and the pane must still run the process recorded with
+  it (`#{pane_pid}`); a Herdr pane must still run this Claude session
+  (`herdr pane list`); and Claude Code itself must still run (`process`).
+  Otherwise nothing is typed and the error says why: `tmux pane %5 no longer
+  holds this session (closed, or its id reused)`, `tmux pane %5 is gone: …`,
+  `Herdr pane w1:p1 no longer holds this session`, `the agent's Claude Code
+  process has exited; nothing was typed`, `cannot verify tmux pane %5
+  (recorded by an older companion); …` (fixed by the agent's next event).
+  A Herdr pane that fails its check falls back to a tmux pane that passes.
 * Errors: `unknown session <id>`, `session has ended`, `agent is waiting for
   a permission decision; answer it first` (typing would answer the prompt),
-  `session not in tmux or Herdr`, and the multiplexer's own error.
+  `session not in tmux or Herdr`, the pane check's, and the multiplexer's
+  own error.
 
 ### `conductore-hostd interrupt <sessionId>`
 
@@ -813,12 +841,18 @@ Measured on development-central (Ubuntu 24.04, dash as `/bin/sh`, Node 22,
 About 40 MB of the daemon's RSS is the node binary's own pages, shared with
 every other Node process (Claude Code included): a bare
 `node -e 'setInterval(()=>{},1e9)'` has 42.7 MB RSS and 6.4 MB private. The
-daemon runs with `--max-old-space-size=16 --max-semi-space-size=1
+daemon runs with `--max-old-space-size=64 --max-semi-space-size=1
 --lite-mode --no-expose-wasm --v8-pool-size=1` (`lib/paths.js`): lite mode
 (no optimizing compiler) touches about 6 MB less and costs no measurable CPU
 at this load (0.35 vs 0.37 ms per event), one V8 worker instead of four drops
 three threads; `--jitless`, `--single-threaded` and glibc
-`MALLOC_ARENA_MAX=1` saved nothing more. The heap limits mostly cap growth.
+`MALLOC_ARENA_MAX=1` saved nothing more. The heap limits mostly cap growth;
+the old-space limit is only a ceiling (idle RSS is the same at 16 and 64 MB).
+16 MB was too low: the long-poll buffer (1000 change records, each carrying
+the agent's pending prompts) aborted the daemon when a few long permission
+prompts waited during heavy subagent activity. The buffer is now also capped
+at 2 M characters, and the daemon's stderr goes to `hostd.log`, so a fatal
+V8 error leaves a line there.
 
 Idle means asleep: no polling loop, no periodic timer. The only timers are
 one-shots tied to activity (snapshot debounce, usage holds and throttle, the
@@ -841,9 +875,13 @@ shows no syscalls).
   escaped quotes. A miss only drops a part of the line (the usage recorded
   by the daemon is parsed properly in Node).
 * The daemon's liveness check in the clients is `kill -0 <pid from
-  hostd.pid>`: after a hard crash, a recycled pid can delay the automatic
-  restart until the phone's next `status`/`events` (which pings the socket
-  and restarts it).
+  hostd.pid>` plus, where `/proc` exists, the process name: the daemon sets
+  its title to `conductore-hostd` (`/proc/<pid>/comm` reads
+  `conductore-host`), so a pid recycled after a reboot or a hard crash does
+  not count. The daemon checks the same (the command line, through `ps`
+  without `/proc`) before it gives up the lock. On macOS the sh clients have
+  only `kill -0`: a recycled pid can delay the automatic restart until the
+  phone's next `status`/`events` (which pings the socket and restarts it).
 
 ## Development
 

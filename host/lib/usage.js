@@ -241,15 +241,20 @@ function readLines (f, state, budget, onLine) {
       const dataStart = pos - (carry ? carry.length : 0)
       pos += n
       let s = 0
+      let lines = 0
+      let stop = false
       for (;;) {
         const e = data.indexOf(10, s)
         if (e === -1) break
         if (!skipping) onLine(data, s, e)
         skipping = false
         s = e + 1
+        // A chunk of dense lines takes a while: stop mid-chunk on time too.
+        if ((++lines & 63) === 0 && budget.exhausted()) { stop = true; break }
       }
       state.offset = dataStart + s
       consumed = state.offset
+      if (stop) { budget.partial = true; break }
       const rest = data.length - s
       if (rest > MAX_LINE) { carry = null; skipping = true; state.offset = pos } else carry = rest ? Buffer.from(data.subarray(s)) : null
     }
@@ -496,9 +501,10 @@ function sessionsOf (agents, projectOf) {
 }
 
 // opts: { days, since (ms), maxBytes, maxMs, now, env, cacheFile, agents,
-//         machine }
+//         machine, startedAt (ms: when maxMs starts counting, e.g. the
+//         process start, so startup and the file walk count too) }
 function compute (opts = {}) {
-  const started = Date.now()
+  const started = opts.startedAt || Date.now()
   const env = opts.env || process.env
   const now = opts.now || Date.now()
   const home = env.HOME || os.homedir()
@@ -513,10 +519,13 @@ function compute (opts = {}) {
   const cache = loadCache(cacheFile)
   const maxBytes = opts.maxBytes || DEFAULT_MAX_BYTES
   const maxMs = opts.maxMs || DEFAULT_MAX_MS
+  // Saving the cache and building the report take the rest (~100 ms on
+  // 1,000 transcripts), so scanning stops a little before maxMs.
+  const scanMs = maxMs - Math.min(200, maxMs / 5)
   const budget = {
     bytes: 0,
     partial: false,
-    exhausted () { return this.bytes >= maxBytes || Date.now() - started >= maxMs }
+    exhausted () { return this.bytes >= maxBytes || Date.now() - started >= scanMs }
   }
   const stats = { files: 0, filesRead: 0, pendingFiles: 0 }
   const projectOf = makeProjectResolver(home)

@@ -21,12 +21,22 @@ function assertSocketOwner (sock) {
   if (!st.isSocket()) throw new Error(`${sock} is not a socket`)
 }
 
-function connect (sock = paths.socketPath()) {
+function connectTo (sock) {
   return new Promise((resolve, reject) => {
     try { assertSocketOwner(sock) } catch (err) { return reject(err) }
     const c = net.createConnection(sock)
     c.once('connect', () => resolve(c))
     c.once('error', reject)
+  })
+}
+
+// The daemon's socket, else one a daemon from before 0.8 still serves.
+function connect (sock) {
+  if (sock) return connectTo(sock)
+  return connectTo(paths.socketPath()).catch(err => {
+    const legacy = paths.legacySocketPaths().filter(p => fs.existsSync(p))
+    return legacy.reduce((prev, p) => prev.catch(() => connectTo(p)), Promise.reject(err))
+      .catch(() => { throw err })
   })
 }
 
@@ -70,13 +80,22 @@ function daemonScript () {
 
 // Starts the daemon in its own session (setsid), with the memory flags.
 // The sh clients get here through `conductore-hostd daemon --detach`.
+// Its stderr goes to the log, so a fatal V8 error (no JS runs then) leaves
+// a trace.
 function spawnDaemon () {
   paths.ensureDirs()
-  const child = spawn(process.execPath, [...paths.DAEMON_NODE_FLAGS, daemonScript(), 'daemon'], {
-    detached: true,
-    stdio: 'ignore',
-    env: process.env
-  })
+  let err = 'ignore'
+  try { err = fs.openSync(paths.logPath(), 'a', 0o600) } catch {}
+  let child
+  try {
+    child = spawn(process.execPath, [...paths.DAEMON_NODE_FLAGS, daemonScript(), 'daemon'], {
+      detached: true,
+      stdio: ['ignore', 'ignore', err],
+      env: process.env
+    })
+  } finally {
+    if (typeof err === 'number') fs.closeSync(err)
+  }
   child.unref()
   log('client', `spawned daemon pid ${child.pid}`)
 }

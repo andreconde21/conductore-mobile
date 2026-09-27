@@ -251,30 +251,74 @@ function pidAlive (pid) {
   try { process.kill(pid, 0); return true } catch (err) { return err.code === 'EPERM' }
 }
 
+// Creates the lock holding our pid in one step (a hard link of a finished
+// temp file: nobody ever reads an empty lock). False when it exists.
+function createLock (file) {
+  const tmp = `${file}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, String(process.pid), { mode: 0o600 })
+  try {
+    fs.linkSync(tmp, file)
+    return true
+  } catch (err) {
+    if (err.code === 'EEXIST') return false
+    // No hard links on this filesystem: exclusive create.
+    try {
+      const fd = fs.openSync(file, 'wx', 0o600)
+      fs.writeSync(fd, String(process.pid))
+      fs.closeSync(fd)
+      return true
+    } catch (e) {
+      if (e.code === 'EEXIST') return false
+      throw e
+    }
+  } finally {
+    try { fs.unlinkSync(tmp) } catch {}
+  }
+}
+
+// Removes a lock left by `holder` (a dead pid). Only the caller that
+// creates the takeover marker for that holder may remove it, after checking
+// that the lock still names it: two callers clearing the same stale lock can
+// never remove a lock someone took in between. A marker left by a crashed
+// caller is dropped after TAKEOVER_STALE_MS.
+const TAKEOVER_STALE_MS = 10000
+// False when another caller is clearing it.
+function clearStale (file, holder) {
+  const marker = `${file}.takeover-${holder}`
+  try {
+    fs.writeFileSync(marker, String(process.pid), { flag: 'wx', mode: 0o600 })
+  } catch (err) {
+    try { if (err.code === 'EEXIST' && Date.now() - fs.statSync(marker).mtimeMs > TAKEOVER_STALE_MS) fs.unlinkSync(marker) } catch {}
+    return false
+  }
+  try {
+    let current = NaN
+    try { current = parseInt(fs.readFileSync(file, 'utf8'), 10) } catch {}
+    if (Object.is(current, holder)) fs.unlinkSync(file)
+  } catch {} finally {
+    try { fs.unlinkSync(marker) } catch {}
+  }
+  return true
+}
+
 // One summarize at a time per user. Resolves a release function, or null
 // when another call still holds the lock after waitMs.
 async function acquireLock (file, waitMs) {
   const deadline = Date.now() + waitMs
   for (;;) {
-    try {
-      const fd = fs.openSync(file, 'wx', 0o600)
-      fs.writeSync(fd, String(process.pid))
-      fs.closeSync(fd)
+    if (createLock(file)) {
       let released = false
       return () => {
         if (released) return
         released = true
-        try { fs.unlinkSync(file) } catch {}
+        try {
+          if (parseInt(fs.readFileSync(file, 'utf8'), 10) === process.pid) fs.unlinkSync(file)
+        } catch {}
       }
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err
     }
     let holder = NaN
     try { holder = parseInt(fs.readFileSync(file, 'utf8'), 10) } catch { continue }
-    if (!pidAlive(holder)) {
-      try { fs.unlinkSync(file) } catch {}
-      continue
-    }
+    if (!pidAlive(holder) && clearStale(file, holder)) continue
     if (Date.now() >= deadline) return null
     await new Promise(resolve => setTimeout(resolve, 100))
   }
@@ -349,5 +393,6 @@ module.exports = {
   systemPrompt,
   buildPrompt,
   killGroup,
+  acquireLock,
   summarize
 }

@@ -89,3 +89,28 @@ test('read/write round-trips through a file, keeping a .bak', () => {
   assert.throws(() => settings.readSettings(file), /cannot parse/)
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+test('write keeps a symlinked settings file linked, and keeps its mode (0600 when new)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-settings-'))
+  const fresh = path.join(dir, 'new', 'settings.json')
+  const umask = process.umask(0o022)
+  try {
+    settings.writeSettings({ env: { ANTHROPIC_API_KEY: 'sk-x' } }, fresh)
+    assert.equal(fs.statSync(fresh).mode & 0o777, 0o600)
+    const real = path.join(dir, 'dotfiles', 'claude-settings.json')
+    fs.mkdirSync(path.dirname(real))
+    fs.writeFileSync(real, JSON.stringify(existing()), { mode: 0o640 })
+    fs.chmodSync(real, 0o640)
+    const link = path.join(dir, 'settings.json')
+    fs.symlinkSync(path.relative(dir, real), link)
+    settings.writeSettings(settings.merge(settings.readSettings(link), HOOK), link)
+    assert.ok(fs.lstatSync(link).isSymbolicLink())
+    assert.deepEqual(settings.installed(JSON.parse(fs.readFileSync(real, 'utf8'))), settings.EVENTS)
+    assert.equal(fs.statSync(real).mode & 0o777, 0o640)
+    assert.deepEqual(JSON.parse(fs.readFileSync(link + '.bak', 'utf8')), existing())
+    assert.deepEqual(fs.readdirSync(path.dirname(real)), ['claude-settings.json'])
+  } finally {
+    process.umask(umask)
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

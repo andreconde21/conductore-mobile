@@ -268,3 +268,30 @@ test('stripMarkdown, cleanSummary and capWords', () => {
   assert.equal(sm.capWords('One two three four five six seven, eight.', 4), 'One two three four…')
   assert.equal(sm.capWords('Short.', 45), 'Short.')
 })
+
+test('callers racing to clear a stale lock never both get it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lock-'))
+  const lockFile = path.join(dir, 'summarize.lock')
+  for (let round = 0; round < 5; round++) {
+    fs.writeFileSync(lockFile, '2147483646') // a pid that is not running
+    const start = Date.now() + 300
+    const racer = `
+      const sm = require(${JSON.stringify(require.resolve('../lib/summarize'))})
+      setTimeout(async () => {
+        const release = await sm.acquireLock(${JSON.stringify(lockFile)}, 0)
+        if (!release) return process.stdout.write('busy')
+        const from = Date.now()
+        setTimeout(() => { process.stdout.write(\`won \${from} \${Date.now()}\`); release() }, 400)
+      }, ${start} - Date.now())`
+    const results = await Promise.all(Array.from({ length: 8 }, () => new Promise((resolve, reject) => {
+      execFile(process.execPath, ['-e', racer], { timeout: 10000 }, (err, stdout) => err ? reject(err) : resolve(stdout))
+    })))
+    // Holders never overlap (a racer delayed past the release may win later).
+    const held = results.filter(r => r.startsWith('won')).map(r => r.split(' ').slice(1).map(Number)).sort((a, b) => a[0] - b[0])
+    assert.ok(held.length >= 1, results.join(','))
+    for (let i = 1; i < held.length; i++) assert.ok(held[i][0] >= held[i - 1][1], results.join(','))
+    assert.equal(fs.existsSync(lockFile), false, 'released')
+    assert.deepEqual(fs.readdirSync(dir), [])
+  }
+  fs.rmSync(dir, { recursive: true, force: true })
+})

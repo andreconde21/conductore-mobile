@@ -4,9 +4,7 @@
 //
 // Overrides (mainly for tests):
 //   CONDUCTORE_HOME    state dir (default ~/.conductore)
-//   CONDUCTORE_SOCKET  socket path (default $XDG_RUNTIME_DIR/conductore/hostd.sock,
-//                      else <state dir>/hostd.sock; always <state dir>/hostd.sock
-//                      when CONDUCTORE_HOME is set)
+//   CONDUCTORE_SOCKET  socket path (default <state dir>/hostd.sock)
 //
 // The sh clients (bin/conductore-hook, bin/conductore-statusline) hard-code
 // the same layout under the state dir: spool/, tmp/, usage/, hostd.pid,
@@ -20,28 +18,37 @@ const PROTOCOL_VERSION = 1
 const VERSION = '0.7.0'
 
 // V8 flags the daemon runs with (measured in README "Footprint"). It holds a
-// few hundred KB of state: small heap limits keep V8 from growing, lite mode
+// few hundred KB of state, but a burst of changes while long permission
+// prompts wait peaks at several MB: the old-space limit is only a ceiling
+// (16 MB aborted there), idle RSS does not depend on it. The small semi
+// space keeps V8 from growing, lite mode
 // (no optimizing compiler; CPU per event stays far below a millisecond)
 // touches ~6 MB less of the node binary, one V8 worker thread instead of 4.
 // --no-expose-wasm only silences lite mode's startup warning.
-const DAEMON_NODE_FLAGS = ['--max-old-space-size=16', '--max-semi-space-size=1', '--lite-mode', '--no-expose-wasm', '--v8-pool-size=1']
+const DAEMON_NODE_FLAGS = ['--max-old-space-size=64', '--max-semi-space-size=1', '--lite-mode', '--no-expose-wasm', '--v8-pool-size=1']
 
 function homeDir () {
   return process.env.CONDUCTORE_HOME || path.join(os.homedir(), '.conductore')
 }
 
-function runtimeDir () {
-  if (process.env.CONDUCTORE_SOCKET) return path.dirname(process.env.CONDUCTORE_SOCKET)
-  // A custom state dir (tests, a second instance) keeps its socket with it,
-  // never the default instance's one.
-  if (process.env.CONDUCTORE_HOME) return homeDir()
-  const xdg = process.env.XDG_RUNTIME_DIR
-  if (xdg && isOwnedDir(xdg)) return path.join(xdg, 'conductore')
-  return homeDir()
+// The socket sits beside the lock, whatever the environment of whoever
+// started the daemon: a tmux server started from cron or su has no
+// XDG_RUNTIME_DIR while the phone's SSH shell has one, and both must agree.
+function socketPath () {
+  return process.env.CONDUCTORE_SOCKET || path.join(homeDir(), 'hostd.sock')
 }
 
-function socketPath () {
-  return process.env.CONDUCTORE_SOCKET || path.join(runtimeDir(), 'hostd.sock')
+function runtimeDir () {
+  return path.dirname(socketPath())
+}
+
+// Where daemons up to 0.7 listened when their starter had XDG_RUNTIME_DIR.
+// Clients fall back to these, so a daemon still running from before an
+// upgrade stays reachable (and stoppable) until it exits.
+function legacySocketPaths () {
+  if (process.env.CONDUCTORE_SOCKET || process.env.CONDUCTORE_HOME) return []
+  const xdg = process.env.XDG_RUNTIME_DIR
+  return xdg && isOwnedDir(xdg) ? [path.join(xdg, 'conductore', 'hostd.sock')] : []
 }
 
 function isOwnedDir (p) {
@@ -82,6 +89,7 @@ module.exports = {
   homeDir,
   runtimeDir,
   socketPath,
+  legacySocketPaths,
   ensureDirs,
   ensureDir,
   idleExitMs,

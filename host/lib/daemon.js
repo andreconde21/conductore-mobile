@@ -18,6 +18,7 @@ const paths = require('./paths')
 const state = require('./state')
 const spool = require('./spool')
 const context = require('./context')
+const proc = require('./proc')
 const { permissionOutput } = require('./permission')
 const { Approvals, CAPABILITIES } = require('./approvals')
 const approvalOps = require('./approval-ops')
@@ -25,6 +26,11 @@ const { usageFrom } = require('./statusline')
 const { log, debug } = require('./log')
 
 const CHANGE_BUFFER = 1000
+// The buffered change lines are also bounded in characters: every record
+// carries the agent's pending prompts (toolInput up to 4 KB each), so a few
+// long prompts times 1000 changes outgrew the heap. A poller whose cursor
+// fell out of the buffer resyncs with a snapshot.
+const CHANGE_BUFFER_CHARS = 2 * 1024 * 1024
 const MAX_REQUEST_BYTES = 1024 * 1024
 const DEFAULT_POLL_TIMEOUT_S = 55
 const MAX_POLL_TIMEOUT_S = 600
@@ -43,15 +49,13 @@ function usageThrottleMs () {
   return Number.isFinite(v) && v >= 0 ? v : 10000
 }
 
-function pidAlive (pid) {
-  try { process.kill(pid, 0); return true } catch (err) { return err.code === 'EPERM' }
-}
-
 function requestId () {
   return Math.floor(Math.random() * 2 ** 48).toString(16).padStart(12, '0')
 }
 
-// Exclusive lock (also the pid file the sh clients check).
+// Exclusive lock (also the pid file the sh clients check). A pid that is not
+// a running daemon (a stale file after a reboot or crash, the pid since
+// reused) does not hold it.
 function acquireLock () {
   const file = paths.lockPath()
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -62,7 +66,7 @@ function acquireLock () {
       if (err.code !== 'EEXIST') throw err
       let pid = NaN
       try { pid = parseInt(fs.readFileSync(file, 'utf8'), 10) } catch {}
-      if (pid && pid !== process.pid && pidAlive(pid)) return false
+      if (pid && pid !== process.pid && proc.isDaemon(pid)) return false
       try { fs.unlinkSync(file) } catch {}
     }
   }
@@ -138,7 +142,8 @@ function writeFifo (file, text) {
 class Daemon {
   constructor () {
     this.state = loadSnapshot()
-    this.changes = []
+    this.changes = [] // { seq, line }: each change record serialized once
+    this.changeChars = 0
     this.waiters = new Map() // requestId -> { fifo, event, sessionId, timer }
     this.approvals = new Approvals()
     this.pollers = new Set() // { socket, since, timer }
@@ -158,6 +163,7 @@ class Daemon {
   }
 
   start () {
+    process.title = proc.DAEMON_TITLE
     paths.ensureDirs()
     if (!acquireLock()) {
       log('daemon', 'another daemon holds the lock, exiting')
@@ -190,6 +196,10 @@ class Daemon {
     this.touch()
     for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => this.shutdown(0))
     process.on('uncaughtException', err => { log('daemon', 'uncaught', err.stack || String(err)) })
+    // Any exit that still runs JS (process.exit, a fatal error handler) frees
+    // the lock; a V8 abort cannot, and the next start sees a dead pid.
+    process.on('exit', () => this.releaseLock())
+    this.expireAgents()
     this.commit(state.prune(this.state))
     this.schedulePrune()
     this.flushSnapshot()
@@ -275,15 +285,23 @@ class Daemon {
     }
   }
 
-  async process ({ header, body, mtime }) {
+  async process ({ header, body, mtime, oversize }) {
     if (header.kind === 'usage') return this.onUsageReport(body, true, mtime)
     if (header.kind !== 'hook') return
+    if (oversize) log('daemon', `dropped an oversized ${header.event} event`)
     const event = body && typeof body === 'object' && !Array.isArray(body) ? body : {}
     if (!event.hook_event_name && header.event) event.hook_event_name = header.event
     const fifo = header.fifo || null
     if (!event.session_id || !event.hook_event_name) {
       if (fifo && isOurFifo(fifo)) writeFifo(fifo, '\n')
       return
+    }
+    // Before the auto-approve path too: an agent first seen through an
+    // auto-approved request still gets its process (M20, M18).
+    const known = this.state.agents[event.session_id]
+    if (header.claude_pid && !(known && known.process && known.process.pid === Number(header.claude_pid))) {
+      const claude = proc.identifyClaude(header.claude_pid)
+      if (claude) event.process = claude
     }
     if (event.hook_event_name === 'PermissionRequest') {
       event.request_id = requestId()
@@ -438,17 +456,30 @@ class Daemon {
         if (e) { clearTimeout(e.timer); this.usageEmits.delete(ch.sessionId) }
         this.usageSeen.delete(ch.sessionId)
       }
-      if (ch.type === 'remove' || ch.reason === 'SessionEnd') pruneRelevant = true
-      this.changes.push(ch)
+      if (ch.type === 'remove' || ch.reason === 'SessionEnd' || ch.reason === 'expired') pruneRelevant = true
+      const line = JSON.stringify(ch)
+      this.changes.push({ seq: ch.seq, line })
+      this.changeChars += line.length
       debug('change', `${ch.type} ${ch.sessionId} ${ch.reason} -> ${ch.agent ? ch.agent.state : 'removed'} seq ${ch.seq}`)
     }
-    if (this.changes.length > CHANGE_BUFFER) this.changes.splice(0, this.changes.length - CHANGE_BUFFER)
+    while (this.changes.length > CHANGE_BUFFER || (this.changes.length > 1 && this.changeChars > CHANGE_BUFFER_CHARS)) {
+      this.changeChars -= this.changes.shift().line.length
+    }
     for (const p of [...this.pollers]) this.servePoller(p)
     if (pruneRelevant) this.schedulePrune()
     if (!this.snapshotTimer) {
       this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
       this.snapshotTimer.unref()
     }
+  }
+
+  // Agents that will never send SessionEnd (their Claude Code is gone). Runs
+  // at start and whenever the phone asks, so it costs nothing at idle.
+  expireAgents () {
+    const changes = state.expire(this.state, proc.sameProcess)
+    this.commit(changes)
+    // Rules that end with the session end with it, as on SessionEnd.
+    for (const ch of changes) this.approvals.endSession(ch.sessionId)
   }
 
   // One timer for the next ended agent to fall out of the list.
@@ -462,6 +493,7 @@ class Daemon {
     if (next === Infinity) return
     this.pruneTimer = setTimeout(() => {
       this.pruneTimer = null
+      this.expireAgents()
       this.commit(state.prune(this.state))
       this.schedulePrune()
     }, Math.max(1000, next - Date.now() + 1000))
@@ -520,10 +552,12 @@ class Daemon {
       }
       case 'status':
         await this.drain()
+        this.expireAgents()
         this.commit(state.prune(this.state))
         this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES }); c.end(); return
       case 'events':
         await this.drain()
+        this.expireAgents()
         return this.handleEvents(req, c)
       case 'decide':
         return this.handleDecide(req, c)
@@ -586,7 +620,7 @@ class Daemon {
     if (!batch.length) return false
     this.pollers.delete(poller)
     clearTimeout(poller.timer)
-    for (const ch of batch) this.reply(poller.socket, ch)
+    if (!poller.socket.destroyed) poller.socket.write(batch.map(ch => ch.line).join('\n') + '\n')
     poller.socket.end()
     return true
   }

@@ -23,9 +23,19 @@ d=${CONDUCTORE_HOME:-$HOME/.conductore}
 ev=${1:-}
 [ -d "$d/spool" ] && [ -d "$d/tmp" ] || mkdir -p "$d/spool" "$d/tmp" || exit 0
 
+# Whether pid $1 is the daemon: running and, where /proc exists, titled
+# conductore-hostd (its comm), not a pid recycled after a reboot or crash.
+alive() {
+  kill -0 "$1" || return 1
+  [ -r "/proc/$1/comm" ] || { [ ! -d /proc/self ]; return; }
+  read -r c <"/proc/$1/comm" || return 1
+  case $c in conductore-h*) return 0 ;; esac
+  return 1
+}
+
 # Starts the daemon when it is not running, at most once per 10 s.
 wake() {
-  if [ -f "$d/hostd.pid" ] && read -r pid <"$d/hostd.pid" && kill -0 "$pid"; then
+  if [ -f "$d/hostd.pid" ] && read -r pid <"$d/hostd.pid" && alive "$pid"; then
     return 0
   fi
   now=$(date +%s)
@@ -48,9 +58,21 @@ publish() {
   ln "$tmp" "$out" || mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
 }
 
+# Claude Code's pid: our parent, or its parent when Claude Code ran us
+# through a shell (`sh -c`). Read from /proc without a fork; elsewhere the
+# parent as is (the daemon only records a process it can identify).
+cpid=$PPID
+if [ -r "/proc/$PPID/stat" ] && read -r st <"/proc/$PPID/stat"; then
+  case ${st#*\(} in sh\)* | dash\)* | bash\)* | zsh\)* | ksh\)* | mksh\)*)
+    st=${st##*\) }
+    st=${st#* }
+    cpid=${st%% *} ;;
+  esac
+fi
+
 # Header, then Claude Code's JSON untouched.
 header() {
-  printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\ntmp=%s\n' "$ev" "$$" "${tmp##*/}"
+  printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\nclaude_pid=%s\ntmp=%s\n' "$ev" "$$" "$cpid" "${tmp##*/}"
   if [ -n "${TMUX:-}" ]; then printf 'tmux=%s\ntmux_pane=%s\n' "$TMUX" "${TMUX_PANE:-}"; fi
   if [ -n "${HERDR_WORKSPACE_ID:-}${HERDR_PANE_ID:-}" ]; then
     printf 'herdr_workspace=%s\nherdr_tab=%s\nherdr_pane=%s\nherdr_name=%s\n' \
@@ -102,7 +124,7 @@ wake
       [ "$i" -ge 5 ] && break
     else
       # Picked up; a daemon that died since will never answer.
-      { [ -f "$d/hostd.pid" ] && read -r p <"$d/hostd.pid" && kill -0 "$p"; } || break
+      { [ -f "$d/hostd.pid" ] && read -r p <"$d/hostd.pid" && alive "$p"; } || break
     fi
   done
   printf '\n' >&3

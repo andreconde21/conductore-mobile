@@ -278,3 +278,23 @@ test('CLI: conductore-hostd usage prints the report', async () => {
   assert.equal(bad.code, 1)
   assert.match(bad.json.error, /--days/)
 })
+
+test('the time cap holds inside one large transcript and counts from startedAt', () => {
+  const t = tmpHome()
+  const lines = []
+  for (let i = 0; i < 60000; i++) lines.push(assistant({ id: `m${i}`, req: `r${i}` }))
+  writeTranscript(t.home, '-work-api/big.jsonl', lines)
+  const r = run(t, { maxMs: 150 })
+  assert.equal(r.scan.partial, true)
+  assert.ok(r.scan.ms < 300, `${r.scan.ms} ms`)
+  // Time already spent before compute (the process start) counts too.
+  const late = run(t, { maxMs: 1000, startedAt: Date.now() - 950 })
+  assert.equal(late.scan.partial, true)
+  assert.ok(late.scan.ms < 1200, `${late.scan.ms} ms`)
+  // Resumed calls finish the file and count every message once.
+  let done = late
+  for (let i = 0; i < 200 && done.scan.partial; i++) done = run(t, { maxMs: 400 })
+  assert.equal(done.scan.partial, false)
+  assert.equal(done.claude.today.messages, 60000)
+  fs.rmSync(t.root, { recursive: true, force: true })
+})
