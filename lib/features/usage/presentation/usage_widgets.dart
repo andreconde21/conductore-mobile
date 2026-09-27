@@ -1,24 +1,39 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
 import 'package:conduit/features/usage/domain/usage_summary.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:flutter/material.dart';
 
 /// Makes the app's [UsageController] reachable from any route (the home
 /// bar, the Agents panel, Settings, the desktop shell).
 class UsageScope extends InheritedWidget {
-  const UsageScope({required this.controller, required super.child, super.key});
+  const UsageScope({
+    required this.controller,
+    required super.child,
+    this.openExplorer,
+    super.key,
+  });
 
   final UsageController controller;
+
+  /// Shows the usage explorer (at [day] when given) somewhere other than
+  /// a pushed page: the desktop shell's main area. Null: a page.
+  final void Function({String? day})? openExplorer;
 
   static UsageController? maybeOf(BuildContext context) =>
       context.getInheritedWidgetOfExactType<UsageScope>()?.controller;
 
+  static UsageScope? scopeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<UsageScope>();
+
   @override
   bool updateShouldNotify(UsageScope oldWidget) =>
-      controller != oldWidget.controller;
+      controller != oldWidget.controller ||
+      openExplorer != oldWidget.openExplorer;
 }
 
 /// The colour of a limit at [percent]: the theme's accent, its yellow from
@@ -469,7 +484,7 @@ class _SummaryCompact extends StatelessWidget {
 
 /// The slim bar at the top of the phone's home screen: limit rings and
 /// today's tokens and cost, collapsible to one line. Tapping it opens the
-/// breakdown. Hidden while no machine is asked for usage.
+/// usage explorer. Hidden while no machine is asked for usage.
 class UsageHomeBar extends StatelessWidget {
   const UsageHomeBar({required this.controller, this.now, super.key});
 
@@ -505,7 +520,8 @@ class UsageHomeBar extends StatelessWidget {
                       : UsageSummaryView(
                           controller: controller,
                           now: now,
-                          onTap: () => showUsageSheet(context, controller),
+                          onTap: () =>
+                              unawaited(openUsageExplorer(context, controller)),
                         ),
                 ),
                 IconButton(
@@ -557,7 +573,7 @@ class _CollapsedBarState extends State<_CollapsedBar> with UsageViewAttachment {
       if (hasReport) '${formatUsageCost(summary.today.costUsd)} today',
     ].join(' · ');
     return InkWell(
-      onTap: () => showUsageSheet(context, widget.controller),
+      onTap: () => unawaited(openUsageExplorer(context, widget.controller)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
@@ -580,7 +596,8 @@ class _CollapsedBarState extends State<_CollapsedBar> with UsageViewAttachment {
               UsageAccountsChip(
                 summary: summary,
                 now: now,
-                onTap: () => showUsageSheet(context, widget.controller),
+                onTap: () =>
+                    unawaited(openUsageExplorer(context, widget.controller)),
                 dense: true,
               ),
             ],
@@ -589,29 +606,6 @@ class _CollapsedBarState extends State<_CollapsedBar> with UsageViewAttachment {
       ),
     );
   }
-}
-
-/// The usage breakdown in its own sheet (from the home bar).
-Future<void> showUsageSheet(BuildContext context, UsageController controller) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (context) => DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.7,
-      maxChildSize: 0.95,
-      builder: (context, scroll) => ListView(
-        controller: scroll,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          Text('Usage', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          UsageBreakdown(controller: controller),
-        ],
-      ),
-    ),
-  );
 }
 
 /// The Usage tab's numbers: limits per machine, tokens and estimated cost
@@ -707,6 +701,19 @@ class _UsageBreakdownState extends State<UsageBreakdown>
                 icon: const Icon(Icons.refresh_rounded, size: 20),
                 onPressed: controller.refresh,
               ),
+            if (hasReport)
+              TextButton(
+                key: const ValueKey('usage-explore'),
+                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                onPressed: () => unawaited(
+                  openUsageExplorer(
+                    context,
+                    controller,
+                    onUpdateCompanion: widget.onUpdateCompanion,
+                  ),
+                ),
+                child: const Text('Explore'),
+              ),
           ],
         ),
         for (final machine in summary.machines) ...[
@@ -729,7 +736,17 @@ class _UsageBreakdownState extends State<UsageBreakdown>
           const SizedBox(height: 14),
           Text('Per day', style: theme.textTheme.labelLarge),
           const SizedBox(height: 6),
-          UsageDayChart(days: days),
+          UsageDayChart(
+            days: days,
+            onSelect: (day) => unawaited(
+              openUsageExplorer(
+                context,
+                controller,
+                day: day,
+                onUpdateCompanion: widget.onUpdateCompanion,
+              ),
+            ),
+          ),
           const SizedBox(height: 14),
           SegmentedButton<UsageGrouping>(
             key: const ValueKey('usage-grouping'),
@@ -1177,10 +1194,17 @@ class _AccountSwitchDialog extends StatelessWidget {
 }
 
 /// Tokens per day as flat bars, today last; the estimated cost under each.
+/// A tap on a day calls [onSelect] (the explorer, open at that day).
 class UsageDayChart extends StatelessWidget {
-  const UsageDayChart({required this.days, this.height = 84, super.key});
+  const UsageDayChart({
+    required this.days,
+    this.height = 84,
+    this.onSelect,
+    super.key,
+  });
 
   final List<UsageDay> days;
+  final ValueChanged<String>? onSelect;
 
   /// Height of the tallest bar.
   final double height;
@@ -1205,38 +1229,41 @@ class UsageDayChart extends StatelessWidget {
               message:
                   '${day.date}: ${formatUsageTokens(day.totals.tokens)} '
                   'tokens · ${formatUsageCost(day.totals.costUsd)}',
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      height: height,
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Container(
-                          key: ValueKey('usage-day-${day.date}'),
-                          height: max == 0 || day.totals.tokens == 0
-                              ? 0
-                              : math.max(2, height * day.totals.tokens / max),
-                          color: index == days.length - 1
-                              ? palette.accent
-                              : palette.accent.withValues(alpha: 0.45),
+              child: InkWell(
+                onTap: onSelect == null ? null : () => onSelect!(day.date),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: height,
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            key: ValueKey('usage-day-${day.date}'),
+                            height: max == 0 || day.totals.tokens == 0
+                                ? 0
+                                : math.max(2, height * day.totals.tokens / max),
+                            color: index == days.length - 1
+                                ? palette.accent
+                                : palette.accent.withValues(alpha: 0.45),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(_weekday(day.date), style: label, maxLines: 1),
-                    Text(
-                      day.totals.costUsd == null || day.totals.tokens == 0
-                          ? ''
-                          : formatUsageCost(day.totals.costUsd),
-                      style: label,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.clip,
-                    ),
-                  ],
+                      const SizedBox(height: 3),
+                      Text(_weekday(day.date), style: label, maxLines: 1),
+                      Text(
+                        day.totals.costUsd == null || day.totals.tokens == 0
+                            ? ''
+                            : formatUsageCost(day.totals.costUsd),
+                        style: label,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.clip,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
