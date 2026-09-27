@@ -25,6 +25,9 @@ enum TerminalHeaderAction {
   settings,
   closeSession,
   keyboardShortcuts,
+  quickActions,
+  composePrompt,
+  recentDirectories,
 }
 
 /// "Label (keys)" on desktop, where a keyboard shortcut exists; the bare
@@ -56,6 +59,9 @@ class TerminalHeader extends StatelessWidget {
     this.onToggleFullscreen,
     this.onNewSession,
     this.onShowShortcuts,
+    this.onQuickActions,
+    this.onComposePrompt,
+    this.onRecentDirectories,
     this.onOpenChatView,
     this.onOpenSettings,
     this.attentionCount = 0,
@@ -117,6 +123,14 @@ class TerminalHeader extends StatelessWidget {
   /// Opens the desktop keyboard shortcuts sheet; null (phones) hides the
   /// entry.
   final VoidCallback? onShowShortcuts;
+
+  /// The session's project quick actions; null hides the entry.
+  final VoidCallback? onQuickActions;
+
+  /// Desktop: the prompt composer and recent folders, which phones reach
+  /// from the on-screen keys.
+  final VoidCallback? onComposePrompt;
+  final VoidCallback? onRecentDirectories;
 
   /// Opens the chat view of the active session's Claude agent; null hides
   /// the entry.
@@ -239,6 +253,9 @@ class TerminalHeader extends StatelessWidget {
               onToggleFullscreen: onToggleFullscreen,
               onNewSession: onNewSession,
               onShowShortcuts: onShowShortcuts,
+              onQuickActions: onQuickActions,
+              onComposePrompt: onComposePrompt,
+              onRecentDirectories: onRecentDirectories,
               onOpenChatView: onOpenChatView,
               onOpenSettings: onOpenSettings,
               onOpenSessionTool: onOpenSessionTool,
@@ -380,6 +397,9 @@ class _OverflowMenu extends StatelessWidget {
     required this.onNewSession,
     required this.onClose,
     this.onShowShortcuts,
+    this.onQuickActions,
+    this.onComposePrompt,
+    this.onRecentDirectories,
     this.onOpenChatView,
     this.onOpenSessionTool,
     this.onOpenSettings,
@@ -392,6 +412,14 @@ class _OverflowMenu extends StatelessWidget {
   final VoidCallback? onNewSession;
   final VoidCallback? onClose;
   final VoidCallback? onShowShortcuts;
+
+  /// The session's project quick actions; null hides the entry.
+  final VoidCallback? onQuickActions;
+
+  /// Desktop: the prompt composer and recent folders, which phones reach
+  /// from the on-screen keys.
+  final VoidCallback? onComposePrompt;
+  final VoidCallback? onRecentDirectories;
   final VoidCallback? onOpenChatView;
   final ValueChanged<SessionTool>? onOpenSessionTool;
   final VoidCallback? onOpenSettings;
@@ -423,6 +451,9 @@ class _OverflowMenu extends StatelessWidget {
         TerminalHeaderAction.settings => onOpenSettings?.call(),
         TerminalHeaderAction.closeSession => onClose?.call(),
         TerminalHeaderAction.keyboardShortcuts => onShowShortcuts?.call(),
+        TerminalHeaderAction.quickActions => onQuickActions?.call(),
+        TerminalHeaderAction.composePrompt => onComposePrompt?.call(),
+        TerminalHeaderAction.recentDirectories => onRecentDirectories?.call(),
       },
       itemBuilder: (context) {
         final theme = Theme.of(context);
@@ -433,6 +464,24 @@ class _OverflowMenu extends StatelessWidget {
               const PopupMenuItem(
                 value: TerminalHeaderAction.chatView,
                 child: _MenuRow(Icons.forum_outlined, 'Open chat view'),
+              ),
+            if (onQuickActions != null)
+              const PopupMenuItem(
+                key: ValueKey('terminal-menu-quick-actions'),
+                value: TerminalHeaderAction.quickActions,
+                child: _MenuRow(Icons.bolt_rounded, 'Quick actions'),
+              ),
+            if (onComposePrompt != null)
+              const PopupMenuItem(
+                key: ValueKey('terminal-menu-compose'),
+                value: TerminalHeaderAction.composePrompt,
+                child: _MenuRow(Icons.edit_note_rounded, 'Compose a prompt…'),
+              ),
+            if (onRecentDirectories != null)
+              const PopupMenuItem(
+                key: ValueKey('terminal-menu-recent-dirs'),
+                value: TerminalHeaderAction.recentDirectories,
+                child: _MenuRow(Icons.folder_open_outlined, 'Recent folders…'),
               ),
             if (tools != null) ...const [
               PopupMenuItem(

@@ -47,6 +47,8 @@ import 'package:conduit/features/live_preview/presentation/live_preview_view.dar
 import 'package:conduit/features/live_preview/presentation/preview_ready_chip.dart';
 import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/quick_actions/presentation/quick_action_runner.dart';
+import 'package:conduit/features/quick_actions/presentation/session_quick_actions.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_actions.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_sheet.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_shortcut.dart';
@@ -1397,6 +1399,41 @@ class _TerminalPageState extends State<TerminalPage>
     return loopbackPreviewPort(url);
   }
 
+  /// The menu's "Quick actions" for [session]'s project, when there is
+  /// something to offer (see [sessionProjectOf]).
+  VoidCallback? _quickActionsFor(TerminalSessionController? session) {
+    if (session == null) return null;
+    final personal = widget.themeController.quickActions;
+    final project = sessionProjectOf(
+      attention: widget.agentAttention,
+      sessionHostId: session.host.id,
+      sessionTitle: session.title,
+      personal: personal,
+    );
+    if (project == null) return null;
+    return () {
+      final machine =
+          widget.connectFlow?.hostsController.findById(
+            baseHostId(session.host.id),
+          ) ??
+          session.host;
+      unawaited(
+        showSessionQuickActions(
+          context,
+          project: project,
+          machine: machine,
+          sessionHost: session.host,
+          personal: personal,
+          attention: widget.agentAttention,
+          runner: QuickActionRunner(
+            workspace: widget.workspace,
+            attention: widget.agentAttention,
+          ),
+        ),
+      );
+    };
+  }
+
   Future<void> _openInBrowser(String url) async {
     final uri = Uri.tryParse(url);
     var opened = false;
@@ -2501,6 +2538,21 @@ class _TerminalPageState extends State<TerminalPage>
                                   : () => _openNewSession(connectFlow),
                               onShowShortcuts: PlatformFeatures.isDesktop
                                   ? () => unawaited(_showDesktopShortcuts())
+                                  : null,
+                              onQuickActions: _quickActionsFor(activeSession),
+                              onComposePrompt:
+                                  PlatformFeatures.isDesktop &&
+                                      activeSession != null
+                                  ? () => unawaited(
+                                      _openPromptComposer(activeSession),
+                                    )
+                                  : null,
+                              onRecentDirectories:
+                                  PlatformFeatures.isDesktop &&
+                                      activeSession != null
+                                  ? () => unawaited(
+                                      _openRecentDirectories(activeSession),
+                                    )
                                   : null,
                               onOpenChatView:
                                   attention == null ||
