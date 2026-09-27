@@ -504,12 +504,17 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
                 ),
             ],
           ),
-          SelectableText(
-            request.summary,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontFamily: 'monospace',
+          // Collapsed: at most three lines, ellipsised. (SelectableText
+          // with maxLines alone is always maxLines tall.)
+          SelectionArea(
+            child: Text(
+              request.summary,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontFamily: 'monospace',
+              ),
+              maxLines: _expanded ? null : 3,
+              overflow: _expanded ? null : TextOverflow.ellipsis,
             ),
-            maxLines: _expanded ? null : 3,
           ),
           if (request.risk case final risk?) ...[
             const SizedBox(height: 6),
