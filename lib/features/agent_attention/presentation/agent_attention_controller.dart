@@ -894,8 +894,18 @@ class AgentAttentionController extends ChangeNotifier {
         _startMonitor(session);
       }
     }
+    // Sessions notify for much that changes nothing here (a title, a
+    // rename): only a change in the hosts listed is worth a rebuild.
+    final hosts = [...monitoredHosts, null, ...unmonitoredHosts];
+    if (listEquals(hosts, _listedHosts)) {
+      return;
+    }
+    _listedHosts = hosts;
     notifyListeners();
   }
+
+  /// [monitoredHosts] and [unmonitoredHosts] as last notified.
+  List<SavedHost?>? _listedHosts;
 
   void _startMonitor(TerminalSessionController session) {
     final monitor = _HostMonitor(

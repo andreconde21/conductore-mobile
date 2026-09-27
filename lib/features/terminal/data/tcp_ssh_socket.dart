@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 class TcpSshSocket implements SSHSocket {
   TcpSshSocket._(this._socket);
@@ -13,10 +14,16 @@ class TcpSshSocket implements SSHSocket {
     Duration? timeout,
   }) async {
     final socket = await Socket.connect(host, port, timeout: timeout);
+    // Keystrokes are tiny writes; without this Nagle holds each one back
+    // until the previous one is acknowledged, a round trip of lag.
+    socket.setOption(SocketOption.tcpNoDelay, true);
     return TcpSshSocket._(socket);
   }
 
   final Socket _socket;
+
+  @visibleForTesting
+  Socket get socketForTesting => _socket;
 
   InternetAddress? get remoteAddress {
     try {

@@ -94,7 +94,9 @@ void main() {
       );
       addTearDown(controller.dispose);
       var notified = 0;
-      controller.addListener(() => notified += 1);
+      var sessionNotified = 0;
+      controller.terminalTitleListenable.addListener(() => notified += 1);
+      controller.addListener(() => sessionNotified += 1);
 
       controller.terminal.write('\x1b]0;dev: Infrastructure\x07');
       expect(controller.terminalTitle, 'dev: Infrastructure');
@@ -102,6 +104,14 @@ void main() {
 
       controller.terminal.write('\x1b]0;dev: Infrastructure\x07');
       expect(notified, 1);
+
+      // A title spinner must not rebuild everything that watches the
+      // session (the terminal page, the workspace, agent attention).
+      for (final frame in ['⠋', '⠙', '⠹']) {
+        controller.terminal.write('\x1b]2;$frame Claude Code\x07');
+      }
+      expect(notified, 4);
+      expect(sessionNotified, 0);
     });
   });
 }

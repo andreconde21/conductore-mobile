@@ -22,7 +22,11 @@ class DartSshSftpRepository implements SftpRepository {
     try {
       client = await _clientFactory.connect(host);
 
-      final sftp = await client.sftp();
+      final sftp = await SshClientFactory.withinSetupTimeout(
+        host,
+        client,
+        client.sftp(),
+      );
       return DartSshSftpSession(client: client, sftp: sftp);
     } catch (error) {
       client?.close();

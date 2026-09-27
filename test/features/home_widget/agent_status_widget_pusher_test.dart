@@ -77,6 +77,47 @@ void main() {
     );
   });
 
+  testWidgets('skips snapshots that differ only by their time', (tester) async {
+    final source = ChangeNotifier();
+    final channel = FakeAgentStatusWidgetChannel();
+    var now = DateTime.utc(2026, 9, 27, 10);
+    var count = 0;
+    final pusher = AgentStatusWidgetPusher(
+      source: source,
+      snapshot: () => AgentStatusSnapshot(
+        monitoring: true,
+        attentionCount: count,
+        agents: const [],
+        updatedAt: now,
+      ),
+      channel: channel,
+    );
+    addTearDown(pusher.dispose);
+    pusher.start();
+    await tester.pump();
+    expect(channel.pushed, hasLength(1));
+
+    // A title spinner re-notifying every half second changes nothing.
+    for (var i = 0; i < 10; i++) {
+      now = now.add(const Duration(seconds: 1));
+      source.notifyListeners();
+      await tester.pump(debounce);
+    }
+    expect(channel.pushed, hasLength(1));
+
+    // A real change goes out at once.
+    count = 1;
+    source.notifyListeners();
+    await tester.pump(debounce);
+    expect(channel.pushed, hasLength(2));
+
+    // And the shown time still refreshes once it is a minute old.
+    now = now.add(AgentStatusWidgetPusher.unchangedRefresh);
+    source.notifyListeners();
+    await tester.pump(debounce);
+    expect(channel.pushed, hasLength(3));
+  });
+
   testWidgets('a change during an in-flight push causes exactly one more', (
     tester,
   ) async {

@@ -109,20 +109,38 @@ class TerminalFileTabsController extends ChangeNotifier {
   Future<Uint8List> read(
     TerminalFileTab tab,
     void Function(int bytesRead, int? total)? onProgress,
-  ) async {
-    final session = await _session(tab.host);
-    final path = await _resolve(session, tab);
+  ) => _withSession(tab, (session, path) {
     return session.read(
       path,
       onProgress: onProgress,
       maxBytes: remoteFileViewerMaxBytes,
     );
-  }
+  });
 
-  Future<void> write(TerminalFileTab tab, Uint8List bytes) async {
-    final session = await _session(tab.host);
-    final path = await _resolve(session, tab);
-    await session.write(path, Stream.value(bytes), bytes.length);
+  Future<void> write(TerminalFileTab tab, Uint8List bytes) =>
+      _withSession(tab, (session, path) {
+        return session.write(path, Stream.value(bytes), bytes.length);
+      });
+
+  /// Runs [action] on [tab]'s pooled session. When it fails the session is
+  /// dropped from the pool and closed, so the next read or save of any of
+  /// the host's tabs reconnects instead of reusing a session that died (a
+  /// network change). A plain file error only costs that reconnect.
+  Future<T> _withSession<T>(
+    TerminalFileTab tab,
+    Future<T> Function(SftpSession session, String path) action,
+  ) async {
+    final pooled = _session(tab.host);
+    final session = await pooled;
+    try {
+      return await action(session, await _resolve(session, tab));
+    } catch (_) {
+      if (identical(_sessions[tab.host.id], pooled)) {
+        unawaited(_sessions.remove(tab.host.id));
+        unawaited(session.close().catchError((Object _) {}));
+      }
+      rethrow;
+    }
   }
 
   /// Shell output often prints paths relative to `~`; SFTP wants absolute
