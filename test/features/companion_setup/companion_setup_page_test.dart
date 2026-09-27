@@ -531,7 +531,7 @@ void main() {
           lessThan(tester.getTopLeft(install).dx),
         );
       },
-      variant: TargetPlatformVariant({
+      variant: const TargetPlatformVariant({
         TargetPlatform.linux,
         TargetPlatform.windows,
         TargetPlatform.macOS,

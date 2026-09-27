@@ -402,7 +402,7 @@ void main() {
   );
 
   group('desktop pages (A-060, A-061, A-062)', () {
-    final desktops = TargetPlatformVariant({
+    const desktops = TargetPlatformVariant({
       TargetPlatform.linux,
       TargetPlatform.windows,
       TargetPlatform.macOS,

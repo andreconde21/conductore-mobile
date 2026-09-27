@@ -38,7 +38,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(lock.status, AppLockStatus.unlocked);
     },
-    variant: TargetPlatformVariant({
+    variant: const TargetPlatformVariant({
       TargetPlatform.linux,
       TargetPlatform.windows,
       TargetPlatform.macOS,

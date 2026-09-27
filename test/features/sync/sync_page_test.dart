@@ -292,7 +292,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text(mismatch), findsOneWidget);
       },
-      variant: TargetPlatformVariant({
+      variant: const TargetPlatformVariant({
         TargetPlatform.linux,
         TargetPlatform.windows,
         TargetPlatform.macOS,
