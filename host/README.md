@@ -60,7 +60,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/spool/` | events and statusline reports waiting for the daemon |
 | `~/.conductore/tmp/` | staging files of the sh clients, FIFOs of waiting permission prompts |
 | `~/.conductore/usage/` | statusline holds and parked reports (see Usage) |
-| `~/.conductore/hostd.pid` | lock and pid of the running daemon |
+| `~/.conductore/hostd.pid` | lock and pid of the running daemon (ignored when that pid is not a running `conductore-hostd`) |
 | `~/.conductore/node` | node binary the sh clients start the daemon with |
 | `~/.conductore/spawn.at` | time of the last start attempt |
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
@@ -658,9 +658,13 @@ shows no syscalls).
   escaped quotes. A miss only drops a part of the line (the usage recorded
   by the daemon is parsed properly in Node).
 * The daemon's liveness check in the clients is `kill -0 <pid from
-  hostd.pid>`: after a hard crash, a recycled pid can delay the automatic
-  restart until the phone's next `status`/`events` (which pings the socket
-  and restarts it).
+  hostd.pid>` plus, where `/proc` exists, the process name: the daemon sets
+  its title to `conductore-hostd` (`/proc/<pid>/comm` reads
+  `conductore-host`), so a pid recycled after a reboot or a hard crash does
+  not count. The daemon checks the same (the command line, through `ps`
+  without `/proc`) before it gives up the lock. On macOS the sh clients have
+  only `kill -0`: a recycled pid can delay the automatic restart until the
+  phone's next `status`/`events` (which pings the socket and restarts it).
 
 ## Development
 

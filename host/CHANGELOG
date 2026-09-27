@@ -3,6 +3,7 @@
 ## Unreleased
 
 - fix (H2): the daemon no longer aborts at its heap limit when a few long permission prompts wait during heavy subagent activity. The long-poll buffer keeps each change serialized once and is capped at 2 M characters as well as 1000 changes (an older cursor gets a snapshot, as after a restart); the old-space limit is 64 MB instead of 16 (a ceiling: idle RSS is unchanged); the daemon's stderr goes to `hostd.log`, so a fatal V8 error leaves a trace; any exit that still runs JS removes `hostd.pid`.
+- fix (M17): a stale `hostd.pid` whose pid now belongs to another process (after a reboot or a crash) no longer blocks the daemon. The daemon sets its process title to `conductore-hostd`; the sh clients check `/proc/<pid>/comm` besides `kill -0`, and the daemon checks the command line (`ps` without `/proc`) before it gives up the lock.
 
 ## 0.7.0 (2026-09-25)
 

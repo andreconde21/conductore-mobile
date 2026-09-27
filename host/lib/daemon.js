@@ -18,6 +18,7 @@ const paths = require('./paths')
 const state = require('./state')
 const spool = require('./spool')
 const context = require('./context')
+const proc = require('./proc')
 const { permissionOutput } = require('./permission')
 const { usageFrom } = require('./statusline')
 const { log, debug } = require('./log')
@@ -46,15 +47,13 @@ function usageThrottleMs () {
   return Number.isFinite(v) && v >= 0 ? v : 10000
 }
 
-function pidAlive (pid) {
-  try { process.kill(pid, 0); return true } catch (err) { return err.code === 'EPERM' }
-}
-
 function requestId () {
   return Math.floor(Math.random() * 2 ** 48).toString(16).padStart(12, '0')
 }
 
-// Exclusive lock (also the pid file the sh clients check).
+// Exclusive lock (also the pid file the sh clients check). A pid that is not
+// a running daemon (a stale file after a reboot or crash, the pid since
+// reused) does not hold it.
 function acquireLock () {
   const file = paths.lockPath()
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -65,7 +64,7 @@ function acquireLock () {
       if (err.code !== 'EEXIST') throw err
       let pid = NaN
       try { pid = parseInt(fs.readFileSync(file, 'utf8'), 10) } catch {}
-      if (pid && pid !== process.pid && pidAlive(pid)) return false
+      if (pid && pid !== process.pid && proc.isDaemon(pid)) return false
       try { fs.unlinkSync(file) } catch {}
     }
   }
@@ -161,6 +160,7 @@ class Daemon {
   }
 
   start () {
+    process.title = proc.DAEMON_TITLE
     paths.ensureDirs()
     if (!acquireLock()) {
       log('daemon', 'another daemon holds the lock, exiting')
