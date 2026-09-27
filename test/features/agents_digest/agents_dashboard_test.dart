@@ -13,7 +13,10 @@ import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
@@ -260,6 +263,81 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('digest-tell-send')));
     await tester.pumpAndSettle();
     expect(sent, ['web:Yes, deploy']);
+  });
+
+  group('desktop', () {
+    const desktops = TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    });
+    final modifier = LogicalKeyboardKey.controlLeft;
+    LogicalKeyboardKey sendModifier() =>
+        defaultTargetPlatform == TargetPlatform.macOS
+        ? LogicalKeyboardKey.metaLeft
+        : modifier;
+
+    Future<void> ctrlEnter(WidgetTester tester, LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(key);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('right-click a card: Chat, Terminal and Answer as a menu', (
+      tester,
+    ) async {
+      await start(tester, facts: _digest());
+      final opened = await pumpView(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('digest-line-web')),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('digest-menu-Answer…')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('digest-menu-Terminal')));
+      await tester.pumpAndSettle();
+      expect(opened.last, 'terminal:web');
+    }, variant: desktops);
+
+    testWidgets('Ctrl+Enter (Cmd+Enter on macOS) sends from Tell', (
+      tester,
+    ) async {
+      await start(tester, facts: _digest());
+      final sent = <String>[];
+      await pumpView(tester, sentText: sent);
+      await tester.tap(find.byKey(const ValueKey('digest-tell-web')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('digest-tell-field')),
+        'Ship it',
+      );
+      await ctrlEnter(tester, sendModifier());
+      expect(sent, ['web:Ship it']);
+    }, variant: desktops);
+
+    testWidgets('phone: no right-click menu, Ctrl+Enter does not send', (
+      tester,
+    ) async {
+      await start(tester, facts: _digest());
+      final sent = <String>[];
+      await pumpView(tester, sentText: sent);
+      await tester.tap(
+        find.byKey(const ValueKey('digest-line-web')),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('digest-menu-Chat')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('digest-tell-web')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('digest-tell-field')),
+        'Ship it',
+      );
+      await ctrlEnter(tester, modifier);
+      expect(sent, isEmpty);
+      expect(find.text('Answer web'), findsOneWidget);
+    });
   });
 
   testWidgets('summaries off: facts only, and the note says so', (

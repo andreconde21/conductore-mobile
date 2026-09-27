@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -13,7 +15,9 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Opens an agent (its chat, or its terminal).
 typedef DigestOpenAgent = void Function(SavedHost host, AgentInfo agent);
@@ -691,6 +695,10 @@ class DigestAgentCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: interactive ? onOpen : null,
+        // Desktop: right-click offers the card's buttons as a menu.
+        onSecondaryTapUp: interactive && PlatformFeatures.isDesktop
+            ? (details) => unawaited(_menu(context, details.globalPosition))
+            : null,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
           child: Column(
@@ -857,6 +865,41 @@ class DigestAgentCard extends StatelessWidget {
     );
   }
 
+  Future<void> _menu(BuildContext context, Offset position) async {
+    final question = agent.attention == DigestAttention.question;
+    final actions = <(String, IconData, VoidCallback)>[
+      ('Chat', Icons.forum_outlined, onChat),
+      ('Terminal', Icons.terminal_rounded, onTerminal),
+      if (onReview case final review?)
+        ('Review', Icons.rate_review_outlined, review),
+      if (agent.state != 'needs_permission')
+        (
+          question ? 'Answer…' : 'Tell it…',
+          Icons.reply_rounded,
+          () => onTell(question),
+        ),
+    ];
+    final picked = await showAdaptiveModal<VoidCallback>(
+      context: context,
+      kind: AdaptiveModalKind.menu,
+      anchorPosition: position,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (label, icon, action) in actions)
+            ListTile(
+              key: ValueKey('digest-menu-$label'),
+              dense: true,
+              leading: Icon(icon, size: 20),
+              title: Text(label),
+              onTap: () => Navigator.of(context).pop(action),
+            ),
+        ],
+      ),
+    );
+    picked?.call();
+  }
+
   List<Widget> _factsRow(AppPalette palette) {
     final f = agent.facts;
     final muted = TextStyle(color: palette.mutedForeground, fontSize: 12);
@@ -935,7 +978,13 @@ class _TellDialogState extends State<_TellDialog> {
   @override
   Widget build(BuildContext context) {
     final question = widget.answer ? widget.agent.headline : null;
-    return AlertDialog(
+    final desktop = PlatformFeatures.isDesktop;
+    final send = FilledButton(
+      key: const ValueKey('digest-tell-send'),
+      onPressed: _send,
+      child: const Text('Send'),
+    );
+    final dialog = AlertDialog(
       title: Text(
         widget.answer
             ? 'Answer ${widget.agent.name}'
@@ -964,12 +1013,24 @@ class _TellDialogState extends State<_TellDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          key: const ValueKey('digest-tell-send'),
-          onPressed: () => Navigator.of(context).pop(_text.text),
-          child: const Text('Send'),
-        ),
+        if (desktop)
+          Tooltip(message: '${_mac ? 'Cmd' : 'Ctrl'}+Enter', child: send)
+        else
+          send,
       ],
     );
+    if (!desktop) return dialog;
+    // Desktop: Ctrl+Enter (Cmd+Enter on macOS) sends; Enter is a new line.
+    return CallbackShortcuts(
+      bindings: {
+        SingleActivator(LogicalKeyboardKey.enter, control: !_mac, meta: _mac):
+            _send,
+      },
+      child: dialog,
+    );
   }
+
+  void _send() => Navigator.of(context).pop(_text.text);
+
+  static bool get _mac => defaultTargetPlatform == TargetPlatform.macOS;
 }
