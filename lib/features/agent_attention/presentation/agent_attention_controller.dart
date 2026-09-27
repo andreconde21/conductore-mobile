@@ -9,6 +9,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention_notifier
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -70,18 +71,21 @@ class AgentHostStatus {
 /// poll keeps running as the fallback (and is all that runs in the
 /// background).
 ///
-/// Notifications are edge-triggered on state *transitions* by stable agent
-/// identity — the first snapshot after monitoring starts never notifies,
-/// and an unchanged state is never re-notified. A provider-reported state
-/// sequence counts as a transition too, so an agent that was answered and
-/// blocked again between two polls still notifies. Pending permission
-/// requests are notified once per request id (including on the first
-/// snapshot: an unanswered prompt is actionable whenever it is seen) and
-/// the notification is cancelled when the request disappears. The set of
-/// notified requests outlives a reconnect, so reconnecting neither
-/// re-alerts nor leaves an answered request's notification behind. A
-/// request that timed out on the host (the agent still waits, now in the
-/// terminal) turns into a plain "needs input" notification.
+/// Notifications: one per agent, a summary of what it needs now
+/// ([AgentNotificationPolicy]), updated in place as the agent changes and
+/// removed once nothing is left for it (answered anywhere, or the agent
+/// ended). Pending permission requests show whenever they are seen (the
+/// first snapshot included: an unanswered prompt is actionable), with
+/// buttons for the first one. Questions, errors and finished turns are
+/// edge-triggered on state *transitions* by stable agent identity: the
+/// first snapshot after monitoring starts never notifies them, and a
+/// provider-reported state sequence counts as a transition too, so an
+/// agent that was answered and asked again between two polls still
+/// notifies. Only a new need alerts; updates within one are silent. What
+/// was notified outlives a reconnect, so reconnecting neither re-alerts
+/// nor leaves an answered agent's notification behind. A request that
+/// timed out on the host (the agent still waits, now in the terminal)
+/// turns the notification into "is waiting for you".
 class AgentAttentionController extends ChangeNotifier {
   AgentAttentionController({
     required TerminalWorkspaceController workspace,
@@ -89,6 +93,7 @@ class AgentAttentionController extends ChangeNotifier {
     required AgentAttentionProvider provider,
     AgentAttentionProvider? companionProvider,
     AgentAttentionNotifier? notifier,
+    AgentNotificationPreferencesStore? notificationPreferences,
     Duration pollInterval = const Duration(seconds: 15),
     Duration watchRestartDelay = const Duration(milliseconds: 500),
     this.persistMonitoringEnabled,
@@ -97,10 +102,13 @@ class AgentAttentionController extends ChangeNotifier {
        _provider = provider,
        _companionProvider = companionProvider,
        _notifier = notifier,
+       _notificationStore =
+           notificationPreferences ?? MemoryAgentNotificationPreferencesStore(),
        _pollInterval = pollInterval,
        _watchRestartDelay = watchRestartDelay {
     _workspace.addListener(_syncMonitors);
     _syncMonitors();
+    unawaited(_loadNotificationPreferences());
   }
 
   final TerminalWorkspaceController _workspace;
@@ -112,6 +120,9 @@ class AgentAttentionController extends ChangeNotifier {
   /// The Conductore companion provider, when the app ships one.
   final AgentAttentionProvider? _companionProvider;
   final AgentAttentionNotifier? _notifier;
+  final AgentNotificationPreferencesStore _notificationStore;
+  AgentNotificationPreferences _notificationPreferences =
+      const AgentNotificationPreferences();
   final Duration _pollInterval;
 
   /// Pause between two long-polls, so a host that answers instantly cannot
@@ -139,9 +150,19 @@ class AgentAttentionController extends ChangeNotifier {
   final Map<String, ApprovalsSnapshot> _approvals = {};
   final Set<String> _loadingApprovals = {};
 
-  /// Per host: request ids that currently have a permission notification.
-  /// Kept across reconnects (monitors come and go with the session).
-  final Map<String, Set<String>> _notifiedRequests = {};
+  /// Per agent notification key: what it last notified. Kept across
+  /// reconnects (monitors come and go with the session).
+  final Map<String, AgentNotice> _notices = {};
+
+  /// Per host: the agent notifications last handed to the platform; null
+  /// until the first sync of this run, which always goes out so leftovers
+  /// from an earlier run are cleared.
+  final Map<String, List<AgentNotification>> _sentNotifications = {};
+
+  /// The agents dashboard's cached headline or summary for an agent
+  /// (host id, agent id), shown in its expanded notification. The app
+  /// wires it to the digest once that exists.
+  String? Function(String hostId, String agentId)? notificationDetail;
   bool _appActive = true;
   bool _foreground = true;
   bool _disposed = false;
@@ -353,8 +374,8 @@ class AgentAttentionController extends ChangeNotifier {
 
   /// Completes a notification action tap: answers the request on [host]
   /// (through its monitor when connected, else over a one-off connection)
-  /// and dismisses the notification, or rewrites it to say the decision
-  /// failed. Never throws.
+  /// and updates the agent's notification (the next item, or gone), or
+  /// rewrites it to say the decision failed. Never throws.
   Future<void> completePermissionAction(
     AgentPermissionAction action,
     SavedHost? host,
@@ -363,16 +384,38 @@ class AgentAttentionController extends ChangeNotifier {
     final verdict = PermissionVerdict.values
         .where((value) => value.wireName == action.verdict)
         .firstOrNull;
-    final notificationId = action.notificationId.isNotEmpty
-        ? action.notificationId
-        : permissionNotificationId(action.hostId, action.requestId);
+    final hasAgent = action.agentId.isNotEmpty;
+    final key = hasAgent
+        ? agentNotificationKey(action.hostId, action.agentId)
+        : action.notificationId;
     Future<void> failed(String reason) async {
-      await notifier?.show(
-        id: notificationId,
-        title: 'Permission decision failed',
-        body:
-            'Open Conductore to answer the request'
-            '${host == null ? '' : ' on ${host.name}'}. $reason',
+      final body =
+          'Open Conductore to answer the request'
+          '${host == null ? '' : ' on ${host.name}'}. $reason';
+      if (!hasAgent) {
+        await notifier?.show(
+          id: action.notificationId,
+          title: 'Permission decision failed',
+          body: body,
+        );
+        return;
+      }
+      // The agent's one notification says so (a later poll re-lists
+      // whatever still waits).
+      _sentNotifications.remove(action.hostId);
+      await notifier?.showAgent(
+        AgentNotification(
+          hostId: action.hostId,
+          agentId: action.agentId,
+          need: AgentNeed.approval,
+          title: 'Permission decision failed',
+          text: body,
+          lines: [body],
+          publicTitle: 'Conductore: permission decision failed',
+          alert: true,
+          alertKey: 'failed:${action.requestId}',
+          open: AgentOpenTarget(hostId: action.hostId, agentId: action.agentId),
+        ),
       );
     }
 
@@ -417,7 +460,6 @@ class AgentAttentionController extends ChangeNotifier {
         }
       }
     } catch (error) {
-      _notifiedRequests[host.id]?.remove(action.requestId);
       await failed(error.toString());
       return;
     } finally {
@@ -425,31 +467,48 @@ class AgentAttentionController extends ChangeNotifier {
         notifyListeners();
       }
     }
-    _notifiedRequests[host.id]?.remove(action.requestId);
-    await notifier?.cancel(id: notificationId);
+    if (monitor != null) {
+      // [_removeRequest] re-posted the agent's notification with what is
+      // left, or removed it.
+      return;
+    }
+    // Nothing watches the host: nothing is known to be left.
+    _notices.remove(key);
+    if (hasAgent) {
+      await notifier?.cancelAgent(key: key);
+    } else {
+      await notifier?.cancel(id: action.notificationId);
+    }
   }
 
-  /// "Claude needs permission: Bash · High risk".
-  static String permissionNotificationTitle(PendingPermissionRequest request) {
-    final risk = request.risk;
-    return 'Claude needs permission: ${request.toolName}'
-        '${risk == null ? '' : ' · ${risk.level.label}'}';
+  /// Settings › Agents › Notifications.
+  AgentNotificationPreferences get notificationPreferences =>
+      _notificationPreferences;
+
+  /// Saves [preferences] and re-posts every agent's notification with them
+  /// (turning an event off removes its notifications).
+  Future<void> setNotificationPreferences(
+    AgentNotificationPreferences preferences,
+  ) async {
+    if (preferences == _notificationPreferences) {
+      return;
+    }
+    _notificationPreferences = preferences;
+    notifyListeners();
+    for (final monitor in _monitors.values) {
+      await _syncNotifications(monitor, entered: const {});
+    }
+    await _notificationStore.save(preferences);
   }
 
-  /// The request, the risk reason on its own line, and the machine.
-  static String permissionNotificationBody(
-    PendingPermissionRequest request,
-    String hostName,
-  ) {
-    final reason = request.risk?.reason ?? '';
-    return '${request.summary} (on $hostName)'
-        '${reason.isEmpty ? '' : '\n$reason'}';
+  Future<void> _loadNotificationPreferences() async {
+    final loaded = await _notificationStore.load();
+    if (_disposed || loaded == _notificationPreferences) {
+      return;
+    }
+    _notificationPreferences = loaded;
+    notifyListeners();
   }
-
-  /// Notification id for one pending request (stable per request, so a
-  /// re-seen request replaces instead of stacking).
-  static String permissionNotificationId(String hostId, String requestId) =>
-      '$hostId:perm:$requestId';
 
   // --- smart approvals ------------------------------------------------------
   //
@@ -836,8 +895,9 @@ class AgentAttentionController extends ChangeNotifier {
     return line.length > 200 ? line.substring(0, 200) : line;
   }
 
-  /// Drops [requestId] from the host's dashboard state and cancels its
-  /// notification (the host confirmed the decision; the next poll agrees).
+  /// Drops [requestId] from the host's dashboard state and updates its
+  /// agent's notification (the host confirmed the decision; the next poll
+  /// agrees).
   /// With [stillWaiting] the request is gone but the agent still waits for
   /// an answer in the terminal, so it stays "needs input".
   void _removeRequest(
@@ -864,18 +924,8 @@ class AgentAttentionController extends ChangeNotifier {
       agents: agents,
       updatedAt: monitor.status.updatedAt,
     );
-    if (_notifiedFor(monitor.host.id).remove(requestId)) {
-      unawaited(
-        _notifier?.cancel(
-              id: permissionNotificationId(monitor.host.id, requestId),
-            ) ??
-            Future<void>.value(),
-      );
-    }
+    unawaited(_syncNotifications(monitor, entered: const {}));
   }
-
-  Set<String> _notifiedFor(String hostId) =>
-      _notifiedRequests.putIfAbsent(hostId, () => <String>{});
 
   void _syncMonitors() {
     if (_disposed) {
@@ -1239,95 +1289,108 @@ class AgentAttentionController extends ChangeNotifier {
       monitor.capabilities = capabilities;
     }
     _noticeAutoApprovals(monitor, snapshot.agents);
-    if (notify) {
-      await _notifyTransitions(monitor, snapshot, previousStates);
-    }
-    await _syncPermissionNotifications(monitor, snapshot);
+    await _syncNotifications(
+      monitor,
+      previousStates: previousStates,
+      initial: !notify,
+      entered: {
+        if (notify)
+          for (final agent in snapshot.agents)
+            if (previousStates[agent.id] == null ||
+                _isTransition(previousStates[agent.id]!, agent))
+              agent.id,
+      },
+    );
   }
 
-  Future<void> _notifyTransitions(
-    _HostMonitor monitor,
-    AgentAttentionSnapshot snapshot,
-    Map<String, _AgentMark> previousStates,
-  ) async {
+  /// Brings the host's agent notifications in line with its agents: one
+  /// per agent that needs something ([AgentNotificationPolicy]), none for
+  /// the rest. [entered] lists the agents whose state is new since
+  /// [previousStates] (the last snapshot; the current marks when only a
+  /// local change is applied).
+  Future<void> _syncNotifications(
+    _HostMonitor monitor, {
+    required Set<String> entered,
+    Map<String, _AgentMark>? previousStates,
+    bool initial = false,
+  }) async {
     final notifier = _notifier;
-    if (notifier == null) {
+    if (notifier == null || _disposed) {
       return;
     }
     final host = monitor.host;
-    for (final agent in snapshot.agents) {
-      final previous = previousStates[agent.id];
-      if (previous != null && !_isTransition(previous, agent)) {
+    final preferences = _notificationPreferences;
+    final previous = previousStates ?? monitor.lastStates;
+    final companion = monitor.provider?.id == companionProviderId;
+    final notifications = <AgentNotification>[];
+    final keys = <String>{};
+    for (final agent in monitor.status.agents) {
+      final key = agentNotificationKey(host.id, agent.id);
+      keys.add(key);
+      final notice = _notices[key];
+      final isEntered = entered.contains(agent.id);
+      final need = AgentNotificationPolicy.needFor(
+        agent: agent,
+        previous: notice,
+        entered: isEntered,
+        previousState: previous[agent.id]?.state,
+        // The companion reports a session that ended as finished.
+        ended: companion && agent.state == AgentAttentionState.finished,
+        initial: initial,
+        level: host.agentNotifyLevel,
+        preferences: preferences,
+      );
+      if (need == null) {
+        _notices.remove(key);
         continue;
       }
-      // Loud: an agent waiting on a human (a pending permission request
-      // gets its own actionable notification). Quiet unless the level is
-      // "All": a finished agent. Everything else only updates the inbox.
-      final level = host.agentNotifyLevel;
-      final needsInput =
-          agent.state.needsAttention &&
-          level.notifiesApprovalsAndErrors &&
-          agent.pendingRequests.isEmpty;
-      final finished =
-          agent.state == AgentAttentionState.finished && level.notifiesFinished;
-      if (!needsInput && !finished) {
-        continue;
-      }
-      await notifier.show(
-        id: '${host.id}:${agent.id}',
-        title: needsInput ? 'Agent needs input' : 'Agent finished',
-        body: _withMessage('${agent.name} on ${host.name}', agent),
-        open: openTargetFor(host.id, agent),
+      final requestIds = need == AgentNeed.approval
+          ? {for (final request in agent.pendingRequests) request.id}
+          : const <String>{};
+      final alert = AgentNotificationPolicy.shouldAlert(
+        previous: notice,
+        need: need,
+        requestIds: requestIds,
+        entered: isEntered,
+        quietUpdates: preferences.quietUpdates,
+        initial: initial,
+      );
+      _notices[key] = AgentNotice(need: need, requestIds: requestIds);
+      notifications.add(
+        AgentNotificationPolicy.build(
+          hostId: host.id,
+          hostName: host.name,
+          agent: agent,
+          need: need,
+          alert: alert,
+          preferences: preferences,
+          open: openTargetFor(host.id, agent),
+          detail: notificationDetail?.call(host.id, agent.id),
+        ),
       );
     }
-  }
-
-  /// Posts one actionable notification per new pending request and cancels
-  /// the ones whose request is gone (answered elsewhere, or the agent
-  /// exited).
-  Future<void> _syncPermissionNotifications(
-    _HostMonitor monitor,
-    AgentAttentionSnapshot snapshot,
-  ) async {
-    final notifier = _notifier;
-    if (notifier == null) {
+    // Agents gone from the host have ended.
+    final prefix = agentNotificationKey(host.id, '');
+    _notices.removeWhere(
+      (key, _) => key.startsWith(prefix) && !keys.contains(key),
+    );
+    // Compared without the alert flag: an unchanged list is not re-posted
+    // (that would reorder the shade), and an unchanged need never alerts.
+    final quiet = [
+      for (final notification in notifications)
+        notification.copyWith(alert: false),
+    ];
+    if (listEquals(_sentNotifications[host.id], quiet)) {
       return;
     }
-    final host = monitor.host;
-    final notified = _notifiedFor(host.id);
-    final seen = <String>{};
-    for (final agent in snapshot.agents) {
-      for (final request in agent.pendingRequests) {
-        seen.add(request.id);
-        if (!host.agentNotifyLevel.notifiesApprovalsAndErrors ||
-            notified.contains(request.id)) {
-          continue;
-        }
-        // Commit before showing so a throwing notifier cannot re-notify.
-        notified.add(request.id);
-        // The generic "needs input" notification for this agent (if any)
-        // is superseded by the actionable one.
-        await notifier.cancel(id: '${host.id}:${agent.id}');
-        await notifier.showPermissionRequest(
-          id: permissionNotificationId(host.id, request.id),
-          title: permissionNotificationTitle(request),
-          body: _withMessage(
-            permissionNotificationBody(request, host.name),
-            agent,
-          ),
-          hostId: host.id,
-          requestId: request.id,
-          open: openTargetFor(host.id, agent),
-        );
-      }
-    }
-    for (final requestId in notified.toList()) {
-      if (!seen.contains(requestId)) {
-        notified.remove(requestId);
-        await notifier.cancel(id: permissionNotificationId(host.id, requestId));
-      }
-    }
+    // Commit before posting so a throwing notifier cannot alert twice.
+    _sentNotifications[host.id] = quiet;
+    await notifier.showAgents(hostId: host.id, notifications: notifications);
   }
+
+  /// The companion provider's id: it reports an ended session as
+  /// [AgentAttentionState.finished].
+  static const companionProviderId = 'conductore';
 
   /// A rule answered something since the last look: refresh the
   /// auto-approved list if one was loaded (the inbox shows it).
@@ -1360,21 +1423,6 @@ class AgentAttentionController extends ChangeNotifier {
       tabId: agent.tab ?? '',
       paneId: agent.pane ?? '',
     );
-  }
-
-  /// Longest agent message put into a notification body.
-  static const _notificationMessageLength = 300;
-
-  /// Appends the agent's last message (if any) on its own line.
-  static String _withMessage(String body, AgentInfo agent) {
-    final message = agent.lastMessage?.trim();
-    if (message == null || message.isEmpty) {
-      return body;
-    }
-    final capped = message.length > _notificationMessageLength
-        ? '${message.substring(0, _notificationMessageLength)}…'
-        : message;
-    return '$body\n$capped';
   }
 
   /// A state change, or the same state reached again (the provider bumped

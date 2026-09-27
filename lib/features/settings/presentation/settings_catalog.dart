@@ -104,6 +104,10 @@ bool _backup(SettingsServices s) => s.backupService != null;
 bool _machines(SettingsServices s) => s.hostsController != null;
 bool _usage(SettingsServices s) => s.agentAttention != null;
 bool _digest(SettingsServices s) => s.digest != null;
+bool _agentNotifications(SettingsServices s) =>
+    s.hostsController != null &&
+    s.agentAttention != null &&
+    PlatformFeatures.agentNotifications;
 bool _trustedKeys(SettingsServices s) => s.hostKeyVerifier != null;
 bool _lock(SettingsServices s) => s.onLockNow != null;
 bool _sessionViews(SettingsServices s) => s.hasSessionViews;
@@ -336,6 +340,24 @@ const List<SettingsEntry> settingsCatalog = [
     'Notifications',
     keywords: ['notify', 'alerts', 'approvals'],
     availableWhen: _machines,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Notify when an agent finishes',
+    keywords: ['notify', 'finished', 'done', 'turn ended', 'idle'],
+    availableWhen: _agentNotifications,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Summary only',
+    keywords: ['notify', 'buttons', 'allow', 'deny', 'actions'],
+    availableWhen: _agentNotifications,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Quiet updates',
+    keywords: ['notify', 'silent', 'sound', 'vibrate', 'verbose'],
+    availableWhen: _agentNotifications,
   ),
   SettingsEntry(
     SettingsSection.agents,

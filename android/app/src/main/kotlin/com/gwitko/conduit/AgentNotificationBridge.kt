@@ -26,17 +26,22 @@ import java.security.SecureRandom
  * `conduit/agent_notifications` method channel.
  *
  * Dart -> native:
- * - `show(id, title, body)`: plain agent notification (tap opens the app).
- * - `showPermissionRequest(id, title, body, hostId, requestId)`: notification
- *   with Allow / Deny / Always actions for one pending permission request.
- * - `cancel(id)`: dismiss.
+ * - `show(id, title, body)`: plain notification (the usage alert; tap opens
+ *   the app). `cancel(id)` dismisses it.
+ * - `showAgents(hostId, notifications)`: the agent notifications of one
+ *   host, one per agent ([AgentNotificationModel.Spec]), posted or updated
+ *   in place; the host's others are removed. The buttons answer each
+ *   agent's first pending request.
+ * - `showAgent(...)`: posts or updates one agent's notification.
+ * - `cancelAgent(key)`: removes one agent's notification.
  * - `consumePermissionActions()` -> `List<Map>`: queued action taps, cleared.
  * - `consumeOpenAgent()` -> `Map?`: the agent a tapped notification points
  *   at (`hostId`, `agentId`, `workspaceId`, `tabId`, `paneId`), cleared.
  *
- * `show` and `showPermissionRequest` take the same optional `open*`
- * arguments; tapping the notification body then opens the app at that
- * agent (its Herdr workspace, tab and pane).
+ * Plain and agent notifications take the same optional `open*` arguments;
+ * tapping the notification body then opens the app at that agent (its
+ * Herdr workspace, tab and pane). Agent notifications share one group
+ * whose summary ("3 agents need you") opens the agents dashboard.
  *
  * Native -> Dart:
  * - `permissionActionAvailable()` -> `bool`: an action was tapped while the
@@ -47,7 +52,7 @@ import java.security.SecureRandom
  *
  * Action taps go through [AgentPermissionActionReceiver], which queues the
  * tap durably and pings Dart when the engine is alive. When the engine goes
- * away gracefully the outstanding permission notifications are re-posted
+ * away gracefully the agent notifications with buttons are re-posted
  * with actions that launch the app instead (Android 12+ forbids starting an
  * activity from a notification's broadcast receiver), and Dart drains the
  * queue after the next start.
@@ -62,10 +67,9 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL).also {
             it.setMethodCallHandler(::handle)
         }
-        // Dart re-posts whatever is still pending once it polls; anything
-        // remembered from an earlier engine is stale for re-posting purposes
-        // (the notifications themselves stay in the shade and still work).
-        AgentNotificationStore.clearOutstanding(flutterPluginBinding.applicationContext)
+        // Per-request notifications of an earlier build go; Dart re-posts
+        // what is still pending, one per agent, once it polls.
+        AgentNotificationStore.migrate(flutterPluginBinding.applicationContext)
         active = this
     }
 
@@ -74,7 +78,7 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         channel?.setMethodCallHandler(null)
         channel = null
         // Nobody is listening for broadcast actions any more: make the
-        // outstanding requests launch the app instead.
+        // buttons launch the app instead.
         context?.let { AgentNotificationStore.repostForLaunch(it) }
         context = null
     }
@@ -183,16 +187,19 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                 pendingOpen = null
                 result.success(target?.toMap())
             }
-            "showPermissionRequest" -> {
-                val request = AgentNotificationStore.PermissionNotification(
-                    id = call.argument<String>("id") ?: "",
-                    title = call.argument<String>("title") ?: "",
-                    body = call.argument<String>("body") ?: "",
-                    hostId = call.argument<String>("hostId") ?: "",
-                    requestId = call.argument<String>("requestId") ?: "",
-                    open = AgentNotificationStore.OpenTarget.fromCall(call),
-                )
-                AgentNotificationStore.showPermissionRequest(ctx, request, launchApp = false)
+            "showAgents" -> {
+                val specs = (call.argument<List<*>>("notifications") ?: emptyList<Any>())
+                    .mapNotNull { (it as? Map<*, *>)?.let(AgentNotificationModel.Spec::fromMap) }
+                AgentNotificationStore.showAgents(ctx, call.argument<String>("hostId") ?: "", specs)
+                result.success(null)
+            }
+            "showAgent" -> {
+                val spec = (call.arguments as? Map<*, *>)?.let(AgentNotificationModel.Spec::fromMap)
+                if (spec != null) AgentNotificationStore.showAgent(ctx, spec)
+                result.success(null)
+            }
+            "cancelAgent" -> {
+                AgentNotificationStore.cancelAgent(ctx, call.argument<String>("key") ?: "")
                 result.success(null)
             }
             "cancel" -> {
@@ -308,34 +315,6 @@ object AgentNotificationStore {
         }
     }
 
-    data class PermissionNotification(
-        val id: String,
-        val title: String,
-        val body: String,
-        val hostId: String,
-        val requestId: String,
-        val open: OpenTarget? = null,
-    ) {
-        fun toJson(): JSONObject = JSONObject()
-            .put("id", id)
-            .put("title", title)
-            .put("body", body)
-            .put("hostId", hostId)
-            .put("requestId", requestId)
-            .apply { open?.let { put("open", it.toJson()) } }
-
-        companion object {
-            fun fromJson(json: JSONObject) = PermissionNotification(
-                id = json.optString("id"),
-                title = json.optString("title"),
-                body = json.optString("body"),
-                hostId = json.optString("hostId"),
-                requestId = json.optString("requestId"),
-                open = OpenTarget.fromJson(json.optJSONObject("open")),
-            )
-        }
-    }
-
     data class PermissionAction(
         val notificationId: String,
         val hostId: String,
@@ -344,26 +323,32 @@ object AgentNotificationStore {
         val title: String,
         val body: String,
         val token: String = "",
+        val agentId: String = "",
     )
 
     private const val PREFS = "conduit_agent_notifications"
     private const val KEY_ACTIONS = "actions"
-    private const val KEY_OUTSTANDING = "outstanding"
+    private const val KEY_AGENTS = "agents_v2"
     private const val KEY_TOKENS = "tokens"
+    private const val KEY_SCHEMA = "schema"
+
+    /** Per-request notifications of builds before schema 2. */
+    private const val KEY_LEGACY_OUTSTANDING = "outstanding"
     private const val CHANNEL_ID = "agent_attention"
-    private const val TAG = "conduit_agent"
+    private const val TAG = AgentNotificationModel.TAG
 
     const val ACTION_DECIDE = "com.gwitko.conduit.action.AGENT_PERMISSION_DECIDE"
     const val EXTRA_NOTIFICATION_ID = "com.gwitko.conduit.NOTIFICATION_ID"
     const val EXTRA_HOST_ID = "com.gwitko.conduit.HOST_ID"
+    const val EXTRA_AGENT_ID = "com.gwitko.conduit.AGENT_ID"
     const val EXTRA_REQUEST_ID = "com.gwitko.conduit.REQUEST_ID"
     const val EXTRA_VERDICT = "com.gwitko.conduit.VERDICT"
     const val EXTRA_TITLE = "com.gwitko.conduit.TITLE"
     const val EXTRA_BODY = "com.gwitko.conduit.BODY"
     const val EXTRA_TOKEN = "com.gwitko.conduit.TOKEN"
     val ACTION_EXTRAS = listOf(
-        EXTRA_NOTIFICATION_ID, EXTRA_HOST_ID, EXTRA_REQUEST_ID, EXTRA_VERDICT, EXTRA_TITLE, EXTRA_BODY,
-        EXTRA_TOKEN,
+        EXTRA_NOTIFICATION_ID, EXTRA_HOST_ID, EXTRA_AGENT_ID, EXTRA_REQUEST_ID, EXTRA_VERDICT, EXTRA_TITLE,
+        EXTRA_BODY, EXTRA_TOKEN,
     )
     const val EXTRA_OPEN_HOST_ID = "com.gwitko.conduit.OPEN_HOST_ID"
     const val EXTRA_OPEN_AGENT_ID = "com.gwitko.conduit.OPEN_AGENT_ID"
@@ -374,7 +359,7 @@ object AgentNotificationStore {
         EXTRA_OPEN_HOST_ID, EXTRA_OPEN_AGENT_ID, EXTRA_OPEN_WORKSPACE_ID, EXTRA_OPEN_TAB_ID,
         EXTRA_OPEN_PANE_ID,
     )
-    val VERDICTS = listOf("allow" to "Allow", "deny" to "Deny", "always" to "Always")
+    private val VERDICT_LABELS = mapOf("allow" to "Allow", "deny" to "Deny", "always" to "Always")
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -393,8 +378,8 @@ object AgentNotificationStore {
                 "Agent attention",
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
-                description = "Alerts when a monitored coding agent needs input, " +
-                    "asks for permission, or finishes."
+                description = "One notification per coding agent: what it needs now, " +
+                    "or that it finished."
             }
             manager.createNotificationChannel(channel)
         }
@@ -412,17 +397,30 @@ object AgentNotificationStore {
     }
 
     /**
-     * Bodies carry the agent's last message and the permission summary: on a
-     * secure lock screen show only the title (Dart keeps titles to labels).
+     * Texts carry request summaries and the agent's message: on a secure
+     * lock screen show only [publicTitle] (the agent's label at most).
      */
-    private fun Notification.Builder.lockScreenSafe(context: Context, title: String): Notification.Builder {
+    private fun Notification.Builder.lockScreenSafe(context: Context, publicTitle: String): Notification.Builder {
         setVisibility(Notification.VISIBILITY_PRIVATE)
         setPublicVersion(
             builder(context)
-                .setContentTitle(title)
+                .setContentTitle(publicTitle)
                 .setContentText("Open Conductore for details")
                 .build(),
         )
+        return this
+    }
+
+    /** Sound and vibration only for [alert]; any other post is silent. */
+    private fun Notification.Builder.inAgentGroup(alert: Boolean): Notification.Builder {
+        setGroup(AgentNotificationModel.GROUP_KEY)
+        setOnlyAlertOnce(!alert)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // A group child with the SUMMARY behaviour never alerts.
+            setGroupAlertBehavior(
+                if (alert) Notification.GROUP_ALERT_CHILDREN else Notification.GROUP_ALERT_SUMMARY,
+            )
+        }
         return this
     }
 
@@ -471,121 +469,280 @@ object AgentNotificationStore {
             .setContentIntent(contentIntent(context, id, open))
             .setAutoCancel(true)
             .build()
-        // A stable per-agent id: a new state for the same agent replaces the
-        // old notification instead of stacking.
-        manager.notify(TAG, id.hashCode(), notification)
+        manager.notify(AgentNotificationModel.PLAIN_TAG, id.hashCode(), notification)
+    }
+
+    fun cancel(context: Context, id: String) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        manager.cancel(AgentNotificationModel.PLAIN_TAG, id.hashCode())
+        // A queued tap of an older build names its per-request notification.
+        manager.cancel(AgentNotificationModel.LEGACY_TAG, id.hashCode())
+    }
+
+    /** Makes [specs] the agent notifications of [hostId]. */
+    @Synchronized
+    fun showAgents(context: Context, hostId: String, specs: List<AgentNotificationModel.Spec>) {
+        val stored = agents(context)
+        val (kept, removed) = AgentNotificationModel.sync(stored, hostId, specs)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        for (key in removed) {
+            manager?.cancel(TAG, AgentNotificationModel.notificationId(key))
+            forgetToken(context, key)
+        }
+        val posted = kept.toMutableMap()
+        val shown = HashSet<String>()
+        for (spec in specs) {
+            val result = post(context, spec, stored[spec.key], launchApp = false) ?: continue
+            posted[spec.key] = result
+            shown.add(spec.key)
+        }
+        saveAgents(context, posted)
+        refreshSummary(context, shown = shown, removed = removed.toSet())
+    }
+
+    /** Posts or updates one agent's notification. */
+    @Synchronized
+    fun showAgent(context: Context, spec: AgentNotificationModel.Spec) {
+        val stored = agents(context).toMutableMap()
+        val result = post(context, spec, stored[spec.key], launchApp = false)
+        stored[spec.key] = result ?: spec
+        saveAgents(context, stored)
+        refreshSummary(context, shown = if (result != null) setOf(spec.key) else emptySet())
+    }
+
+    @Synchronized
+    fun cancelAgent(context: Context, key: String) {
+        val stored = agents(context).toMutableMap()
+        stored.remove(key)
+        saveAgents(context, stored)
+        forgetToken(context, key)
+        context.getSystemService(NotificationManager::class.java)
+            ?.cancel(TAG, AgentNotificationModel.notificationId(key))
+        refreshSummary(context, removed = setOf(key))
     }
 
     /**
-     * Posts a permission notification with three action buttons. While the
-     * engine runs the buttons broadcast to [AgentPermissionActionReceiver];
+     * Posts [spec] unless [AgentNotificationModel.post] skips it; returns it
+     * as stored (with its shade position), or null when not posted. While
+     * the engine runs the buttons broadcast to [AgentPermissionActionReceiver];
      * with [launchApp], and always below Android 12, they open the app
      * carrying the action instead (see [PermissionActionGuard]). From
      * Android 12 on a button only fires once the device is unlocked.
      */
-    fun showPermissionRequest(context: Context, request: PermissionNotification, launchApp: Boolean) {
-        rememberOutstanding(context, request)
-        val token = issueToken(context, request)
-        val launch = PermissionActionGuard.buttonsLaunchApp(
-            Build.VERSION.SDK_INT,
-            engineListening = !launchApp,
-        )
-        val manager = manager(context) ?: return
+    private fun post(
+        context: Context,
+        spec: AgentNotificationModel.Spec,
+        previous: AgentNotificationModel.Spec?,
+        launchApp: Boolean,
+    ): AgentNotificationModel.Spec? {
+        val manager = manager(context) ?: return null
+        val id = AgentNotificationModel.notificationId(spec.key)
+        val decision = AgentNotificationModel.post(spec, previous, isShowing(manager, id))
+        if (decision == AgentNotificationModel.Post.SKIP) return null
+        val alert = decision == AgentNotificationModel.Post.ALERT
+        val postedAt = AgentNotificationModel.postedAt(decision, previous, System.currentTimeMillis())
+        val style = Notification.InboxStyle().setBigContentTitle(spec.title)
+        for (line in spec.lines) style.addLine(line)
         val builder = builder(context)
-            .setContentTitle(request.title)
-            .setContentText(request.body)
-            .setStyle(Notification.BigTextStyle().bigText(request.body))
-            .lockScreenSafe(context, request.title)
-            .setContentIntent(contentIntent(context, request.id, request.open))
-            .setAutoCancel(false)
-            .setOnlyAlertOnce(true)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            .setContentTitle(spec.title)
+            .setContentText(spec.text)
+            .setStyle(style)
+            .lockScreenSafe(context, spec.publicTitle)
+            .setContentIntent(contentIntent(context, spec.key, spec.open))
+            .setAutoCancel(spec.action == null)
+            .setWhen(postedAt)
+            .setShowWhen(true)
+            .inAgentGroup(alert)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O && spec.needsYou) {
             // Channels carry the importance from O on.
             @Suppress("DEPRECATION")
             builder.setPriority(Notification.PRIORITY_HIGH)
         }
-        for ((verdict, label) in VERDICTS) {
-            val requestCode = (request.id + verdict).hashCode()
-            val fill: Intent.() -> Unit = {
-                putExtra(EXTRA_NOTIFICATION_ID, request.id)
-                putExtra(EXTRA_HOST_ID, request.hostId)
-                putExtra(EXTRA_REQUEST_ID, request.requestId)
-                putExtra(EXTRA_VERDICT, verdict)
-                putExtra(EXTRA_TITLE, request.title)
-                putExtra(EXTRA_BODY, request.body)
-                putExtra(EXTRA_TOKEN, token)
+        val verdicts = AgentNotificationModel.verdicts(spec)
+        if (verdicts.isEmpty()) {
+            forgetToken(context, spec.key)
+        } else {
+            val token = issueToken(context, spec)
+            val launch = PermissionActionGuard.buttonsLaunchApp(
+                Build.VERSION.SDK_INT,
+                engineListening = !launchApp,
+            )
+            for ((verdict, label) in verdicts) {
+                val payload = AgentNotificationModel.buttonPayload(spec, verdict) ?: continue
+                builder.addAction(button(context, spec, payload, label, token, launch))
             }
-            val pending = if (launch) {
-                launchIntent(context, requestCode, fill)
-            } else {
-                val intent = Intent(context, AgentPermissionActionReceiver::class.java).apply {
-                    action = ACTION_DECIDE
-                    // Distinct data per button so the system never merges the
-                    // three PendingIntents.
-                    data = Uri.parse("conductore://decide/${request.id}/$verdict")
-                    fill()
-                }
-                PendingIntent.getBroadcast(
-                    context,
-                    requestCode,
-                    intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                )
-            }
-            // The int-icon builder is deprecated but the only one below API 23;
-            // notification actions show no icon on modern Android anyway.
-            @Suppress("DEPRECATION")
-            val button = Notification.Action.Builder(0, label, pending)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // Allow / Deny / Always decide for the host (Always for good):
-                // never from a locked phone.
-                button.setAuthenticationRequired(true)
-            }
-            builder.addAction(button.build())
         }
-        manager.notify(TAG, request.id.hashCode(), builder.build())
+        if (spec.reviewAll) {
+            // Opens the agent, like the body: nothing is decided.
+            @Suppress("DEPRECATION")
+            val review = Notification.Action.Builder(
+                0,
+                "Review all",
+                launchIntent(context, (spec.key + ":review").hashCode()) { spec.open?.putInto(this) },
+            )
+            builder.addAction(review.build())
+        }
+        manager.notify(TAG, id, builder.build())
+        return spec.copy(postedAt = postedAt)
     }
 
-    /** Replaces the actions with a "sending" line so a second tap cannot double-decide. */
-    fun showSending(context: Context, action: PermissionAction) {
-        forgetOutstanding(context, action.notificationId)
+    private fun button(
+        context: Context,
+        spec: AgentNotificationModel.Spec,
+        payload: AgentNotificationModel.ButtonPayload,
+        label: String,
+        token: String,
+        launch: Boolean,
+    ): Notification.Action {
+        val requestCode = (payload.notificationId + payload.verdict).hashCode()
+        val fill: Intent.() -> Unit = {
+            putExtra(EXTRA_NOTIFICATION_ID, payload.notificationId)
+            putExtra(EXTRA_HOST_ID, payload.hostId)
+            putExtra(EXTRA_AGENT_ID, payload.agentId)
+            putExtra(EXTRA_REQUEST_ID, payload.requestId)
+            putExtra(EXTRA_VERDICT, payload.verdict)
+            putExtra(EXTRA_TITLE, spec.title)
+            putExtra(EXTRA_BODY, spec.text)
+            putExtra(EXTRA_TOKEN, token)
+        }
+        val pending = if (launch) {
+            launchIntent(context, requestCode, fill)
+        } else {
+            val intent = Intent(context, AgentPermissionActionReceiver::class.java).apply {
+                action = ACTION_DECIDE
+                // Distinct data per button so the system never merges the
+                // PendingIntents.
+                data = Uri.parse("conductore://decide/${Uri.encode(payload.notificationId)}/${payload.verdict}")
+                fill()
+            }
+            PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+        // The int-icon builder is deprecated but the only one below API 23;
+        // notification actions show no icon on modern Android anyway.
+        @Suppress("DEPRECATION")
+        val button = Notification.Action.Builder(0, label, pending)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Allow / Deny / Always decide for the host (Always for good):
+            // never from a locked phone.
+            button.setAuthenticationRequired(true)
+        }
+        return button.build()
+    }
+
+    /** Whether notification [id] is in the shade; null when Android cannot tell. */
+    private fun isShowing(manager: NotificationManager, id: Int): Boolean? {
+        val ids = showingIds(manager) ?: return null
+        return id in ids
+    }
+
+    private fun showingIds(manager: NotificationManager): Set<Int>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        return try {
+            manager.activeNotifications.filter { it.tag == TAG }.map { it.id }.toSet()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Posts or removes the group summary over the agent notifications in
+     * the shade ([shown] were just posted, [removed] just cancelled: the
+     * system may not list those changes yet). Tapping it opens the agents
+     * dashboard.
+     */
+    private fun refreshSummary(context: Context, shown: Set<String> = emptySet(), removed: Set<String> = emptySet()) {
         val manager = manager(context) ?: return
-        val label = VERDICTS.firstOrNull { it.first == action.verdict }?.second ?: action.verdict
-        val notification = builder(context)
-            .setContentTitle(action.title)
-            .setContentText("Sending $label…")
-            .setContentIntent(launchIntent(context, 0))
-            .setOnlyAlertOnce(true)
+        val showingIds = showingIds(manager)
+        val showing = agents(context).values.filter {
+            it.key !in removed &&
+                (it.key in shown || showingIds == null || AgentNotificationModel.notificationId(it.key) in showingIds)
+        }
+        val summary = AgentNotificationModel.summary(showing)
+        if (summary == null) {
+            manager.cancel(TAG, AgentNotificationModel.summaryId)
+            return
+        }
+        val style = Notification.InboxStyle().setBigContentTitle(summary.title)
+        for (line in summary.lines.take(6)) style.addLine(line)
+        val dashboard = launchIntent(context, AgentNotificationModel.summaryId) {
+            putExtra(AgentStatusStore.EXTRA_LAUNCH_TARGET, AgentStatusStore.LAUNCH_TARGET_DASHBOARD)
+        }
+        val builder = builder(context)
+            .setContentTitle(summary.title)
+            .setContentText(summary.lines.joinToString(", "))
+            .setStyle(style)
+            .setNumber(summary.count)
+            .lockScreenSafe(context, summary.publicTitle)
+            .setContentIntent(dashboard)
             .setAutoCancel(false)
-            .build()
-        manager.notify(TAG, action.notificationId.hashCode(), notification)
+            .setGroup(AgentNotificationModel.GROUP_KEY)
+            .setGroupSummary(true)
+            .setOnlyAlertOnce(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // The children alert; the summary never does.
+            builder.setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
+        }
+        manager.notify(TAG, AgentNotificationModel.summaryId, builder.build())
+    }
+
+    /** Replaces the buttons with a "sending" line so a second tap cannot double-decide. */
+    fun showSending(context: Context, action: PermissionAction) {
+        showStatus(context, action, "Sending ${label(action.verdict)}…", launchOnTap = false)
     }
 
     /** The engine is gone: the queued tap completes once the app is opened. */
     fun showOpenToFinish(context: Context, action: PermissionAction) {
-        forgetOutstanding(context, action.notificationId)
+        showStatus(context, action, "Tap to open Conductore and finish: ${label(action.verdict)}", launchOnTap = true)
+    }
+
+    private fun label(verdict: String) = VERDICT_LABELS[verdict] ?: verdict
+
+    /** The agent's notification without buttons, saying where its tap stands. */
+    @Synchronized
+    private fun showStatus(context: Context, action: PermissionAction, text: String, launchOnTap: Boolean) {
+        val stored = agents(context).toMutableMap()
+        val spec = stored[action.notificationId]
+        if (spec != null) {
+            // Answered: a re-post (the engine going away) must not bring
+            // the buttons back.
+            stored[spec.key] = spec.copy(action = null, reviewAll = false)
+            saveAgents(context, stored)
+        }
         val manager = manager(context) ?: return
-        val label = VERDICTS.firstOrNull { it.first == action.verdict }?.second ?: action.verdict
-        val notification = builder(context)
-            .setContentTitle(action.title)
-            .setContentText("Tap to open Conductore and finish: $label")
-            .setContentIntent(launchIntent(context, action.notificationId.hashCode()))
-            .setAutoCancel(true)
-            .build()
-        manager.notify(TAG, action.notificationId.hashCode(), notification)
+        val title = spec?.title ?: action.title
+        val builder = builder(context)
+            .setContentTitle(title)
+            .setContentText(text)
+            .lockScreenSafe(context, spec?.publicTitle ?: "Conductore")
+            .setContentIntent(
+                if (launchOnTap) launchIntent(context, action.notificationId.hashCode()) else launchIntent(context, 0),
+            )
+            .setAutoCancel(launchOnTap)
+            .inAgentGroup(alert = false)
+        if (spec != null && spec.postedAt != 0L) builder.setWhen(spec.postedAt)
+        // A tap queued by an older build names its per-request notification.
+        val tag = if (spec != null || action.agentId.isNotEmpty()) TAG else AgentNotificationModel.LEGACY_TAG
+        manager.notify(tag, action.notificationId.hashCode(), builder.build())
     }
 
-    fun cancel(context: Context, id: String) {
-        forgetOutstanding(context, id)
-        forgetToken(context, id)
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        manager.cancel(TAG, id.hashCode())
+    /** Re-posts agent notification [key] with app-launching buttons. */
+    @Synchronized
+    fun repostForLaunch(context: Context, key: String) {
+        val spec = agents(context)[key] ?: return
+        post(context, spec.copy(alert = false), spec, launchApp = true)
     }
 
-    /** Re-posts the outstanding notification [id] with app-launching actions. */
-    fun repostForLaunch(context: Context, id: String) {
-        val request = outstanding(context).firstOrNull { it.id == id } ?: return
-        showPermissionRequest(context, request, launchApp = true)
+    /** Re-posts every agent notification with buttons, with app-launching ones. */
+    @Synchronized
+    fun repostForLaunch(context: Context) {
+        for (spec in agents(context).values) {
+            if (spec.action != null) post(context, spec.copy(alert = false), spec, launchApp = true)
+        }
     }
 
     fun isDeviceLocked(context: Context): Boolean {
@@ -594,13 +751,6 @@ object AgentNotificationStore {
             keyguard.isDeviceLocked
         } else {
             keyguard.isKeyguardLocked && keyguard.isKeyguardSecure
-        }
-    }
-
-    /** Re-posts every outstanding permission notification with app-launching actions. */
-    fun repostForLaunch(context: Context) {
-        for (request in outstanding(context)) {
-            showPermissionRequest(context, request, launchApp = true)
         }
     }
 
@@ -616,28 +766,78 @@ object AgentNotificationStore {
             title = intent.getStringExtra(EXTRA_TITLE) ?: "",
             body = intent.getStringExtra(EXTRA_BODY) ?: "",
             token = intent.getStringExtra(EXTRA_TOKEN) ?: "",
+            agentId = intent.getStringExtra(EXTRA_AGENT_ID) ?: "",
         )
     }
 
     /**
-     * The random token the buttons of notification [request] carry: kept
-     * while the same request is re-posted, new for every other one.
+     * Cancels the per-request notifications of builds before schema 2 once:
+     * everything still showing under the old tag, and the ids the old build
+     * remembered. Their buttons' tokens go too, so none of them decides
+     * anything any more.
      */
     @Synchronized
-    private fun issueToken(context: Context, request: PermissionNotification): String {
+    fun migrate(context: Context) {
+        val prefs = prefs(context)
+        if (!AgentNotificationModel.needsMigration(prefs.getInt(KEY_SCHEMA, 1))) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (manager != null) {
+            val active = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    manager.activeNotifications.map { it.tag to it.id }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+            for (id in AgentNotificationModel.legacyCancellations(active, legacyIds(context))) {
+                manager.cancel(AgentNotificationModel.LEGACY_TAG, id)
+            }
+        }
+        prefs.edit()
+            .remove(KEY_LEGACY_OUTSTANDING)
+            .remove(KEY_TOKENS)
+            .putInt(KEY_SCHEMA, AgentNotificationModel.SCHEMA)
+            .apply()
+    }
+
+    /** The notification ids an older build remembered (outstanding requests and tokens). */
+    private fun legacyIds(context: Context): List<String> {
+        val ids = ArrayList<String>()
+        try {
+            val outstanding = JSONArray(prefs(context).getString(KEY_LEGACY_OUTSTANDING, null) ?: "[]")
+            for (i in 0 until outstanding.length()) {
+                outstanding.optJSONObject(i)?.optString("id")?.takeIf { it.isNotEmpty() }?.let(ids::add)
+            }
+        } catch (_: Exception) {
+            // Unreadable: the active list still covers what shows.
+        }
+        ids.addAll(tokens(context).keys().asSequence().toList())
+        return ids
+    }
+
+    /**
+     * The random token the buttons of [spec] carry: kept while its first
+     * request stays the same, new for every other one (so a button of an
+     * earlier version of the notification decides nothing).
+     */
+    @Synchronized
+    private fun issueToken(context: Context, spec: AgentNotificationModel.Spec): String {
+        val action = spec.action ?: return ""
         val tokens = tokens(context)
-        val current = tokens.optJSONObject(request.id)?.let(::issuedFrom)
-        if (current != null && current.hostId == request.hostId && current.requestId == request.requestId) {
+        val current = tokens.optJSONObject(spec.key)?.let(::issuedFrom)
+        if (current != null && current.hostId == spec.hostId && current.requestId == action.requestId) {
             return current.token
         }
         val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val token = bytes.joinToString("") { "%02x".format(it) }
         tokens.put(
-            request.id,
+            spec.key,
             JSONObject()
                 .put("token", token)
-                .put("hostId", request.hostId)
-                .put("requestId", request.requestId),
+                .put("hostId", spec.hostId)
+                .put("requestId", action.requestId),
         )
         prefs(context).edit().putString(KEY_TOKENS, tokens.toString()).apply()
         return token
@@ -645,8 +845,8 @@ object AgentNotificationStore {
 
     /**
      * Whether [action] came from a button of a notification the app posted
-     * and still shows; the first tap uses the token up, so a replayed or
-     * second tap decides nothing.
+     * and still shows for that request; the first tap uses the token up, so
+     * a replayed or second tap decides nothing.
      */
     @Synchronized
     fun claimAction(context: Context, action: PermissionAction): Boolean {
@@ -690,6 +890,7 @@ object AgentNotificationStore {
             JSONObject()
                 .put("notificationId", action.notificationId)
                 .put("hostId", action.hostId)
+                .put("agentId", action.agentId)
                 .put("requestId", action.requestId)
                 .put("verdict", action.verdict),
         )
@@ -707,6 +908,7 @@ object AgentNotificationStore {
                 mapOf(
                     "notificationId" to item.optString("notificationId"),
                     "hostId" to item.optString("hostId"),
+                    "agentId" to item.optString("agentId"),
                     "requestId" to item.optString("requestId"),
                     "verdict" to item.optString("verdict"),
                 ),
@@ -724,37 +926,22 @@ object AgentNotificationStore {
         }
     }
 
-    @Synchronized
-    private fun rememberOutstanding(context: Context, request: PermissionNotification) {
-        val kept = outstanding(context).filter { it.id != request.id } + request
-        saveOutstanding(context, kept)
-    }
-
-    @Synchronized
-    private fun forgetOutstanding(context: Context, id: String) {
-        saveOutstanding(context, outstanding(context).filter { it.id != id })
-    }
-
-    @Synchronized
-    fun clearOutstanding(context: Context) {
-        prefs(context).edit().remove(KEY_OUTSTANDING).apply()
-    }
-
-    private fun outstanding(context: Context): List<PermissionNotification> {
-        val raw = prefs(context).getString(KEY_OUTSTANDING, null) ?: return emptyList()
+    /** The agent notifications posted (or held back as silent), by key. */
+    private fun agents(context: Context): Map<String, AgentNotificationModel.Spec> {
+        val raw = prefs(context).getString(KEY_AGENTS, null) ?: return emptyMap()
         return try {
-            val array = JSONArray(raw)
-            (0 until array.length()).mapNotNull { index ->
-                array.optJSONObject(index)?.let(PermissionNotification::fromJson)
-            }
+            val json = JSONObject(raw)
+            json.keys().asSequence().mapNotNull { key ->
+                json.optJSONObject(key)?.let(AgentNotificationModel.Spec::fromJson)?.let { key to it }
+            }.toMap()
         } catch (_: Exception) {
-            emptyList()
+            emptyMap()
         }
     }
 
-    private fun saveOutstanding(context: Context, requests: List<PermissionNotification>) {
-        val array = JSONArray()
-        for (request in requests) array.put(request.toJson())
-        prefs(context).edit().putString(KEY_OUTSTANDING, array.toString()).apply()
+    private fun saveAgents(context: Context, agents: Map<String, AgentNotificationModel.Spec>) {
+        val json = JSONObject()
+        for ((key, spec) in agents) json.put(key, spec.toJson())
+        prefs(context).edit().putString(KEY_AGENTS, json.toString()).apply()
     }
 }

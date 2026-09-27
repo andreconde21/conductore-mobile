@@ -3,6 +3,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -315,8 +316,8 @@ void main() {
           herdr('done'),
         ]);
         expect(
-          [for (final shown in notifier.shown) shown.$2],
-          ['Agent needs input', 'Agent finished'],
+          [for (final alert in notifier.alerts) alert.need],
+          [AgentNeed.question, AgentNeed.finished],
         );
       });
 
@@ -329,9 +330,12 @@ void main() {
           herdr('working'),
         ]);
         expect(
-          [for (final shown in notifier.shown) shown.$2],
-          ['Agent needs input'],
+          [for (final alert in notifier.alerts) alert.need],
+          [AgentNeed.question],
         );
+        // The finished turn does not notify: the question's notification
+        // goes away.
+        expect(notifier.agents, isEmpty);
       });
 
       test('Approvals and errors still posts permission requests', () async {
@@ -339,7 +343,7 @@ void main() {
           companion('working'),
           companion('needs_permission', pending: true),
         ], useCompanion: true);
-        expect(notifier.permissionsShown, hasLength(1));
+        expect(notifier.alerts.single.need, AgentNeed.approval);
       });
 
       test('None posts nothing, approvals included', () async {
@@ -348,8 +352,7 @@ void main() {
           companion('needs_permission', pending: true),
           companion('ended'),
         ], useCompanion: true);
-        expect(notifier.shown, isEmpty);
-        expect(notifier.permissionsShown, isEmpty);
+        expect(notifier.agentPosts, isEmpty);
       });
     });
   });

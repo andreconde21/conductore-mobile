@@ -1,3 +1,5 @@
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
+
 /// Where tapping a notification's body takes the app: one agent on one
 /// host, with its Herdr location when the provider reports it.
 class AgentOpenTarget {
@@ -65,16 +67,16 @@ class AgentOpenTarget {
       'AgentOpenTarget($hostId, $workspaceId, $tabId, $paneId)';
 }
 
-/// Posts local "agent needs attention" notifications.
+/// Posts local notifications: one per agent ([showAgents]) and plain ones
+/// (the usage alert).
 ///
-/// Titles must be lock-screen safe (agent labels, host names, tool
-/// names). Bodies may carry the agent's last message and the one-line
-/// summary of a pending permission request, so the platform shows only the
-/// title on a secure lock screen; never pass terminal output or full tool
-/// inputs.
+/// Titles must be lock-screen safe (agent labels, host names). Bodies may
+/// carry the agent's last message and one-line summaries of pending
+/// permission requests, so the platform shows only a public version on a
+/// secure lock screen; never pass terminal output or full tool inputs.
 abstract class AgentAttentionNotifier {
-  /// Shows (or replaces, for the same [id]) one notification. Tapping it
-  /// opens the app at [open] when given.
+  /// Shows (or replaces, for the same [id]) one plain notification.
+  /// Tapping it opens the app at [open] when given.
   Future<void> show({
     required String id,
     required String title,
@@ -82,21 +84,25 @@ abstract class AgentAttentionNotifier {
     AgentOpenTarget? open,
   });
 
-  /// Shows (or replaces, for the same [id]) one notification with
-  /// Allow / Deny / Always actions for a pending permission request. The
-  /// platform reports the tapped action back through the app's permission
-  /// action source with [hostId] and [requestId].
-  Future<void> showPermissionRequest({
-    required String id,
-    required String title,
-    required String body,
+  /// Removes the plain notification with [id], if it is still showing.
+  Future<void> cancel({required String id});
+
+  /// Makes [notifications] the agent notifications of [hostId]: each
+  /// agent's one notification is posted or updated in place, and the
+  /// host's other agent notifications are removed. The platform keeps
+  /// every agent notification in one group with a summary ("3 agents need
+  /// you"). An action tap reports the notification's first request back
+  /// through the app's permission action source.
+  Future<void> showAgents({
     required String hostId,
-    required String requestId,
-    AgentOpenTarget? open,
+    required List<AgentNotification> notifications,
   });
 
-  /// Removes the notification with [id], if it is still showing.
-  Future<void> cancel({required String id});
+  /// Posts or updates one agent's notification, leaving the others be.
+  Future<void> showAgent(AgentNotification notification);
+
+  /// Removes the agent notification [key] ([agentNotificationKey]).
+  Future<void> cancelAgent({required String key});
 }
 
 /// Delivers notification taps that should open an agent.
