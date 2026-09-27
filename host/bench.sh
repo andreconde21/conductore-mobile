@@ -6,7 +6,8 @@
 # Runs against a throwaway state dir (never your real ~/.conductore or its
 # daemon): fires N hook events and N statusline refreshes, prints the wall
 # time per event, the peak RSS of one event (GNU time or BSD time -l), and
-# the daemon's CPU time and RSS for the whole run.
+# the daemon's CPU time and RSS for the whole run, then N/4 permission
+# requests that an approval rule answers (the hook's auto-approve latency).
 set -eu
 
 N=${1:-200}
@@ -63,13 +64,26 @@ t4=$(ms)
 set -- $(ping)
 cpu2=$1
 
+# Auto-approved PermissionRequests: a rule answers, the hook prints the
+# decision (FIFO round trip through the daemon).
+printf '%s\n' '{"version":1,"rules":[{"id":"rbench00000","rule":"Bash(ls *)","scope":{"kind":"any"},"expiresAt":null,"endsWithSession":null,"source":"cli","createdAt":0,"hits":0,"lastUsedAt":null}]}' >"$TMPD/rules.json"
+PR='{"session_id":"bench","cwd":"/tmp/bench","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls -la"}}'
+printf '%s\n' "$PR" >"$TMPD/pr.json"
+case $("$HOOK" PermissionRequest <"$TMPD/pr.json") in *'"allow"'*) ;; *) echo 'auto-approve did not answer' >&2; exit 1 ;; esac
+M=$((N / 4 + 1))
+t5=$(ms)
+i=0
+while [ "$i" -lt "$M" ]; do "$HOOK" PermissionRequest <"$TMPD/pr.json" >/dev/null; i=$((i + 1)); done
+t6=$(ms)
+
 hook_peak=$(IN=$TMPD/ev.json; printf '%s\n' "$EV" >"$IN"; peak "$HOOK" PreToolUse)
 sl_peak=$(IN=$TMPD/sl.json; printf '%s\n' "$STL" >"$IN"; peak "$SL")
 
 awk -v n="$N" -v h=$((t1 - t0)) -v a=$((t2 - t1)) -v s=$((t4 - t3)) \
-  -v hp="$hook_peak" -v sp="$sl_peak" -v dc=$((cpu1 - cpu0)) -v sc=$((cpu2 - cpu1)) -v rss="$rss" 'BEGIN {
+  -v hp="$hook_peak" -v sp="$sl_peak" -v m="$M" -v p=$((t6 - t5)) -v dc=$((cpu1 - cpu0)) -v sc=$((cpu2 - cpu1)) -v rss="$rss" 'BEGIN {
   printf "hook        %d events: %.2f ms/event wall, peak RSS %s kB per event\n", n, h / n, hp
   printf "            daemon applied the last one %d ms after the loop; daemon CPU %d ms total (%.2f ms/event)\n", a, dc, dc / n
   printf "statusline  %d runs:   %.2f ms/run wall, peak RSS %s kB per run; daemon CPU %d ms total\n", n, s / n, sp, sc
   printf "daemon      RSS %.1f MB after the run\n", rss / 1048576
+  printf "auto-approve %d permission requests answered by a rule: %.2f ms/request wall\n", m, p / m
 }'

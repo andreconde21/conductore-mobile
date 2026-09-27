@@ -19,6 +19,7 @@ const state = require('./state')
 const spool = require('./spool')
 const context = require('./context')
 const { permissionOutput } = require('./permission')
+const { Approvals } = require('./approvals')
 const { usageFrom } = require('./statusline')
 const { log, debug } = require('./log')
 
@@ -138,6 +139,7 @@ class Daemon {
     this.state = loadSnapshot()
     this.changes = []
     this.waiters = new Map() // requestId -> { fifo, event, sessionId, timer }
+    this.approvals = new Approvals()
     this.pollers = new Set() // { socket, since, timer }
     this.usageEmits = new Map() // sessionId -> { at, timer }
     this.holds = new Map() // sessionId -> timer (usage/<sid>.hold exists)
@@ -282,15 +284,31 @@ class Daemon {
       if (fifo && isOurFifo(fifo)) writeFifo(fifo, '\n')
       return
     }
+    if (event.hook_event_name === 'PermissionRequest') {
+      event.request_id = requestId()
+      this.approvals.assess(event)
+      // A rule answers before anything else runs (no tmux lookup first):
+      // the hook prints the decision within milliseconds.
+      const rule = fifo && isOurFifo(fifo) ? this.approvals.match(event) : null
+      if (rule && writeFifo(fifo, JSON.stringify(permissionOutput(event, 'allow')) + '\n')) {
+        await context.enrich(event, header)
+        this.commit(state.autoApproved(this.state, event))
+        this.approvals.record(rule, event, this.state.agents[event.session_id])
+        log('permission', `${event.request_id} auto (${rule.id} ${rule.rule})`)
+        return
+      }
+      await context.enrich(event, header)
+      return this.onPermission(event, fifo, header.timeout)
+    }
     await context.enrich(event, header)
-    if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout)
     this.commit(state.reduce(this.state, event))
+    if (event.hook_event_name === 'SessionEnd') this.approvals.endSession(event.session_id)
   }
 
   // --- permission requests ----------------------------------------------------
 
   onPermission (event, fifo, timeout) {
-    const id = requestId()
+    const id = event.request_id || requestId()
     event.request_id = id
     this.commit(state.reduce(this.state, event))
     if (!fifo || !isOurFifo(fifo) || !fifoAlive(fifo)) {
@@ -320,8 +338,9 @@ class Daemon {
   }
 
   // Resolves a waiting hook. decision: allow | deny | always | timeout | gone.
+  // `rule`: the approval rule that answered it (logged as auto-approved).
   // Returns whether the hook received the answer.
-  settle (id, decision, message) {
+  settle (id, decision, message, rule = null) {
     const waiter = this.waiters.get(id)
     if (!waiter) return false
     this.waiters.delete(id)
@@ -335,9 +354,10 @@ class Daemon {
       // The hook is gone; its FIFO would otherwise linger.
       try { if (isOurFifo(waiter.fifo)) fs.unlinkSync(waiter.fifo) } catch {}
     }
-    const resolution = delivered || decision === 'timeout' ? decision : 'gone'
+    const resolution = delivered || decision === 'timeout' ? (rule && delivered ? 'auto' : decision) : 'gone'
     this.commit(state.resolvePermission(this.state, id, resolution))
-    log('permission', `${id} ${resolution}`)
+    if (rule && delivered) this.approvals.record(rule, waiter.event, this.state.agents[waiter.sessionId])
+    log('permission', `${id} ${resolution}${rule ? ` (${rule.id} ${rule.rule})` : ''}`)
     if (!this.waiters.size && this.probeTimer) { clearInterval(this.probeTimer); this.probeTimer = null }
     return delivered
   }
@@ -511,12 +531,24 @@ class Daemon {
       case 'status':
         await this.drain()
         this.commit(state.prune(this.state))
-        this.reply(c, { ...state.snapshot(this.state), source: 'daemon' }); c.end(); return
+        this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: paths.CAPABILITIES }); c.end(); return
       case 'events':
         await this.drain()
         return this.handleEvents(req, c)
       case 'decide':
         return this.handleDecide(req, c)
+      case 'approve-low':
+        return this.done(c, this.approveLow(req))
+      case 'trust':
+        return this.done(c, this.trust(req))
+      case 'rules':
+        return this.done(c, this.rulesOp(req))
+      case 'approvals':
+        return this.done(c, {
+          rules: this.approvals.rules(),
+          autoApproved: this.approvals.auditEntries(Date.now(), req.hours),
+          now: Date.now()
+        })
       case 'usage':
         // Legacy Node statusline (`conductore-hostd statusline`).
         this.reply(c, { ok: true, result: this.handleUsage(req) }); c.end(); return
@@ -526,6 +558,115 @@ class Daemon {
         return
       default:
         this.reply(c, { error: `unknown op ${req.op}` }); c.end()
+    }
+  }
+
+  // Replies with a result object, or {error} when it threw.
+  done (c, fn) {
+    this.reply(c, fn)
+    c.end()
+  }
+
+  // Waiting requests a rule now covers (one was just added) are answered.
+  applyRules () {
+    const approved = []
+    for (const [id, w] of [...this.waiters]) {
+      const rule = this.approvals.match(w.event)
+      if (rule && this.settle(id, 'allow', null, rule)) approved.push(id)
+    }
+    return approved
+  }
+
+  // "Approve all N safe": allows every waiting request rated low (only those
+  // listed in `ids`, when given; only one session's, with `sessionId`).
+  // Anything else is skipped with a reason, never allowed.
+  approveLow (req) {
+    const wanted = Array.isArray(req.ids) ? new Set(req.ids.map(String)) : null
+    const approved = []
+    const skipped = []
+    for (const agent of Object.values(this.state.agents)) {
+      if (req.sessionId && agent.sessionId !== req.sessionId) continue
+      for (const p of [...agent.pending]) {
+        if (wanted && !wanted.has(p.id)) continue
+        wanted && wanted.delete(p.id)
+        if (!p.batchable || !p.risk || p.risk.level !== 'low') { skipped.push({ id: p.id, reason: `${(p.risk && p.risk.level) || 'unrated'} risk: review it` }); continue }
+        if (!this.waiters.has(p.id)) {
+          this.commit(state.resolvePermission(this.state, p.id, 'gone'))
+          skipped.push({ id: p.id, reason: 'expired; answer it in the terminal' })
+          continue
+        }
+        if (this.settle(p.id, 'allow')) approved.push({ id: p.id, sessionId: agent.sessionId, toolName: p.toolName, summary: p.summary })
+        else skipped.push({ id: p.id, reason: 'expired; answer it in the terminal' })
+      }
+    }
+    if (wanted) for (const id of wanted) skipped.push({ id, reason: 'unknown request' })
+    return { ok: true, approved, skipped }
+  }
+
+  // "Trust this for N minutes": saves a rule from a waiting request, allows
+  // the request and every other waiting one the rule covers. High-risk
+  // requests are refused: they always ask.
+  trust (req) {
+    const found = state.findPending(this.state, req.requestId)
+    if (!found) return { error: `unknown request ${req.requestId}` }
+    const { agent, request } = found
+    if (!request.risk || request.risk.level === 'high') {
+      return { error: `high-risk requests always ask (${request.risk ? request.risk.reason : 'not rated'}); nothing was trusted` }
+    }
+    if (!this.waiters.has(request.id)) {
+      this.commit(state.resolvePermission(this.state, request.id, 'gone'))
+      return { error: 'request expired; answer it in the terminal' }
+    }
+    const kind = req.scope || 'repo'
+    const scope = kind === 'session'
+      ? { kind: 'session', sessionId: agent.sessionId, label: agent.name || null }
+      : kind === 'repo'
+        ? { kind: 'repo', path: req.path || request.repo || agent.cwd }
+        : { kind: 'any' }
+    const forever = !!req.forever
+    const untilSessionEnd = !!req.untilSessionEnd
+    const minutes = req.minutes !== undefined && req.minutes !== null ? req.minutes : forever || untilSessionEnd ? null : 60
+    let rule
+    try {
+      rule = this.approvals.add({
+        rule: req.rule || (request.suggestedRules || [])[0] || request.toolName,
+        scope,
+        minutes,
+        untilSessionEnd,
+        sessionId: agent.sessionId,
+        source: ['trust', 'always', 'voice'].includes(req.source) ? req.source : 'trust'
+      })
+    } catch (err) {
+      return { error: err.message }
+    }
+    const approved = []
+    if (this.settle(request.id, 'allow')) approved.push(request.id)
+    approved.push(...this.applyRules())
+    return { ok: true, rule, approved }
+  }
+
+  rulesOp (req) {
+    try {
+      switch (req.action) {
+        case 'list': case undefined:
+          return { rules: this.approvals.rules(), now: Date.now() }
+        case 'add': {
+          const rule = this.approvals.add({ ...req.spec, source: (req.spec && req.spec.source) || 'cli' })
+          return { ok: true, rule, approved: this.applyRules() }
+        }
+        case 'remove': {
+          const rule = this.approvals.remove(req.id)
+          return rule ? { ok: true, removed: rule } : { error: `unknown rule ${req.id}` }
+        }
+        case 'edit': {
+          const rule = this.approvals.edit(req.id, req.patch || {})
+          return rule ? { ok: true, rule, approved: this.applyRules() } : { error: `unknown rule ${req.id}` }
+        }
+        default:
+          return { error: `unknown rules action ${req.action}` }
+      }
+    } catch (err) {
+      return { error: err.message }
     }
   }
 
@@ -541,10 +682,15 @@ class Daemon {
       this.commit(state.resolvePermission(this.state, requestId, 'gone'))
       this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
     }
-    if (!this.settle(requestId, decision, message)) {
+    // "Always" on a high-risk request would let Claude Code skip asking for
+    // good: it is answered as a one-time allow instead.
+    const high = decision === 'always' && found.request.risk && found.request.risk.level === 'high'
+    if (!this.settle(requestId, high ? 'allow' : decision, message)) {
       this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
     }
-    this.reply(c, { ok: true, requestId, decision, sessionId: found.agent.sessionId }); c.end()
+    const res = { ok: true, requestId, decision: high ? 'allow' : decision, sessionId: found.agent.sessionId }
+    if (high) res.note = 'high-risk requests always ask: allowed once, no rule saved'
+    this.reply(c, res); c.end()
   }
 
   handleEvents (req, c) {

@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports|usage|summarize"
+    phone ──ssh user@host "conductore-hostd status|events|decide|trust|rules|transcript|send|ports|usage|summarize"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -69,6 +69,8 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/summarize.lock` | pid of the running `summarize` (one at a time; never the text) |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
+| `~/.conductore/rules.json` | approval rules and time-boxed trust the hook answers by itself (see Approval rules), mode 0600 |
+| `~/.conductore/auto-approved.json` | what those rules answered in the last 24 h (at most 500 entries), mode 0600 |
 
 Environment: `CONDUCTORE_PERMISSION_TIMEOUT` (seconds the hook waits for the
 phone, default 120, read by the hook), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
@@ -166,11 +168,16 @@ Every command prints one JSON document on stdout and exits 0, or prints
           "toolName": "Bash",
           "summary": "rm -rf node_modules",
           "toolInput": { "command": "rm -rf node_modules", "description": "Remove node_modules" },
-          "createdAt": 1790286139530
+          "createdAt": 1790286139530,
+          "risk": { "level": "high", "reason": "Deletes recursively (rm -rf): node_modules" },
+          "batchable": false,
+          "suggestedRules": ["Bash(rm *)", "Bash(rm -rf node_modules)", "Bash"],
+          "repo": "/home/andre/Projects/Foo"
         }
       ]
     }
-  ]
+  ],
+  "capabilities": ["smart-approvals"]
 }
 ```
 
@@ -187,6 +194,15 @@ Every command prints one JSON document on stdout and exits 0, or prints
   `{"_truncated":true,"preview":"…"}`.
 * `usage` is present only once the statusline reported something for the
   session (see Usage).
+* `pending[].risk` (`low` / `medium` / `high` and a one-line reason),
+  `batchable` (may go into "approve all safe"), `suggestedRules` (most
+  specific first) and `repo` (the git work tree of the agent's cwd) are set
+  on every request the daemon rated; see Approval rules.
+* `lastAutoApprovedAt` (epoch ms): the last time a rule answered one of the
+  agent's requests; the phone refreshes its `approvals` list when it moves.
+* `capabilities`: what this companion supports, for the phone to gate on
+  (also in `version`). `smart-approvals`: risk labels, `rules`, `trust`,
+  `approve-low`, `approvals`, `classify`.
 * `source` is `daemon`, `snapshot` (daemon down, read from `state.json`, with
   `writtenAt`) or `none` (never ran). Timestamps are Unix milliseconds.
 * Agents are sorted by `updatedAt`, newest first.
@@ -210,7 +226,7 @@ than `seq` already exist, it prints them and exits at once. Lines:
 * `snapshot`: the cursor is not covered by the daemon's buffer (it restarted
   or the phone was away for more than 1000 changes). Replace everything and
   continue from its `seq`.
-* `reason` is the hook event name, `decision:<allow|deny|always|timeout|gone>`,
+* `reason` is the hook event name, `decision:<allow|deny|always|auto|timeout|gone>`,
   `usage` (only the `usage` field changed) or `prune`.
 
 Suggested loop on the phone: `status` once, then `events --since <seq>` in a
@@ -225,6 +241,65 @@ loop, reconnecting on SSH errors.
 Unblocks the waiting hook. Errors (exit 1): `unknown request <id>` (already
 decided, timed out, or never existed) and `request expired; answer it in the
 terminal` (the hook process is gone). `--message` is passed to Claude on deny.
+`always` on a high-risk request is answered as a one-time `allow` (no rule
+for Claude Code either), with `"note": "high-risk requests always ask: …"`.
+
+### `conductore-hostd approve-low [--ids <id,id,…>] [--session <sessionId>]`
+
+"Approve all N safe": allows every waiting request rated low (with `--ids`,
+only those: pass the list the user saw). Everything else is skipped with a
+reason, never allowed.
+
+```json
+{"ok":true,"approved":[{"id":"3671d8715ac1","sessionId":"0f2c…","toolName":"Bash","summary":"git status"}],
+ "skipped":[{"id":"9a0e…","reason":"high risk: review it"},{"id":"nope","reason":"unknown request"}]}
+```
+
+### `conductore-hostd trust <requestId> [--rule 'Tool(pattern)'] [--scope repo|session|any] [--minutes 60 | --until-session-end | --forever] [--path <dir>]`
+
+"Trust this for N minutes": saves a rule from a waiting request (default:
+its first `suggestedRules` entry, scope `repo` = the request's `repo`, 60
+minutes), allows the request, and allows every other waiting request the
+rule covers. `--scope session` limits it to this agent session (and drops
+it when the session ends); `--until-session-end` keeps the scope but ends
+with the session. Refused for high-risk requests.
+
+```json
+{"ok":true,"rule":{"id":"r0a1b2c3d4e","rule":"Bash(npm test *)","scope":{"kind":"repo","path":"/home/andre/Projects/Foo"},
+ "expiresAt":1790287039530,"endsWithSession":null,"source":"trust","note":null,"createdAt":1790286139530,"hits":0,"lastUsedAt":null},
+ "approved":["3671d8715ac1"]}
+```
+
+### `conductore-hostd rules [list|add|edit|remove]`
+
+```sh
+conductore-hostd rules                                  # {"rules":[…active…],"now":…}
+conductore-hostd rules add 'Bash(npm test *)' --scope repo --path ~/Projects/Foo [--minutes 15]
+conductore-hostd rules add 'Read' --scope session --session <sessionId>
+conductore-hostd rules edit <ruleId> [--rule '…'] [--scope …] [--minutes N | --forever]
+conductore-hostd rules remove <ruleId>                  # {"ok":true,"removed":{…}}
+```
+
+`add` and `edit` answer waiting requests the rule now covers
+(`"approved": [ids]`). Expired rules are not listed and are dropped the
+next time the file is written.
+
+### `conductore-hostd approvals [--hours 24]`
+
+The active rules plus what they answered, newest first:
+
+```json
+{"rules":[…],"now":1790286139530,
+ "autoApproved":[{"requestId":"5b7c…","at":1790286139530,"sessionId":"0f2c…","agent":"Foo","cwd":"/home/andre/Projects/Foo",
+   "toolName":"Bash","summary":"npm test","risk":{"level":"low","reason":"Runs tests: npm test"},
+   "ruleId":"r0a1b2c3d4e","rule":"Bash(npm test *)","scope":{"kind":"repo","path":"/home/andre/Projects/Foo"}}]}
+```
+
+### `conductore-hostd classify [--tool Bash --command '…' | --file <path> | --url <url>] [--cwd <dir>]`
+
+The risk label and rule suggestions for one tool call, without the daemon
+(or `{"tool_name","tool_input","cwd"}` on stdin):
+`{"risk":{"level":"low","reason":"Runs tests: npm test"},"batchable":true,"suggestedRules":["Bash(npm test *)","Bash(npm *)","Bash"],"repo":"/home/andre/Projects/Foo"}`.
 
 ### `conductore-hostd focus <sessionId>`
 
@@ -467,7 +542,7 @@ instead. See Usage.
   latency is measured around the spawn from Node, so it includes a little
   process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1","capabilities":["smart-approvals"]}`
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 
@@ -568,6 +643,66 @@ event. A `decide` for that request fails with `unknown request`.
 Note that a hook `allow` does not override a matching deny rule, and Claude
 Code still evaluates ask rules against `updatedInput` (not used here).
 
+## Approval rules
+
+The phone can tell the companion to answer some requests by itself: a
+time-boxed trust ("Allow `npm test` in this repo for 15 min"), or a rule
+saved from "Always". They live in `~/.conductore/rules.json` (mode 0600),
+never in Claude Code's settings, so they work with the phone offline and go
+away when revoked.
+
+When a PermissionRequest arrives the daemon first rates it (`lib/risk.js`,
+below). Unless it is high risk, it checks the active rules (`lib/rules.js`);
+a match is answered `allow` at once, before any tmux or Herdr lookup: the
+request never shows as pending, the agent stays `working` with
+`lastAutoApprovedAt` set, and it is logged in `auto-approved.json` (the
+phone's "Auto-approved" list). Claude Code's own terminal prompt is up
+meanwhile, exactly as without a rule; the hook's answer clears it. Nothing
+is auto-approved unless the user created a rule.
+
+Syntax: Claude Code's own `Tool` / `Tool(content)`:
+
+| Rule | Covers |
+| --- | --- |
+| `Bash(npm test)` | exactly that command |
+| `Bash(npm test *)` | `npm test` and `npm test <anything>` (`*` is any text; `npm test:*` is the same) |
+| `Edit(src/**)` | Edit, Write, MultiEdit, NotebookEdit under `src/` of the rule's repo (`**` any depth, `*` one segment, `//abs/path` and `~/path` absolute, a pattern without `/` at any depth) |
+| `Read(docs/**)` | Read, Grep, Glob, LS under `docs/` |
+| `WebFetch(domain:docs.rs)` | that host and its subdomains |
+| `mcp__github` | every tool of that MCP server |
+| `Bash`, `Edit`, … | every call of the tool |
+
+A Bash rule covers a compound command (`&&`, `;`, `|`) only when every
+command in it is covered; `cd <dir>` and read-only filters after a pipe
+(`| tail -20`, `| grep x`) need no rule. A command with `$(…)`, backticks
+or unbalanced quotes is covered only by a rule for that exact command (or a
+bare `Bash`). Scopes: `repo` (sessions whose cwd is inside the path),
+`session` (one agent session; dropped when it ends) or `any`. Expiry is
+checked when a rule is used; no timer runs.
+
+### Risk labels
+
+Every request gets `low`, `medium` or `high` and a one-line reason:
+
+* low: read-only tools (Read, Grep, Glob, LS, WebSearch, WebFetch of a
+  well-known documentation or package site), read-only commands (`ls`,
+  `cat`, `rg`, `git status|diff|log|show`, `docker ps`, …), test and lint
+  runs (`npm test`, `pytest`, `go test`, `flutter analyze`, …).
+* medium: edits inside the repo, installs, builds, scripts, commits, plain
+  pushes, anything unknown (including MCP tools and unknown web sites).
+* high: recursive deletes, deletes or writes outside the repo (temp dirs
+  excepted), secrets paths (`.env`, `~/.ssh`, `~/.aws`, key files,
+  `.git-credentials`, …), `sudo`/`su`, force pushes, hard resets,
+  `git clean -f`, `curl … | sh`, network commands to hosts outside a short
+  known list, `ssh`/`scp`/`rsync` to remote hosts, global installs,
+  publishing, service and cluster changes, edits in `.git/` or
+  `.claude/settings*.json`.
+
+High is never batchable and never answered by a rule: it always asks.
+The classifier is pure and conservative (unknown means medium, a complex
+command takes the highest of its parts). `test/risk.test.js` holds the
+sample table.
+
 ## Threat model
 
 * Everything runs as the user who runs Claude Code. The socket is 0600 inside
@@ -591,6 +726,10 @@ Code still evaluates ask rules against `updatedInput` (not used here).
   waiting so a prompt cannot answer it by accident.
 * `transcript` only reads the `transcript_path` Claude Code reported for a
   known session (absolute, `.jsonl`), and drops thinking text and images.
+* Approval rules are created only by the user (phone or CLI), stored 0600
+  in the state dir, and can never answer a request rated high. A rule is
+  only as narrow as its pattern: `Bash` with scope `any` allows every
+  medium-risk command in every repo until revoked.
 * An `always` decision persists an allow rule in the project's
   `.claude/settings.local.json` (or wherever Claude Code suggested), exactly
   as choosing "always" in the terminal would. Review
@@ -669,6 +808,11 @@ the sh statusline (default line parity with `lib/statusline.js`, hold and
 park throttle, `--chain` passthrough) through a real daemon,
 `test/chat.test.js` the `transcript`/`send`/`interrupt` commands (with fake
 `tmux`/`herdr` binaries that record their arguments),
+`test/risk.test.js` the risk classifier (a table of 260+ real commands and
+tool calls) and the shell reader, `test/rules.test.js` rule syntax,
+matching, scopes, expiry and suggestions, `test/approvals.test.js` trust,
+rules, `approve-low`, the auto-approved log and the hook's auto-answer
+latency through a real daemon,
 `test/summarize.test.js` the `summarize` command with a fake `claude`
 (argv, passthrough, markdown and word cap, timeout kill, busy, truncation),
 and

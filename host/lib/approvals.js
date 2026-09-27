@@ -1,0 +1,183 @@
+'use strict'
+
+// The daemon's approval policy: rules (rules.js) plus the log of what they
+// answered. Owns ~/.conductore/rules.json and ~/.conductore/auto-approved.json
+// (both 0600). Nothing here runs unless a permission request arrives or the
+// phone asks: no timers, expiry is checked when a rule is used.
+
+const fs = require('fs')
+const os = require('os')
+const paths = require('./paths')
+const rules = require('./rules')
+const risk = require('./risk')
+const { summarize } = require('./state')
+const { log } = require('./log')
+
+const AUDIT_KEEP_MS = 24 * 60 * 60 * 1000
+const AUDIT_MAX = 500
+
+class Approvals {
+  constructor ({ rulesFile = paths.approvalRulesPath(), auditFile = paths.autoApprovedPath(), home = os.homedir() } = {}) {
+    this.rulesFile = rulesFile
+    this.auditFile = auditFile
+    this.home = home
+    this.list = []
+    this.mtime = -1
+    this.audit = null // loaded on first use
+  }
+
+  // --- rules ------------------------------------------------------------------
+
+  // Active rules, re-read when the file changed on disk (edited by hand).
+  rules (now = Date.now()) {
+    let mtime = 0
+    try { mtime = fs.statSync(this.rulesFile).mtimeMs } catch {}
+    if (mtime !== this.mtime) {
+      this.list = rules.load(this.rulesFile)
+      this.mtime = mtime
+    }
+    return this.list.filter(r => rules.isActive(r, now))
+  }
+
+  persist (now = Date.now()) {
+    const [kept] = rules.prune(this.list, now)
+    this.list = kept
+    try {
+      paths.ensureDirs()
+      rules.save(this.rulesFile, this.list)
+      this.mtime = fs.statSync(this.rulesFile).mtimeMs
+    } catch (err) {
+      log('approvals', 'could not save rules', err.message)
+    }
+  }
+
+  add (spec, now = Date.now()) {
+    const rec = rules.makeRule(spec, now)
+    const active = this.rules(now)
+    if (active.length >= rules.MAX_RULES) throw new Error(`too many rules (${rules.MAX_RULES}); remove some first`)
+    this.list = [...active, rec]
+    this.persist(now)
+    log('approvals', `rule ${rec.id} added: ${rec.rule} (${rec.scope.kind}${rec.expiresAt ? `, until ${new Date(rec.expiresAt).toISOString()}` : ''})`)
+    return rec
+  }
+
+  remove (id, now = Date.now()) {
+    const active = this.rules(now)
+    const rec = active.find(r => r.id === id)
+    if (!rec) return null
+    this.list = active.filter(r => r.id !== id)
+    this.persist(now)
+    log('approvals', `rule ${id} removed: ${rec.rule}`)
+    return rec
+  }
+
+  // Changes a rule's pattern, scope or duration; keeps its id and counters.
+  edit (id, patch, now = Date.now()) {
+    const active = this.rules(now)
+    const old = active.find(r => r.id === id)
+    if (!old) return null
+    const spec = {
+      rule: patch.rule !== undefined ? patch.rule : old.rule,
+      scope: patch.scope !== undefined ? patch.scope : old.scope,
+      source: old.source,
+      note: patch.note !== undefined ? patch.note : old.note,
+      sessionId: patch.sessionId !== undefined ? patch.sessionId : old.endsWithSession,
+      untilSessionEnd: patch.untilSessionEnd !== undefined ? patch.untilSessionEnd : !!old.endsWithSession
+    }
+    if (patch.minutes !== undefined && patch.minutes !== null) spec.minutes = patch.minutes
+    const next = rules.makeRule(spec, now)
+    if (patch.minutes === undefined && !patch.forever) next.expiresAt = old.expiresAt
+    Object.assign(next, { id: old.id, createdAt: old.createdAt, hits: old.hits || 0, lastUsedAt: old.lastUsedAt || null })
+    this.list = active.map(r => (r.id === id ? next : r))
+    this.persist(now)
+    return next
+  }
+
+  // A session ended: its session-scoped and until-session-end rules go.
+  endSession (sessionId, now = Date.now()) {
+    this.rules(now)
+    const [kept, dropped] = rules.prune(this.list, now, sessionId)
+    if (!dropped.length) return []
+    this.list = kept
+    this.persist(now)
+    return dropped
+  }
+
+  // --- requests ---------------------------------------------------------------
+
+  context (event) {
+    const cwd = typeof event.cwd === 'string' && event.cwd ? event.cwd : null
+    return { cwd, root: cwd ? rules.repoRoot(cwd, this.home) : null, home: this.home }
+  }
+
+  // Risk label, rule suggestions and repo of a PermissionRequest, stored on
+  // the event (the state reducer copies them into the pending request).
+  assess (event) {
+    const ctx = this.context(event)
+    event.risk = risk.classify(event.tool_name, event.tool_input, ctx)
+    event.batchable = risk.batchable(event.tool_name, event.risk)
+    event.suggested_rules = rules.suggest(event.tool_name, event.tool_input, ctx)
+    event.repo_root = ctx.root
+    return ctx
+  }
+
+  // The rule that answers this request by itself, or null. High risk always
+  // asks, whatever the rules say.
+  match (event, now = Date.now()) {
+    if (!event.risk) this.assess(event)
+    if (!event.risk || event.risk.level === 'high') return null
+    const active = this.rules(now)
+    if (!active.length) return null
+    return rules.findMatch(active, event, this.context(event), now)
+  }
+
+  // A rule answered a request: count it and log it.
+  record (rule, event, agent, now = Date.now()) {
+    const rec = this.list.find(r => r.id === rule.id)
+    if (rec) {
+      rec.hits = (rec.hits || 0) + 1
+      rec.lastUsedAt = now
+      this.persist(now)
+    }
+    const entries = this.auditEntries(now)
+    entries.unshift({
+      requestId: event.request_id || null,
+      at: now,
+      sessionId: event.session_id || null,
+      agent: (agent && agent.name) || null,
+      cwd: event.cwd || null,
+      toolName: event.tool_name || null,
+      summary: summarize(event.tool_name, event.tool_input),
+      risk: event.risk || null,
+      ruleId: rule.id,
+      rule: rule.rule,
+      scope: rule.scope
+    })
+    if (entries.length > AUDIT_MAX) entries.length = AUDIT_MAX
+    this.audit = entries
+    try {
+      const tmp = `${this.auditFile}.${process.pid}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, entries }) + '\n', { mode: 0o600 })
+      fs.renameSync(tmp, this.auditFile)
+    } catch (err) {
+      log('approvals', 'could not save the auto-approved log', err.message)
+    }
+  }
+
+  // Auto-approved requests of the last 24 h (or `hours`), newest first.
+  auditEntries (now = Date.now(), hours = 24) {
+    if (this.audit === null) {
+      try {
+        const data = JSON.parse(fs.readFileSync(this.auditFile, 'utf8'))
+        this.audit = Array.isArray(data && data.entries) ? data.entries.filter(e => e && typeof e.at === 'number') : []
+      } catch {
+        this.audit = []
+      }
+    }
+    this.audit = this.audit.filter(e => now - e.at < AUDIT_KEEP_MS)
+    const since = now - Math.min(Math.max(Number(hours) || 24, 0), 24) * 3600000
+    return this.audit.filter(e => e.at >= since)
+  }
+}
+
+module.exports = { Approvals, AUDIT_KEEP_MS }

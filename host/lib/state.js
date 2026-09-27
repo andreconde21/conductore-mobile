@@ -6,7 +6,9 @@
 //   { version: 1, seq: N, agents: { [sessionId]: Agent } }
 //   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, state, lastEvent, lastToolName,
 //             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest] }
-//   PendingRequest = { id, toolName, summary, toolInput, createdAt }
+//   PendingRequest = { id, toolName, summary, toolInput, createdAt,
+//                      risk: { level, reason }, batchable, suggestedRules, repo }
+//   (the last four only when the daemon assessed the request, see approvals.js)
 //
 // Every mutation bumps `seq` and yields a change record
 //   { seq, type: 'change' | 'remove', sessionId, agent, reason }
@@ -150,13 +152,20 @@ function reduce (state, event, now = Date.now()) {
     case 'PermissionRequest': {
       const id = event.request_id || `${sid}:${now}`
       if (!agent.pending.some(p => p.id === id)) {
-        agent.pending.push({
+        const request = {
           id,
           toolName: event.tool_name || null,
           summary: summarize(event.tool_name, event.tool_input),
           toolInput: capToolInput(event.tool_input),
           createdAt: now
-        })
+        }
+        if (event.risk) {
+          request.risk = event.risk
+          request.batchable = !!event.batchable
+          request.suggestedRules = Array.isArray(event.suggested_rules) ? event.suggested_rules : []
+          request.repo = event.repo_root || null
+        }
+        agent.pending.push(request)
       }
       next = 'needs_permission'
       break
@@ -202,7 +211,28 @@ function questionText (event) {
   return null
 }
 
-// Remove a pending request; `resolution` is 'allow' | 'deny' | 'always' | 'timeout' | 'gone'.
+// A PermissionRequest a rule answered at once: it never becomes pending.
+// The agent keeps working; `lastAutoApprovedAt` tells the phone to refresh
+// its auto-approved list.
+function autoApproved (state, event, now = Date.now()) {
+  if (!event || !event.session_id) return []
+  const sid = event.session_id
+  let agent = state.agents[sid]
+  if (!agent) {
+    agent = newAgent(sid, now)
+    state.agents[sid] = agent
+  }
+  applyContext(agent, event)
+  agent.lastEvent = 'PermissionRequest'
+  if (event.tool_name) agent.lastToolName = event.tool_name
+  if (agent.state === 'ended') agent.endedAt = null
+  if (!agent.pending.length) agent.state = 'working'
+  agent.lastAutoApprovedAt = now
+  agent.updatedAt = now
+  return [record(state, 'change', agent, 'decision:auto')]
+}
+
+// Remove a pending request; `resolution` is 'allow' | 'deny' | 'always' | 'auto' | 'timeout' | 'gone'.
 function resolvePermission (state, requestId, resolution, now = Date.now()) {
   for (const agent of Object.values(state.agents)) {
     const idx = agent.pending.findIndex(p => p.id === requestId)
@@ -215,6 +245,7 @@ function resolvePermission (state, requestId, resolution, now = Date.now()) {
         agent.lastMessage = 'Permission prompt is waiting in the terminal'
       } else agent.state = 'working'
     }
+    if (resolution === 'auto') agent.lastAutoApprovedAt = now
     agent.updatedAt = now
     return [record(state, 'change', agent, `decision:${resolution}`)]
   }
@@ -292,6 +323,7 @@ module.exports = {
   createState,
   reduce,
   resolvePermission,
+  autoApproved,
   findPending,
   setUsage,
   usageChange,
