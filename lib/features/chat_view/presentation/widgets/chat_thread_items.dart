@@ -2,6 +2,7 @@ import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
@@ -10,6 +11,119 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 const _mono = 'monospace';
+
+/// A prompt (or answer) sent from the chat view that the transcript has
+/// not shown yet: a dimmer user bubble with its state underneath, and
+/// Retry / Edit once it failed.
+class ChatOutgoingBubble extends StatelessWidget {
+  const ChatOutgoingBubble({
+    required this.item,
+    this.onRetry,
+    this.onEdit,
+    super.key,
+  });
+
+  final ChatOutgoing item;
+  final VoidCallback? onRetry;
+  final VoidCallback? onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final failed = item.state == ChatSendState.failed;
+    final (icon, status) = switch (item.state) {
+      ChatSendState.sending => (Icons.schedule_rounded, 'Sending…'),
+      ChatSendState.failed => (
+        Icons.error_outline_rounded,
+        'Not sent${item.error == null ? '' : ': ${item.error}'}',
+      ),
+      ChatSendState.sent when item.late => (
+        Icons.done_rounded,
+        'Sent · not in the transcript yet',
+      ),
+      ChatSendState.sent => (Icons.done_rounded, 'Sent'),
+    };
+    final statusColor = failed ? scheme.error : scheme.onSurfaceVariant;
+    return Align(
+      alignment: Alignment.centerRight,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.85,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 40, top: 6, bottom: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                onLongPress: () => _copy(context, item.text),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer.withValues(alpha: 0.5),
+                    border: failed ? Border.all(color: scheme.error) : null,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(AppTheme.radius),
+                      topRight: Radius.circular(AppTheme.radius),
+                      bottomLeft: Radius.circular(AppTheme.radius),
+                      bottomRight: Radius.circular(4),
+                    ),
+                  ),
+                  child: Text(
+                    item.answer ? 'Answer: ${item.text}' : item.text,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 3),
+              Row(
+                key: const ValueKey('outgoing-status'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 13, color: statusColor),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      status,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: statusColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (failed)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (onEdit != null)
+                      TextButton(
+                        key: const ValueKey('outgoing-edit'),
+                        onPressed: onEdit,
+                        child: const Text('Edit'),
+                      ),
+                    if (onRetry != null)
+                      TextButton(
+                        key: const ValueKey('outgoing-retry'),
+                        onPressed: onRetry,
+                        child: const Text('Retry'),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// The user's prompt, right-aligned.
 class ChatUserBubble extends StatelessWidget {
