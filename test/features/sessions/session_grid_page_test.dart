@@ -6,6 +6,7 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -138,5 +139,31 @@ void main() {
       summarizeAgentState(attention.statusFor(session.host.id), 'h#tmux:x'),
       AgentAttentionState.needsInput,
     );
+  });
+
+  testWidgets(
+    'desktop right-click on a tile opens its actions',
+    (tester) async {
+      final workspace = await pumpGrid(tester);
+      workspace.open(buildHost('a'));
+      await tester.pump();
+      await tester.tap(find.text('Host a'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.text('Reconnect'), findsOneWidget);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
+
+  testWidgets('phones ignore right-click on a tile', (tester) async {
+    final workspace = await pumpGrid(tester);
+    workspace.open(buildHost('a'));
+    await tester.pump();
+    await tester.tap(find.text('Host a'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    expect(find.text('Reconnect'), findsNothing);
   });
 }
