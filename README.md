@@ -156,6 +156,15 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   menu or Settings.
 - **Inbox** of every agent across your machines, with permission requests you
   answer with Allow, Deny or Always, and a Usage tab.
+- **Smarter approvals** (companion with `smart-approvals`): every request
+  carries a Low, Medium or High risk label with a one-line reason. "Trust…"
+  allows a pattern such as `Bash(npm test *)` for 15 min, 1 h or until the
+  session ends, in one session, one repo or all repos; "Always" saves the
+  same kind of rule until revoked. The companion answers matching requests by
+  itself, even with the phone offline, and never answers a high-risk one.
+  "Approve all N safe" clears the low-risk ones in one go, the inbox lists
+  what was auto-approved in the last 24 h with "Undo trust", and Settings ›
+  Agents › Approval rules lists and edits each machine's rules.
 - **Usage** (companion 0.6 or newer): Claude's 5-hour and weekly limits,
   tokens and an estimated cost per day, machine, project and model, Codex
   too. On the home screen, the widget and the Quick Settings tile, with an
