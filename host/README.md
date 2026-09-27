@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports|usage|summarize"
+    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports|usage|summarize|guide"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -67,6 +67,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/ports.json` | listening ports and the seq each first appeared at (`ports`) |
 | `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets and daily token sums, last 31 days (about 1.3 MB for 1,100 transcripts) |
 | `~/.conductore/summarize.lock` | pid of the running `summarize` (one at a time; never the text) |
+| `~/.conductore/guide.lock` | pid of the running `guide` (one at a time; never the request) |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 
@@ -452,6 +453,53 @@ truncated), never as an argument. Exactly one JSON line on stdout and exit
 * Claude Code itself still does its start-up bookkeeping for the call: a
   `~/.claude/sessions/<pid>.json` entry removed at exit, `~/.claude.json`
   counters, and plugin marketplace refreshes.
+
+### `conductore-hostd guide [--timeout-ms 15000]`
+
+The phone's voice guide ("Talk to the fleet"). The phone matches common
+spoken commands itself; anything else comes here as one JSON object on
+stdin (32 KB max), never as an argument:
+
+```json
+{"utterance":"ask the api agent how far it is","context":{"lang":"en","screen":{"view":"home"},"machines":[{"id":"m1","name":"VTM"}],"projects":[{"id":"p1","name":"conductore-mobile"}],"agents":[{"id":"a1","machine":"m1","name":"api","project":"p1","state":"working","pending":[]}]}}
+```
+
+The context holds short ids (`m1`, `a1`, `r1`, …, made up by the phone for
+this one request) and labels: machines, projects, agents with their state
+and pending permission requests (tool, one-line summary, risk), and the
+screen. Never a transcript. Exactly one JSON line on stdout and exit 0 in
+every case:
+
+```json
+{"schema":1,"action":{"action":"send","target":"a1","text":"How far are you?","minutes":0,"speak":"Asking api how far it is."},"ms":2900,"model":"claude-haiku-4-5-20251001"}
+{"schema":1,"action":{"action":"say","target":"","text":"","minutes":0,"speak":"I could not find that."},"rejected":"unknown-target","ms":2500,"model":"claude-haiku-4-5-20251001"}
+{"schema":1,"error":"busy","message":"another guide request is running"}
+```
+
+* `action` is one of `open`, `chat`, `terminal`, `approve`, `deny`,
+  `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`;
+  `target` is an id from the context or empty, `text` the prompt for
+  `send`, `minutes` (1–480) for `trust`, `speak` one short sentence to say.
+* The answer is checked here too: an action outside the list, an id the
+  context does not name, a `send` without text or target, an `open` or
+  `read` without target, or a `trust` without minutes comes back as a
+  `say` with `rejected` (`unknown-action`, `unknown-target`, `incomplete`).
+  The phone checks the action against its own state again before doing
+  anything, and asks for a spoken confirmation before approving, denying,
+  sending or trusting.
+* `error`: `claude-missing`, `not-logged-in`, `timeout`, `busy` (another
+  `guide` still ran after 2 s), `failed` (anything else, including bad
+  input and flags).
+* It runs `claude -p --tools "" --safe-mode --no-session-persistence
+  --output-format json --model haiku --system-prompt <fixed instruction>
+  --json-schema <fixed schema>` with the request on stdin between random
+  delimiters, `MAX_THINKING_TOKENS=0`: the same lock-down as `summarize`
+  (no tools, no hooks, no transcript), at nice 10, claude in its own
+  process group killed on timeout or a signal, one call per user at a time
+  (`~/.conductore/guide.lock`). The request is never logged or written to
+  disk. A CLI one-shot: nothing at idle.
+* Older companions answer `unknown command guide`: the phone then asks the
+  next machine, or says the guide's brain needs an update.
 
 ### `conductore-hostd statusline [--chain '<cmd>']`
 

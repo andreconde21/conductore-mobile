@@ -1,5 +1,11 @@
 # Changelog — host companion
 
+## Unreleased
+
+- feat: `guide [--timeout-ms 15000]`: the phone's voice guide. `{utterance, context}` JSON on stdin (32 KB max; short ids and labels of machines, projects, agents, pending requests and the screen, never transcripts), one action out of a closed list on stdout (`open`, `chat`, `terminal`, `approve`, `deny`, `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`) with a short sentence to speak, or `error` (claude-missing, not-logged-in, timeout, busy, failed); exit 0.
+- Same lock-down as `summarize`: `claude -p --tools "" --safe-mode --no-session-persistence --output-format json --model haiku`, a fixed system prompt and `--json-schema`, the request on stdin between random delimiters, thinking off, nice 10, its own process group killed on timeout, one call per user at a time (`guide.lock`), nothing logged. Actions naming ids the context does not hold, or missing their text or minutes, come back as a `say` with `rejected`.
+- The phone's other commands are unchanged; older phones never call `guide`.
+
 ## 0.7.0 (2026-09-25)
 
 - feat: `summarize [--max-words 45] [--timeout-ms 20000]`: a one- or two-sentence spoken version of the reply on stdin (64 KB max) for the phone's "Claude summary" read-aloud mode, as one JSON line (`summary`, `ms`, `model`, or `error`: claude-missing, not-logged-in, timeout, busy, failed; exit 0). Replies under 40 words come back as they are (`passthrough: true`) without calling Claude.
