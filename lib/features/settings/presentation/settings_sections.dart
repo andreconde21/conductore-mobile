@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
@@ -597,12 +598,12 @@ class SettingsSectionBody extends StatelessWidget {
             title: const Text('Trusted host keys'),
             subtitle: const Text('Servers Conductore has connected to before.'),
             trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => TrustedKeysPage(
-                  verifier: verifier,
-                  themeController: services.theme,
-                ),
+            onTap: () => pushAdaptivePage<void>(
+              context,
+              desktopMaxWidth: 760,
+              builder: (_) => TrustedKeysPage(
+                verifier: verifier,
+                themeController: services.theme,
               ),
             ),
           ),
