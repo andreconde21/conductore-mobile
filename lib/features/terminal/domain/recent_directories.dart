@@ -2,6 +2,8 @@
 /// recent first, fed by the shell (OSC 7), tmux and the companion's agents.
 library;
 
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
+
 /// How many directories are kept per host.
 const maxRecentDirectories = 20;
 
@@ -88,12 +90,12 @@ String? parseOsc7Directory(List<String> args) {
   return normalizeRecentDirectory(path);
 }
 
-/// Quotes [value] for a POSIX shell (and tmux's command parser, which
-/// follows the same single-quote rules) unless it is plainly safe.
+/// Quotes [value] for the login shell, whichever it is, and tmux's
+/// command parser (see [shellQuoteArgument]) unless it is plainly safe.
 String quoteDirectory(String value) =>
     RegExp(r'^[A-Za-z0-9_./:=+@%,-]+$').hasMatch(value)
     ? value
-    : "'${value.replaceAll("'", r"'\''")}'";
+    : shellQuoteArgument(value);
 
 /// Typed into the current shell to change to [directory].
 String cdCommand(String directory) => 'cd ${quoteDirectory(directory)}';

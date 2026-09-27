@@ -1,6 +1,7 @@
 package com.gwitko.conduit
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -19,6 +20,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.SecureRandom
 
 /**
  * `conduit/agent_notifications` method channel.
@@ -120,9 +122,12 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
     private fun stashLaunchAction(intent: Intent?): Boolean {
         val ctx = context ?: return false
         val action = AgentNotificationStore.actionFromIntent(intent) ?: return false
+        for (key in AgentNotificationStore.ACTION_EXTRAS) intent?.removeExtra(key)
+        // MainActivity is exported: only the app's own buttons, carrying the
+        // token of a notification it posted, may decide anything.
+        if (!AgentNotificationStore.claimAction(ctx, action)) return false
         AgentNotificationStore.enqueueAction(ctx, action)
         AgentNotificationStore.showSending(ctx, action)
-        for (key in AgentNotificationStore.ACTION_EXTRAS) intent?.removeExtra(key)
         return true
     }
 
@@ -217,6 +222,13 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
 class AgentPermissionActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = AgentNotificationStore.actionFromIntent(intent) ?: return
+        if (!PermissionActionGuard.mayQueue(AgentNotificationStore.isDeviceLocked(context))) {
+            // Nothing is decided from the lock screen: the buttons now open
+            // the app, which the device unlock (and the app lock) guard.
+            AgentNotificationStore.repostForLaunch(context, action.notificationId)
+            return
+        }
+        if (!AgentNotificationStore.claimAction(context, action)) return
         AgentNotificationStore.enqueueAction(context, action)
         val bridge = AgentNotificationBridge.active
         if (bridge != null) {
@@ -321,11 +333,13 @@ object AgentNotificationStore {
         val verdict: String,
         val title: String,
         val body: String,
+        val token: String = "",
     )
 
     private const val PREFS = "conduit_agent_notifications"
     private const val KEY_ACTIONS = "actions"
     private const val KEY_OUTSTANDING = "outstanding"
+    private const val KEY_TOKENS = "tokens"
     private const val CHANNEL_ID = "agent_attention"
     private const val TAG = "conduit_agent"
 
@@ -336,8 +350,10 @@ object AgentNotificationStore {
     const val EXTRA_VERDICT = "com.gwitko.conduit.VERDICT"
     const val EXTRA_TITLE = "com.gwitko.conduit.TITLE"
     const val EXTRA_BODY = "com.gwitko.conduit.BODY"
+    const val EXTRA_TOKEN = "com.gwitko.conduit.TOKEN"
     val ACTION_EXTRAS = listOf(
         EXTRA_NOTIFICATION_ID, EXTRA_HOST_ID, EXTRA_REQUEST_ID, EXTRA_VERDICT, EXTRA_TITLE, EXTRA_BODY,
+        EXTRA_TOKEN,
     )
     const val EXTRA_OPEN_HOST_ID = "com.gwitko.conduit.OPEN_HOST_ID"
     const val EXTRA_OPEN_AGENT_ID = "com.gwitko.conduit.OPEN_AGENT_ID"
@@ -453,10 +469,17 @@ object AgentNotificationStore {
     /**
      * Posts a permission notification with three action buttons. While the
      * engine runs the buttons broadcast to [AgentPermissionActionReceiver];
-     * with [launchApp] they open the app carrying the action instead.
+     * with [launchApp], and always below Android 12, they open the app
+     * carrying the action instead (see [PermissionActionGuard]). From
+     * Android 12 on a button only fires once the device is unlocked.
      */
     fun showPermissionRequest(context: Context, request: PermissionNotification, launchApp: Boolean) {
         rememberOutstanding(context, request)
+        val token = issueToken(context, request)
+        val launch = PermissionActionGuard.buttonsLaunchApp(
+            Build.VERSION.SDK_INT,
+            engineListening = !launchApp,
+        )
         val manager = manager(context) ?: return
         val builder = builder(context)
             .setContentTitle(request.title)
@@ -480,8 +503,9 @@ object AgentNotificationStore {
                 putExtra(EXTRA_VERDICT, verdict)
                 putExtra(EXTRA_TITLE, request.title)
                 putExtra(EXTRA_BODY, request.body)
+                putExtra(EXTRA_TOKEN, token)
             }
-            val pending = if (launchApp) {
+            val pending = if (launch) {
                 launchIntent(context, requestCode, fill)
             } else {
                 val intent = Intent(context, AgentPermissionActionReceiver::class.java).apply {
@@ -501,7 +525,13 @@ object AgentNotificationStore {
             // The int-icon builder is deprecated but the only one below API 23;
             // notification actions show no icon on modern Android anyway.
             @Suppress("DEPRECATION")
-            builder.addAction(Notification.Action.Builder(0, label, pending).build())
+            val button = Notification.Action.Builder(0, label, pending)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Allow / Deny / Always decide for the host (Always for good):
+                // never from a locked phone.
+                button.setAuthenticationRequired(true)
+            }
+            builder.addAction(button.build())
         }
         manager.notify(TAG, request.id.hashCode(), builder.build())
     }
@@ -537,8 +567,24 @@ object AgentNotificationStore {
 
     fun cancel(context: Context, id: String) {
         forgetOutstanding(context, id)
+        forgetToken(context, id)
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.cancel(TAG, id.hashCode())
+    }
+
+    /** Re-posts the outstanding notification [id] with app-launching actions. */
+    fun repostForLaunch(context: Context, id: String) {
+        val request = outstanding(context).firstOrNull { it.id == id } ?: return
+        showPermissionRequest(context, request, launchApp = true)
+    }
+
+    fun isDeviceLocked(context: Context): Boolean {
+        val keyguard = context.getSystemService(KeyguardManager::class.java) ?: return true
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            keyguard.isDeviceLocked
+        } else {
+            keyguard.isKeyguardLocked && keyguard.isKeyguardSecure
+        }
     }
 
     /** Re-posts every outstanding permission notification with app-launching actions. */
@@ -559,7 +605,72 @@ object AgentNotificationStore {
             verdict = verdict,
             title = intent.getStringExtra(EXTRA_TITLE) ?: "",
             body = intent.getStringExtra(EXTRA_BODY) ?: "",
+            token = intent.getStringExtra(EXTRA_TOKEN) ?: "",
         )
+    }
+
+    /**
+     * The random token the buttons of notification [request] carry: kept
+     * while the same request is re-posted, new for every other one.
+     */
+    @Synchronized
+    private fun issueToken(context: Context, request: PermissionNotification): String {
+        val tokens = tokens(context)
+        val current = tokens.optJSONObject(request.id)?.let(::issuedFrom)
+        if (current != null && current.hostId == request.hostId && current.requestId == request.requestId) {
+            return current.token
+        }
+        val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val token = bytes.joinToString("") { "%02x".format(it) }
+        tokens.put(
+            request.id,
+            JSONObject()
+                .put("token", token)
+                .put("hostId", request.hostId)
+                .put("requestId", request.requestId),
+        )
+        prefs(context).edit().putString(KEY_TOKENS, tokens.toString()).apply()
+        return token
+    }
+
+    /**
+     * Whether [action] came from a button of a notification the app posted
+     * and still shows; the first tap uses the token up, so a replayed or
+     * second tap decides nothing.
+     */
+    @Synchronized
+    fun claimAction(context: Context, action: PermissionAction): Boolean {
+        val tokens = tokens(context)
+        val issued = tokens.optJSONObject(action.notificationId)?.let(::issuedFrom)
+        if (!PermissionActionGuard.accepts(issued, action.hostId, action.requestId, action.token)) {
+            return false
+        }
+        tokens.remove(action.notificationId)
+        prefs(context).edit().putString(KEY_TOKENS, tokens.toString()).apply()
+        return true
+    }
+
+    @Synchronized
+    private fun forgetToken(context: Context, id: String) {
+        val tokens = tokens(context)
+        if (tokens.remove(id) != null) {
+            prefs(context).edit().putString(KEY_TOKENS, tokens.toString()).apply()
+        }
+    }
+
+    private fun issuedFrom(json: JSONObject) = PermissionActionGuard.Issued(
+        token = json.optString("token"),
+        hostId = json.optString("hostId"),
+        requestId = json.optString("requestId"),
+    )
+
+    private fun tokens(context: Context): JSONObject {
+        val raw = prefs(context).getString(KEY_TOKENS, null) ?: return JSONObject()
+        return try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            JSONObject()
+        }
     }
 
     @Synchronized

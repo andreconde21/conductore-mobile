@@ -211,8 +211,9 @@ class _TrustedKeyTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: colorScheme.outlineVariant),
                   ),
+                  // SHA256 as OpenSSH prints it, when known; MD5 below.
                   child: SelectableText(
-                    record.fingerprint,
+                    [?record.sha256Fingerprint, record.fingerprint].join('\n'),
                     style: const TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 11.5,

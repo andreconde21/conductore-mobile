@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/features/terminal/data/host_key_capture.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -13,6 +14,17 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
   final FlutterSecureStorage _storage;
   final HostKeyPrompt _prompt;
 
+  /// Checks the key [fingerprint] (`MD5:…`, from the SSH library) of
+  /// [host]:[port] against the pinned one.
+  ///
+  /// A first key is offered for trust. A changed key fails without a
+  /// prompt unless the connection runs in [withInteractiveHostKeyCheck]
+  /// (a terminal or file browser the user opened); there the prompt warns
+  /// and asks twice before the new key replaces the old one.
+  ///
+  /// The SHA256 fingerprint comes from the key exchange
+  /// ([HostKeyFingerprints]); it is shown first and pinned alongside the
+  /// MD5 one, which stays the stored format.
   @override
   Future<bool> verify({
     required String host,
@@ -20,15 +32,30 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
     required String type,
     required String fingerprint,
   }) async {
+    final sha256 = HostKeyFingerprints.sha256For(fingerprint);
     final records = await loadTrustedKeys();
     final key = '$host:$port';
     final existingIndex = records.indexWhere((record) => record.key == key);
     final existing = existingIndex == -1 ? null : records[existingIndex];
 
-    if (existing != null &&
-        existing.type == type &&
-        existing.fingerprint == fingerprint) {
+    if (existing != null && _matches(existing, type, fingerprint, sha256)) {
+      if (existing.sha256Fingerprint == null && sha256 != null) {
+        records[existingIndex] = HostKeyRecord(
+          host: existing.host,
+          port: existing.port,
+          type: existing.type,
+          fingerprint: existing.fingerprint,
+          sha256Fingerprint: sha256,
+          trustedAt: existing.trustedAt,
+        );
+        await _save(records);
+      }
       return true;
+    }
+
+    if (existing != null && !isInteractiveHostKeyCheck) {
+      // Background work never offers to trust a changed key.
+      return false;
     }
 
     final decision = await _prompt.request(
@@ -37,6 +64,7 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
         port: port,
         type: type,
         fingerprint: fingerprint,
+        sha256Fingerprint: sha256,
         kind: existing == null
             ? HostKeyPromptKind.firstTrust
             : HostKeyPromptKind.mismatch,
@@ -53,6 +81,7 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
       port: port,
       type: type,
       fingerprint: fingerprint,
+      sha256Fingerprint: sha256,
       trustedAt: DateTime.now(),
     );
     if (existing == null) {
@@ -62,6 +91,18 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
     }
     await _save(records);
     return true;
+  }
+
+  /// The same key: type and MD5, and SHA256 too when both sides have it.
+  static bool _matches(
+    HostKeyRecord record,
+    String type,
+    String fingerprint,
+    String? sha256,
+  ) {
+    if (record.type != type || record.fingerprint != fingerprint) return false;
+    final pinned = record.sha256Fingerprint;
+    return pinned == null || sha256 == null || pinned == sha256;
   }
 
   @override

@@ -2405,11 +2405,13 @@ void main() {
 
       final reject = StubPrompt(decision: HostKeyDecision.reject);
       final verifier2 = SecureHostKeyVerifier(storage, reject);
-      final ok = await verifier2.verify(
-        host: 'a',
-        port: 22,
-        type: 'ssh-rsa',
-        fingerprint: 'MD5:bb',
+      final ok = await withInteractiveHostKeyCheck(
+        () => verifier2.verify(
+          host: 'a',
+          port: 22,
+          type: 'ssh-rsa',
+          fingerprint: 'MD5:bb',
+        ),
       );
 
       expect(ok, isFalse);
@@ -2429,11 +2431,13 @@ void main() {
         fingerprint: 'MD5:aa',
       );
 
-      final ok = await verifier.verify(
-        host: 'a',
-        port: 22,
-        type: 'ssh-rsa',
-        fingerprint: 'MD5:bb',
+      final ok = await withInteractiveHostKeyCheck(
+        () => verifier.verify(
+          host: 'a',
+          port: 22,
+          type: 'ssh-rsa',
+          fingerprint: 'MD5:bb',
+        ),
       );
 
       expect(ok, isTrue);
