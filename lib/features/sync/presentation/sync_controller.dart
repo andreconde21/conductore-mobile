@@ -519,19 +519,32 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     }
     // Applied keys are hashed as the app stored them; the others as they
     // were merged, so an edit made since (its push still pending) is not
-    // taken as synced.
-    await _state.saveBase({
-      for (final record in result.merged.values)
-        record.key: SyncBaseEntry(
+    // taken as synced. Keys of a category turned off keep the hash and
+    // clock they were last synced with (see [SyncBaseEntry.pausedClock]).
+    SyncBaseEntry baseEntry(SyncRecord record) {
+      if (enabledKey(record.key)) {
+        return SyncBaseEntry(
           record: record,
-          localHash: enabledKey(record.key)
-              ? valueHash(
-                  result.toApply.containsKey(record.key)
-                      ? after[record.key]
-                      : local[record.key],
-                )
-              : null,
-        ),
+          localHash: valueHash(
+            result.toApply.containsKey(record.key)
+                ? after[record.key]
+                : local[record.key],
+          ),
+        );
+      }
+      final previous = base[record.key];
+      final localHash = previous?.localHash;
+      return SyncBaseEntry(
+        record: record,
+        localHash: localHash,
+        pausedClock: localHash == null
+            ? null
+            : previous!.pausedClock ?? previous.record.clock,
+      );
+    }
+
+    await _state.saveBase({
+      for (final record in result.merged.values) record.key: baseEntry(record),
     });
     await _logMerge(result);
 

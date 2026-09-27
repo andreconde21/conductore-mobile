@@ -325,4 +325,60 @@ void main() {
     );
     expect(valueHash({'a': 1}), isNot(valueHash({'a': 2})));
   });
+
+  group('a category turned back on', () {
+    // Synced as 'dark' at t=100, then the category was turned off here.
+    final synced = _rec(theme, 'dark', 100);
+    Map<String, SyncBaseEntry> paused(SyncRecord hub) => {
+      theme: SyncBaseEntry(
+        record: hub,
+        localHash: valueHash('dark'),
+        pausedClock: synced.clock,
+      ),
+    };
+
+    test('keeps an edit made here when the hub did not change', () {
+      final result = _merge(
+        base: paused(synced),
+        local: {theme: 'light'},
+        remote: {theme: synced},
+      );
+      expect(result.merged[theme]!.value, 'light');
+      expect(result.toApply, isEmpty);
+      expect(result.conflicts, isEmpty);
+    });
+
+    test('takes a change made elsewhere when nothing changed here', () {
+      final hub = _rec(theme, 'system', 200);
+      final result = _merge(
+        base: paused(hub),
+        local: {theme: 'dark'},
+        remote: {theme: hub},
+      );
+      expect(result.toApply, {theme: 'system'});
+      expect(result.conflicts, isEmpty);
+    });
+
+    test('both changed: the hub wins and this edit stays restorable', () {
+      final hub = _rec(theme, 'system', 200);
+      final result = _merge(
+        base: paused(hub),
+        local: {theme: 'light'},
+        remote: {theme: hub},
+        now: 5000,
+      );
+      expect(result.toApply, {theme: 'system'});
+      final conflict = result.conflicts.single;
+      expect(conflict.kind, SyncConflictKind.concurrentEdit);
+      expect(conflict.keptLocal, isFalse);
+      expect(conflict.lostValue, 'light');
+    });
+
+    test('the paused clock survives the saved base', () {
+      final entry = paused(synced)[theme]!;
+      final back = SyncBaseEntry.fromJson(entry.toJson())!;
+      expect(back.pausedClock, synced.clock);
+      expect(back.localHash, entry.localHash);
+    });
+  });
 }

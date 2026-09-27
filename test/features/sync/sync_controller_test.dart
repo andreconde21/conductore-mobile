@@ -370,6 +370,59 @@ void main() {
     expect(a.host('b').name, 'From B');
   });
 
+  group('turning a category back on', () {
+    test('keeps an edit made here while it was off', () async {
+      final (a, b) = await twoDevices();
+      await a.sync.syncNow();
+      await a.sync.setCategory(SyncCategory.appearance, false);
+      await a.sync.syncNow();
+
+      _tick();
+      await a.local.theme.setTerminalFontSize(19);
+      _tick();
+      await a.sync.setCategory(SyncCategory.appearance, true);
+      await a.sync.syncNow();
+
+      expect(a.local.theme.terminalFontSize, 19);
+      expect(
+        (await _hubRecords(server))['setting:terminalFontSize']!.value,
+        19,
+      );
+      await b.sync.syncNow();
+      expect(b.local.theme.terminalFontSize, 19);
+    });
+
+    test('when another device changed it too, takes the hub\'s version and '
+        'keeps this one restorable', () async {
+      final (a, b) = await twoDevices();
+      await a.sync.syncNow();
+      await b.sync.syncNow();
+      await a.sync.setCategory(SyncCategory.appearance, false);
+      await a.sync.syncNow();
+
+      _tick();
+      await a.local.theme.setTerminalFontSize(19);
+      _tick();
+      await b.local.theme.setTerminalFontSize(15);
+      await b.sync.syncNow();
+      _tick();
+      await a.sync.setCategory(SyncCategory.appearance, true);
+      await a.sync.syncNow();
+
+      expect(a.local.theme.terminalFontSize, 15);
+      final conflict = a.sync.activity.firstWhere(
+        (e) => e.kind == SyncActivityKind.conflict,
+      );
+      expect(conflict.key, 'setting:terminalFontSize');
+      expect(conflict.canRestore, isTrue);
+      expect(conflict.lostValue, 19);
+
+      _tick();
+      await a.sync.keepMine(conflict);
+      expect(a.local.theme.terminalFontSize, 19);
+    });
+  });
+
   test('credentials sync only when turned on', () async {
     final a = await _Device.create(
       server,
