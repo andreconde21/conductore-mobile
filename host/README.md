@@ -195,7 +195,7 @@ Every command prints one JSON document on stdout and exits 0, or prints
       ]
     }
   ],
-  "capabilities": ["smart-approvals"]
+  "capabilities": ["smart-approvals", "digest"]
 }
 ```
 
@@ -793,7 +793,7 @@ instead. See Usage.
   latency is measured around the spawn from Node, so it includes a little
   process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1","capabilities":["smart-approvals"]}`
+* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1","capabilities":["smart-approvals","digest"]}`
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 
