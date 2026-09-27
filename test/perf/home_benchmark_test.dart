@@ -170,6 +170,11 @@ void main() {
       'top': probe.top().replaceAll(' ', ','),
     });
     expect(boards['m0']!.state.workspaces, hasLength(4));
+    // Only the busy session's preview redraws, once per refresh tick.
+    // Before: the page rebuilt every 2 s and on every board poll (26k
+    // widget builds and 7k paints a minute).
+    expect(probe.builds, lessThan(500));
+    expect(probe.paints, lessThan(1000));
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 10));
