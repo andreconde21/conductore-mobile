@@ -111,6 +111,31 @@ void main() {
     });
   });
 
+  group('review L10', () {
+    test('single-quoted names and one-word hosts', () {
+      expect(
+        clean("Failed host lookup: 'buildserver'", ['buildserver']),
+        "Failed host lookup: '<text>'",
+      );
+      clean('Failed host lookup: buildserver (OS Error)', ['buildserver']);
+      clean('SocketException: host = Buildserver, port = 22', ['buildserver']);
+      clean("no workspace 'Acme Payroll' in session", ['acme', 'payroll']);
+    });
+
+    test('relative and branch paths', () {
+      clean('checkout of feature/acme-merger failed', ['acme-merger']);
+      clean('cannot open src/acme/secret_plan.dart', ['acme', 'secret_plan']);
+    });
+
+    test('keeps Dart identifiers, types and apostrophes', () {
+      const message =
+          "type 'String' is not a subtype of type 'List<int>?' in 'dispose()'; "
+          "can't retry, don't know";
+      expect(scrubber.scrub(message), message);
+      expect(scrubber.scrub('Host is down'), 'Host is down');
+    });
+  });
+
   group('secrets', () {
     test('PEM keys, OpenSSH public keys, hex and base64 tokens', () {
       clean(
