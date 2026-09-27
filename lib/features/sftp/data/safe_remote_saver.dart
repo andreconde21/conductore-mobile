@@ -124,7 +124,7 @@ class SafeRemoteSaver {
       if (target == null) {
         // A dangling symlink: writing through it creates its target and
         // keeps the link, where a rename would replace the link itself.
-        await _fs.writeInPlace(path, bytes);
+        await _writeInPlace(path, bytes);
         return const SftpSaveResult(SftpSaveMethod.inPlace);
       }
       final original = await _fs.lstat(target);
@@ -140,7 +140,7 @@ class SafeRemoteSaver {
         return await _saveWithBackup(target, bytes, original);
       }
       if (original != null && (await _fs.linkCount(target) ?? 1) > 1) {
-        await _fs.writeInPlace(target, bytes);
+        await _writeInPlace(target, bytes);
         return const SftpSaveResult(
           SftpSaveMethod.inPlaceHardLinked,
           notice:
@@ -184,14 +184,7 @@ class SafeRemoteSaver {
       handle = await _fs.createExclusive(temp);
     } on CannotCreateFileError {
       // The file is writable but its folder takes no new files.
-      try {
-        await _fs.writeInPlace(target, bytes);
-      } catch (error) {
-        throw AppFailure(
-          'Could not save $name. The file on the server may be incomplete.',
-          describeSaveError(error),
-        );
-      }
+      await _writeInPlace(target, bytes);
       return const SftpSaveResult(
         SftpSaveMethod.inPlace,
         notice:
@@ -314,6 +307,18 @@ class SafeRemoteSaver {
           'place and keep a backup copy ($backupName) until they finish.';
     }
     return SftpSaveResult(SftpSaveMethod.inPlaceWithBackup, notice: notice);
+  }
+
+  Future<void> _writeInPlace(String path, Uint8List bytes) async {
+    try {
+      await _fs.writeInPlace(path, bytes);
+    } catch (error) {
+      throw AppFailure(
+        'Could not save ${_basename(path)}. The file on the server may be '
+        'incomplete.',
+        describeSaveError(error),
+      );
+    }
   }
 
   Future<void> _removeQuietly(String path) async {
