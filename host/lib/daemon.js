@@ -241,6 +241,9 @@ class Daemon {
     this.pruneTimer = null
     this.probeTimer = null
     this.stopping = false
+    // With seq, names one exact state: a restarted daemon (whose seq may
+    // repeat after reloading state.json) never matches an older etag.
+    this.epoch = `${process.pid.toString(36)}${Date.now().toString(36)}`
   }
 
   start () {
@@ -651,7 +654,7 @@ class Daemon {
         await this.drain()
         this.expireAgents()
         this.commit(state.prune(this.state))
-        this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES }); c.end(); return
+        this.replyStatus(req, c); c.end(); return
       case 'digest':
         // Everything `digest` needs in one answer: the agents and their activity.
         await this.drain()
@@ -708,6 +711,17 @@ class Daemon {
       this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
     }
     this.reply(c, { ok: true, requestId, decision: verdict.decision, sessionId: found.agent.sessionId, ...(verdict.note ? { note: verdict.note } : {}) }); c.end()
+  }
+
+  // `status`; with the etag of the phone's last copy, only a marker when
+  // nothing changed since (an idle machine's poll stays a few bytes).
+  replyStatus (req, c) {
+    const etag = `${this.epoch}.${this.state.seq}`
+    if (typeof req.etag === 'string' && req.etag === etag) {
+      this.reply(c, { version: this.state.version, seq: this.state.seq, etag, unchanged: true, source: 'daemon', capabilities: CAPABILITIES })
+      return
+    }
+    this.reply(c, { ...state.snapshot(this.state), etag, source: 'daemon', capabilities: CAPABILITIES })
   }
 
   handleEvents (req, c) {

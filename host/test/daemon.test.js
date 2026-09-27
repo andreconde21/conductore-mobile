@@ -354,6 +354,24 @@ test('events long-poll returns the batch since seq, waits for new changes, and t
   assert.ok(Array.isArray(ahead.lines[0].agents))
 })
 
+test('status --etag answers only a marker until something changes', async () => {
+  const full = await status()
+  assert.equal(full.source, 'daemon')
+  assert.match(full.etag, /\.\d+$/)
+  const same = await cli('status', '--etag', full.etag)
+  assert.deepEqual(same.json, { version: 1, seq: full.seq, etag: full.etag, unchanged: true, source: 'daemon', capabilities: full.capabilities })
+  // A stale or foreign etag gets the whole state.
+  const other = await cli('status', '--etag', 'x.1')
+  assert.equal(other.json.unchanged, undefined)
+  assert.deepEqual(other.json.agents, full.agents)
+  await hook(ev('s1', 'PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/y' } }))
+  const changed = await cli('status', '--etag', full.etag)
+  assert.equal(changed.json.unchanged, undefined)
+  assert.equal(changed.json.seq, full.seq + 1)
+  assert.notEqual(changed.json.etag, full.etag)
+  assert.ok(Array.isArray(changed.json.agents))
+})
+
 test('SessionEnd marks ended; stop persists a snapshot that status falls back to', async () => {
   await hook(ev('s1', 'SessionEnd', { reason: 'other' }))
   const live = await status()
@@ -375,6 +393,18 @@ test('daemon restart resumes the seq counter from the snapshot', async () => {
   assert.equal(st.source, 'daemon')
   assert.equal(st.seq, before + 1)
   assert.ok(st.agents.some(a => a.sessionId === 's1' && a.state === 'ended'))
+})
+
+test('a restarted daemon never matches an etag from before, even at the same seq', async () => {
+  const before = await status()
+  await cli('stop')
+  await waitFor(async () => !fs.existsSync(env.CONDUCTORE_SOCKET))
+  await client.ensureDaemon()
+  const after = await cli('status', '--etag', before.etag)
+  assert.equal(after.json.source, 'daemon')
+  assert.equal(after.json.seq, before.seq)
+  assert.equal(after.json.unchanged, undefined)
+  assert.ok(Array.isArray(after.json.agents))
 })
 
 test('install and uninstall edit the settings file idempotently', async () => {

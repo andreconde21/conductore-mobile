@@ -30,7 +30,9 @@ const reviewMod = lazy('./review')
 
 const USAGE = `usage: conductore-hostd <command>
 
-  status                          agents and pending permission requests
+  status [--etag <etag>]          agents and pending permission requests;
+                                  with the etag of an earlier reply, only
+                                  {unchanged: true} when nothing changed
   events --since <seq> [--timeout 55]
                                   long-poll: one JSON line per change
   decide <requestId> allow|deny|always [--message "..."]
@@ -141,9 +143,12 @@ function readSnapshotFile () {
   return { ...state.snapshot(st), seq: st.seq, source: 'snapshot', writtenAt: snap.writtenAt || null }
 }
 
-async function status () {
+async function status (args) {
+  const { flags } = parseFlags(args)
+  const req = { op: 'status' }
+  if (typeof flags.etag === 'string') req.etag = flags.etag
   try {
-    const [res] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+    const [res] = await client.request(req, { timeoutMs: 5000 })
     if (res && !res.error) return out(res)
   } catch {}
   // Events are waiting in the spool (the daemon is starting, or exited
@@ -151,7 +156,7 @@ async function status () {
   if (spoolMod().isSpooled(paths.spoolDir())) {
     try {
       await client.ensureDaemon()
-      const [res] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+      const [res] = await client.request(req, { timeoutMs: 5000 })
       if (res && !res.error) return out(res)
     } catch {}
   }
@@ -974,7 +979,7 @@ async function main (argv) {
   const [cmd, ...args] = argv
   switch (cmd) {
     case 'daemon': return daemonCmd(args)
-    case 'status': return status()
+    case 'status': return status(args)
     case 'events': return events(args)
     case 'decide': return decide(args)
     case 'approve-low': return approveLow(args)

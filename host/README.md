@@ -165,7 +165,7 @@ Events carrying `agent_id` (subagents) never move the parent to a waiting state.
 Every command prints one JSON document on stdout and exits 0, or prints
 `{"error":"..."}` and exits 1. `events` prints one JSON object per line.
 
-### `conductore-hostd status`
+### `conductore-hostd status [--etag <etag>]`
 
 ```json
 {
@@ -238,6 +238,11 @@ Every command prints one JSON document on stdout and exits 0, or prints
 * `source` is `daemon`, `snapshot` (daemon down, read from `state.json`, with
   `writtenAt`) or `none` (never ran). Timestamps are Unix milliseconds.
 * Agents are sorted by `updatedAt`, newest first.
+* `etag` (daemon only) names this exact state. `status --etag <etag>` answers
+  `{"version":1,"seq":42,"etag":"…","unchanged":true,"source":"daemon","capabilities":[…]}`
+  (no `agents`) when the state is still the one that etag named; keep your
+  copy. A restarted daemon never matches an older etag. Companions before
+  1.1 ignore the flag and always answer in full.
 
 ### `conductore-hostd events --since <seq> [--timeout 55]`
 
