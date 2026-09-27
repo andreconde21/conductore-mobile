@@ -105,6 +105,11 @@ final class SpeechRecognitionBridge: NSObject, FlutterStreamHandler {
     }
   }
 
+  /// One bridge per app, one sink per channel: a new listen replaces the
+  /// sink, a cancel clears it, and events with no sink are dropped. The
+  /// engine sends a cancel without saying which Dart listener it came
+  /// from, so a stale cancel cannot be told apart here (Dart must keep one
+  /// subscription per channel).
   func onListen(withArguments arguments: Any?, eventSink sink: @escaping FlutterEventSink)
     -> FlutterError?
   {
