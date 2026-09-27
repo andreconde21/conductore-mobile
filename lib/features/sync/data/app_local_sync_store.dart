@@ -251,7 +251,7 @@ class AppLocalSyncStore implements LocalSyncStore {
               key.startsWith('${SyncKeys.hostListPrefix}:') ||
               key.startsWith('${SyncKeys.secretPrefix}:host:'),
         )) {
-      await _applyHosts(values, options, replace: replace);
+      await _applyHosts(values, changedKeys, options, replace: replace);
     }
     if (on.contains(SyncCategory.machines) &&
         changed((key) => key.startsWith('${SyncKeys.knownHostPrefix}:'))) {
@@ -264,7 +264,7 @@ class AppLocalSyncStore implements LocalSyncStore {
               key.startsWith('${SyncKeys.snippetPrefix}:') ||
               key.startsWith('${SyncKeys.secretPrefix}:snippet:'),
         )) {
-      await _applySnippets(values, options, replace: replace);
+      await _applySnippets(values, changedKeys, options, replace: replace);
     }
     if (on.contains(SyncCategory.appearance)) {
       final settings = <String, Object?>{
@@ -289,8 +289,11 @@ class AppLocalSyncStore implements LocalSyncStore {
     }
   }
 
+  /// Only the machines under [changedKeys] change; the others stay as they
+  /// are now, edits made since the sync's snapshot included.
   Future<void> _applyHosts(
     Map<String, Object?> values,
+    Set<String> changedKeys,
     LocalSyncOptions options, {
     required bool replace,
   }) async {
@@ -352,16 +355,25 @@ class AppLocalSyncStore implements LocalSyncStore {
         result.add(host);
         continue;
       }
-      final hasRecord = values.containsKey(SyncKeys.host(host.id));
-      if (machines && replace && !hasRecord) {
+      final key = SyncKeys.host(host.id);
+      if (machines &&
+          replace &&
+          changedKeys.contains(key) &&
+          !values.containsKey(key)) {
         continue; // Deleted on another device.
       }
-      result.add(build(host, host.id));
+      final changed =
+          changedKeys.contains(key) ||
+          changedKeys.contains(SyncKeys.hostSecret(host.id));
+      result.add(changed ? build(host, host.id) : host);
       placed.add(host.id);
     }
     if (machines) {
       for (final key in values.keys) {
-        if (!key.startsWith('${SyncKeys.hostPrefix}:')) continue;
+        if (!key.startsWith('${SyncKeys.hostPrefix}:') ||
+            !changedKeys.contains(key)) {
+          continue;
+        }
         final id = SyncKeys.idOf(key, SyncKeys.hostPrefix);
         if (id.isEmpty || placed.contains(id)) continue;
         final host = build(null, id);
@@ -373,11 +385,13 @@ class AppLocalSyncStore implements LocalSyncStore {
 
     HostListSortMode? sortMode;
     List<String>? manualOrder;
-    if (machines) {
+    if (machines && changedKeys.contains(SyncKeys.hostSortMode)) {
       final rawMode = values[SyncKeys.hostSortMode];
       sortMode = HostListSortMode.values
           .where((mode) => mode.name == rawMode)
           .firstOrNull;
+    }
+    if (machines && changedKeys.contains(SyncKeys.hostManualOrder)) {
       final rawOrder = values[SyncKeys.hostManualOrder];
       if (rawOrder is List) {
         manualOrder = rawOrder.whereType<String>().toList();
@@ -445,13 +459,18 @@ class AppLocalSyncStore implements LocalSyncStore {
     await hostKeys.saveTrustedKeys(byKey.values.toList());
   }
 
+  /// Only the snippets under [changedKeys] change; the others stay as they
+  /// are now. The list is ordered by the synced positions, and snippets
+  /// the values do not know (added here since) go last.
   Future<void> _applySnippets(
     Map<String, Object?> values,
+    Set<String> changedKeys,
     LocalSyncOptions options, {
     required bool replace,
   }) async {
     final credentials = options.categories.contains(SyncCategory.credentials);
-    final local = {for (final s in theme.terminalSnippets) s.id: s};
+    final live = theme.terminalSnippets;
+    final local = {for (final s in live) s.id: s};
     String hiddenText(String id) {
       final secret = credentials ? values[SyncKeys.snippetSecret(id)] : null;
       if (secret is Map && secret['text'] is String) {
@@ -463,36 +482,53 @@ class AppLocalSyncStore implements LocalSyncStore {
     if (!options.categories.contains(SyncCategory.snippets)) {
       // Credentials only: fill in hidden text of the snippets already here.
       await theme.setTerminalSnippets([
-        for (final snippet in theme.terminalSnippets)
+        for (final snippet in live)
           snippet.hidden
               ? snippet.copyWith(text: hiddenText(snippet.id))
               : snippet,
       ]);
       return;
     }
-    final incoming = <(num, String, TerminalSnippet)>[];
-    for (final entry in values.entries) {
-      if (!entry.key.startsWith('${SyncKeys.snippetPrefix}:')) continue;
-      final raw = entry.value;
-      if (raw is! Map) continue;
-      var snippet = TerminalSnippet.fromJson(raw);
-      if (snippet == null) continue;
+    final byId = {...local};
+    for (final key in changedKeys) {
+      final String id;
+      if (key.startsWith('${SyncKeys.snippetPrefix}:')) {
+        id = SyncKeys.idOf(key, SyncKeys.snippetPrefix);
+      } else if (key.startsWith('${SyncKeys.secretPrefix}:snippet:')) {
+        id = key.substring('${SyncKeys.secretPrefix}:snippet:'.length);
+      } else {
+        continue;
+      }
+      final raw = values[SyncKeys.snippet(id)];
+      var snippet = raw is Map ? TerminalSnippet.fromJson(raw) : null;
+      if (snippet == null) {
+        if (replace && changedKeys.contains(SyncKeys.snippet(id))) {
+          byId.remove(id);
+        }
+        continue;
+      }
       if (snippet.hidden) {
         snippet = snippet.copyWith(text: hiddenText(snippet.id));
       }
-      final position = raw['position'];
-      incoming.add((position is num ? position : 1 << 20, snippet.id, snippet));
+      byId[id] = snippet;
     }
-    incoming.sort((a, b) {
-      final byPosition = a.$1.compareTo(b.$1);
-      return byPosition != 0 ? byPosition : a.$2.compareTo(b.$2);
-    });
-    final list = [for (final item in incoming) item.$3];
-    if (!replace) {
-      final ids = list.map((s) => s.id).toSet();
-      list.addAll(theme.terminalSnippets.where((s) => !ids.contains(s.id)));
+    num position(String id, int index) {
+      final raw = values[SyncKeys.snippet(id)];
+      final synced = raw is Map ? raw['position'] : null;
+      return synced is num ? synced : (1 << 20) + index;
     }
-    await theme.setTerminalSnippets(list);
+
+    final ids = [
+      ...live.map((s) => s.id).where(byId.containsKey),
+      ...byId.keys.where((id) => !local.containsKey(id)),
+    ];
+    final ordered =
+        [for (var i = 0; i < ids.length; i++) (position(ids[i], i), ids[i])]
+          ..sort((a, b) {
+            final byPosition = a.$1.compareTo(b.$1);
+            return byPosition != 0 ? byPosition : a.$2.compareTo(b.$2);
+          });
+    await theme.setTerminalSnippets([for (final (_, id) in ordered) byId[id]!]);
   }
 
   Future<void> _applyConnections(

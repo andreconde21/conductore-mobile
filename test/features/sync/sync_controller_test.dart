@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/sync/data/sync_crypto.dart';
 import 'package:conduit/features/sync/data/sync_setup.dart';
 import 'package:conduit/features/sync/data/sync_state_store.dart';
@@ -259,6 +260,71 @@ void main() {
     expect(b.host('a').name, 'Older edit on B');
     await a.sync.syncNow();
     expect(a.host('a').name, 'Older edit on B');
+  });
+
+  group('edits made while a sync runs', () {
+    /// A renamed 'a' and synced; B's next sync downloads that change, and
+    /// [edit] runs on B during the download.
+    Future<(_Device, _Device)> editDuringDownload(
+      Future<void> Function(_Device b) edit,
+    ) async {
+      final (a, b) = await twoDevices();
+      await a.sync.syncNow();
+      _tick();
+      await a.rename('a', 'Renamed on A');
+      await a.sync.syncNow();
+      _tick();
+      server.duringNextBundleRead = () => edit(b);
+      await b.sync.syncNow();
+      return (a, b);
+    }
+
+    test('a machine saved during the download is kept and pushed', () async {
+      final (a, b) = await editDuringDownload(
+        (b) => b.local.hosts.upsert(machine('new', password: 'pw')),
+      );
+
+      expect(b.local.hosts.hosts.map((h) => h.id), contains('new'));
+      expect(b.host('new').password, 'pw');
+      expect(b.host('a').name, 'Renamed on A');
+      expect((await _hubRecords(server)).keys, contains('host:new'));
+      await a.sync.syncNow();
+      expect(a.local.hosts.hosts.map((h) => h.id), contains('new'));
+    });
+
+    test('a machine deleted during the download stays deleted', () async {
+      final (_, b) = await editDuringDownload(
+        (b) => b.local.hosts.remove(b.host('b')),
+      );
+
+      expect(b.local.hosts.hosts.map((h) => h.id), isNot(contains('b')));
+      expect((await _hubRecords(server))['host:b']!.deleted, isTrue);
+    });
+
+    test('a machine edited during the download keeps the edit', () async {
+      final (_, b) = await editDuringDownload(
+        (b) => b.rename('b', 'Edited on B'),
+      );
+
+      expect(b.host('b').name, 'Edited on B');
+      expect(b.host('a').name, 'Renamed on A');
+      expect(
+        (await _hubRecords(server))['host:b']!.value,
+        containsPair('name', 'Edited on B'),
+      );
+    });
+
+    test('a snippet added during the download is kept and pushed', () async {
+      final (_, b) = await editDuringDownload(
+        (b) => b.local.theme.setTerminalSnippets([
+          ...b.local.theme.terminalSnippets,
+          const TerminalSnippet(id: 'late', label: 'Late', text: 'uptime'),
+        ]),
+      );
+
+      expect(b.local.theme.terminalSnippets.map((s) => s.id), contains('late'));
+      expect((await _hubRecords(server)).keys, contains('snippet:late'));
+    });
   });
 
   test('a push that loses the race merges and retries', () async {

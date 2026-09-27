@@ -443,7 +443,8 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
 
-    final result = mergeSync(
+    var dirtySince = config.dirtySince;
+    SyncMergeResult merge() => mergeSync(
       base: base,
       local: local,
       enabled: config.categories,
@@ -452,8 +453,19 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       deviceId: config.deviceId,
       now: _now().millisecondsSinceEpoch,
       counter: config.counter,
-      editTime: config.dirtySince?.millisecondsSinceEpoch,
+      editTime: dirtySince?.millisecondsSinceEpoch,
     );
+    var result = merge();
+    // Edits made while the hub was read (a machine saved during a poll)
+    // are merged too, so applying the hub's changes never puts back the
+    // older snapshot.
+    for (var round = 0; round < 3 && result.toApply.isNotEmpty; round++) {
+      final current = await _local.snapshot(_options(config));
+      if (valueHash(current) == valueHash(local)) break;
+      local = current;
+      dirtySince = _config?.dirtySince ?? dirtySince;
+      result = merge();
+    }
 
     bool enabledKey(String key) {
       final category = SyncCategory.ofKey(key);
@@ -477,16 +489,21 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       } finally {
         _applying = false;
       }
-      _debounce?.cancel();
-      _debounce = null;
       after = await _local.snapshot(_options(config));
     }
+    // Applied keys are hashed as the app stored them; the others as they
+    // were merged, so an edit made since (its push still pending) is not
+    // taken as synced.
     await _state.saveBase({
       for (final record in result.merged.values)
         record.key: SyncBaseEntry(
           record: record,
           localHash: enabledKey(record.key)
-              ? valueHash(after[record.key])
+              ? valueHash(
+                  result.toApply.containsKey(record.key)
+                      ? after[record.key]
+                      : local[record.key],
+                )
               : null,
         ),
     });
@@ -511,7 +528,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       initialized: {...latest.initialized, ...config.categories},
       lastRevision: meta?.version ?? 0,
       unpushed: push,
-      clearDirtySince: latest.dirtySince == config.dirtySince,
+      clearDirtySince: latest.dirtySince == dirtySince,
     );
     _config = config;
     await _state.saveConfig(config);

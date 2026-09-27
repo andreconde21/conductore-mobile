@@ -93,7 +93,10 @@ void main() {
       );
       final values = await source.store.snapshot(_defaults);
 
-      await target.store.apply(values, values.keys.toSet(), _defaults);
+      await target.store.apply(values, {
+        ...values.keys,
+        'host:gone',
+      }, _defaults);
 
       final hosts = {for (final h in target.hosts.hosts) h.id: h};
       expect(hosts.keys, containsAll(['a', 'b', 'local']));
@@ -102,6 +105,33 @@ void main() {
       expect(hosts['a']!.password, 'local-password');
     },
   );
+
+  test('applying leaves machines and snippets outside the changed keys as '
+      'they are now', () async {
+    final source = await LocalDevice.create(
+      hosts: [machine('a'), machine('b')],
+    );
+    await source.theme.setTerminalSnippets(const [
+      TerminalSnippet(id: 'x', label: 'deploy', text: 'make deploy'),
+    ]);
+    final values = await source.store.snapshot(_defaults);
+    final target = await LocalDevice.create(
+      hosts: [
+        machine('a', name: 'Old'),
+        machine('b', name: 'Edited here'),
+      ],
+    );
+    await target.theme.setTerminalSnippets(const [
+      TerminalSnippet(id: 'new', label: 'new', text: 'uptime'),
+    ]);
+
+    await target.store.apply(values, {'host:a', 'snippet:x'}, _defaults);
+
+    final hosts = {for (final h in target.hosts.hosts) h.id: h};
+    expect(hosts['a']!.name, 'Machine a');
+    expect(hosts['b']!.name, 'Edited here b');
+    expect(target.theme.terminalSnippets.map((s) => s.id), ['x', 'new']);
+  });
 
   test('credentials apply when that category is on', () async {
     final source = await LocalDevice.create(
