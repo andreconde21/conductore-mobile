@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 0.8.0 (2026-09-27)
 
 - feat: `guide [--timeout-ms 15000]`: the phone's voice guide. `{utterance, context}` JSON on stdin (32 KB max; short ids and labels of machines, projects, agents, pending requests and the screen, never transcripts), one action out of a closed list on stdout (`open`, `chat`, `terminal`, `approve`, `deny`, `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`) with a short sentence to speak, or `error` (claude-missing, not-logged-in, timeout, busy, failed); exit 0.
 - Same lock-down as `summarize`: `claude -p --tools "" --safe-mode --no-session-persistence --output-format json --model haiku`, a fixed system prompt and `--json-schema`, the request on stdin between random delimiters, thinking off, nice 10, its own process group killed on timeout, one call per user at a time (`guide.lock`), nothing logged. Actions naming ids the context does not hold, or missing their text or minutes, come back as a `say` with `rejected`.
