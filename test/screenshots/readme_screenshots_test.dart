@@ -16,6 +16,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
@@ -60,7 +61,13 @@ import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
+import 'package:conduit/features/voice_guide/domain/guide_preferences.dart';
+import 'package:conduit/features/voice_guide/domain/guide_world.dart';
+import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
+import 'package:conduit/features/voice_guide/presentation/guide_controller.dart';
+import 'package:conduit/features/voice_guide/presentation/guide_overlay.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -75,6 +82,8 @@ import '../features/terminal/herdr/fake_herdr_runner.dart';
 import '../features/usage/usage_fakes.dart';
 import '../features/voice/fake_speech_recognizer.dart';
 import '../features/voice/fake_tts.dart';
+import '../features/voice_guide/guide_fixtures.dart'
+    show FakeApprovals, FakeMessenger, FakeNavigator;
 import '../support/test_doubles.dart';
 import 'demo_screens.dart';
 import 'screenshot_harness.dart';
@@ -381,10 +390,24 @@ Future<SyncController> demoSyncDevice(
 Widget _withUsage(UsageController? usage, Widget page) =>
     usage == null ? page : UsageScope(controller: usage, child: page);
 
+/// [page] with the voice guide's home button and, while it runs, its card.
+Widget _withGuide(GuideController? guide, Widget page) => guide == null
+    ? page
+    : GuideScope(
+        controller: guide,
+        child: Stack(
+          children: [
+            page,
+            GuideOverlay(controller: guide),
+          ],
+        ),
+      );
+
 /// Usage on the workstation: the 5-hour limit at 62 %, the week at 31 %,
 /// today's tokens and cost. [detailed] adds the build box and a week of
 /// projects and models, for the breakdown.
-UsageController demoUsage({bool detailed = false}) {
+/// [accounts] adds two Claude accounts managed by cswap, work active.
+UsageController demoUsage({bool detailed = false, bool accounts = false}) {
   final now = DateTime.now();
   String day(int back) {
     final d = now.subtract(Duration(days: back));
@@ -413,6 +436,29 @@ UsageController demoUsage({bool detailed = false}) {
         today: day(0),
         from: day(6),
         limits: limits,
+        accounts: accounts
+            ? [
+                usageAccount(
+                  1,
+                  'work',
+                  active: true,
+                  fiveHour: 62,
+                  weekly: 31,
+                  fiveHourResets: now.add(
+                    const Duration(hours: 2, minutes: 14),
+                  ),
+                  weeklyResets: now.add(const Duration(days: 3)),
+                ),
+                usageAccount(
+                  2,
+                  'personal',
+                  fiveHour: 8,
+                  weekly: 12,
+                  fiveHourResets: now.add(const Duration(hours: 4)),
+                  weeklyResets: now.add(const Duration(days: 5)),
+                ),
+              ]
+            : null,
         rows: [
           usageRow(day(0), output: 1840000, costUsd: 6.4),
           usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
@@ -519,6 +565,7 @@ void main() {
     void Function(TerminalWorkspaceController workspace)? onWorkspace,
     UsageController? usage,
     bool buildBoxUnreachable = false,
+    GuideController? guide,
   }) async {
     if (desktop) {
       useDesktopView(tester);
@@ -623,32 +670,35 @@ void main() {
     final verifier = NoopVerifier();
     await tester.pumpWidget(
       shotApp(
-        home: _withUsage(
-          usage,
-          HostsPage(
-            hostsController: hostsController,
-            lockController: AppLockController(AlwaysAuthenticates()),
-            terminalRepository: NoNetworkTerminalRepository(),
-            workspaceController: workspace,
-            localShellController: LocalShellController(),
-            themeController: theme,
-            hostKeyVerifier: verifier,
-            promptCoordinator: HostKeyPromptCoordinator(),
-            sftpRepository: NoNetworkSftpRepository(),
-            sftpBookmarksRepository: InMemorySftpBookmarks(),
-            agentAttention: agentAttention,
-            backupService: AppBackupService(
+        home: _withGuide(
+          guide,
+          _withUsage(
+            usage,
+            HostsPage(
               hostsController: hostsController,
+              lockController: AppLockController(AlwaysAuthenticates()),
+              terminalRepository: NoNetworkTerminalRepository(),
+              workspaceController: workspace,
+              localShellController: LocalShellController(),
               themeController: theme,
               hostKeyVerifier: verifier,
+              promptCoordinator: HostKeyPromptCoordinator(),
+              sftpRepository: NoNetworkSftpRepository(),
+              sftpBookmarksRepository: InMemorySftpBookmarks(),
+              agentAttention: agentAttention,
+              backupService: AppBackupService(
+                hostsController: hostsController,
+                themeController: theme,
+                hostKeyVerifier: verifier,
+              ),
+              fileExport: RecordingFileExport(),
+              homeBoards: boards,
+              homePreferences: InMemoryHomePreferencesRepository(),
+              connectFlow: homeFlow,
+              previewRefreshInterval: const Duration(days: 1),
+              desktopShell: shell,
+              shellMode: shellMode,
             ),
-            fileExport: RecordingFileExport(),
-            homeBoards: boards,
-            homePreferences: InMemoryHomePreferencesRepository(),
-            connectFlow: homeFlow,
-            previewRefreshInterval: const Duration(days: 1),
-            desktopShell: shell,
-            shellMode: shellMode,
           ),
         ),
         systemBars: !desktop,
@@ -1677,5 +1727,407 @@ void main() {
     expect(find.byType(HomeBoardNoticeTile), findsOneWidget);
     await saveShot(tester, '29-cant-reach');
     await tearDownPage(tester);
+  });
+
+  /// An attention controller watching the workstation's companion 0.8,
+  /// smart approvals on: [status] for `status`, [demoApprovals] for
+  /// `approvals`.
+  Future<AgentAttentionController> smartAttention(
+    WidgetTester tester, {
+    required String status,
+  }) async {
+    final workspace = TerminalWorkspaceController(DemoTerminalRepository());
+    addTearDown(workspace.dispose);
+    final runner = CompanionRunner({
+      'status': status,
+      'approvals': demoApprovals(),
+    });
+    final attention = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => runner,
+      provider: const ConductoreHostAttentionProvider(),
+      companionProvider: const ConductoreHostAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    attention.setAppForeground(false);
+    addTearDown(attention.dispose);
+    final session = workspace.open(
+      workstation.copyWith(agentMonitor: AgentMonitorKind.companion),
+    );
+    await tester.runAsync(session.connect);
+    await tester.runAsync(pumpEventQueue);
+    return attention;
+  }
+
+  /// Chat View on the workstation's todo-api session, with the mic and
+  /// Talk available.
+  Future<void> pumpChat(
+    WidgetTester tester,
+    List<Map<String, Object?>> thread, {
+    required String state,
+    List<Map<String, Object?>> pending = const [],
+    AgentAttentionController? attention,
+  }) async {
+    usePhoneView(tester);
+    final theme = await everforest();
+    final dictation = DictationController(
+      FakeSpeechRecognizer(),
+      language: () => 'en-US',
+    );
+    addTearDown(dictation.dispose);
+    final controller = ChatViewController(
+      runner: ScriptedAgentCommandRunner([
+        ok(
+          livePage(
+            thread,
+            state: state,
+            started: const Duration(minutes: 12),
+            pending: pending,
+          ),
+        ),
+      ]),
+      sessionId: 's-api',
+      decide: (_, _) async {},
+      pollInterval: const Duration(days: 1),
+    );
+    await tester.pumpWidget(
+      VoiceSettingsScope(
+        settings: theme,
+        child: shotApp(home: const Scaffold()),
+      ),
+    );
+    await pushPage(
+      tester,
+      ChatViewPage(
+        controller: controller,
+        hostName: 'workstation',
+        onOpenTerminal: () {},
+        textToSpeech: FakeTts(),
+        dictation: dictation,
+        attention: attention,
+        hostId: attention == null ? null : workstation.id,
+      ),
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+  }
+
+  testWidgets('30 approval risk', (tester) async {
+    final attention = await smartAttention(
+      tester,
+      status: smartStatus(pending: [lowRiskTest]),
+    );
+    await pumpChat(
+      tester,
+      [
+        stamped(
+          userLine('u1', 'Add a due date to todos and cover it with tests'),
+          const Duration(minutes: 12),
+        ),
+        assistantLine('a1', [
+          text(
+            "I'll add an optional **`dueDate`** to the todo schema, "
+            'validate it as an ISO date and sort overdue todos first. '
+            'The schema and the route are done; now the tests.',
+          ),
+          toolUse('t1', 'Bash', {
+            'command': 'npm test -- due-date',
+            'description': 'Run the due date tests',
+          }),
+        ]),
+      ],
+      state: 'needs_permission',
+      pending: [jsonDecode(lowRiskTest) as Map<String, Object?>],
+      attention: attention,
+    );
+    expect(find.text('Low risk'), findsOneWidget);
+    expect(find.text('Trust…'), findsOneWidget);
+    expect(find.text('Always'), findsOneWidget);
+    await saveShot(tester, '30-approval-risk');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('31 approval rules', (tester) async {
+    usePhoneView(tester);
+    final attention = await smartAttention(
+      tester,
+      status: smartStatus(pending: const []),
+    );
+    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    await pushPage(
+      tester,
+      ApprovalRulesPage(
+        controller: attention,
+        host: workstation.copyWith(agentMonitor: AgentMonitorKind.companion),
+      ),
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    expect(find.text('Bash(npm test *)'), findsOneWidget);
+    await saveShot(tester, '31-approval-rules');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('32 voice guide', (tester) async {
+    final mic = FakeSpeechRecognizer();
+    final tts = FakeTts();
+    final dictation = DictationController(mic, language: () => 'en-US');
+    final speaker = ReadAloudController(
+      tts: tts,
+      preferences: () => VoicePreferences.defaults,
+    );
+    const request = PendingPermissionRequest(
+      id: 'req-1',
+      toolName: 'Bash',
+      summary: 'npm test -- due-date',
+    );
+    const world = GuideWorld(
+      machines: [
+        GuideMachine(
+          hostId: 'workstation',
+          name: 'workstation',
+          monitored: true,
+        ),
+        GuideMachine(hostId: 'build-box', name: 'build-box', monitored: true),
+      ],
+      agents: [
+        GuideAgent(
+          hostId: 'workstation',
+          machineName: 'workstation',
+          info: AgentInfo(
+            id: 's-api',
+            name: 'claude',
+            project: 'todo-api',
+            state: AgentAttentionState.needsInput,
+            pendingRequests: [request],
+          ),
+        ),
+        GuideAgent(
+          hostId: 'workstation',
+          machineName: 'workstation',
+          info: AgentInfo(
+            id: 's-web',
+            name: 'claude',
+            project: 'todo-web',
+            state: AgentAttentionState.working,
+          ),
+        ),
+      ],
+    );
+    final guide = GuideController(
+      dictation: dictation,
+      speaker: speaker,
+      world: () => world,
+      approvals: FakeApprovals(),
+      navigator: FakeNavigator(GuideScreen.home),
+      messenger: FakeMessenger(),
+      preferences: () => GuidePreferences.defaults,
+      speechLanguage: () => 'en-US',
+      afterSpeechPause: Duration.zero,
+      thinkingNotice: const Duration(seconds: 30),
+    );
+    addTearDown(() {
+      guide.dispose();
+      speaker.dispose();
+      dictation.dispose();
+    });
+    await pumpHome(tester, guide: guide);
+    expect(find.byKey(const ValueKey('home-voice-guide')), findsOneWidget);
+    guide.start();
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    mic.say('approve');
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    await pumpFrames(tester);
+    expect(guide.phase, GuidePhase.speaking);
+    await saveShot(tester, '32-voice-guide');
+    guide.stop();
+    await tearDownPage(tester);
+  });
+
+  testWidgets('33 usage accounts', (tester) async {
+    await pumpHome(tester, usage: demoUsage(detailed: true, accounts: true));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 6);
+    await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    // Up to the full sheet, the Accounts section in view.
+    await tester.drag(
+      find.byKey(const ValueKey('usage-breakdown')),
+      const Offset(0, -300),
+    );
+    await pumpFrames(tester, 8);
+    expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
+    await saveShot(tester, '33-usage-accounts');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('34 chat peer messages', (tester) async {
+    await pumpChat(tester, [
+      stamped(
+        userLine('u1', 'Add a due date to todos and cover it with tests'),
+        const Duration(minutes: 18),
+      ),
+      assistantLine('a1', [
+        text(
+          'Todos have an optional **`dueDate`**, validated as an ISO date. '
+          'I asked the web session to show it in the list.',
+        ),
+      ]),
+      stamped(
+        userLine(
+          'm1',
+          'Another Claude session sent a message:\n'
+              '<cross-session-message from="todo-web">\n'
+              'The list shows due dates now. Can the API also return '
+              '`overdue: true` so the UI does not compute it?\n'
+              '</cross-session-message>\n\n'
+              'This came from another Claude session — not typed by your '
+              'user, but very likely working on their behalf.',
+        ),
+        const Duration(minutes: 9),
+      ),
+      assistantLine('a2', [
+        toolUse('t1', 'Edit', {
+          'file_path': '/home/demo/todo-api/src/routes/todos.ts',
+          'old_string': '  return todo;',
+          'new_string': '  return { ...todo, overdue: isOverdue(todo) };',
+        }),
+      ]),
+      userLine('r1', [toolResult('t1', 'ok')]),
+      assistantLine('a3', [
+        text(
+          'Done: `GET /todos` returns `overdue` for each todo. I asked the '
+          'reviewer to check both changes.',
+        ),
+      ]),
+      stamped(
+        userLine(
+          'm2',
+          '<teammate-message teammate_id="reviewer" color="green">\n'
+              '{"type":"idle_notification","from":"reviewer",'
+              '"idleReason":"available",'
+              '"result":"Reviewed the due date changes: no issues.\\n'
+              'Both suites pass (24 and 31 tests)."}\n'
+              '</teammate-message>',
+        ),
+        const Duration(minutes: 2),
+      ),
+      assistantLine('a4', [
+        text(
+          'The reviewer found no issues and both test suites pass. '
+          'Ready to commit?',
+        ),
+      ]),
+    ], state: 'waiting_input');
+    expect(find.text('From session todo-web'), findsOneWidget);
+    expect(find.text('reviewer finished'), findsOneWidget);
+    await saveShot(tester, '34-chat-peer-messages');
+    await tearDownPage(tester);
+  });
+}
+
+/// Answers the companion by subcommand (`status`, `approvals`, …).
+class CompanionRunner implements AgentCommandRunner {
+  CompanionRunner(this.replies);
+
+  final Map<String, String> replies;
+
+  @override
+  Future<AgentCommandResult> run(
+    String command, {
+    required Duration timeout,
+  }) async {
+    for (final MapEntry(:key, :value) in replies.entries) {
+      if (command.contains('conductore-hostd $key')) return ok(value);
+    }
+    return const AgentCommandResult(
+      stdout: '{"error":"unknown command"}',
+      stderr: '',
+      exitCode: 1,
+    );
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+/// `npm test -- due-date` as companion 0.8 reports it: low risk, with the
+/// rules it would suggest.
+const lowRiskTest =
+    '{"id":"req-1","toolName":"Bash","summary":"npm test -- due-date",'
+    '"toolInput":{"command":"npm test -- due-date",'
+    '"description":"Run the due date tests"},'
+    '"risk":{"level":"low","reason":"Runs tests: npm test -- due-date"},'
+    '"batchable":true,'
+    '"suggestedRules":["Bash(npm test -- due-date)","Bash(npm test *)"],'
+    '"repo":"/home/demo/todo-api"}';
+
+/// Companion 0.8 status on the workstation, smart approvals on.
+String smartStatus({required List<String> pending}) =>
+    '{"version":1,"seq":4,"source":"daemon",'
+    '"capabilities":["smart-approvals"],"agents":['
+    '${agentJson('s-api', 'todo-api', state: pending.isEmpty ? 'working' : 'needs_permission', minutes: 0, pending: pending.join(','))}'
+    ']}';
+
+/// The workstation's rules: a time-boxed trust, two standing rules and
+/// one that ends with its session.
+String demoApprovals() {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  Map<String, Object?> rule(
+    String id,
+    String rule,
+    Map<String, Object?> scope, {
+    int? expiresInMinutes,
+    String? endsWithSession,
+    required String source,
+    int hits = 0,
+  }) => {
+    'id': id,
+    'rule': rule,
+    'scope': scope,
+    'expiresAt': expiresInMinutes == null
+        ? null
+        : now + expiresInMinutes * 60000 + 30000,
+    'endsWithSession': endsWithSession,
+    'source': source,
+    'createdAt': now - 3600000,
+    'hits': hits,
+    'lastUsedAt': hits > 0 ? now - 120000 : null,
+  };
+  const api = {'kind': 'repo', 'path': '/home/demo/todo-api'};
+  return jsonEncode({
+    'now': now,
+    'rules': [
+      rule(
+        'r1',
+        'Bash(npm test *)',
+        api,
+        expiresInMinutes: 45,
+        source: 'trust',
+        hits: 6,
+      ),
+      rule(
+        'r2',
+        'Bash(git status *)',
+        const {'kind': 'any'},
+        source: 'always',
+        hits: 23,
+      ),
+      rule('r3', 'Read', api, source: 'cli', hits: 41),
+      rule(
+        'r4',
+        'Bash(npm run lint *)',
+        const {'kind': 'session', 'sessionId': 's-web', 'label': 'todo-web'},
+        endsWithSession: 's-web',
+        source: 'voice',
+        hits: 2,
+      ),
+    ],
+    'autoApproved': <Object>[],
   });
 }
