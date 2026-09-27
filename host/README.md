@@ -358,11 +358,16 @@ Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
   are read per call; poll again until `offset` equals `size`.
 * `reset: true`: `--since` was past the end (the file was replaced), so this
   is a fresh tail read. `oversized: true`: one line was longer than
-  `--max-bytes` and was skipped.
+  `--max-bytes` (a prompt with pasted images, a big tool result); it is read
+  and returned on its own, or skipped when it is over 64 MB.
 * Kept line types: `user`, `assistant`, `system` (`subtype`, `content`
-  capped at 500 chars, `level`) and `summary`. Attachments, queue
-  operations, file-history snapshots, cost state and other bookkeeping lines
-  are dropped. `isMeta`, `isCompactSummary` and `isApiErrorMessage` are
+  capped at 500 chars, `level`) and `summary`. A prompt the user typed while
+  the agent was working, which Claude Code records only as a
+  `queued_command` attachment, comes back as a `user` entry with
+  `queued: true` (the attachment's `prompt` as `message.content`); queued
+  task notifications and teammate or coordinator messages do not. Other
+  attachments, queue operations, file-history snapshots, cost state and
+  other bookkeeping lines are dropped. `isMeta`, `isCompactSummary` and `isApiErrorMessage` are
   passed through when set.
 * Content blocks: `text` (capped at 32 KB, `truncated` when cut), `thinking`
   (text never sent, only `hasText`), `tool_use` (`id`, `name`, `input`; long

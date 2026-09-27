@@ -56,21 +56,72 @@ function requestId () {
 // Exclusive lock (also the pid file the sh clients check). A pid that is not
 // a running daemon (a stale file after a reboot or crash, the pid since
 // reused) does not hold it.
+//
+// There is never a moment without a whole lock file while a daemon holds
+// it: the file is published complete (a hard link of a temp file holding our
+// pid, never an empty file another starting daemon could read as stale), and
+// a stale one is replaced by rename, not removed first. Only the caller that
+// creates the takeover marker may replace it, after checking it still names
+// the stale holder: two daemons starting at once (the hook's and the CLI's)
+// cannot both take it.
+const TAKEOVER_STALE_MS = 10000
+const pause = new Int32Array(new SharedArrayBuffer(4))
+
+function readPid (file) {
+  try { return parseInt(fs.readFileSync(file, 'utf8'), 10) } catch { return NaN }
+}
+
+// Publishes tmp as file unless file exists. False when it does.
+function publishNew (tmp, file) {
+  try {
+    fs.linkSync(tmp, file)
+    return true
+  } catch (err) {
+    if (err.code === 'EEXIST') return false
+  }
+  // No hard links on this filesystem: exclusive create.
+  try {
+    fs.writeFileSync(file, String(process.pid) + '\n', { flag: 'wx', mode: 0o600 })
+    return true
+  } catch (err) {
+    if (err.code === 'EEXIST') return false
+    throw err
+  }
+}
+
 function acquireLock () {
   const file = paths.lockPath()
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      fs.writeFileSync(file, String(process.pid) + '\n', { flag: 'wx', mode: 0o600 })
-      return true
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err
-      let pid = NaN
-      try { pid = parseInt(fs.readFileSync(file, 'utf8'), 10) } catch {}
-      if (pid && pid !== process.pid && proc.isDaemon(pid)) return false
-      try { fs.unlinkSync(file) } catch {}
+  const tmp = `${file}.${process.pid}.tmp`
+  const marker = `${file}.takeover`
+  fs.writeFileSync(tmp, String(process.pid) + '\n', { mode: 0o600 })
+  try {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if (publishNew(tmp, file)) return true
+      const holder = readPid(file)
+      if (holder === process.pid) return true
+      if (holder && proc.isDaemon(holder)) return false
+      try {
+        fs.writeFileSync(marker, String(process.pid), { flag: 'wx', mode: 0o600 })
+      } catch {
+        // Another daemon is taking over: see who wins. A marker left by a
+        // crash expires.
+        try { if (Date.now() - fs.statSync(marker).mtimeMs > TAKEOVER_STALE_MS) fs.unlinkSync(marker) } catch {}
+        Atomics.wait(pause, 0, 0, 20)
+        continue
+      }
+      try {
+        if (Object.is(readPid(file), holder)) {
+          fs.renameSync(tmp, file)
+          return true
+        }
+      } finally {
+        try { fs.unlinkSync(marker) } catch {}
+      }
     }
+    return false
+  } finally {
+    try { fs.unlinkSync(tmp) } catch {}
   }
-  return false
 }
 
 function loadSnapshot () {
@@ -114,7 +165,6 @@ function fifoAlive (file) {
   return true
 }
 
-const pause = new Int32Array(new SharedArrayBuffer(4))
 
 // Writes one line to a waiting hook. False when it is gone.
 function writeFifo (file, text) {

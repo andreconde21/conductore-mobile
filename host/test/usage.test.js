@@ -268,7 +268,7 @@ test('CLI: conductore-hostd usage prints the report', async () => {
   })
   const ok = await run(['--days', '3'])
   assert.equal(ok.code, 0)
-  assert.equal(ok.json.version, '0.8.0')
+  assert.equal(ok.json.version, '0.8.1')
   assert.equal(ok.json.claude.today.output, 42)
   // No cswap: no accounts field at all.
   assert.equal(ok.json.claude.accounts, undefined)

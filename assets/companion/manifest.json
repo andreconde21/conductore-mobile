@@ -1,8 +1,8 @@
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "archive": "companion.tar.gz",
   "files": {
-    "README.md": "e88c134e57ca04363c18348a56c5f3da40f4465d9d5c5cc8c52c25a8252696c6",
+    "README.md": "97ee5b8009ba897138879edf64425a6503ad6de4b05117959716b8a452d64b3f",
     "bin/conductore-hook": "3d84e008893fd195d75e599ec390ac0fb20cffcfe2c9240e89c7873a840c855e",
     "bin/conductore-hostd": "ce811efd5a8cad5ee09df0adbc5b14d4613ca88d7815ffebe4e0ef72117c36f5",
     "bin/conductore-statusline": "99c2e9c9640fe4c44ddd44f04bcd4f0024c4924940de5c89c2b14266ccbdbdca",
@@ -13,11 +13,11 @@
     "lib/client.js": "c8b7cde77679284f0aafe9db46f9947ad531dda2c7fe3f9fd68cfffc9194806d",
     "lib/context.js": "12183b3fc3288514d0808c569ea0db4fbd0f94862bc241c9562001a15c32b7ea",
     "lib/cswap.js": "12979c36b3588753c6613526c179508bad0d592d0aa352a747bbb34a3f7b0344",
-    "lib/daemon.js": "d8ddd1f9fb94b4ddc3e9c2f0d3ced0ac1d9abd7d1e83bf1732e52ee5ec55888e",
+    "lib/daemon.js": "49aff91fc7ba81fb92b34f0d127102c7469a74afe81711c7497e8241a3bf157a",
     "lib/guide.js": "48399c8e7c49813dcf83ddf10a3e9e2dc217590aa72b0236ac649533c575dd06",
     "lib/log.js": "9ba8a3a5b87df77433e285da1ff9d279fa3be9e50fa62a6bd83437ae1d999fd1",
     "lib/pane.js": "481a2cf690094b2039fe801828c32d3f917130a5d0b6d0c0a9e6b2f7eba98201",
-    "lib/paths.js": "7b632863cd112e7815b75083cb109c8fa4c8c2a0c4e3f480ab0a0712edf83d60",
+    "lib/paths.js": "ca291e10fbfc3b7610070505daea7928130f81a6e464f63338963695e8237f8c",
     "lib/permission.js": "725acd9b6adffe598b8acb246a30cb86ef187a79e9d4edada6e65565a75d9b0a",
     "lib/ports.js": "e6e1cec8d5b2deb5e68f5642f268e2d1e5d83fb0985e8b34c508344174f9a2b2",
     "lib/pricing.js": "360b9f70bdbde122e3322f204d1a4a2368956c31ef908de37ecbe0bf727cb10b",
@@ -30,8 +30,8 @@
     "lib/state.js": "29882adbe0ae779e9ec6458fbfea2432baa2f5fe6f6f1e18236590c0a744d84a",
     "lib/statusline.js": "efddd67f4e52b6a0a0d3ab1890e52cc6da863beba9583e53340b88a8418c67f9",
     "lib/summarize.js": "6490eee71469708f326ea1401b2d6d94e6d45787870aa5d7bd3a604dd0deafe6",
-    "lib/transcript.js": "e7083c5431f25fa7bc62d93d4fab4a84eb2aad3bb62e79e42ce7c622bea8f54d",
+    "lib/transcript.js": "2c149d492eb30efc6b3ee2bd6845a3d9259cf0be02eb747192a67ea0069a528c",
     "lib/usage.js": "c6116b8afd4177aabb086e14aba4b971d6891e66a25493c539b750ffe003416b",
-    "package.json": "dd8f49ce62b3e3db6446dc2246785137f83cef61a32986e7ed957795ad97282a"
+    "package.json": "c1ff8686deeb87c753540f288c2c1ecfcb01b045f4a7d52ca09c96cc318466ac"
   }
 }

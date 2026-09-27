@@ -21,11 +21,15 @@ class ChatUserMessage extends ChatItem {
     this.timestamp,
     this.isCommand = false,
     this.pasted = const [],
+    this.truncated = false,
   });
 
   final String text;
   final int imageCount;
   final DateTime? timestamp;
+
+  /// The host cut the prompt at its text cap.
+  final bool truncated;
 
   /// A slash command rather than a prompt.
   final bool isCommand;
@@ -384,10 +388,12 @@ class ChatItemBuilder {
   ) {
     final texts = <String>[];
     var images = 0;
+    var truncated = false;
     for (final block in entry.blocks) {
       switch (block) {
-        case TextBlock(:final text):
+        case TextBlock(:final text, truncated: final cut):
           texts.add(text);
+          truncated = truncated || cut;
         case ImageBlock():
           images += 1;
         default:
@@ -421,6 +427,7 @@ class ChatItemBuilder {
               pasted: pasted,
               imageCount: imagesLeft,
               timestamp: entry.timestamp,
+              truncated: truncated,
             ),
           );
           imagesLeft = 0;

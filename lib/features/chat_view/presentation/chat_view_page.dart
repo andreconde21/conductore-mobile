@@ -10,6 +10,7 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_working.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
@@ -379,9 +380,34 @@ class _ChatViewPageState extends State<ChatViewPage>
   /// The user is acting (sending, answering): stop talking over them.
   void _quiet() => _readAloud?.stop();
 
-  Future<void> _send(String text, {bool enter = true}) {
+  Future<void> _send(String text, {bool enter = true}) async {
     _quiet();
-    return _chat.send(text, enter: enter);
+    try {
+      await _chat.send(text, enter: enter);
+    } on AppFailure {
+      // A submitted prompt stays in the thread as a failed bubble with
+      // Retry and Edit, so the composer need not keep it.
+      if (!enter) rethrow;
+    }
+  }
+
+  Future<void> _retry(ChatOutgoing outgoing) async {
+    _quiet();
+    try {
+      await _chat.retry(outgoing.id);
+    } on AppFailure {
+      // Shown on the new bubble.
+    }
+  }
+
+  /// Puts a failed prompt back in the composer.
+  void _edit(ChatOutgoing outgoing) {
+    final text = _chat.discard(outgoing.id);
+    if (text == null) return;
+    _composerText.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
   }
 
   /// The last lifecycle state seen, to tell leaving from coming back.
@@ -563,10 +589,16 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
   }
 
-  Future<void> _pick(int number) async {
+  Future<void> _pick(ChatQuestion question, int number) async {
     _quiet();
+    final options = question.questions.firstOrNull?.options ?? const [];
     try {
-      await _chat.answerQuestion(number);
+      await _chat.answerQuestion(
+        number,
+        label: number <= options.length ? options[number - 1].label : null,
+      );
+    } on AppFailure {
+      // The failed answer bubble offers Retry.
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -865,6 +897,8 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (working != null) _lastWorking = working;
     // While frozen, show only what was there when the user scrolled up.
     final freeze = _freeze;
+    final allOutgoing = _chat.outgoing;
+    final confirmedIds = {for (final o in allOutgoing) ?o.confirmedId};
     var shownCount = items.length;
     var pending = allPending;
     var held = 0;
@@ -876,7 +910,9 @@ class _ChatViewPageState extends State<ChatViewPage>
         shownCount = last + 1;
       }
       for (var i = shownCount; i < items.length; i++) {
-        if (items[i] is! ChatThinking) held += 1;
+        if (items[i] is! ChatThinking && !confirmedIds.contains(items[i].id)) {
+          held += 1;
+        }
       }
       pending = [
         for (final request in allPending)
@@ -884,6 +920,13 @@ class _ChatViewPageState extends State<ChatViewPage>
       ];
       held += allPending.length - pending.length;
     }
+    // What the user sent stays at the bottom until the transcript shows
+    // it; while frozen above that entry, the bubble stands in for it.
+    final shownIds = {for (final item in items.take(shownCount)) item.id};
+    final outgoing = [
+      for (final o in allOutgoing)
+        if (o.pending || !shownIds.contains(o.confirmedId)) o,
+    ];
     final showWorkingRow = freeze == null
         ? working != null
         : freeze.working && (working ?? _lastWorking) != null;
@@ -914,6 +957,13 @@ class _ChatViewPageState extends State<ChatViewPage>
               (widget.attention?.isDeciding(request.id) ?? false),
           onDecide: (verdict) => _decide(request, verdict),
           onTrust: _smartApprovals ? () => _trust(request) : null,
+        ),
+      for (final o in outgoing.reversed)
+        ChatOutgoingBubble(
+          key: ValueKey(o.id),
+          item: o,
+          onRetry: () => unawaited(_retry(o)),
+          onEdit: o.answer ? null : () => _edit(o),
         ),
       for (final entry in ChatToolActivity.arrange(
         items.sublist(0, shownCount),
@@ -960,7 +1010,7 @@ class _ChatViewPageState extends State<ChatViewPage>
             ),
           ),
         )
-      else if (items.isEmpty && pending.isEmpty)
+      else if (items.isEmpty && pending.isEmpty && outgoing.isEmpty)
         const _Centered(
           icon: Icons.forum_outlined,
           text: 'No messages yet. Send a prompt to start.',
@@ -1020,7 +1070,10 @@ class _ChatViewPageState extends State<ChatViewPage>
       ChatQuestion() => ChatQuestionCard(
         key: key,
         item: item,
-        onPick: !item.answered && isLast && waiting ? _pick : null,
+        onPick:
+            !item.answered && isLast && waiting && !_chat.isAnswering(item.id)
+            ? (number) => _pick(item, number)
+            : null,
       ),
       ChatNotice() => ChatNoticeRow(key: key, item: item),
     };

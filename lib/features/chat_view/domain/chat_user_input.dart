@@ -71,8 +71,12 @@ abstract final class ChatUserInput {
     r'<system-reminder>[\s\S]*?</system-reminder>',
   );
 
-  /// A reminder cut off by the host's line cap (no closing tag).
-  static final _openSystemReminder = RegExp(r'<system-reminder>[\s\S]*$');
+  /// A reminder cut off by the host's line cap (no closing tag). Only at
+  /// the start of a line, where the harness puts them: the user writing
+  /// about the tag mid-sentence must not lose the rest of the prompt.
+  static final _openSystemReminder = RegExp(
+    r'(^|\n)[ \t]*<system-reminder>[\s\S]*$',
+  );
 
   /// The paragraph Claude Code appends to a message from another session
   /// ("This came from another Claude session — not typed by your user…"):
@@ -86,9 +90,11 @@ abstract final class ChatUserInput {
     r'<(teammate-message|cross-session-message)\b([^>]*)>([\s\S]*?)</\1>',
   );
 
-  /// A message cut off by the host's line cap (no closing tag).
+  /// A message cut off by the host's line cap (no closing tag), at the
+  /// start of a line like the harness writes it.
   static final _openAgentMessage = RegExp(
-    r'<(teammate-message|cross-session-message)\b([^>]*)>([\s\S]*)$',
+    r'(?:^|\n)[ \t]*<(teammate-message|cross-session-message)\b([^>]*)>'
+    r'([\s\S]*)$',
   );
   static final _attribute = RegExp(r'([\w-]+)="([^"]*)"');
   static final _task = RegExp(
@@ -97,6 +103,11 @@ abstract final class ChatUserInput {
   static final _pasted = RegExp(
     r'<pasted_content\b[^>]*>([\s\S]*?)</pasted_content>',
   );
+
+  /// Stands in for a pasted block while the harness tags are stripped, so
+  /// whatever the user pasted (a log full of tags, a transcript) is never
+  /// taken for injected content.
+  static final _pastedSlot = RegExp('\u0000(\\d+)\u0000');
   static final _whileWorking = RegExp(
     r'^\s*The user sent a new message while you were working:\s*([\s\S]*?)'
     r'(?:\n\s*\n\s*IMPORTANT:[\s\S]*)?$',
@@ -119,23 +130,42 @@ abstract final class ChatUserInput {
       return const [];
     }
     final parts = <UserInputPart>[];
+    final pastes = <String>[];
+    String restore(String text) => text.replaceAllMapped(
+      _pastedSlot,
+      (match) => pastes[int.parse(match[1]!)],
+    );
     var text = raw
+        .replaceAllMapped(_pasted, (match) {
+          pastes.add(match[0]!);
+          return '\u0000${pastes.length - 1}\u0000';
+        })
         .replaceAll(_systemReminder, '')
         .replaceAll(_openSystemReminder, '');
 
     // Messages from other agents (several may share one line).
+    var fromAgents = false;
     if (_agentMessage.hasMatch(text)) {
       for (final match in _agentMessage.allMatches(text)) {
-        parts.add(_agentPart(match));
+        parts.add(_agentPart(match, restore));
       }
       text = text.replaceAll(_agentMessage, '');
+      fromAgents = true;
     }
     final open = _openAgentMessage.firstMatch(text);
     if (open != null) {
-      parts.add(_agentPart(open));
+      parts.add(_agentPart(open, restore));
       text = text.substring(0, open.start);
+      fromAgents = true;
     }
-    text = text.replaceAll(_agentPrefix, '').replaceAll(_peerTrailer, '');
+    // The harness's framing around agent messages. Without one, only a
+    // trailer that is the whole line is dropped (it can arrive alone); the
+    // user quoting either sentence keeps it.
+    if (fromAgents) {
+      text = text.replaceAll(_agentPrefix, '').replaceAll(_peerTrailer, '');
+    } else if (text.replaceAll(_peerTrailer, '').trim().isEmpty) {
+      text = '';
+    }
 
     for (final match in _task.allMatches(text)) {
       final body = match[1]!;
@@ -175,6 +205,7 @@ abstract final class ChatUserInput {
       text = working[1]!;
     }
 
+    text = restore(text);
     final pasted = [
       for (final match in _pasted.allMatches(text)) match[1]!.trim(),
     ];
@@ -185,7 +216,10 @@ abstract final class ChatUserInput {
     return parts;
   }
 
-  static AgentMessagePart _agentPart(RegExpMatch match) {
+  static AgentMessagePart _agentPart(
+    RegExpMatch match,
+    String Function(String) restore,
+  ) {
     final session = match[1] == 'cross-session-message';
     final attributes = {
       for (final a in _attribute.allMatches(match[2]!)) a[1]!: a[2]!,
@@ -193,7 +227,7 @@ abstract final class ChatUserInput {
     final from =
         attributes['teammate_id'] ?? attributes['from'] ?? 'another agent';
     // A cut-off message runs to the end of the line, trailer included.
-    final body = match[3]!.replaceAll(_peerTrailer, '').trim();
+    final body = restore(match[3]!.replaceAll(_peerTrailer, '')).trim();
     if (body.startsWith('{')) {
       try {
         final json = jsonDecode(body);
