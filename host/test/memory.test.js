@@ -10,14 +10,14 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { spawn, execFile } = require('child_process')
 const paths = require('../lib/paths')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-mem-'))
+const home = tempDir('cnd-mem-')
 const env = {
   ...process.env,
   CONDUCTORE_HOME: home,
@@ -126,6 +126,5 @@ test('long pending prompts plus 1,500 subagent events do not exhaust a 16 MB hea
 
 test.after(async () => {
   await cli('stop').catch(() => {})
-  await sleep(200)
-  fs.rmSync(home, { recursive: true, force: true })
+  await cleanup()
 })

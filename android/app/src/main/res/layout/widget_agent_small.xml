@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2x1: how many agents need you, big, and the 5-hour limit ring. The
+     colours are the defaults (Everforest); the provider applies the app
+     theme's. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/widget_surface"
+        style="@style/AgentWidgetSurface"
+        android:src="@drawable/agent_widget_fill"
+        android:tint="@color/agent_widget_surface" />
+
+    <ImageView
+        android:id="@+id/widget_border"
+        style="@style/AgentWidgetSurface"
+        android:src="@drawable/agent_widget_stroke"
+        android:tint="@color/agent_widget_border" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="10dp">
+
+        <TextView
+            android:id="@+id/widget_needs_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/agent_widget_unknown_count"
+            android:textColor="@color/agent_widget_accent"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_needs_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:text="@string/agent_widget_title"
+            android:textColor="@color/agent_widget_on_surface"
+            android:textSize="13sp" />
+
+        <FrameLayout
+            android:id="@+id/widget_ring_5h"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="6dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/widget_ring_5h_image"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/widget_ring_5h_text"
+                style="@style/AgentWidgetRingText" />
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

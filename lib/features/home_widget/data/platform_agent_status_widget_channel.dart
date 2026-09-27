@@ -8,7 +8,10 @@ import 'package:flutter/services.dart';
 ///
 /// Dart → native:
 /// - `push(String json)`: the encoded [AgentStatusSnapshot].
-/// - `consumeLaunchTarget()` → `String?` (`"agents"`), cleared on read.
+/// - `consumeLaunchTarget()` → `String?` naming an [AgentStatusLaunchTarget]
+///   (`"dashboard"`, `"usage"`, ...), cleared on read. A tap on one of the
+///   widget's agent lines never comes this way: the native side checks its
+///   token and hands the agent to the notification deep link.
 /// - `requestAddTile()` → `String` naming an [AddTileResult].
 ///
 /// Native → Dart:

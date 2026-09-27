@@ -11,6 +11,7 @@ import 'package:re_editor/re_editor.dart';
 void main() {
   final viewerKey = GlobalKey<SftpFileViewerState>();
   Uint8List? written;
+  String? saveNotice;
 
   Widget build({
     required String path,
@@ -29,6 +30,7 @@ void main() {
           write: writable
               ? (bytes) async {
                   written = bytes;
+                  return saveNotice;
                 }
               : null,
         ),
@@ -36,7 +38,10 @@ void main() {
     );
   }
 
-  setUp(() => written = null);
+  setUp(() {
+    written = null;
+    saveNotice = null;
+  });
 
   testWidgets('shows text and saves edits back', (tester) async {
     await tester.pumpWidget(
@@ -70,6 +75,25 @@ void main() {
     expect(viewerKey.currentState!.isDirty, isFalse);
     expect(viewerKey.currentState!.hasSaved, isTrue);
     expect(find.text('Saved motd'), findsOneWidget);
+  });
+
+  testWidgets('tells how the file was saved when that matters', (tester) async {
+    saveNotice = 'It has other hard links.';
+    await tester.pumpWidget(
+      build(
+        path: '/etc/motd',
+        read: () async => Uint8List.fromList(utf8.encode('hello\n')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.controller!.text = 'bye\n';
+    await tester.pump();
+    await tester.tap(find.byTooltip('Save to server'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saved motd. It has other hard links.'), findsOneWidget);
   });
 
   testWidgets('keeps CRLF line endings and is not dirty on open', (

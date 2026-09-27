@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/voice_guide/domain/guide_ports.dart';
 import 'package:conduit/features/voice_guide/domain/guide_world.dart';
 
 /// Everything the guide says, short, in English or Portuguese.
@@ -67,6 +68,12 @@ abstract class GuideStrings {
   String accountAmbiguous(List<String> accounts);
   String accountAlreadyActive(String account);
   String accountCannotSwitch(String account);
+  String notAvailableReview(String agent);
+  String openingReview(String agent);
+  String nothingToUndo(String agent);
+  String undoWhileWorking(String agent);
+  String confirmUndo(String agent, GuideTurnPreview turn);
+  String undone(String agent, int files);
 
   /// "VTM", "VTM and Laptop", "VTM, Laptop and Box" (with [and]).
   String machinesList(List<String> names, String and) {
@@ -158,8 +165,8 @@ class _English extends GuideStrings {
   @override
   String get help =>
       "Say: what's waiting, open and a name, approve, deny, tell an agent to "
-      'do something, read the last reply, go to chat, go to terminal, home, '
-      "what's my usage, or stop.";
+      'do something, read the last reply, review, undo that, catch me up, go '
+      "to chat, go to terminal, home, what's my usage, or stop.";
   @override
   String get nothingMore => "That's all.";
   @override
@@ -275,6 +282,30 @@ class _English extends GuideStrings {
   @override
   String accountCannotSwitch(String account) =>
       "$account can't be switched to from here.";
+  @override
+  String notAvailableReview(String agent) =>
+      "Review isn't available for $agent. Update the agent hooks on its "
+      'machine.';
+  @override
+  String openingReview(String agent) => 'Reviewing $agent.';
+  @override
+  String nothingToUndo(String agent) => '$agent has no turn to undo.';
+  @override
+  String undoWhileWorking(String agent) =>
+      '$agent is still working. Undo when its turn ends.';
+  @override
+  String confirmUndo(String agent, GuideTurnPreview turn) {
+    final files = turn.files == 1 ? 'one file' : '${turn.files} files';
+    final what = turn.prompt.isEmpty
+        ? ''
+        : ', "${GuideStrings._cap(turn.prompt, 80)}",';
+    return "Undo $agent's last turn$what and restore $files? Say yes.";
+  }
+
+  @override
+  String undone(String agent, int files) =>
+      'Undone: ${files == 1 ? 'one file' : '$files files'} of $agent '
+      'restored. Say review to redo it.';
 
   static String _duration(int minutes) {
     if (minutes % 60 == 0) {
@@ -387,8 +418,9 @@ class _Portuguese extends GuideStrings {
   @override
   String get help =>
       'Diz: o que está à espera, abre e um nome, aprova, nega, diz a um agente '
-      'para fazer algo, lê a última resposta, vai para o chat, vai para o '
-      'terminal, início, qual é o meu uso, ou pára.';
+      'para fazer algo, lê a última resposta, revê, desfaz isso, põe-me a '
+      'par, vai para o chat, vai para o terminal, início, qual é o meu uso, '
+      'ou pára.';
   @override
   String get nothingMore => 'É tudo.';
   @override
@@ -507,6 +539,31 @@ class _Portuguese extends GuideStrings {
   @override
   String accountCannotSwitch(String account) =>
       'Não dá para mudar para $account daqui.';
+  @override
+  String notAvailableReview(String agent) =>
+      'A revisão não está disponível para $agent. Atualiza os hooks do '
+      'agente na máquina dele.';
+  @override
+  String openingReview(String agent) => 'A rever $agent.';
+  @override
+  String nothingToUndo(String agent) =>
+      '$agent não tem nenhum turno a desfazer.';
+  @override
+  String undoWhileWorking(String agent) =>
+      '$agent ainda está a trabalhar. Desfaz quando o turno acabar.';
+  @override
+  String confirmUndo(String agent, GuideTurnPreview turn) {
+    final files = turn.files == 1 ? 'um ficheiro' : '${turn.files} ficheiros';
+    final what = turn.prompt.isEmpty
+        ? ''
+        : ', "${GuideStrings._cap(turn.prompt, 80)}",';
+    return 'Desfazer o último turno de $agent$what e repor $files? Diz sim.';
+  }
+
+  @override
+  String undone(String agent, int files) =>
+      'Desfeito: ${files == 1 ? 'um ficheiro' : '$files ficheiros'} de '
+      '$agent reposto${files == 1 ? '' : 's'}. Diz revê para refazer.';
 
   static String _duration(int minutes) {
     if (minutes % 60 == 0) {

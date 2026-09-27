@@ -118,4 +118,19 @@ void main() {
     expect(odd.readAloudLength, ReadAloudLength.brief);
     expect(odd.toolActivity, ToolActivity.collapsed);
   });
+
+  test('Review opens on demand by default; the choice round-trips', () {
+    expect(VoicePreferences.defaults.reviewOpens, ReviewOpens.onDemand);
+    final auto = VoicePreferences.defaults.copyWith(
+      reviewOpens: ReviewOpens.afterEachTurn,
+    );
+    expect(
+      VoicePreferences.decode(auto.encode()).reviewOpens,
+      ReviewOpens.afterEachTurn,
+    );
+    expect(
+      VoicePreferences.decode('{"reviewOpens":"sometimes"}').reviewOpens,
+      ReviewOpens.onDemand,
+    );
+  });
 }

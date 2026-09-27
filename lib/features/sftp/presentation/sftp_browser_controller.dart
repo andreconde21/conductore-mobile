@@ -150,13 +150,16 @@ class SftpBrowserController extends ChangeNotifier {
     _errorMessage = null;
     _securityKeyMessage = null;
     await _securityKeySubscription?.cancel();
-    _securityKeySubscription = SecurityKeyInteraction.instance.messages.listen((
-      message,
-    ) {
-      if (_status != SftpBrowserStatus.connecting) return;
-      _securityKeyMessage = message;
-      _safeNotify();
-    });
+    _securityKeySubscription = null;
+    // App-wide prompts: only a hardware-key sign-in can be their source.
+    if (host.authMethod == SshAuthMethod.hardwareKey) {
+      _securityKeySubscription = SecurityKeyInteraction.instance.messages
+          .listen((message) {
+            if (_status != SftpBrowserStatus.connecting) return;
+            _securityKeyMessage = message;
+            _safeNotify();
+          });
+    }
     _safeNotify();
     try {
       final session = await repository.connect(host);
@@ -440,12 +443,13 @@ class SftpBrowserController extends ChangeNotifier {
     );
   }
 
-  Future<void> writeFile(String path, Uint8List bytes) async {
+  /// Saves an edited file; completes with the save's notice for the user.
+  Future<String?> writeFile(String path, Uint8List bytes) async {
     final session = _session;
     if (session == null) {
       throw const AppFailure('Not connected.');
     }
-    await session.write(path, Stream.value(bytes), bytes.length);
+    return (await session.save(path, bytes)).notice;
   }
 
   Future<void> _mutate(Future<void> Function() action) async {

@@ -3,8 +3,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const settings = require('../lib/settings')
 
 const HOOK = '/home/u/.local/bin/conductore-hook'
@@ -78,7 +78,7 @@ test('isOurs matches only our command shape', () => {
 })
 
 test('read/write round-trips through a file, keeping a .bak', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-settings-'))
+  const dir = tempDir('cnd-settings-')
   const file = path.join(dir, 'settings.json')
   assert.deepEqual(settings.readSettings(file), {})
   settings.writeSettings(existing(), file)
@@ -91,7 +91,7 @@ test('read/write round-trips through a file, keeping a .bak', () => {
 })
 
 test('write keeps a symlinked settings file linked, and keeps its mode (0600 when new)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-settings-'))
+  const dir = tempDir('cnd-settings-')
   const fresh = path.join(dir, 'new', 'settings.json')
   const umask = process.umask(0o022)
   try {
@@ -114,3 +114,5 @@ test('write keeps a symlinked settings file linked, and keeps its mode (0600 whe
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test.after(() => cleanup())

@@ -8,6 +8,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_settings.dart';
 import 'package:conduit/features/app_lock/domain/app_lock_preferences.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
@@ -311,6 +312,25 @@ class SettingsSectionBody extends StatelessWidget {
           theme.setVoice(theme.voice.copyWith(toolActivity: mode)),
     ),
     _gap,
+    SettingsSegmentCard<ReviewOpens>(
+      key: const ValueKey('chat-review-opens'),
+      icon: Icons.rate_review_outlined,
+      title: 'Review changes',
+      description: switch (theme.voice.reviewOpens) {
+        ReviewOpens.onDemand =>
+          'Review opens from its button in Chat View, the Agents dashboard '
+              'and the inbox, or when you tell the voice guide "review".',
+        ReviewOpens.afterEachTurn =>
+          'When a turn ends in Chat View, Review opens with a card per '
+              'changed file: accept, reject, comment, or undo the turn.',
+      },
+      values: ReviewOpens.values,
+      label: (mode) => mode.label,
+      selected: theme.voice.reviewOpens,
+      onChanged: (mode) =>
+          theme.setVoice(theme.voice.copyWith(reviewOpens: mode)),
+    ),
+    _gap,
     if (PlatformFeatures.dictation || PlatformFeatures.textToSpeech) ...[
       const SettingsHeading('Where to find voice'),
       const SettingsNote(
@@ -419,6 +439,17 @@ class SettingsSectionBody extends StatelessWidget {
             );
           },
         ),
+      if (services.digest case final digest?) ...[
+        _gap,
+        const SettingsHeading('Dashboard'),
+        const SettingsNote(
+          'The Agents dashboard (home bar) shows what every agent did '
+          'since you last looked: files, tests, failures, waiting time, '
+          'agents that look stuck, and a short summary.',
+        ),
+        const SizedBox(height: 6),
+        DigestSettingsCards(controller: digest),
+      ],
       if (PlatformFeatures.agentNotifications)
         if (UsageScope.maybeOf(context) case final usage?) ...[
           _gap,

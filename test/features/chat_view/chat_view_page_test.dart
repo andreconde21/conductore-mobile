@@ -170,7 +170,9 @@ void main() {
     expect(tester.widget<TextField>(field).controller!.text, isEmpty);
   });
 
-  testWidgets('a failed send keeps the text and says why', (tester) async {
+  testWidgets('a failed send keeps the text in its bubble and says why', (
+    tester,
+  ) async {
     await pumpPage(tester, [
       ok(page([])),
       const AgentCommandResult(
@@ -183,8 +185,12 @@ void main() {
     await tester.enterText(field, 'hello');
     await tester.tap(find.byTooltip('Send'));
     await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(field).controller!.text, 'hello');
+    expect(find.text('hello'), findsOneWidget);
     expect(find.textContaining('session not in tmux or Herdr'), findsOneWidget);
+    // Edit puts it back in the composer.
+    await tester.tap(find.byKey(const ValueKey('outgoing-edit')));
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, 'hello');
   });
 
   testWidgets('open question options type the option number', (tester) async {

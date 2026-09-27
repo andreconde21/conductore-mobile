@@ -155,6 +155,31 @@ void main() {
       expect(GuidePhrases.match('help'), isA<GuideHelp>());
     });
 
+    test('catch me up', () {
+      for (final phrase in [
+        'Catch me up',
+        'catch me up please',
+        'what did I miss',
+        'what happened while I was away',
+        'give me a recap',
+        'brief me',
+        'summarize the agents',
+      ]) {
+        expect(GuidePhrases.match(phrase), isA<GuideCatchUp>(), reason: phrase);
+      }
+      for (final phrase in [
+        'põe-me a par',
+        'poe me a par',
+        'o que é que perdi',
+        'faz-me um resumo',
+        'dá-me um ponto de situação',
+      ]) {
+        expect(GuidePhrases.match(phrase), isA<GuideCatchUp>(), reason: phrase);
+      }
+      // A sentence that merely contains the words is not the command.
+      expect(GuidePhrases.match('the recap job failed'), isNull);
+    });
+
     test('anything else goes to the brain', () {
       for (final phrase in [
         'ask web how far it is',
@@ -291,6 +316,66 @@ void main() {
       for (final phrase in ['', 'maybe', 'open api', 'talvez']) {
         expect(GuidePhrases.yesNo(phrase), isNull, reason: phrase);
       }
+    });
+  });
+
+  group('review and undo', () {
+    test('undo, in English and Portuguese, with or without a name', () {
+      for (final phrase in [
+        'undo that',
+        'Undo it',
+        'undo the last turn',
+        'revert that',
+        'roll back the changes',
+        'desfaz isso',
+        'Desfazer',
+        'anula o último turno',
+      ]) {
+        final intent = GuidePhrases.match(phrase);
+        expect(intent, isA<GuideUndo>(), reason: phrase);
+        expect((intent! as GuideUndo).target, isNull, reason: phrase);
+        expect(intent.risky, isTrue);
+      }
+      expect(
+        nameOf((GuidePhrases.match('undo that for api') as GuideUndo).target),
+        'api',
+      );
+      expect(
+        nameOf((GuidePhrases.match('desfaz isso no web') as GuideUndo).target),
+        'web',
+      );
+    });
+
+    test('review, revê, show the changes', () {
+      for (final phrase in [
+        'review',
+        'Review the changes',
+        'show me the diff',
+        'what changed',
+        'revê',
+        'rever',
+        'revê as alterações',
+        'mostra as alterações',
+      ]) {
+        final intent = GuidePhrases.match(phrase);
+        expect(intent, isA<GuideReview>(), reason: phrase);
+        expect((intent! as GuideReview).target, isNull, reason: phrase);
+      }
+      expect(
+        nameOf((GuidePhrases.match('review api') as GuideReview).target),
+        'api',
+      );
+      expect(
+        nameOf(
+          (GuidePhrases.match('review the changes of api') as GuideReview)
+              .target,
+        ),
+        'api',
+      );
+      expect(
+        nameOf((GuidePhrases.match('revê o api') as GuideReview).target),
+        'api',
+      );
     });
   });
 }

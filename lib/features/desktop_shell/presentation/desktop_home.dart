@@ -9,6 +9,9 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
@@ -32,6 +35,7 @@ import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
+import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 
@@ -179,8 +183,10 @@ class DesktopHomeState extends State<DesktopHome> {
       widget.workspace.hasSessions ||
       (embedding.host?.viewIds.isNotEmpty ?? false);
 
-  /// Whether the main area shows the terminal page (else the dashboard).
-  bool get terminalVisible => _hasViews && !_controller.showHome;
+  /// Whether the main area shows the terminal page (else the dashboard or
+  /// the usage explorer).
+  bool get terminalVisible =>
+      _hasViews && !_controller.showHome && !_controller.showUsage;
 
   @override
   void initState() {
@@ -591,7 +597,7 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   void _syncPreviewTimer() {
-    final dashboard = !terminalVisible && _appResumed;
+    final dashboard = !terminalVisible && !_controller.showUsage && _appResumed;
     if (dashboard && widget.workspace.hasSessions) {
       _previewTimer ??= Timer.periodic(widget.previewRefreshInterval, (_) {
         if (mounted) setState(() {});
@@ -895,7 +901,7 @@ class DesktopHomeState extends State<DesktopHome> {
         final showTerminal = terminalVisible;
         final chrome = !_fullscreen;
         final panel = controller.rightPanel;
-        return ColoredBox(
+        final shell = ColoredBox(
           color: palette.canvas,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -920,7 +926,11 @@ class DesktopHomeState extends State<DesktopHome> {
               ],
               Expanded(
                 child: IndexedStack(
-                  index: showTerminal ? 0 : 1,
+                  index: controller.showUsage
+                      ? 2
+                      : showTerminal
+                      ? 0
+                      : 1,
                   sizing: StackFit.expand,
                   children: [
                     TickerMode(
@@ -928,9 +938,10 @@ class DesktopHomeState extends State<DesktopHome> {
                       child: widget.terminalBuilder(embedding),
                     ),
                     TickerMode(
-                      enabled: !showTerminal,
+                      enabled: !showTerminal && !controller.showUsage,
                       child: _dashboard(context),
                     ),
+                    _usageMain(context),
                   ],
                 ),
               ),
@@ -948,9 +959,19 @@ class DesktopHomeState extends State<DesktopHome> {
             ],
           ),
         );
+        // "Explore" in a usage view opens the explorer in the main area.
+        final usage = UsageScope.maybeOf(context);
+        if (usage == null) return shell;
+        return UsageScope(
+          controller: usage,
+          openExplorer: _openUsage,
+          child: shell,
+        );
       },
     );
   }
+
+  void _openUsage({String? day}) => _controller.setShowUsage(true, day: day);
 
   Widget _sidebarHeader() {
     final palette = AppPalette.of(context);
@@ -1350,6 +1371,7 @@ class DesktopHomeState extends State<DesktopHome> {
         isDeciding: attention.isDeciding,
         onNewSession: () => unawaited(widget.actions.newSession()),
         usage: _usageView(context, dashboard: true),
+        agents: _agentsDigest(context),
         actions: [_agentsToggle(), _previewToggle()],
         // Crash reports and usage counts, once, like the phone's home.
         notice: const PrivacyNotice(),
@@ -1358,6 +1380,31 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   static final Listenable _never = ChangeNotifier();
+
+  /// The agents dashboard (companion `digest`) in the home's main column;
+  /// null without the app's digest controller.
+  Widget? _agentsDigest(BuildContext context) {
+    final digest = DigestScope.maybeOf(context);
+    if (digest == null) return null;
+    return AgentsDashboardView(
+      controller: digest,
+      attention: widget.agentAttention,
+      shrinkWrap: true,
+      inlineMenu: true,
+      padding: EdgeInsets.zero,
+      onOpenChat: (host, agent) =>
+          unawaited(widget.actions.openChat(host, agent)),
+      onOpenTerminal: (host, agent) {
+        final flow = widget.connectFlow;
+        if (flow != null) {
+          unawaited(flow.openAgent(host, agent));
+        } else {
+          unawaited(widget.agentAttention.focusAgent(host.id, agent));
+        }
+        _controller.showHome = false;
+      },
+    );
+  }
 
   /// Usage at a glance (companion `usage`): the app's usage controller in
   /// its compact layout; a tap opens the breakdown in the right panel.
@@ -1371,7 +1418,29 @@ class DesktopHomeState extends State<DesktopHome> {
       key: ValueKey(dashboard ? 'dashboard-usage' : 'sidebar-usage'),
       controller: usage,
       layout: UsageSummaryLayout.compact,
-      onTap: () => _controller.rightPanel = ShellRightPanel.usage,
+      onTap: _openUsage,
+    );
+  }
+
+  /// The usage explorer in the main area: more room than the right panel
+  /// for a wide chart, breakdowns side by side and the day beside them.
+  Widget _usageMain(BuildContext context) {
+    final usage = UsageScope.maybeOf(context);
+    if (usage == null || !_controller.showUsage) {
+      return const SizedBox.shrink();
+    }
+    return Material(
+      color: AppPalette.of(context).canvas,
+      child: UsageExplorerView(
+        key: ValueKey('shell-usage-explorer-${_controller.usageDay}'),
+        usage: usage,
+        initialDay: _controller.usageDay,
+        onClose: () => _controller.setShowUsage(false),
+        onUpdateCompanion: (hostId) {
+          final host = usage.hostFor(hostId);
+          if (host != null) unawaited(showCompanionSetup(context, host));
+        },
+      ),
     );
   }
 

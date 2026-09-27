@@ -8,8 +8,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { execFile } = require('child_process')
 const usage = require('../lib/usage')
 const pricing = require('../lib/pricing')
@@ -22,7 +22,7 @@ const TODAY = usage.localDate(NOW)
 const YESTERDAY = usage.addDays(TODAY, -1)
 
 function tmpHome () {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'conductore-usage-'))
+  const root = tempDir('conductore-usage-')
   const home = path.join(root, 'home')
   fs.mkdirSync(path.join(home, '.claude', 'projects'), { recursive: true })
   return { root, home, cacheFile: path.join(root, 'usage-cache.json') }
@@ -211,7 +211,7 @@ test('Claude limits: the later window wins, then the higher use; past windows ar
 })
 
 test('project names: repository root, linked worktree, home', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'conductore-proj-'))
+  const root = tempDir('conductore-proj-')
   const repo = path.join(root, 'myrepo')
   fs.mkdirSync(path.join(repo, '.git', 'worktrees', 'wt'), { recursive: true })
   fs.mkdirSync(path.join(repo, 'src', 'deep'), { recursive: true })
@@ -249,7 +249,7 @@ test('--days and --since pick the range; nothing installed reports absent', () =
   assert.equal(run(t, { days: 1 }).claude.range.output, 1)
   assert.equal(run(t, { days: 7 }).claude.range.output, 11)
   assert.equal(run(t, { since: NOW - 2 * 24 * HOUR }).claude.range.output, 1)
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'conductore-empty-'))
+  const empty = tempDir('conductore-empty-')
   const r = usage.compute({ env: { HOME: empty }, now: NOW, cacheFile: path.join(empty, 'c.json') })
   assert.equal(r.claude.present, false)
   assert.equal(r.codex.present, false)
@@ -268,7 +268,7 @@ test('CLI: conductore-hostd usage prints the report', async () => {
   })
   const ok = await run(['--days', '3'])
   assert.equal(ok.code, 0)
-  assert.equal(ok.json.version, '0.8.1')
+  assert.equal(ok.json.version, '1.0.0')
   assert.equal(ok.json.claude.today.output, 42)
   // No cswap: no accounts field at all.
   assert.equal(ok.json.claude.accounts, undefined)
@@ -298,3 +298,151 @@ test('the time cap holds inside one large transcript and counts from startedAt',
   assert.equal(done.claude.today.messages, 60000)
   fs.rmSync(t.root, { recursive: true, force: true })
 })
+
+test('--hourly splits rows by local hour, --sessions adds per-session rows; plain rows keep their shape', () => {
+  const t = tmpHome()
+  const lines = [
+    assistant({ id: 'h1', output: 10, at: NOW - 2 * HOUR }),
+    assistant({ id: 'h2', req: 'r2', output: 20, at: NOW - 2 * HOUR + 60000 }),
+    assistant({ id: 'h3', req: 'r3', output: 40, at: NOW })
+  ]
+  writeTranscript(t.home, '-work-api/a.jsonl', lines.map(l => l.replace('"sessionId":"s1"', '"sessionId":"aaaaaaaa-1111"')))
+  writeTranscript(t.home, '-work-api/b.jsonl', [assistant({ id: 'h4', req: 'r4', output: 5, at: NOW })].map(l => l.replace('"sessionId":"s1"', '"sessionId":"bbbbbbbb-2222"')))
+  const plain = run(t)
+  assert.equal(plain.hourly, false)
+  assert.equal(plain.claude.bySession, undefined)
+  assert.equal(plain.claude.rows.length, 1)
+  assert.deepEqual(Object.keys(plain.claude.rows[0]).sort(), ['cacheRead', 'cacheWrite', 'costUsd', 'date', 'input', 'messages', 'model', 'output', 'project'])
+  assert.equal(plain.to, TODAY)
+  assert.equal(plain.detailFrom, usage.addDays(TODAY, -30))
+  assert.equal(plain.historyFrom, usage.addDays(TODAY, -61))
+  assert.equal(plain.utcOffsetMin, -new Date(NOW).getTimezoneOffset())
+
+  const r = run(t, { from: TODAY, to: TODAY, hourly: true, sessions: true })
+  assert.equal(r.hourly, true)
+  const hours = r.claude.rows.map(x => [x.hour, x.output]).sort((a, b) => a[0] - b[0])
+  assert.deepEqual(hours, [[new Date(NOW - 2 * HOUR).getHours(), 30], [new Date(NOW).getHours(), 45]])
+  assert.equal(r.claude.range.output, 75)
+  const sessions = r.claude.bySession.map(x => [x.session, x.output]).sort()
+  assert.deepEqual(sessions, [['aaaaaaaa', 70], ['bbbbbbbb', 5]])
+  assert.equal(r.claude.bySession[0].date, TODAY)
+})
+
+test('--from/--to pick any range in the kept days; today stays today; older days become daily history', () => {
+  const t = tmpHome()
+  const DAY = 24 * HOUR
+  writeTranscript(t.home, '-work-api/a.jsonl', [
+    assistant({ id: 'a', output: 1, at: NOW }),
+    assistant({ id: 'b', req: 'rb', output: 10, at: NOW - 3 * DAY }),
+    assistant({ id: 'c', req: 'rc', output: 100, at: NOW - 5 * DAY })
+  ])
+  const r = run(t, { from: usage.addDays(TODAY, -5), to: usage.addDays(TODAY, -3) })
+  assert.equal(r.from, usage.addDays(TODAY, -5))
+  assert.equal(r.to, usage.addDays(TODAY, -3))
+  assert.equal(r.claude.range.output, 110)
+  assert.equal(r.claude.today.output, 1)
+  // --to beyond today is clamped; --from alone runs to today.
+  assert.equal(run(t, { from: usage.addDays(TODAY, -3), to: usage.addDays(TODAY, 4) }).to, TODAY)
+  assert.equal(run(t, { from: usage.addDays(TODAY, -3) }).claude.range.output, 11)
+  // --days reaches back 62 days now.
+  assert.equal(run(t, { days: 62 }).from, usage.addDays(TODAY, -61))
+
+  // 40 days on: those days are history, daily sums without hours or
+  // sessions, still in a range.
+  const later = NOW + 40 * DAY
+  const old = run(t, { now: later, days: 62, hourly: true, sessions: true })
+  assert.equal(old.claude.range.output, 111)
+  assert.ok(old.claude.rows.every(x => x.hour === undefined))
+  assert.deepEqual(old.claude.bySession, [])
+  const cache = JSON.parse(fs.readFileSync(t.cacheFile, 'utf8'))
+  assert.deepEqual(Object.keys(cache.claude.buckets[TODAY]), ['\tapi\tclaude-opus-5\t\t'])
+  assert.equal(cache.claude.sessions[TODAY], undefined)
+  assert.equal(cache.claude.seen[TODAY], undefined)
+  // 70 days on: gone.
+  assert.equal(run(t, { now: NOW + 70 * DAY, days: 62 }).claude.range.output, 0)
+})
+
+test('accounts: messages count for the cswap account last seen active before them', () => {
+  const t = tmpHome()
+  // Seen active: work two hours ago, then home now.
+  run(t, { now: NOW - 2 * HOUR, activeAccount: 'work' })
+  run(t, { now: NOW - 2 * HOUR + 1000, activeAccount: 'work' })
+  writeTranscript(t.home, '-work-api/a.jsonl', [
+    assistant({ id: 'a', output: 1, at: NOW - 3 * HOUR }),
+    assistant({ id: 'b', req: 'rb', output: 10, at: NOW - HOUR }),
+    assistant({ id: 'c', req: 'rc', output: 100, at: NOW + 1000 })
+  ])
+  const r = run(t, { activeAccount: 'home' })
+  const by = Object.fromEntries(r.claude.rows.map(x => [x.account ?? '', x.output]))
+  assert.deepEqual(by, { '': 1, work: 10, home: 100 })
+  const cache = JSON.parse(fs.readFileSync(t.cacheFile, 'utf8'))
+  assert.deepEqual(cache.accountLog.map(e => e[1]), ['work', 'home'])
+  assert.equal(usage.accountAt(cache.accountLog, NOW - 3 * HOUR), '')
+})
+
+test('a version 1 cache is answered from while the transcripts are read again, then replaced', () => {
+  const t = tmpHome()
+  const lines = []
+  for (let i = 0; i < 300; i++) lines.push(assistant({ id: `m${i}`, req: `r${i}`, output: 2 }))
+  const file = writeTranscript(t.home, '-work-api/a.jsonl', lines)
+  const st = fs.statSync(file)
+  fs.writeFileSync(t.cacheFile, JSON.stringify({
+    v: 1,
+    claude: { files: { [file]: { offset: st.size, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs } }, buckets: { [TODAY]: { 'api\tclaude-opus-5\t': [0, 600, 0, 0, 0, 300] } }, seen: {} },
+    codex: { files: {}, buckets: {}, seen: {} },
+    limits: { claude: [{ label: '5h', usedPct: 30, resetsAt: NOW + HOUR }], codex: [] },
+    codexLimitsAt: 0
+  }))
+  let r = run(t, { maxBytes: Math.floor(st.size / 4), hourly: true })
+  assert.equal(r.scan.partial, true)
+  assert.equal(r.scan.rebuilding, true)
+  assert.equal(r.hourly, false)
+  assert.equal(r.detailFrom, null)
+  // The old sums, not the half-read new ones.
+  assert.equal(r.claude.today.output, 600)
+  assert.equal(r.claude.rows[0].hour, undefined)
+  assert.equal(r.claude.limits[0].usedPct, 30)
+  for (let i = 0; i < 20 && r.scan.partial; i++) r = run(t, { maxBytes: Math.floor(st.size / 4), hourly: true })
+  assert.equal(r.scan.partial, false)
+  assert.equal(r.scan.rebuilding, false)
+  assert.equal(r.hourly, true)
+  assert.equal(r.claude.today.output, 600)
+  assert.equal(r.claude.today.messages, 300)
+  assert.equal(r.claude.rows[0].hour, new Date(NOW).getHours())
+  assert.equal(JSON.parse(fs.readFileSync(t.cacheFile, 'utf8')).legacy, undefined)
+})
+
+test('CLI: --day with --hourly and --sessions, and bad ranges', async () => {
+  const t = tmpHome()
+  const at = Date.now()
+  const today = usage.localDate(at)
+  writeTranscript(t.home, '-work-api/a.jsonl', [assistant({ id: 'msg_1', output: 42, at })])
+  const chome = path.join(t.root, 'chome')
+  const run = args => new Promise(resolve => {
+    execFile(process.execPath, [HOSTD, 'usage', ...args], {
+      env: { ...process.env, HOME: t.home, CONDUCTORE_HOME: chome, CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', CONDUCTORE_CSWAP: '' }
+    }, (err, stdout) => resolve({ code: err ? err.code : 0, json: JSON.parse(stdout) }))
+  })
+  const ok = await run(['--days', '31', '--day', today, '--hourly', '--sessions'])
+  assert.equal(ok.code, 0)
+  assert.equal(ok.json.from, today)
+  assert.equal(ok.json.to, today)
+  assert.equal(ok.json.hourly, true)
+  assert.equal(ok.json.claude.rows[0].hour, new Date(at).getHours())
+  assert.equal(ok.json.claude.bySession.length, 1)
+  const range = await run(['--from', usage.addDays(today, -2), '--to', today])
+  assert.equal(range.json.from, usage.addDays(today, -2))
+  assert.equal(range.json.claude.range.output, 42)
+  for (const [args, re] of [
+    [['--from', '2026-9-1'], /--from/],
+    [['--day', 'monday'], /--day/],
+    [['--from', today, '--to', usage.addDays(today, -1)], /after/],
+    [['--day', today, '--from', today], /not both/]
+  ]) {
+    const bad = await run(args)
+    assert.equal(bad.code, 1)
+    assert.match(bad.json.error, re)
+  }
+})
+
+test.after(() => cleanup())

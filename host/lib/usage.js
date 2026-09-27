@@ -7,8 +7,9 @@
 // ~/.claude/projects/**/*.jsonl ($CLAUDE_CONFIG_DIR/projects) carries
 // message.usage and message.model. Codex CLI: token_count events in
 // ~/.codex/sessions/**/*.jsonl ($CODEX_HOME) carry running totals and the
-// account's rate limits. Both are summed per local day, project and model
-// into ~/.conductore/usage-cache.json.
+// account's rate limits. Both are summed per local day and hour, project,
+// model, speed and account (the cswap account the companion saw active at
+// the time), and per day and session, into ~/.conductore/usage-cache.json.
 //
 // Cheap by construction:
 // * incremental: the cache keeps, per file, the byte offset read so far;
@@ -25,8 +26,10 @@
 // resumed session copies earlier entries into a new file: entries are
 // counted once per (message id, request id), the largest output wins.
 //
-// Only the last RETENTION_DAYS days are kept; costs are computed from
-// lib/pricing.js at answer time.
+// The last RETENTION_DAYS days are kept in full (hours, sessions, the
+// hashes that dedupe messages); days up to HISTORY_DAYS back only as daily
+// sums (no hour, no session), so a 30-day range can be compared with the
+// 30 days before. Costs are computed from lib/pricing.js at answer time.
 
 const fs = require('fs')
 const os = require('os')
@@ -35,8 +38,10 @@ const crypto = require('crypto')
 const pricing = require('./pricing')
 
 const SCHEMA = 1
-const CACHE_VERSION = 1
+const CACHE_VERSION = 2
 const RETENTION_DAYS = 31
+const HISTORY_DAYS = 62
+const MAX_ACCOUNT_LOG = 500
 const DEFAULT_DAYS = 7
 const DEFAULT_MAX_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_MS = 2500
@@ -54,6 +59,7 @@ const MARK_TURN_CONTEXT = Buffer.from('"turn_context"')
 const MARK_SESSION_META = Buffer.from('"session_meta"')
 
 const pad = n => String(n).padStart(2, '0')
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function localDate (ms) {
   const d = new Date(ms)
@@ -124,22 +130,44 @@ function resolveProject (cwd, home) {
 
 // --- cache --------------------------------------------------------------------
 
+// buckets[day]["HH\tproject\tmodel\tspeed\taccount"] (HH empty for a
+// history day) and sessions[day]["session\tproject\tmodel\tspeed\taccount"]
+// (the session id's first 8 characters) hold [IN, OUT, CW5, CW1H, CR, MSGS].
 function emptyAgentCache () {
-  return { files: {}, buckets: {}, seen: {} }
+  return { files: {}, buckets: {}, sessions: {}, seen: {} }
 }
 
+// accountLog: [[ms, label]], each time the active cswap account was seen to
+// change. legacy: a version 1 cache's daily buckets, answered from while
+// the transcripts are read again for hours and sessions.
 function emptyCache () {
-  return { v: CACHE_VERSION, claude: emptyAgentCache(), codex: emptyAgentCache(), limits: { claude: [], codex: [] }, codexLimitsAt: 0 }
+  return { v: CACHE_VERSION, claude: emptyAgentCache(), codex: emptyAgentCache(), limits: { claude: [], codex: [] }, codexLimitsAt: 0, accountLog: [] }
 }
 
 function loadCache (file) {
   try {
     const c = JSON.parse(fs.readFileSync(file, 'utf8'))
-    if (!c || c.v !== CACHE_VERSION) return emptyCache()
+    if (!c || (c.v !== CACHE_VERSION && c.v !== 1)) return emptyCache()
     const base = emptyCache()
-    for (const agent of ['claude', 'codex']) base[agent] = { ...emptyAgentCache(), ...(c[agent] || {}) }
     base.limits = { claude: [], codex: [], ...(c.limits || {}) }
     base.codexLimitsAt = Number(c.codexLimitsAt) || 0
+    if (c.v === 1) {
+      // Version 1 kept days without hours or sessions: read everything
+      // again, answering from the old sums until that is done.
+      base.legacy = {}
+      for (const agent of ['claude', 'codex']) {
+        const days = {}
+        for (const [day, keys] of Object.entries((c[agent] && c[agent].buckets) || {})) {
+          days[day] = {}
+          for (const [key, b] of Object.entries(keys)) days[day][`\t${key}\t`] = b
+        }
+        base.legacy[agent] = days
+      }
+      return base
+    }
+    for (const agent of ['claude', 'codex']) base[agent] = { ...emptyAgentCache(), ...(c[agent] || {}) }
+    if (Array.isArray(c.accountLog)) base.accountLog = c.accountLog
+    if (c.legacy) base.legacy = c.legacy
     return base
   } catch {
     return emptyCache()
@@ -177,12 +205,59 @@ function seenSets (agentCache) {
 
 const hash8 = s => crypto.createHash('sha1').update(s).digest('base64url').slice(0, 8)
 
-function prune (cache, cutoffDate) {
+// Days before retentionFrom become history: their hours are summed into
+// one daily bucket per key, sessions and hashes go. Days before historyFrom
+// go entirely.
+function prune (cache, retentionFrom, historyFrom) {
   for (const agent of ['claude', 'codex']) {
     const c = cache[agent]
-    for (const day of Object.keys(c.buckets)) if (day < cutoffDate) delete c.buckets[day]
-    for (const day of Object.keys(c.seen)) if (day < cutoffDate) delete c.seen[day]
+    for (const day of Object.keys(c.buckets)) {
+      if (day < historyFrom) { delete c.buckets[day]; continue }
+      if (day >= retentionFrom) continue
+      const daily = {}
+      let hourly = false
+      for (const [key, b] of Object.entries(c.buckets[day])) {
+        const tab = key.indexOf('\t')
+        if (tab > 0) hourly = true
+        const k = key.slice(tab)
+        const sum = daily[k] || (daily[k] = [0, 0, 0, 0, 0, 0])
+        for (let i = 0; i < 6; i++) sum[i] += b[i] || 0
+      }
+      if (hourly) c.buckets[day] = daily
+    }
+    for (const day of Object.keys(c.sessions)) if (day < retentionFrom) delete c.sessions[day]
+    for (const day of Object.keys(c.seen)) if (day < retentionFrom) delete c.seen[day]
   }
+  const log = cache.accountLog
+  const cutoff = new Date(`${historyFrom}T00:00:00`).getTime()
+  // Keep the entry in force at the cutoff.
+  let first = 0
+  while (first + 1 < log.length && log[first + 1][0] <= cutoff) first++
+  if (first) log.splice(0, first)
+  if (log.length > MAX_ACCOUNT_LOG) log.splice(0, log.length - MAX_ACCOUNT_LOG)
+}
+
+// Records the account seen active now when it differs from the last one.
+function noteAccount (cache, label, now) {
+  if (typeof label !== 'string' || !label) return
+  const log = cache.accountLog
+  const last = log[log.length - 1]
+  if (last && last[1] === label) return
+  if (last && last[0] > now) return
+  log.push([now, label])
+}
+
+// The account active at ts as last seen before it; '' before the first
+// sighting (or without cswap).
+function accountAt (log, ts) {
+  let lo = 0
+  let hi = log.length - 1
+  let found = ''
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (log[mid][0] <= ts) { found = log[mid][1]; lo = mid + 1 } else hi = mid - 1
+  }
+  return found
 }
 
 function lock (file) {
@@ -266,10 +341,24 @@ function readLines (f, state, budget, onLine) {
 
 // --- Claude -------------------------------------------------------------------
 
-function bucketAdd (agentCache, day, key, vals) {
-  const byDay = agentCache.buckets[day] || (agentCache.buckets[day] = {})
+function addTo (store, day, key, vals) {
+  const byDay = store[day] || (store[day] = {})
   const b = byDay[key] || (byDay[key] = [0, 0, 0, 0, 0, 0])
   for (let i = 0; i < vals.length; i++) b[i] += vals[i]
+}
+
+// One counted message (or the rest of its output): into its hour's bucket
+// and its session's.
+function bucketAdd (agentCache, at, vals) {
+  addTo(agentCache.buckets, at.day, at.key, vals)
+  addTo(agentCache.sessions, at.day, at.skey, vals)
+}
+
+// Where a message at ts is counted.
+function place (ctx, ts, project, model, speed, session) {
+  const d = new Date(ts)
+  const rest = `${project}\t${model}\t${speed}\t${accountAt(ctx.cache.accountLog, ts)}`
+  return { day: localDate(ts), key: `${pad(d.getHours())}\t${rest}`, skey: `${String(session || '').slice(0, 8)}\t${rest}` }
 }
 
 const n0 = v => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
@@ -295,7 +384,7 @@ function claudeLineHandler (ctx, fileState) {
     if (last && last.h === h) {
       // The next content block of the message just counted.
       if (out > last.out) {
-        bucketAdd(cache.claude, last.day, last.key, [0, out - last.out])
+        bucketAdd(cache.claude, last.at, [0, out - last.out])
         last.out = out
       }
       return
@@ -306,9 +395,9 @@ function claudeLineHandler (ctx, fileState) {
     const cw = n0(u.cache_creation_input_tokens)
     const cw1h = Math.min(cw, n0(u.cache_creation && u.cache_creation.ephemeral_1h_input_tokens))
     const speed = u.speed === 'fast' ? 'fast' : ''
-    const key = `${projectOf(o.cwd)}\t${m.model}\t${speed}`
-    bucketAdd(cache.claude, day, key, [n0(u.input_tokens), out, cw - cw1h, cw1h, n0(u.cache_read_input_tokens), 1])
-    fileState.last = { h, out, day, key }
+    const at = place(ctx, ts, projectOf(o.cwd), m.model, speed, o.sessionId)
+    bucketAdd(cache.claude, at, [n0(u.input_tokens), out, cw - cw1h, cw1h, n0(u.cache_read_input_tokens), 1])
+    fileState.last = { h, out, at }
   }
 }
 
@@ -338,6 +427,7 @@ function codexLineHandler (ctx, fileState) {
     const p = o && o.payload
     if (!p || typeof p !== 'object') return
     if (o.type === 'session_meta' || o.type === 'turn_context') {
+      if (o.type === 'session_meta' && typeof p.id === 'string') fileState.session = p.id
       if (typeof p.cwd === 'string') fileState.cwd = p.cwd
       if (typeof p.model === 'string') fileState.model = p.model
       return
@@ -360,8 +450,8 @@ function codexLineHandler (ctx, fileState) {
     const dCached = now.cached - prev.cached
     const dOut = now.out - prev.out
     if (ts < cutoffMs || (dIn <= 0 && dOut <= 0)) return
-    const key = `${projectOf(fileState.cwd)}\t${fileState.model || 'unknown'}\t`
-    bucketAdd(cache.codex, localDate(ts), key, [Math.max(0, dIn - dCached), dOut, 0, 0, dCached, 1])
+    const at = place(ctx, ts, projectOf(fileState.cwd), fileState.model || 'unknown', '', fileState.session)
+    bucketAdd(cache.codex, at, [Math.max(0, dIn - dCached), dOut, 0, 0, dCached, 1])
   }
 }
 
@@ -447,37 +537,72 @@ function addTotals (t, row) {
 
 const round6 = v => (v === null ? null : Math.round(v * 1e6) / 1e6)
 
-function report (agent, agentCache, from, today, unpriced) {
+function rowOf (agent, fields, b, unpriced) {
+  const [project, model, speed, account] = fields
+  const cost = pricing.costUsd(agent, model, { input: b[IN], output: b[OUT], cacheWrite5m: b[CW5], cacheWrite1h: b[CW1H], cacheRead: b[CR] }, speed)
+  if (cost === null) unpriced.add(model)
+  const row = {
+    project,
+    model,
+    input: b[IN],
+    output: b[OUT],
+    cacheWrite: b[CW5] + b[CW1H],
+    cacheRead: b[CR],
+    messages: b[MSGS],
+    costUsd: round6(cost)
+  }
+  if (speed) row.speed = speed
+  if (account) row.account = account
+  return row
+}
+
+const byCost = (a, b) => (a.date === b.date ? (b.costUsd || 0) - (a.costUsd || 0) : a.date < b.date ? -1 : 1)
+
+// Rows from `from` to `to`: one per day, project, model, speed and account,
+// or also per hour (opts.hourly; history days have none). opts.sessions
+// adds bySession: one row per day, session, project, model, speed and
+// account (days of the last RETENTION_DAYS only).
+function report (agent, agentCache, days, range, opts, unpriced) {
+  const { from, to, today } = range
   const rows = []
-  const range = totalsOf()
+  const totals = totalsOf()
   const todayTotals = totalsOf()
-  for (const day of Object.keys(agentCache.buckets).sort()) {
-    if (day < from || day > today) continue
-    for (const [key, b] of Object.entries(agentCache.buckets[day])) {
-      const [project, model, speed] = key.split('\t')
-      const cost = pricing.costUsd(agent, model, { input: b[IN], output: b[OUT], cacheWrite5m: b[CW5], cacheWrite1h: b[CW1H], cacheRead: b[CR] }, speed)
-      if (cost === null) unpriced.add(model)
-      const row = {
-        date: day,
-        project,
-        model,
-        input: b[IN],
-        output: b[OUT],
-        cacheWrite: b[CW5] + b[CW1H],
-        cacheRead: b[CR],
-        messages: b[MSGS],
-        costUsd: round6(cost)
-      }
-      if (speed) row.speed = speed
-      rows.push(row)
-      addTotals(range, row)
+  for (const day of Object.keys(days).sort()) {
+    const inRange = day >= from && day <= to
+    if (!inRange && day !== today) continue
+    const sums = new Map()
+    for (const [key, b] of Object.entries(days[day])) {
+      const tab = key.indexOf('\t')
+      const k = opts.hourly ? key : key.slice(tab + 1)
+      const sum = sums.get(k)
+      if (sum) for (let i = 0; i < 6; i++) sum[i] += b[i] || 0
+      else sums.set(k, b.slice(0, 6))
+    }
+    for (const [key, b] of sums) {
+      const fields = key.split('\t')
+      const hour = opts.hourly ? fields.shift() : ''
+      const row = { date: day, ...rowOf(agent, fields, b, unpriced) }
+      if (hour) row.hour = Number(hour)
+      if (inRange) { rows.push(row); addTotals(totals, row) }
       if (day === today) addTotals(todayTotals, row)
     }
   }
-  range.costUsd = round6(range.costUsd)
+  totals.costUsd = round6(totals.costUsd)
   todayTotals.costUsd = round6(todayTotals.costUsd)
-  rows.sort((a, b) => (a.date === b.date ? (b.costUsd || 0) - (a.costUsd || 0) : a.date < b.date ? -1 : 1))
-  return { today: todayTotals, range, rows }
+  rows.sort((a, b) => byCost(a, b) || (a.hour ?? -1) - (b.hour ?? -1))
+  const out = { today: todayTotals, range: totals, rows }
+  if (opts.sessions) {
+    const bySession = []
+    for (const day of Object.keys(agentCache.sessions || {}).sort()) {
+      if (day < from || day > to) continue
+      for (const [key, b] of Object.entries(agentCache.sessions[day])) {
+        const [session, ...fields] = key.split('\t')
+        bySession.push({ date: day, session, ...rowOf(agent, fields, b, unpriced) })
+      }
+    }
+    out.bySession = bySession.sort(byCost)
+  }
+  return out
 }
 
 // Context use of live sessions, from the daemon's agents.
@@ -500,9 +625,30 @@ function sessionsOf (agents, projectOf) {
   return out
 }
 
-// opts: { days, since (ms), maxBytes, maxMs, now, env, cacheFile, agents,
-//         machine, startedAt (ms: when maxMs starts counting, e.g. the
-//         process start, so startup and the file walk count too) }
+// The dates to answer for: --from/--to (or --day) win over --since, which
+// wins over --days; clamped to the days kept and to today.
+function rangeOf (opts, today, historyFrom) {
+  let to = today
+  let from
+  if (opts.from || opts.to) {
+    to = opts.to || today
+    from = opts.from || addDays(to, -(Math.max(1, Math.min(HISTORY_DAYS, opts.days || DEFAULT_DAYS)) - 1))
+  } else if (Number.isFinite(opts.since)) {
+    from = localDate(opts.since)
+  } else {
+    from = addDays(today, -(Math.max(1, Math.min(HISTORY_DAYS, opts.days || DEFAULT_DAYS)) - 1))
+  }
+  if (to > today) to = today
+  if (from < historyFrom) from = historyFrom
+  if (from > to) from = to
+  return { from, to, today }
+}
+
+// opts: { days, since (ms), from, to (YYYY-MM-DD), hourly, sessions,
+//         activeAccount (the cswap account active now), maxBytes, maxMs,
+//         now, env, cacheFile, agents, machine, startedAt (ms: when maxMs
+//         starts counting, e.g. the process start, so startup and the file
+//         walk count too) }
 function compute (opts = {}) {
   const started = opts.startedAt || Date.now()
   const env = opts.env || process.env
@@ -510,9 +656,8 @@ function compute (opts = {}) {
   const home = env.HOME || os.homedir()
   const today = localDate(now)
   const retentionFrom = addDays(today, -(RETENTION_DAYS - 1))
-  let from = addDays(today, -(Math.max(1, Math.min(RETENTION_DAYS, opts.days || DEFAULT_DAYS)) - 1))
-  if (Number.isFinite(opts.since)) from = localDate(Math.max(opts.since, new Date(retentionFrom + 'T00:00:00').getTime()))
-  if (from > today) from = today
+  const historyFrom = addDays(today, -(HISTORY_DAYS - 1))
+  const range = rangeOf(opts, today, historyFrom)
   const cutoffMs = new Date(`${retentionFrom}T00:00:00`).getTime()
 
   const cacheFile = opts.cacheFile
@@ -537,10 +682,14 @@ function compute (opts = {}) {
   const busy = unlock === null
   if (!busy) {
     try {
+      noteAccount(cache, opts.activeAccount, now)
       const ctx = { cache, projectOf, cutoffMs, budget, stats }
       if (claudePresent) scanAgent('claude', [claudeDir], ctx)
       if (codexDirs.length) scanAgent('codex', codexDirs, ctx)
-      prune(cache, retentionFrom)
+      // The rescan after an upgrade is done: answer from it.
+      if (cache.legacy && !budget.partial && !stats.pendingFiles) delete cache.legacy
+      prune(cache, retentionFrom, historyFrom)
+      if (cache.legacy) for (const agent of ['claude', 'codex']) for (const day of Object.keys(cache.legacy[agent] || {})) if (day < historyFrom) delete cache.legacy[agent][day]
       cache.limits.claude = mergeLimits([cache.limits.claude, ...(opts.agents || []).map(a => a && a.usage && a.usage.limits)])
       if (cacheFile) saveCache(cacheFile, cache)
     } finally {
@@ -551,14 +700,17 @@ function compute (opts = {}) {
   }
 
   const unpriced = new Set()
+  const legacy = cache.legacy
+  const detail = { hourly: !!opts.hourly && !legacy, sessions: !!opts.sessions && !legacy }
+  const daysOf = agent => (legacy ? legacy[agent] || {} : cache[agent].buckets)
   const claude = {
     present: claudePresent,
     limits: publicLimits(cache.limits.claude, now),
     sessions: sessionsOf(opts.agents, projectOf),
-    ...report('claude', cache.claude, from, today, unpriced)
+    ...report('claude', cache.claude, daysOf('claude'), range, detail, unpriced)
   }
   const codex = codexDirs.length
-    ? { present: true, limits: publicLimits(cache.limits.codex, now), ...report('codex', cache.codex, from, today, unpriced) }
+    ? { present: true, limits: publicLimits(cache.limits.codex, now), ...report('codex', cache.codex, daysOf('codex'), range, detail, unpriced) }
     : { present: false }
   let cacheBytes = null
   try { cacheBytes = fs.statSync(cacheFile).size } catch {}
@@ -567,8 +719,16 @@ function compute (opts = {}) {
     machine: opts.machine || os.hostname(),
     generatedAt: now,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+    utcOffsetMin: -new Date(now).getTimezoneOffset(),
     today,
-    from,
+    from: range.from,
+    to: range.to,
+    // Rows carry `hour`, and bySession is there, when asked for and known:
+    // not while the cache is being rebuilt after an upgrade.
+    hourly: detail.hourly,
+    // Hours and sessions exist from detailFrom, daily sums from historyFrom.
+    detailFrom: legacy ? null : retentionFrom,
+    historyFrom,
     claude,
     codex,
     pricing: {
@@ -586,9 +746,10 @@ function compute (opts = {}) {
       partial: budget.partial,
       pendingFiles: stats.pendingFiles,
       busy,
+      rebuilding: !!legacy,
       cacheBytes
     }
   }
 }
 
-module.exports = { compute, localDate, addDays, resolveProject, mergeLimits, fresher, RETENTION_DAYS, SCHEMA }
+module.exports = { compute, localDate, addDays, resolveProject, mergeLimits, fresher, accountAt, DATE_RE, RETENTION_DAYS, HISTORY_DAYS, SCHEMA }

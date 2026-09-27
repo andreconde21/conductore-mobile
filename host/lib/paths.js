@@ -15,7 +15,7 @@ const os = require('os')
 const path = require('path')
 
 const PROTOCOL_VERSION = 1
-const VERSION = '0.8.1'
+const VERSION = '1.0.0'
 
 // V8 flags the daemon runs with (measured in README "Footprint"). It holds a
 // few hundred KB of state, but a burst of changes while long permission
@@ -106,5 +106,11 @@ module.exports = {
   // `ports`: listening ports with the seq each first appeared at.
   portsPath: () => path.join(homeDir(), 'ports.json'),
   // `usage`: per-file offsets and daily token buckets of the transcripts.
-  usageCachePath: () => path.join(homeDir(), 'usage-cache.json')
+  usageCachePath: () => path.join(homeDir(), 'usage-cache.json'),
+  // The daemon's per-agent activity log (what `digest` counts).
+  activityPath: () => path.join(homeDir(), 'activity.json'),
+  // `digest --summaries`: rolling summary per agent and its token use.
+  digestPath: () => path.join(homeDir(), 'digest.json'),
+  // Per-turn snapshot records (`turns`, `diff`, `undo`).
+  turnsPath: () => path.join(homeDir(), 'turns.json')
 }

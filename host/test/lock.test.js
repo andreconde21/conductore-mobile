@@ -6,14 +6,14 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { spawn, execFile } = require('child_process')
 const proc = require('../lib/proc')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lock-'))
+const home = tempDir('cnd-lock-')
 const env = { ...process.env, CONDUCTORE_HOME: home, CONDUCTORE_SOCKET: path.join(home, 'hostd.sock') }
 for (const k of Object.keys(env)) if (/^(TMUX|HERDR_)/.test(k)) delete env[k]
 
@@ -77,7 +77,7 @@ test('daemons starting together over a stale lock: one runs and the lock names i
   // once read the winner's lock while it was still empty, took it over and,
   // finding the socket served, removed it: a daemon ran with no hostd.pid.
   for (let round = 0; round < 5; round++) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lockr-'))
+    const dir = tempDir('cnd-lockr-')
     const renv = { ...env, CONDUCTORE_HOME: dir, CONDUCTORE_SOCKET: path.join(dir, 'hostd.sock') }
     const squatter = spawn('sleep', ['60'], { stdio: 'ignore' })
     const daemons = []
@@ -109,6 +109,5 @@ test('daemons starting together over a stale lock: one runs and the lock names i
 
 test.after(async () => {
   await cli('stop').catch(() => {})
-  await sleep(200)
-  fs.rmSync(home, { recursive: true, force: true })
+  await cleanup()
 })

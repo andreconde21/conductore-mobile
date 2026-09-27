@@ -107,6 +107,13 @@ void main() {
     expect(controller.url, Uri.parse('http://127.0.0.1:40000/about?x=1'));
   });
 
+  test('a WebView report after the tab closed is ignored', () async {
+    await controller.start(3000);
+    controller.dispose();
+    // A disposed ChangeNotifier asserts when it notifies.
+    expect(() => controller.setPath('/late'), returnsNormally);
+  });
+
   test('a refused port fails with the forwarder message', () async {
     forwarder.refused.add(9999);
     await controller.start(9999);

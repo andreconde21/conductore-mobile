@@ -8,13 +8,13 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { execFile } = require('child_process')
 const gm = require('../lib/guide')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-guide-'))
+const root = tempDir('cnd-guide-')
 const binDir = path.join(root, 'bin')
 const home = path.join(root, 'home')
 const record = path.join(root, 'record.json')
@@ -197,4 +197,4 @@ test('normalizeAction on its own', () => {
   assert.deepEqual([...gm.contextIds(CONTEXT)].sort(), ['a1', 'm1', 'p1', 'r1'])
 })
 
-test.after(() => fs.rmSync(root, { recursive: true, force: true }))
+test.after(() => cleanup())

@@ -77,6 +77,8 @@ header() {
   if [ -n "${HERDR_WORKSPACE_ID:-}${HERDR_PANE_ID:-}" ]; then
     printf 'herdr_workspace=%s\nherdr_tab=%s\nherdr_pane=%s\nherdr_name=%s\n' \
       "${HERDR_WORKSPACE_ID:-}" "${HERDR_TAB_ID:-}" "${HERDR_PANE_ID:-}" "${HERDR_AGENT_NAME:-}"
+    # The agent's own Herdr server (a named session has its own socket).
+    if [ -n "${HERDR_SOCKET_PATH:-}" ]; then printf 'herdr_socket=%s\n' "$HERDR_SOCKET_PATH"; fi
   fi
 }
 

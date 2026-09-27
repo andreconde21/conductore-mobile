@@ -9,6 +9,8 @@ import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/review/data/review_client.dart';
+import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_launcher.dart';
@@ -273,6 +275,13 @@ class AppGuideNavigator implements GuideNavigator {
     if (navigator == null) return GuideScreen.home;
     final top = topRouteOf(navigator);
     if (top == null) return GuideScreen.home;
+    if (reviewRouteTarget(top) case final target?) {
+      return GuideScreen(
+        GuideView.other,
+        hostId: baseHostId(target.hostId),
+        agentId: target.agentId,
+      );
+    }
     if (chatRouteTarget(top) case final target?) {
       return GuideScreen(
         GuideView.chat,
@@ -375,6 +384,88 @@ class AppGuideNavigator implements GuideNavigator {
     flow.terminalRequests.value += 1;
     return true;
   }
+}
+
+/// Review and "undo that" for the guide, through the companion's turn
+/// snapshots on the agent's machine (the same calls as the Review page).
+class AppGuideReviewer implements GuideReviewer {
+  AppGuideReviewer({required this.navigatorKey, required this.attention});
+
+  final GlobalKey<NavigatorState> navigatorKey;
+  final AgentAttentionController attention;
+
+  SavedHost? _host(GuideAgent agent) =>
+      monitoredHostFor(attention, agent.hostId);
+
+  @override
+  bool canReview(GuideAgent agent) {
+    final host = _host(agent);
+    return host != null && !agent.ended && reviewAvailable(attention, host);
+  }
+
+  @override
+  bool canUndo(GuideAgent agent) {
+    final host = _host(agent);
+    return host != null && attention.supportsSnapshots(host.id);
+  }
+
+  @override
+  Future<bool> review(GuideAgent agent) async {
+    final host = _host(agent);
+    final navigator = navigatorKey.currentState;
+    if (host == null || navigator == null) return false;
+    final top = topRouteOf(navigator);
+    final showing = top == null ? null : reviewRouteTarget(top);
+    if (showing != null &&
+        showing.hostId == host.id &&
+        showing.agentId == agent.id) {
+      return true;
+    }
+    final context = navigator.overlay?.context;
+    if (context == null || !context.mounted) return false;
+    unawaited(
+      openReview(
+        context: context,
+        attention: attention,
+        host: host,
+        agent: agent.info,
+      ),
+    );
+    return true;
+  }
+
+  Future<T> _withClient<T>(
+    GuideAgent agent,
+    Future<T> Function(ConductoreReviewClient client) body,
+  ) async {
+    final host = _host(agent);
+    if (host == null) throw StateError('That machine is not connected.');
+    final (runner, :owned) = attention.runnerFor(host);
+    try {
+      return await body(ConductoreReviewClient(runner));
+    } finally {
+      if (owned) unawaited(runner.close());
+    }
+  }
+
+  @override
+  Future<GuideTurnPreview?> lastTurn(GuideAgent agent) =>
+      _withClient(agent, (client) async {
+        final turn = (await client.turns(agent.id)).latest;
+        if (turn == null) return null;
+        final dry = await client.undo(agent.id, turn.turn, dryRun: true);
+        return GuideTurnPreview(
+          turn: turn.turn,
+          files: dry.restored.length,
+          prompt: turn.prompt,
+        );
+      });
+
+  @override
+  Future<int> undo(GuideAgent agent, int turn) => _withClient(
+    agent,
+    (client) async => (await client.undo(agent.id, turn)).restored.length,
+  );
 }
 
 /// Makes the guide reachable from the pages that start it (the home bar,

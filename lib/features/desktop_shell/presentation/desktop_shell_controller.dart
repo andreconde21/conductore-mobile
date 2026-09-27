@@ -66,6 +66,8 @@ class DesktopShellController extends ChangeNotifier {
   double _rightPanelWidth = 360;
   SidebarPrefs _prefs = const SidebarPrefs();
   bool _showHome = false;
+  bool _showUsage = false;
+  String? _usageDay;
   String _filter = '';
   bool _layoutHeld = true;
   bool _loaded = false;
@@ -118,6 +120,12 @@ class DesktopShellController extends ChangeNotifier {
 
   /// The dashboard is on screen although views are open ("Home").
   bool get showHome => _showHome;
+
+  /// The usage explorer fills the main area (not saved).
+  bool get showUsage => _showUsage;
+
+  /// The day the explorer opened at (the Usage tab's chart), once.
+  String? get usageDay => _usageDay;
 
   /// The sidebar's filter text (not saved).
   String get filter => _filter;
@@ -236,9 +244,19 @@ class DesktopShellController extends ChangeNotifier {
     _changed();
   }
 
+  /// Showing home or a terminal also leaves the usage explorer.
   set showHome(bool value) {
-    if (value == _showHome || _disposed) return;
+    if ((value == _showHome && !_showUsage) || _disposed) return;
     _showHome = value;
+    _showUsage = false;
+    notifyListeners();
+  }
+
+  /// Opens the usage explorer in the main area (at [day]), or closes it.
+  void setShowUsage(bool value, {String? day}) {
+    if (_disposed || (value == _showUsage && day == _usageDay)) return;
+    _showUsage = value;
+    _usageDay = value ? day : null;
     notifyListeners();
   }
 

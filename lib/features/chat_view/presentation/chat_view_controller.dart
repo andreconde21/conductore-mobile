@@ -7,6 +7,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
 import 'package:conduit/features/voice/domain/speech_summary.dart';
 import 'package:flutter/foundation.dart';
@@ -41,6 +42,10 @@ extension ChatActivityLabel on ChatActivity {
 /// change). The first load reads only the transcript's tail; [loadOlder]
 /// pages backwards on demand. Prompts are typed into the live session with
 /// `send`, so the TUI and the chat always show the same conversation.
+///
+/// A prompt sent from here shows at once as an [outgoing] bubble (sending,
+/// sent, failed) and is replaced by the transcript's own entry when a poll
+/// brings it. Sends go out one at a time, in order.
 class ChatViewController extends ChangeNotifier {
   ChatViewController({
     required AgentCommandRunner runner,
@@ -52,7 +57,10 @@ class ChatViewController extends ChangeNotifier {
     Duration pollInterval = const Duration(milliseconds: 1500),
     Duration? workingPollInterval,
     int tailBytes = ConductoreChatClient.defaultTailBytes,
+    this.lateAfter = const Duration(minutes: 2),
+    DateTime Function()? clock,
   }) : _runner = runner,
+       _clock = clock ?? DateTime.now,
        _client = ConductoreChatClient(runner),
        _decide = decide,
        _agentChanges = agentChanges,
@@ -66,6 +74,11 @@ class ChatViewController extends ChangeNotifier {
   }
 
   final String sessionId;
+
+  /// How long a sent prompt may stay out of the transcript before its
+  /// bubble says so.
+  final Duration lateAfter;
+  final DateTime Function() _clock;
 
   /// Name to show before the first reply arrives.
   final String? fallbackName;
@@ -101,6 +114,18 @@ class ChatViewController extends ChangeNotifier {
   ChatAgentStatus? _agent;
   final Set<String> _deciding = {};
 
+  final List<_Outgoing> _outgoing = [];
+  int _outgoingCount = 0;
+  Future<void> _sendQueue = Future.value();
+
+  /// Confirmed bubbles kept (a thread frozen above the real entry still
+  /// shows them).
+  static const _keptConfirmed = 10;
+
+  /// A transcript entry older than this before a send cannot be it (for
+  /// when the send had nothing in the thread to anchor to).
+  static const _clockSkew = Duration(minutes: 10);
+
   Timer? _timer;
   Future<void>? _inFlight;
   bool _pollAgain = false;
@@ -108,6 +133,35 @@ class ChatViewController extends ChangeNotifier {
   bool _disposed = false;
 
   List<ChatItem> get items => _items;
+
+  /// Prompts and answers sent from this view, oldest first: pending ones
+  /// (sending, sent, failed) and the last few confirmed ones.
+  List<ChatOutgoing> get outgoing {
+    final now = _clock();
+    return [
+      for (final o in _outgoing)
+        ChatOutgoing(
+          id: o.id,
+          text: o.shown,
+          state: o.state,
+          error: o.error,
+          answer: o.questionId != null,
+          confirmedId: o.confirmedId,
+          late:
+              o.confirmedId == null &&
+              o.state == ChatSendState.sent &&
+              now.difference(o.sentAt!) >= lateAfter,
+        ),
+    ];
+  }
+
+  /// Whether an answer to question [questionId] is on its way.
+  bool isAnswering(String questionId) => _outgoing.any(
+    (o) =>
+        o.questionId == questionId &&
+        o.confirmedId == null &&
+        o.state != ChatSendState.failed,
+  );
   ChatAgentStatus? get agent => _agent;
   bool get loading => _loading;
   bool get loadingOlder => _loadingOlder;
@@ -269,6 +323,7 @@ class ChatViewController extends ChangeNotifier {
         }
         if (grew) {
           _items = ChatItemBuilder.build(_entries);
+          _confirmOutgoing();
         }
         _error = null;
         _loading = false;
@@ -328,12 +383,171 @@ class ChatViewController extends ChangeNotifier {
     }
   }
 
-  /// Types [text] into the session and presses Enter. Throws an
-  /// [AppFailure] the view shows; the text is then kept by the composer.
-  Future<void> send(String text, {bool enter = true}) async {
-    if (text.trim().isEmpty && enter) {
+  /// Types [text] into the session and presses Enter, showing it at once
+  /// as an [outgoing] bubble. Sends queue up and go out in order. Throws an
+  /// [AppFailure] when it could not be sent; the bubble then shows the
+  /// failure with the text kept for [retry] or [discard].
+  ///
+  /// With [enter] false the text is only typed (no bubble: nothing was
+  /// submitted).
+  Future<void> send(String text, {bool enter = true}) {
+    if (!enter) {
+      return _type(text, enter: false);
+    }
+    if (text.trim().isEmpty) {
+      return Future.value();
+    }
+    return _queue(_Outgoing(_nextOutgoingId(), text, _snapshot()));
+  }
+
+  /// Sends a failed message again, as a new bubble at the bottom.
+  Future<void> retry(String outgoingId) {
+    final index = _outgoing.indexWhere(
+      (o) => o.id == outgoingId && o.state == ChatSendState.failed,
+    );
+    if (index == -1) {
+      return Future.value();
+    }
+    final old = _outgoing.removeAt(index);
+    if (old.questionId != null) {
+      return answerQuestion(old.number!, label: old.label);
+    }
+    return send(old.text);
+  }
+
+  /// Drops a failed message and returns its text (for editing), or null.
+  String? discard(String outgoingId) {
+    final index = _outgoing.indexWhere(
+      (o) => o.id == outgoingId && o.state == ChatSendState.failed,
+    );
+    if (index == -1) {
+      return null;
+    }
+    final old = _outgoing.removeAt(index);
+    notifyListeners();
+    return old.questionId != null ? null : old.text;
+  }
+
+  String _nextOutgoingId() => 'outgoing-${_outgoingCount++}';
+
+  /// What the thread holds now, to tell a new entry from an old one.
+  _Snapshot _snapshot() => _Snapshot(
+    anchor: _items.lastOrNull?.id,
+    known: {for (final item in _items) item.id},
+    at: _clock(),
+  );
+
+  Future<void> _queue(_Outgoing outgoing) {
+    _outgoing.add(outgoing);
+    notifyListeners();
+    final done = Completer<void>();
+    // Keep the chain alive past a failure.
+    _sendQueue = _sendQueue.then((_) async {
+      if (outgoing.state == ChatSendState.failed) {
+        // An earlier message failed: this one was not typed either.
+        done.completeError(AppFailure(outgoing.error!));
+        return;
+      }
+      try {
+        await _client.send(sessionId, outgoing.text, enter: outgoing.enter);
+        outgoing
+          ..state = ChatSendState.sent
+          ..sentAt = _clock();
+        done.complete();
+        if (!_disposed) {
+          notifyListeners();
+          unawaited(refresh());
+        }
+      } catch (error) {
+        final failure = switch (error) {
+          ChatUnsupported(:final message) => AppFailure(message),
+          AppFailure() => error,
+          _ => AppFailure(_describe(error)),
+        };
+        _fail(outgoing, failure.userMessage);
+        done.completeError(failure);
+      }
+    });
+    return done.future;
+  }
+
+  /// Marks [outgoing] failed, and every send queued behind it: typing
+  /// those now would put them before it.
+  void _fail(_Outgoing outgoing, String error) {
+    outgoing
+      ..state = ChatSendState.failed
+      ..error = error;
+    final index = _outgoing.indexOf(outgoing);
+    for (final later in _outgoing.skip(index + 1)) {
+      if (later.state == ChatSendState.sending) {
+        later
+          ..state = ChatSendState.failed
+          ..error = 'Not sent: the message before it failed.';
+      }
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Pairs pending bubbles with the transcript entries that show them, in
+  /// send order, each entry used once.
+  void _confirmOutgoing() {
+    if (_outgoing.isEmpty) {
       return;
     }
+    final claimed = {for (final o in _outgoing) ?o.confirmedId};
+    // Failed ones too: a send that timed out may have been typed after all.
+    for (final o in _outgoing) {
+      if (o.confirmedId != null) {
+        continue;
+      }
+      final questionId = o.questionId;
+      if (questionId != null) {
+        final question = _items.where((item) => item.id == questionId);
+        if (question.isEmpty ||
+            question.first is ChatQuestion &&
+                (question.first as ChatQuestion).answered) {
+          o.confirmedId = questionId;
+        }
+        continue;
+      }
+      var from = 0;
+      final anchor = o.before.anchor;
+      if (anchor != null) {
+        from = _items.indexWhere((item) => item.id == anchor) + 1;
+      }
+      for (var i = from; i < _items.length; i++) {
+        final item = _items[i];
+        if (claimed.contains(item.id) || o.before.known.contains(item.id)) {
+          continue;
+        }
+        if (from == 0 && _tooOld(item, o.before.at)) {
+          continue;
+        }
+        if (ChatOutgoingMatch.matches(o.text, item)) {
+          o.confirmedId = item.id;
+          claimed.add(item.id);
+          break;
+        }
+      }
+    }
+    // Keep only the last few confirmed ones.
+    var confirmed = _outgoing.where((o) => o.confirmedId != null).length;
+    _outgoing.removeWhere(
+      (o) => o.confirmedId != null && confirmed-- > _keptConfirmed,
+    );
+  }
+
+  static bool _tooOld(ChatItem item, DateTime sentAt) {
+    final at = switch (item) {
+      ChatUserMessage(:final timestamp) => timestamp,
+      ChatShellCommand(:final timestamp) => timestamp,
+      _ => null,
+    };
+    return at != null && at.isBefore(sentAt.toUtc().subtract(_clockSkew));
+  }
+
+  /// Types [text] without a bubble (a partial prompt, a menu key).
+  Future<void> _type(String text, {required bool enter}) async {
     _sending = true;
     notifyListeners();
     try {
@@ -370,8 +584,26 @@ class ChatViewController extends ChangeNotifier {
   }
 
   /// Picks option [number] (1-based) of an open AskUserQuestion prompt by
-  /// typing its number, as the terminal's menu accepts.
-  Future<void> answerQuestion(int number) => send('$number', enter: false);
+  /// typing its number, as the terminal's menu accepts. When the thread
+  /// shows the open question, the answer shows at once as an [outgoing]
+  /// bubble ([label]: the option's text) until the question is answered.
+  Future<void> answerQuestion(int number, {String? label}) {
+    final question = _items.lastOrNull;
+    if (question is! ChatQuestion || question.answered) {
+      return _type('$number', enter: false);
+    }
+    return _queue(
+      _Outgoing(
+        _nextOutgoingId(),
+        '$number',
+        _snapshot(),
+        enter: false,
+        questionId: question.id,
+        number: number,
+        label: label,
+      ),
+    );
+  }
 
   Future<void> decide(
     PendingPermissionRequest request,
@@ -433,4 +665,47 @@ class ChatViewController extends ChangeNotifier {
     }
     super.dispose();
   }
+}
+
+/// The thread when a message was sent.
+class _Snapshot {
+  const _Snapshot({
+    required this.anchor,
+    required this.known,
+    required this.at,
+  });
+
+  /// The last item then; the message's entry can only come after it.
+  final String? anchor;
+  final Set<String> known;
+  final DateTime at;
+}
+
+class _Outgoing {
+  _Outgoing(
+    this.id,
+    this.text,
+    this.before, {
+    this.enter = true,
+    this.questionId,
+    this.number,
+    this.label,
+  });
+
+  final String id;
+  final String text;
+  final _Snapshot before;
+  final bool enter;
+
+  /// For an answer: the question, the option picked and its label.
+  final String? questionId;
+  final int? number;
+  final String? label;
+
+  ChatSendState state = ChatSendState.sending;
+  DateTime? sentAt;
+  String? error;
+  String? confirmedId;
+
+  String get shown => label == null ? text : '$number. $label';
 }

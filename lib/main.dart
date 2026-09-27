@@ -21,6 +21,8 @@ import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.d
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
+import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/data/secure_app_lock_preferences.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
@@ -29,8 +31,10 @@ import 'package:conduit/features/app_lock/presentation/lock_page.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
+import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
+import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
 import 'package:conduit/features/hosts/data/secure_saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
@@ -216,12 +220,33 @@ void main() {
     preferences: const SecureUsagePreferencesStore(secureStorage),
     notifier: const PlatformAgentAttentionNotifier(),
   );
+  // The agents dashboard (companion `digest`): facts, stuck flags and
+  // Claude summaries per agent, asked only while it is on screen.
+  final digest = DigestController(
+    source: AttentionDigestHostSource(
+      attention: agentAttention,
+      hosts: hostsController,
+    ),
+    preferences: const SecureDigestPreferencesStore(secureStorage),
+    language: () {
+      final own = themeController.voice.guide.language;
+      final speech = own.isNotEmpty ? own : themeController.speechLanguage;
+      return speech.isNotEmpty
+          ? speech
+          : WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+    },
+  );
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
   addTelemetryTerms(() => usage.summary.accountTerms);
+  // The widget's dashboard counts read the digest's cached answers only;
+  // its colours follow the app theme.
   AgentStatusWidgetPusher.forController(
     agentAttention,
     usage: usage,
+    digest: digest,
+    theme: () => AgentStatusTheme.fromPalette(themeController.palette),
+    themeChanges: themeController,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();
   const fileExport = FilePickerFileExport();
@@ -417,7 +442,12 @@ void main() {
         runnerFor: agentAttention.runnerFor,
       ),
       usage: (code) => guideUsageText(usage.summary, code),
+      catchUp: digest.catchUp,
       accounts: UsageGuideAccounts(usage),
+      reviewer: AppGuideReviewer(
+        navigatorKey: navigatorKey,
+        attention: agentAttention,
+      ),
       locked: () => !lockController.isUnlocked,
     );
   }
@@ -430,6 +460,7 @@ void main() {
     hostsController: hostsController,
     hostKeyVerifier: hostKeyVerifier,
     agentAttention: agentAttention,
+    digest: digest,
     appLock: PlatformFeatures.appLock ? lockController : null,
     onLockNow: () async {
       // Locking closes every session; unlocking brings them back.
@@ -453,29 +484,32 @@ void main() {
               agentAttention: agentAttention,
               child: UsageScope(
                 controller: usage,
-                child: ConduitApp(
-                  themeController: themeController,
-                  lockController: lockController,
-                  hostsController: hostsController,
-                  terminalRepository: terminalRepository,
-                  workspaceController: workspaceController,
-                  localShellController: localShellController,
-                  hostKeyVerifier: hostKeyVerifier,
-                  promptCoordinator: promptCoordinator,
-                  sftpRepository: sftpRepository,
-                  sftpBookmarksRepository: sftpBookmarksRepository,
-                  agentAttention: agentAttention,
-                  backupService: backupService,
-                  fileExport: fileExport,
-                  connectFlow: connectFlow,
-                  shareTarget: shareTarget,
-                  sessionRestore: sessionRestore,
-                  localDataChanges: localDataChanges,
-                  hostChannels: hostChannels,
-                  navigatorKey: navigatorKey,
-                  voice: voice,
-                  guide: guide,
-                  guideWake: guide == null ? null : GuideWakeChannel(),
+                child: DigestScope(
+                  controller: digest,
+                  child: ConduitApp(
+                    themeController: themeController,
+                    lockController: lockController,
+                    hostsController: hostsController,
+                    terminalRepository: terminalRepository,
+                    workspaceController: workspaceController,
+                    localShellController: localShellController,
+                    hostKeyVerifier: hostKeyVerifier,
+                    promptCoordinator: promptCoordinator,
+                    sftpRepository: sftpRepository,
+                    sftpBookmarksRepository: sftpBookmarksRepository,
+                    agentAttention: agentAttention,
+                    backupService: backupService,
+                    fileExport: fileExport,
+                    connectFlow: connectFlow,
+                    shareTarget: shareTarget,
+                    sessionRestore: sessionRestore,
+                    localDataChanges: localDataChanges,
+                    hostChannels: hostChannels,
+                    navigatorKey: navigatorKey,
+                    voice: voice,
+                    guide: guide,
+                    guideWake: guide == null ? null : GuideWakeChannel(),
+                  ),
                 ),
               ),
             ),
@@ -689,6 +723,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     if (PlatformFeatures.backgroundKeepalive) {
       unawaited(_backgroundKeepalive.stop().catchError((_) {}));
     }
+    _launchRequests.dispose();
     super.dispose();
   }
 
@@ -739,11 +774,14 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
         return widget.hostsController.findById(hostId);
       },
       onOpen: (host, agent) async {
-        await flow.openAgent(host, agent);
+        await flow.openAgent(host, agent, preferredView: true);
       },
       child: home,
     );
   }
+
+  /// The widget's dashboard and usage taps, for the home page.
+  final _launchRequests = HomeLaunchRequests();
 
   AppPalette? _themedPalette;
   late ThemeData _lightTheme;
@@ -835,6 +873,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 sessionRestore: widget.sessionRestore,
                 localDataChanges: widget.localDataChanges,
                 hostChannels: widget.hostChannels,
+                launchRequests: _launchRequests,
               );
               return _wrapShareTargetHost(
                 AgentStatusLaunchListener(
@@ -843,6 +882,10 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   workspace: widget.workspaceController,
                   connectFlow: widget.connectFlow,
                   onGuide: widget.guide?.start,
+                  onDashboard: () =>
+                      _launchRequests.request(HomeLaunchRequest.dashboard),
+                  onUsage: () =>
+                      _launchRequests.request(HomeLaunchRequest.usage),
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
                     agentAttention: widget.agentAttention,

@@ -22,9 +22,11 @@ const portsMod = lazy('./ports')
 const usageMod = lazy('./usage')
 const summarizeMod = lazy('./summarize')
 const guideMod = lazy('./guide')
+const digestMod = lazy('./digest')
 const cswapMod = lazy('./cswap')
 const rulesMod = lazy('./rules')
 const riskMod = lazy('./risk')
+const reviewMod = lazy('./review')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -60,16 +62,39 @@ const USAGE = `usage: conductore-hostd <command>
   ports [--since <seq>]           TCP ports your own processes listen on
                                   (dev servers), each with the seq it
                                   first appeared at; --since: only newer
-  usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]
+  usage [--days 7] [--since <iso>] [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+        [--day YYYY-MM-DD] [--hourly] [--sessions] [--max-bytes N] [--max-ms N]
                                   Claude Code / Codex limits, context per
                                   session, tokens and estimated cost per
-                                  day, project and model (incremental scan);
-                                  with cswap, every Claude account's limits
+                                  day (--hourly: hour), project and model
+                                  (incremental scan; --sessions: per
+                                  session too); with cswap, every Claude
+                                  account's limits
   cswap-switch <slot> | --best    switch the Claude account for new
                                   sessions (cswap switch)
   summarize [--max-words 45] [--timeout-ms 20000]
                                   a spoken one- or two-sentence summary of
                                   the reply on stdin (claude -p, no tools)
+  digest [--since <ms>] [--summaries] [--max-agents 10] [--max-ms 30000]
+         [--lang en|pt] [--stuck-working-min 30] [--stuck-errors 3]
+         [--stuck-repeats 5] [--stuck-approval-min 60]
+                                  every agent's facts since a time, stuck
+                                  flags, and (--summaries) a short summary of
+                                  the agents that changed (claude -p, no tools)
+  turns <sessionId> [--limit 20]  the session's recent turns: prompt, time,
+                                  files changed, snapshot refs, undo state
+  diff <sessionId> <turn> [--file <path>]... [--max-bytes 1048576]
+       [--max-file-bytes 65536] [--context 3]
+                                  per-file unified diff of one turn (between
+                                  its before and after snapshots)
+  undo <sessionId> <turn> [--file <path>]... [--dry-run] [--keep-commits]
+                                  restore the work tree (or those files) to
+                                  before the turn; snapshots the current
+                                  state first (see redo); never touches
+                                  commits, branches, HEAD or the index
+  redo <sessionId> <turn> [--dry-run]
+                                  put back what the last undo of that turn
+                                  changed
   guide [--timeout-ms 15000]      the voice guide: one action for the
                                   {utterance, context} JSON on stdin
                                   (claude -p, no tools)
@@ -342,7 +367,7 @@ async function transcriptCmd (args) {
   try {
     const a = found.agent
     // The agent's live status rides along so one poll refreshes the whole view.
-    const agent = { name: a.name, state: a.state, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
+    const agent = { name: a.name, state: a.state, lastEvent: a.lastEvent || null, lastToolName: a.lastToolName || null, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
     return out({ sessionId, agent, ...transcriptMod().readTranscript(file, opts) })
   } catch (err) {
     if (err.code === 'ENOENT') return fail(`transcript not found: ${file}`)
@@ -434,6 +459,20 @@ async function usageCmd (args) {
     if (!Number.isFinite(since)) return fail('--since must be an ISO date or time')
     opts.since = since
   }
+  for (const flag of ['from', 'to', 'day']) {
+    if (flags[flag] === undefined) continue
+    if (!usageMod().DATE_RE.test(String(flags[flag])) || !Number.isFinite(Date.parse(flags[flag]))) return fail(`--${flag} must be a date (YYYY-MM-DD)`)
+  }
+  if (flags.day !== undefined) {
+    if (flags.from !== undefined || flags.to !== undefined) return fail('use --day or --from/--to, not both')
+    opts.from = opts.to = flags.day
+  } else {
+    if (flags.from !== undefined) opts.from = flags.from
+    if (flags.to !== undefined) opts.to = flags.to
+    if (opts.from && opts.to && opts.from > opts.to) return fail('--from must not be after --to')
+  }
+  opts.hourly = flags.hourly === true
+  opts.sessions = flags.sessions === true
   // Scanning is background work: never compete with the agents.
   try { os.setPriority(0, 10) } catch {}
   try {
@@ -442,15 +481,22 @@ async function usageCmd (args) {
     opts.cacheFile = paths.usageCachePath()
     // --max-ms caps the whole call, Node's start included.
     opts.startedAt = Math.round(performance.timeOrigin)
-    const result = usageMod().compute(opts)
-    // Every cswap account's limits; nothing at all without cswap.
+    // Every cswap account's limits; nothing at all without cswap. Read
+    // first: the scan counts new messages for the account active now.
     let cswap = null
     try { cswap = await cswapMod().accounts({ cacheFile: cswapCachePath() }) } catch {}
+    const active = cswap && Array.isArray(cswap.accounts) ? cswap.accounts.find(a => a && a.active) : null
+    if (active && !cswap.stale) opts.activeAccount = active.label
+    const result = usageMod().compute(opts)
     if (cswap) {
       const { accounts, ...meta } = cswap
       result.claude.accounts = accounts
       result.claude.cswap = meta
     }
+    // The companion's own claude calls for `digest --summaries` (not in any
+    // transcript: they run without session persistence).
+    const digestToday = digestMod().loadStore(paths.digestPath()).usage
+    if (digestToday && digestToday.date === result.today) result.companion = { digest: digestToday }
     return out({ version: paths.VERSION, ...result })
   } catch (err) {
     return fail(`usage failed: ${err.message}`)
@@ -550,6 +596,140 @@ async function guideCmd (args) {
   }
 }
 
+// The agents and their activity: the daemon when it runs (started when
+// events wait in the spool, like `status`), else state.json and
+// activity.json. A daemon from before `digest` answers `status` only.
+async function digestData () {
+  const ask = async () => {
+    const [res] = await client.request({ op: 'digest' }, { timeoutMs: 5000 })
+    if (res && !res.error) return { status: res, activity: (res.activity && res.activity.agents) || {}, source: 'daemon', hasActivity: true }
+    if (res && /unknown op/.test(res.error || '')) {
+      const [st] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+      if (st && !st.error) return { status: st, activity: {}, source: 'daemon', hasActivity: false }
+    }
+    return null
+  }
+  try { const r = await ask(); if (r) return r } catch {}
+  if (spoolMod().isSpooled(paths.spoolDir())) {
+    try {
+      await client.ensureDaemon()
+      const r = await ask()
+      if (r) return r
+    } catch {}
+  }
+  let activity = {}
+  let hasActivity = false
+  try {
+    const a = JSON.parse(fs.readFileSync(paths.activityPath(), 'utf8'))
+    if (a && a.agents) { activity = a.agents; hasActivity = true }
+  } catch {}
+  try {
+    return { status: readSnapshotFile(), activity, source: 'snapshot', hasActivity }
+  } catch {
+    return { status: { agents: [] }, activity, source: 'none', hasActivity }
+  }
+}
+
+// Always exits 0 with one JSON document (errors as {error, message}).
+async function digestCmd (args) {
+  const dm = digestMod()
+  const sm = summarizeMod()
+  const { flags } = parseFlags(args)
+  const bad = message => out({ schema: dm.SCHEMA, error: 'failed', message })
+  const opts = { summaries: flags.summaries === true, lang: flags.lang === 'pt' ? 'pt' : 'en', thresholds: {} }
+  if (flags.since !== undefined) {
+    const n = optNumber(flags, 'since')
+    if (Number.isNaN(n)) return bad('--since must be epoch milliseconds')
+    opts.since = n
+  }
+  for (const [flag, key, min, max] of [['max-agents', 'maxAgents', 1, 30], ['max-ms', 'maxMs', 5000, 120000]]) {
+    const n = optNumber(flags, flag)
+    if (n === undefined) continue
+    if (Number.isNaN(n) || n < min || n > max) return bad(`--${flag} must be between ${min} and ${max}`)
+    opts[key] = n
+  }
+  for (const [flag, key, max] of [['stuck-working-min', 'workingMin', 1440], ['stuck-errors', 'sameError', 100], ['stuck-repeats', 'sameCommand', 100], ['stuck-approval-min', 'approvalMin', 1440]]) {
+    const n = optNumber(flags, flag)
+    if (n === undefined) continue
+    if (Number.isNaN(n) || n < 1 || n > max) return bad(`--${flag} must be between 1 and ${max}`)
+    opts.thresholds[key] = n
+  }
+  // Background work: never compete with the agents (claude and git inherit it).
+  try { os.setPriority(0, 10) } catch {}
+  let child = null
+  const onSignal = () => {
+    if (child) sm.killGroup(child, 'SIGKILL')
+    process.exit(1)
+  }
+  for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(sig, onSignal)
+  try {
+    paths.ensureDirs()
+    const data = await digestData()
+    // The newer hooks this machine has registered; without them failures
+    // and API errors are read from the transcripts.
+    let registered = []
+    try { registered = settingsMod().installed(settingsMod().readSettings()) } catch {}
+    return out({
+      version: paths.VERSION,
+      ...await dm.digest({
+        ...opts,
+        data,
+        hooks: { failures: registered.includes('PostToolUseFailure'), stopFailure: registered.includes('StopFailure') },
+        storeFile: paths.digestPath(),
+        lockFile: path.join(paths.homeDir(), 'digest.lock'),
+        onChild: c => { child = c }
+      })
+    })
+  } catch (err) {
+    return bad(String(err.message).slice(0, 200))
+  } finally {
+    for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal)
+  }
+}
+
+// --file may repeat.
+function fileFlags (args) {
+  const files = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--file' && typeof args[i + 1] === 'string') files.push(args[++i])
+    else if (args[i].startsWith('--file=')) files.push(args[i].slice(7))
+  }
+  return files
+}
+
+function turnArg (value) {
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+async function reviewCmd (cmd, args) {
+  const { flags, positional } = parseFlags(args)
+  const [sessionId, turnText] = positional
+  const n = turnArg(turnText)
+  const usage = {
+    turns: 'usage: turns <sessionId> [--limit 20]',
+    diff: 'usage: diff <sessionId> <turn> [--file <path>]... [--max-bytes N] [--max-file-bytes N] [--context 3]',
+    undo: 'usage: undo <sessionId> <turn> [--file <path>]... [--dry-run] [--keep-commits]',
+    redo: 'usage: redo <sessionId> <turn> [--dry-run]'
+  }[cmd]
+  if (!sessionId || (cmd !== 'turns' && !n)) return fail(usage)
+  const num = name => (flags[name] === undefined ? undefined : optNumber(flags, name))
+  for (const name of ['limit', 'max-bytes', 'max-file-bytes', 'context']) if (Number.isNaN(num(name))) return fail(`--${name} must be a non-negative number`)
+  const review = reviewMod()
+  let res
+  switch (cmd) {
+    case 'turns': res = await review.turnsCmd(sessionId, { limit: Math.min(num('limit') || 20, 50) }); break
+    case 'diff': res = await review.diffCmd(sessionId, n, { files: fileFlags(args), maxBytes: num('max-bytes'), maxFileBytes: num('max-file-bytes'), context: num('context') }); break
+    case 'undo': res = await review.undoCmd(sessionId, n, { files: fileFlags(args), dryRun: !!flags['dry-run'], keepCommits: !!flags['keep-commits'] }); break
+    case 'redo': res = await review.redoCmd(sessionId, n, { dryRun: !!flags['dry-run'] }); break
+  }
+  if (res.error) {
+    process.stdout.write(JSON.stringify(res.code ? { error: res.error, code: res.code } : { error: res.error }) + '\n')
+    return 1
+  }
+  return out(res)
+}
+
 async function portsCmd (args) {
   const { flags } = parseFlags(args)
   const since = optNumber(flags, 'since')
@@ -628,6 +808,20 @@ function recordNodePath () {
   fs.writeFileSync(file, process.execPath + '\n', { mode: 0o600 })
 }
 
+// The local Claude Code's version, for the hooks only newer versions
+// know: { bin, version } or null (not found, no answer in 5 s, unreadable).
+function claudeVersion () {
+  const bin = summarizeMod().findClaude()
+  if (!bin) return null
+  const env = { ...process.env }
+  delete env.CLAUDECODE
+  try {
+    const text = require('child_process').execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], env })
+    const version = settingsMod().parseVersion(text)
+    return version ? { bin, version: version.join('.') } : null
+  } catch { return null }
+}
+
 function install () {
   const settings = settingsMod()
   const statusline = statuslineMod()
@@ -640,7 +834,11 @@ function install () {
   // Replaces every earlier conductore handler (any path, the Node hook of
   // 0.3 and older) and moves a `conductore-hostd statusline` line to the sh
   // statusline, keeping the command it wraps.
-  const merged = settings.merge(current, hookBin)
+  // The newer events only where this Claude Code knows them; a merge also
+  // takes ours off optional events a downgraded one would not know.
+  const claude = claudeVersion()
+  const { events, skipped } = settings.eventsFor(claude && claude.version)
+  const merged = settings.merge(current, hookBin, events)
   const sl = statusline.merge(merged, slBin)
   const before = JSON.stringify(current)
   if (JSON.stringify(sl.settings) !== before) {
@@ -648,7 +846,7 @@ function install () {
   }
   paths.ensureDirs()
   try { recordNodePath() } catch (err) { return fail(`cannot write ${paths.nodePathFile()}: ${err.message}`) }
-  return out({ ok: true, settings: file, hook: hookBin, statusline: slBin, events: settings.EVENTS, statusLine: sl.action })
+  return out({ ok: true, settings: file, hook: hookBin, statusline: slBin, events, skipped, claudeVersion: claude ? claude.version : null, statusLine: sl.action })
 }
 
 async function uninstall () {
@@ -718,6 +916,15 @@ async function doctor () {
   const present = settings.installed(cfg)
   const missing = settings.EVENTS.filter(e => !present.includes(e))
   add('hooks registered', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : `${present.length} events`)
+  const local = claudeVersion()
+  const { skipped } = settings.eventsFor(local && local.version)
+  const optionalOn = settings.OPTIONAL_EVENTS.map(o => o.event).filter(e => present.includes(e))
+  add('optional hooks', true, [
+    optionalOn.length ? `registered: ${optionalOn.join(', ')}` : 'none registered',
+    ...skipped.map(x => `${x.event} skipped (${x.reason})`),
+    ...skipped.filter(x => present.includes(x.event)).map(x => `${x.event} is registered but this Claude Code may not know it: run install`),
+    local ? `Claude Code ${local.version}` : 'Claude Code not found'
+  ].join('; '))
   const sl = statusline.describe(cfg)
   add('statusline (usage)', sl.wired, sl.detail)
   try {
@@ -783,7 +990,9 @@ async function main (argv) {
     case 'usage': return usageCmd(args)
     case 'summarize': return summarizeCmd(args)
     case 'guide': return guideCmd(args)
+    case 'digest': return digestCmd(args)
     case 'cswap-switch': return cswapSwitchCmd(args)
+    case 'turns': case 'diff': case 'undo': case 'redo': return reviewCmd(cmd, args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()

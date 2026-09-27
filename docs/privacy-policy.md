@@ -77,8 +77,8 @@ few events: the app was opened; a top-level screen was shown (home,
 terminal, chat, settings, files); a connection finished (SSH, Mosh or
 local; with Herdr, tmux or neither; worked or failed, and if it failed
 only whether the machine was unreachable, refused the login, had an
-unexpected host key, or something else); Chat View was opened; dictation
-or Talk was used; a host companion was found (its version number). Each
+unexpected host key, or something else); Chat View was opened; the usage
+explorer was opened; dictation or Talk was used; a host companion was found (its version number). Each
 event also carries the platform, app version and build flavor. Events are
 sent in small batches, at most a few per minute, and dropped when the
 device is offline.

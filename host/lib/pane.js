@@ -7,17 +7,19 @@
 //
 // A recorded pane id can point at someone else by now: tmux reuses ids once
 // a pane closes or its server restarts, and the agent may run on a tmux
-// server other than the default one. So tmux commands go to the socket the
-// hook reported (-S), and right before typing each target is checked: the
-// tmux pane still runs the process it ran when recorded, the Herdr pane
-// still runs this Claude session, and Claude Code itself still runs.
+// server or Herdr session other than the default one. So tmux commands go to
+// the socket the hook reported (-S), herdr commands to the Herdr server the
+// hook ran under (HERDR_SOCKET_PATH), and right before typing each target is
+// checked: the tmux pane still runs the process it ran when recorded, the
+// Herdr pane still runs this Claude session, and Claude Code itself still
+// runs.
 // Anything else is refused and nothing is typed.
 
 const crypto = require('crypto')
 const { execFile, spawn } = require('child_process')
 const { log } = require('./log')
 const proc = require('./proc')
-const { parsePaneList } = require('./context')
+const { parsePaneList, herdrEnv } = require('./context')
 
 const MAX_TEXT = 100000
 
@@ -31,17 +33,17 @@ function enterDelayMs () {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-function run (cmd, args, input) {
+function run (cmd, args, input, env = process.env) {
   return new Promise(resolve => {
     if (input === undefined) {
-      execFile(cmd, args, { timeout: 10000 }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') }))
+      execFile(cmd, args, { timeout: 10000, env }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') }))
       return
     }
     let stdout = ''
     let stderr = ''
     let done = false
     const finish = r => { if (!done) { done = true; clearTimeout(timer); resolve(r) } }
-    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], env })
     const timer = setTimeout(() => { child.kill(); finish({ err: new Error('timed out'), stdout, stderr }) }, 10000)
     child.stdout.on('data', d => { stdout += d })
     child.stderr.on('data', d => { stderr += d })
@@ -58,7 +60,7 @@ const why = r => (r.stderr || r.stdout || (r.err && r.err.message) || '').trim()
 // owns the agent), else its tmux pane.
 function targets (agent) {
   const list = []
-  if (agent.herdr && agent.herdr.paneId) list.push({ via: 'herdr', paneId: agent.herdr.paneId })
+  if (agent.herdr && agent.herdr.paneId) list.push({ via: 'herdr', paneId: agent.herdr.paneId, socket: agent.herdr.socket || null })
   if (agent.tmux && agent.tmux.paneId) {
     list.push({ via: 'tmux', paneId: agent.tmux.paneId, socket: agent.tmux.socket || null, panePid: agent.tmux.panePid || null })
   }
@@ -67,6 +69,9 @@ function targets (agent) {
 
 // tmux argv for the agent's own server.
 const tmuxArgs = (t, args) => t.socket ? ['-S', t.socket, ...args] : args
+
+// A herdr command on the agent's own Herdr server.
+const herdr = (t, args) => run('herdr', args, undefined, herdrEnv(t.socket))
 
 // Null when the target still holds this agent, else why not.
 async function verify (agent, t) {
@@ -79,7 +84,7 @@ async function verify (agent, t) {
     if (Number(r.stdout.trim()) !== t.panePid) return `tmux pane ${t.paneId} no longer holds this session (closed, or its id reused)`
     return null
   }
-  const r = await run('herdr', ['pane', 'list'])
+  const r = await herdr(t, ['pane', 'list'])
   const panes = r.err ? null : parsePaneList(r.stdout)
   if (!panes) return `cannot list Herdr panes to verify ${t.paneId}: ${why(r) || 'unexpected output'}`
   const pane = panes.find(p => p.paneId === t.paneId)
@@ -130,19 +135,20 @@ async function tmuxType (t, text, enter) {
   return { ok: true }
 }
 
-async function herdrType (paneId, text, enter) {
+async function herdrType (t, text, enter) {
+  const paneId = t.paneId
   if (enter && text.length) {
     // Herdr's own submit: handles multiline and refuses a blocked agent.
-    const r = await run('herdr', ['agent', 'prompt', paneId, text])
+    const r = await herdr(t, ['agent', 'prompt', paneId, text])
     if (r.err) return { error: `herdr agent prompt failed: ${why(r)}` }
     return { ok: true }
   }
   if (text.length) {
-    const r = await run('herdr', ['pane', 'send-text', paneId, text])
+    const r = await herdr(t, ['pane', 'send-text', paneId, text])
     if (r.err) return { error: `herdr pane send-text failed: ${why(r)}` }
   }
   if (enter) {
-    const r = await run('herdr', ['pane', 'send-keys', paneId, 'enter'])
+    const r = await herdr(t, ['pane', 'send-keys', paneId, 'enter'])
     if (r.err) return { error: `herdr pane send-keys failed: ${why(r)}` }
   }
   return { ok: true }
@@ -153,7 +159,7 @@ async function herdrType (paneId, text, enter) {
 async function sendText (agent, text, { enter = true } = {}) {
   const { list, errors } = await verifiedTargets(agent)
   for (const t of list) {
-    const r = t.via === 'herdr' ? await herdrType(t.paneId, text, enter) : await tmuxType(t, text, enter)
+    const r = t.via === 'herdr' ? await herdrType(t, text, enter) : await tmuxType(t, text, enter)
     if (r.ok) return { ok: true, via: t.via, paneId: t.paneId }
     log('pane', r.error)
     errors.push(r.error)
@@ -171,7 +177,7 @@ async function sendKey (agent, key) {
   const { list, errors } = await verifiedTargets(agent)
   for (const t of list) {
     const r = t.via === 'herdr'
-      ? await run('herdr', ['pane', 'send-keys', t.paneId, names.herdr])
+      ? await herdr(t, ['pane', 'send-keys', t.paneId, names.herdr])
       : await run('tmux', tmuxArgs(t, ['send-keys', '-t', t.paneId, names.tmux]))
     if (!r.err) return { ok: true, via: t.via, paneId: t.paneId }
     errors.push(`${t.via} send-keys failed: ${why(r)}`)
@@ -185,7 +191,7 @@ async function focus (agent) {
   const { list, errors } = await verifiedTargets(agent)
   for (const t of list) {
     if (t.via === 'herdr') {
-      const r = await run('herdr', ['agent', 'focus', t.paneId])
+      const r = await herdr(t, ['agent', 'focus', t.paneId])
       if (!r.err) return { ok: true, via: 'herdr', paneId: t.paneId }
       log('pane', 'herdr focus failed', why(r))
       errors.push(`herdr agent focus failed: ${why(r)}`)

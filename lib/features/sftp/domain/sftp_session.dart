@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
+import 'package:conduit/features/sftp/domain/sftp_save_result.dart';
 
 abstract class SftpSession {
   Future<List<SftpEntry>> list(String path);
@@ -21,6 +22,12 @@ abstract class SftpSession {
     int length, {
     void Function(int bytesSent)? onProgress,
   });
+
+  /// Replaces the contents of the existing (or new) file at [path] with
+  /// [bytes], the way an editor saves: where the server allows it through a
+  /// temporary file and an atomic rename, so a dropped connection cannot
+  /// leave the file half-written. Unlike [write], which truncates in place.
+  Future<SftpSaveResult> save(String path, Uint8List bytes);
 
   Future<void> makeDirectory(String path);
 

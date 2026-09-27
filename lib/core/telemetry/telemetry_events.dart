@@ -48,6 +48,14 @@ class TelemetryEvent {
   const TelemetryEvent.chatModeOpened()
     : this._('chat_mode_opened', TelemetryScreen.chat);
 
+  /// The agents dashboard was opened (no content, no counts).
+  const TelemetryEvent.digestOpened()
+    : this._('digest_opened', TelemetryScreen.home);
+
+  /// The usage explorer was opened (no range, filter or numbers).
+  const TelemetryEvent.usageExplorerOpened()
+    : this._('usage_explorer_opened', TelemetryScreen.home);
+
   TelemetryEvent.voiceUsed(TelemetryVoice kind)
     : this._('voice_used', TelemetryScreen.chat, {'kind': kind.name});
 

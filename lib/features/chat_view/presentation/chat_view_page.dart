@@ -9,15 +9,21 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
+import 'package:conduit/features/chat_view/data/platform_text_share.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_working.dart';
+import 'package:conduit/features/chat_view/presentation/chat_forward.dart';
+import 'package:conduit/features/chat_view/presentation/chat_thread_extras.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/talk_panel.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
@@ -57,6 +63,9 @@ class ChatViewPage extends StatefulWidget {
     this.clipboardHasImage = PlatformPromptImageSource.clipboardHasImage,
     this.attention,
     this.hostId,
+    this.forwardTargets,
+    this.onForward,
+    this.share = PlatformTextShare.share,
     super.key,
   });
 
@@ -114,13 +123,29 @@ class ChatViewPage extends StatefulWidget {
   final AgentAttentionController? attention;
   final String? hostId;
 
+  /// Where a message can be sent ("Send to another agent"), and how;
+  /// default: the other live sessions [attention] knows, opened in their
+  /// own chat with the message sent there.
+  final List<ChatForwardTarget> Function()? forwardTargets;
+  final ChatForward? onForward;
+
+  /// A message's "Share": the system share sheet (tests inject one).
+  final Future<bool> Function(String text) share;
+
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
 }
 
 class _ChatViewPageState extends State<ChatViewPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, ChatThreadExtras {
   final _scroll = ScrollController();
+
+  @override
+  TextEditingController get composerText => _composerText;
+
+  @override
+  ScrollController get threadScroll => _scroll;
+
   bool _monitoringTurnedOn = false;
 
   Future<void> _enableMonitoring() async {
@@ -170,6 +195,7 @@ class _ChatViewPageState extends State<ChatViewPage>
       ..track(const TelemetryEvent.chatModeOpened());
     _chat.setVisible(true);
     _chat.addListener(_stickToBottom);
+    _chat.addListener(_watchTurnEnd);
     if (widget.dictation == null) {
       final recognizer =
           widget.speechRecognizer ??
@@ -254,6 +280,71 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   ThemeController? get _settings => VoiceSettingsScope.maybeOf(context);
 
+  // --- Review -------------------------------------------------------------------
+
+  /// The monitored machine this chat is on.
+  SavedHost? get _reviewHost {
+    final attention = widget.attention;
+    final hostId = widget.hostId;
+    if (attention == null || hostId == null) return null;
+    return attention.monitoredHosts.where((h) => h.id == hostId).firstOrNull;
+  }
+
+  /// The monitor's record of this agent (Review needs its cwd and name).
+  AgentInfo? get _reviewAgent => widget.attention
+      ?.statusFor(widget.hostId ?? '')
+      ?.agents
+      .where((a) => a.id == _chat.sessionId)
+      .firstOrNull;
+
+  bool get _canReview {
+    final host = _reviewHost;
+    return host != null &&
+        _reviewAgent != null &&
+        reviewAvailable(widget.attention!, host);
+  }
+
+  bool _reviewOpen = false;
+
+  Future<void> _openReview() async {
+    final host = _reviewHost;
+    final agent = _reviewAgent;
+    if (host == null || agent == null || _reviewOpen) return;
+    _reviewOpen = true;
+    try {
+      await openReview(
+        context: context,
+        attention: widget.attention!,
+        host: host,
+        agent: agent,
+        // Through the chat, so the prompt shows as a bubble here too.
+        send: (text) => _chat.send(text),
+        dictation: _dictation,
+      );
+    } finally {
+      _reviewOpen = false;
+    }
+  }
+
+  String? _lastTurnState;
+
+  /// "Review changes: after each turn": a turn that ends (Stop) while this
+  /// chat is on screen opens Review, on machines that snapshot turns.
+  void _watchTurnEnd() {
+    final agent = _chat.agent;
+    final state = agent?.state;
+    final previous = _lastTurnState;
+    _lastTurnState = state;
+    if (previous != 'working' || state != 'waiting_input') return;
+    if (agent?.lastEvent != 'Stop') return;
+    final voice = _settings?.voice ?? VoicePreferences.defaults;
+    if (voice.reviewOpens != ReviewOpens.afterEachTurn) return;
+    final host = _reviewHost;
+    if (host == null || !widget.attention!.supportsSnapshots(host.id)) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    unawaited(_openReview());
+  }
+
   /// Hands every new poll to the reader; the first loaded thread only
   /// marks what is already there as read.
   void _feedReadAloud() {
@@ -310,10 +401,15 @@ class _ChatViewPageState extends State<ChatViewPage>
       )?.showSnackBar(SnackBar(content: Text(message)));
     }
     if (talk.active) _talkMessageShown = null;
+    _syncDictation();
   }
 
+  /// Dictating into the composer keeps the reader quiet (and skips what
+  /// arrives meanwhile). Talk's own listening does not: it closes the mic
+  /// when there is something to read (see TalkController.update).
   void _syncDictation() {
-    _readAloud?.suppressed = _dictation?.isActive ?? false;
+    _readAloud?.suppressed =
+        (_dictation?.isActive ?? false) && !(_talk?.active ?? false);
   }
 
   void _toggleReadAloud() {
@@ -374,9 +470,34 @@ class _ChatViewPageState extends State<ChatViewPage>
   /// The user is acting (sending, answering): stop talking over them.
   void _quiet() => _readAloud?.stop();
 
-  Future<void> _send(String text, {bool enter = true}) {
+  Future<void> _send(String text, {bool enter = true}) async {
     _quiet();
-    return _chat.send(text, enter: enter);
+    try {
+      await _chat.send(text, enter: enter);
+    } on AppFailure {
+      // A submitted prompt stays in the thread as a failed bubble with
+      // Retry and Edit, so the composer need not keep it.
+      if (!enter) rethrow;
+    }
+  }
+
+  Future<void> _retry(ChatOutgoing outgoing) async {
+    _quiet();
+    try {
+      await _chat.retry(outgoing.id);
+    } on AppFailure {
+      // Shown on the new bubble.
+    }
+  }
+
+  /// Puts a failed prompt back in the composer.
+  void _edit(ChatOutgoing outgoing) {
+    final text = _chat.discard(outgoing.id);
+    if (text == null) return;
+    _composerText.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
   }
 
   /// The last lifecycle state seen, to tell leaving from coming back.
@@ -431,6 +552,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     WidgetsBinding.instance.removeObserver(this);
     _chat.removeListener(_feedReadAloud);
     _chat.removeListener(_stickToBottom);
+    _chat.removeListener(_watchTurnEnd);
     _dictation?.removeListener(_syncDictation);
     _talk
       ?..removeListener(_onTalkChanged)
@@ -558,10 +680,16 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
   }
 
-  Future<void> _pick(int number) async {
+  Future<void> _pick(ChatQuestion question, int number) async {
     _quiet();
+    final options = question.questions.firstOrNull?.options ?? const [];
     try {
-      await _chat.answerQuestion(number);
+      await _chat.answerQuestion(
+        number,
+        label: number <= options.length ? options[number - 1].label : null,
+      );
+    } on AppFailure {
+      // The failed answer bubble offers Retry.
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -654,11 +782,13 @@ class _ChatViewPageState extends State<ChatViewPage>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => wrapShortcuts(_page(context));
+
+  Widget _page(BuildContext context) {
     final theme = Theme.of(context);
     return ListenableBuilder(
       // Settings too: Tool activity and the read-aloud length show here.
-      listenable: Listenable.merge([_chat, ?_settings]),
+      listenable: Listenable.merge([_chat, ?_settings, search]),
       builder: (context, _) {
         final activity = _chat.activity;
         final working = _working;
@@ -702,6 +832,7 @@ class _ChatViewPageState extends State<ChatViewPage>
               ],
             ),
             actions: [
+              searchButton(),
               if (_talk case final talk?)
                 ListenableBuilder(
                   listenable: talk,
@@ -719,6 +850,13 @@ class _ChatViewPageState extends State<ChatViewPage>
                 _ReadAloudToggle(
                   controller: readAloud,
                   onPressed: _toggleReadAloud,
+                ),
+              if (_canReview)
+                IconButton(
+                  key: const ValueKey('chat-review'),
+                  tooltip: 'Review changes',
+                  onPressed: _openReview,
+                  icon: const Icon(Icons.rate_review_outlined),
                 ),
               _ChatMenu(
                 readAloudLength: _readAloud == null ? null : _readAloudLength,
@@ -747,6 +885,7 @@ class _ChatViewPageState extends State<ChatViewPage>
             top: false,
             child: Column(
               children: [
+                ?findBar(),
                 if (_chat.error case final error?)
                   MaterialBanner(
                     content: Text(error, maxLines: 3),
@@ -808,6 +947,7 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   Widget _composer(ChatActivity? activity) => ChatComposer(
     textController: _composerText,
+    focusNode: composerFocus,
     onTalk: _talk == null ? null : _startTalk,
     onGuide: GuideScope.maybeOf(context) == null ? null : _startGuide,
     enabled: _chat.canSend,
@@ -860,6 +1000,8 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (working != null) _lastWorking = working;
     // While frozen, show only what was there when the user scrolled up.
     final freeze = _freeze;
+    final allOutgoing = _chat.outgoing;
+    final confirmedIds = {for (final o in allOutgoing) ?o.confirmedId};
     var shownCount = items.length;
     var pending = allPending;
     var held = 0;
@@ -871,7 +1013,9 @@ class _ChatViewPageState extends State<ChatViewPage>
         shownCount = last + 1;
       }
       for (var i = shownCount; i < items.length; i++) {
-        if (items[i] is! ChatThinking) held += 1;
+        if (items[i] is! ChatThinking && !confirmedIds.contains(items[i].id)) {
+          held += 1;
+        }
       }
       pending = [
         for (final request in allPending)
@@ -879,6 +1023,14 @@ class _ChatViewPageState extends State<ChatViewPage>
       ];
       held += allPending.length - pending.length;
     }
+    // What the user sent stays at the bottom until the transcript shows
+    // it; while frozen above that entry, the bubble stands in for it.
+    searchThread(items, shownCount, _toolActivity);
+    final shownIds = {for (final item in items.take(shownCount)) item.id};
+    final outgoing = [
+      for (final o in allOutgoing)
+        if (o.pending || !shownIds.contains(o.confirmedId)) o,
+    ];
     final showWorkingRow = freeze == null
         ? working != null
         : freeze.working && (working ?? _lastWorking) != null;
@@ -910,6 +1062,15 @@ class _ChatViewPageState extends State<ChatViewPage>
           onDecide: (verdict) => _decide(request, verdict),
           onTrust: _smartApprovals ? () => _trust(request) : null,
         ),
+      for (final o in outgoing.reversed)
+        decorateOutgoing(
+          o,
+          ChatOutgoingBubble(
+            item: o,
+            onRetry: () => unawaited(_retry(o)),
+            onEdit: o.answer ? null : () => _edit(o),
+          ),
+        ),
       for (final entry in ChatToolActivity.arrange(
         items.sublist(0, shownCount),
         _toolActivity,
@@ -923,7 +1084,7 @@ class _ChatViewPageState extends State<ChatViewPage>
           final ChatToolGroup group => ChatToolGroupRow(
             key: ValueKey(group.id),
             group: group,
-            expanded: _openGroups.contains(group.id),
+            expanded: _openGroups.contains(group.id) || searchOpens(group),
             onToggle: () => setState(() {
               if (!_openGroups.remove(group.id)) _openGroups.add(group.id);
             }),
@@ -955,20 +1116,23 @@ class _ChatViewPageState extends State<ChatViewPage>
             ),
           ),
         )
-      else if (items.isEmpty && pending.isEmpty)
+      else if (items.isEmpty && pending.isEmpty && outgoing.isEmpty)
         const _Centered(
           icon: Icons.forum_outlined,
           text: 'No messages yet. Send a prompt to start.',
         ),
     ];
+    noteRows(rows);
     return Stack(
       children: [
-        ListView(
-          key: const ValueKey('chat-thread'),
-          controller: _scroll,
-          reverse: true,
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          children: rows,
+        wrapThread(
+          ListView(
+            key: const ValueKey('chat-thread'),
+            controller: _scroll,
+            reverse: true,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            children: rows,
+          ),
         ),
         if (held > 0)
           Positioned(
@@ -1002,7 +1166,7 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   Widget _row(ChatItem item, {required bool isLast, required bool waiting}) {
     final key = ValueKey(item.id);
-    return switch (item) {
+    return decorateRow(item, switch (item) {
       ChatUserMessage() => ChatUserBubble(key: key, item: item),
       ChatAgentMessage() => ChatAgentMessageCard(key: key, item: item),
       ChatTaskNotice() => ChatTaskNoticeRow(key: key, item: item),
@@ -1015,10 +1179,13 @@ class _ChatViewPageState extends State<ChatViewPage>
       ChatQuestion() => ChatQuestionCard(
         key: key,
         item: item,
-        onPick: !item.answered && isLast && waiting ? _pick : null,
+        onPick:
+            !item.answered && isLast && waiting && !_chat.isAnswering(item.id)
+            ? (number) => _pick(item, number)
+            : null,
       ),
       ChatNotice() => ChatNoticeRow(key: key, item: item),
-    };
+    });
   }
 }
 

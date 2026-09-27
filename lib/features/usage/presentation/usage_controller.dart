@@ -12,6 +12,8 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/domain/usage_alert.dart';
+import 'package:conduit/features/usage/domain/usage_explorer.dart';
+import 'package:conduit/features/usage/domain/usage_range.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
 import 'package:conduit/features/usage/domain/usage_summary.dart';
 import 'package:flutter/foundation.dart';
@@ -77,6 +79,25 @@ class AttentionUsageHostSource implements UsageHostSource {
   @override
   void removeListener(VoidCallback listener) =>
       _changes.removeListener(listener);
+}
+
+/// One machine's answer to a [UsageController.query].
+class UsageQueryResult {
+  const UsageQueryResult({
+    required this.hostId,
+    required this.hostName,
+    this.report,
+    this.error,
+    this.needsUpdate = false,
+  });
+
+  final String hostId;
+  final String hostName;
+  final UsageReport? report;
+  final String? error;
+
+  /// No companion, or one without `usage`.
+  final bool needsUpdate;
 }
 
 /// Usage of every machine, for the home bar, the Agents panel's Usage tab,
@@ -161,6 +182,91 @@ class UsageController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// The saved machine behind [hostId], while it is asked for usage.
   SavedHost? hostFor(String hostId) => _hosts[hostId];
+
+  /// Today on the machines (`YYYY-MM-DD`): the latest any report gave,
+  /// else this device's date.
+  String get today {
+    String? latest;
+    for (final machine in _machines.values) {
+      final day = machine.report?.today;
+      if (day != null &&
+          parseUsageDate(day) != null &&
+          (latest == null || day.compareTo(latest) > 0)) {
+        latest = day;
+      }
+    }
+    return latest ?? formatUsageDate(_clock());
+  }
+
+  /// Runs `conductore-hostd <arguments>` (a `usage` command, see
+  /// [companionUsageArguments]) on every machine at once, for the usage
+  /// explorer. The poll's replies are left alone.
+  Future<List<UsageQueryResult>> query(String arguments) async {
+    if (_disposed) {
+      return const [];
+    }
+    return Future.wait([
+      for (final host in _hosts.values.toList()) _query(host, arguments),
+    ]);
+  }
+
+  Future<UsageQueryResult> _query(SavedHost host, String arguments) async {
+    AgentCommandRunner? runner;
+    var owned = false;
+    try {
+      final (r, owned: o) = _source.runnerFor(host);
+      runner = r;
+      owned = o;
+      final result = await r.run(
+        CompanionCommands.hostdCommand(arguments),
+        timeout: commandTimeout,
+      );
+      final report = result.exitCode == null || result.exitCode == 0
+          ? parseUsageReport(result.stdout)
+          : null;
+      if (report != null) {
+        return UsageQueryResult(
+          hostId: host.id,
+          hostName: host.name,
+          report: report,
+        );
+      }
+      final output = '${result.stdout}\n${result.stderr}';
+      final missing =
+          result.exitCode == 127 ||
+          output.contains('unknown command') ||
+          output.contains('not found');
+      return UsageQueryResult(
+        hostId: host.id,
+        hostName: host.name,
+        needsUpdate: missing,
+        error: missing ? null : _firstLine(output) ?? 'No usage reply',
+      );
+    } on Object catch (error) {
+      return UsageQueryResult(
+        hostId: host.id,
+        hostName: host.name,
+        error: _firstLine('$error') ?? 'Unreachable',
+      );
+    } finally {
+      if (owned) {
+        unawaited(runner?.close());
+      }
+    }
+  }
+
+  /// Remembers the usage explorer's range and measure on this device.
+  Future<void> setExplorerPreferences({
+    UsageRangePreset? range,
+    UsageDateRange? custom,
+    UsageMetric? metric,
+  }) => _savePreferences(
+    _preferences.copyWith(
+      explorerRange: range,
+      explorerCustom: custom,
+      explorerMetric: metric,
+    ),
+  );
 
   /// Call when a widget that shows usage appears; call the returned
   /// function when it goes away. Polling runs while any view is attached.

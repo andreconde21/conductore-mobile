@@ -3,12 +3,12 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { Approvals, AUDIT_MAX_BYTES } = require('../lib/approvals')
 
 test('the auto-approved log is bounded by bytes, holds no tool input, and survives a restart', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-audit-'))
+  const dir = tempDir('cnd-audit-')
   const opts = { rules: path.join(dir, 'rules.json'), audit: path.join(dir, 'auto-approved.json'), home: dir }
   const a = new Approvals(opts)
   const rule = a.add({ rule: 'Bash', scope: { kind: 'any' } })
@@ -28,3 +28,5 @@ test('the auto-approved log is bounded by bytes, holds no tool input, and surviv
   assert.equal(new Approvals(opts).auditEntries(now + 25 * 3600000).length, 0)
   fs.rmSync(dir, { recursive: true })
 })
+
+test.after(() => cleanup())

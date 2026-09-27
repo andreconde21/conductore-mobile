@@ -10,6 +10,8 @@ class HomeTopBar extends StatelessWidget {
     this.machine,
     this.onSwitcher,
     this.onGuide,
+    this.onAgents,
+    this.agentsBadge = 0,
     super.key,
   });
 
@@ -21,6 +23,12 @@ class HomeTopBar extends StatelessWidget {
 
   /// Starts the voice guide; null hides its button.
   final VoidCallback? onGuide;
+
+  /// Opens the agents dashboard; null hides its button.
+  final VoidCallback? onAgents;
+
+  /// Agents waiting on the user, shown on the dashboard button.
+  final int agentsBadge;
 
   /// The machine chip (absent before any machine is saved).
   final Widget? machine;
@@ -44,6 +52,19 @@ class HomeTopBar extends StatelessWidget {
             child: Center(child: machine ?? const ConduitGlyph(size: 24)),
           ),
           const SizedBox(width: 4),
+          if (onAgents != null)
+            IconButton(
+              key: const ValueKey('home-agents-dashboard'),
+              tooltip: 'Agents dashboard',
+              iconSize: 24,
+              color: colorScheme.onSurface,
+              icon: Badge(
+                isLabelVisible: agentsBadge > 0,
+                label: Text('$agentsBadge'),
+                child: const Icon(Icons.space_dashboard_outlined),
+              ),
+              onPressed: onAgents,
+            ),
           if (onGuide != null)
             IconButton(
               key: const ValueKey('home-voice-guide'),

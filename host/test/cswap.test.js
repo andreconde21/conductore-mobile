@@ -8,8 +8,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { execFile } = require('child_process')
 const cswap = require('../lib/cswap')
 
@@ -18,7 +18,7 @@ const FIXTURE = fs.readFileSync(path.join(__dirname, 'fixtures', 'cswap-list.jso
 const NOW = Date.parse('2026-09-27T08:20:00Z')
 
 function tmpDir () {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'conductore-cswap-'))
+  return tempDir('conductore-cswap-')
 }
 
 // A fake cswap: prints [stdout] for `list`, [switchOut] for `switch`,
@@ -258,3 +258,5 @@ test('CLI: cswap-switch validates its arguments and reports the switch', async (
   assert.equal(missing.code, 1)
   assert.match(missing.json.error, /not installed/)
 })
+
+test.after(() => cleanup())

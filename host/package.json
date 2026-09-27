@@ -1,6 +1,6 @@
 {
   "name": "conductore-host",
-  "version": "0.8.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Host companion daemon and Claude Code hook/statusline clients (sh) for Conductore Mobile",
   "license": "MIT",

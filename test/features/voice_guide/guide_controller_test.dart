@@ -7,6 +7,7 @@ import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
 import 'package:conduit/features/voice_guide/domain/approval_actions.dart';
 import 'package:conduit/features/voice_guide/domain/guide_brain.dart';
+import 'package:conduit/features/voice_guide/domain/guide_ports.dart';
 import 'package:conduit/features/voice_guide/domain/guide_preferences.dart';
 import 'package:conduit/features/voice_guide/domain/guide_world.dart';
 import 'package:conduit/features/voice_guide/presentation/guide_controller.dart';
@@ -36,6 +37,8 @@ void main() {
     FakeApprovals? approvalActions,
     FakeBrain? withBrain,
     FakeAccounts? accounts,
+    GuideCatchUpText? catchUp,
+    FakeReviewer? reviewer,
   }) async {
     mic = FakeSpeechRecognizer();
     tts = FakeTts();
@@ -66,7 +69,9 @@ void main() {
       speechLanguage: () => 'en-US',
       brain: brain,
       usage: (_) => 'Five hour limit at 42 percent.',
+      catchUp: catchUp,
       accounts: accounts,
+      reviewer: reviewer,
       locked: () => locked,
       afterSpeechPause: Duration.zero,
       thinkingNotice: const Duration(seconds: 30),
@@ -117,6 +122,33 @@ void main() {
     mic.emit(const SpeechError(code: SpeechError.speechTimeout, message: ''));
     await settle(tester);
     expect(guide.phase, GuidePhase.off);
+  });
+
+  testWidgets('catch me up speaks the dashboard, in the guide language', (
+    tester,
+  ) async {
+    final asked = <String>[];
+    await setUpGuide(
+      tester,
+      catchUp: (code) async {
+        asked.add(code);
+        return '1 needs you, 0 stuck, 2 working, 3 done.';
+      },
+    );
+    await begin(tester);
+    await talk(tester, 'catch me up');
+    expect(await hear(tester), '1 needs you, 0 stuck, 2 working, 3 done.');
+    expect(asked, ['en']);
+    expect(guide.phase, GuidePhase.listening);
+  });
+
+  testWidgets('without a dashboard, catch me up says what is waiting', (
+    tester,
+  ) async {
+    await setUpGuide(tester);
+    await begin(tester);
+    await talk(tester, 'catch me up');
+    expect(await hear(tester), 'One approval: api on VTM wants npm test.');
   });
 
   testWidgets('approve asks for a yes, then approves exactly that request', (
@@ -589,4 +621,114 @@ void main() {
       expect(await hear(tester), 'Approved.');
     },
   );
+
+  group('review and undo', () {
+    GuideWorld onChat(AgentAttentionState state) => GuideWorld(
+      machines: const [vtm],
+      agents: [agent('s-api', project: 'api', state: state)],
+      screen: const GuideScreen(
+        GuideView.chat,
+        hostId: 'vtm',
+        agentId: 's-api',
+      ),
+    );
+
+    testWidgets('undo that asks with the turn and file count, then undoes '
+        'exactly that turn', (tester) async {
+      final reviewer = FakeReviewer();
+      await setUpGuide(
+        tester,
+        world: onChat(AgentAttentionState.needsInput),
+        reviewer: reviewer,
+      );
+      await begin(tester);
+      await talk(tester, 'undo that');
+      expect(
+        await hear(tester),
+        "Undo api's last turn, \"Fix the date parser\", and restore 3 "
+        'files? Say yes.',
+      );
+      expect(reviewer.undone, isEmpty);
+      await talk(tester, 'yes');
+      expect(
+        await hear(tester),
+        'Undone: 3 files of api restored. Say review to redo it.',
+      );
+      expect(reviewer.undone, [('s-api', 4)]);
+    });
+
+    testWidgets('no, and a working agent, undo nothing', (tester) async {
+      final reviewer = FakeReviewer();
+      await setUpGuide(
+        tester,
+        world: onChat(AgentAttentionState.needsInput),
+        reviewer: reviewer,
+      );
+      await begin(tester);
+      await talk(tester, 'desfaz isso');
+      await hear(tester);
+      await talk(tester, 'no');
+      expect(await hear(tester), 'Cancelled.');
+      expect(reviewer.undone, isEmpty);
+
+      now = onChat(AgentAttentionState.working);
+      await talk(tester, 'undo the last turn');
+      expect(
+        await hear(tester),
+        'api is still working. Undo when its turn ends.',
+      );
+      expect(reviewer.undone, isEmpty);
+    });
+
+    testWidgets('nothing to undo, and a machine without snapshots', (
+      tester,
+    ) async {
+      final reviewer = FakeReviewer()..last = null;
+      await setUpGuide(
+        tester,
+        world: onChat(AgentAttentionState.needsInput),
+        reviewer: reviewer,
+      );
+      await begin(tester);
+      await talk(tester, 'undo that');
+      expect(await hear(tester), 'api has no turn to undo.');
+      reviewer.undoable = false;
+      await talk(tester, 'undo that');
+      expect(
+        await hear(tester),
+        "Review isn't available for api. Update the agent hooks on its "
+        'machine.',
+      );
+    });
+
+    testWidgets('review opens Review of the agent on screen, or a named one', (
+      tester,
+    ) async {
+      final reviewer = FakeReviewer();
+      await setUpGuide(
+        tester,
+        world: onChat(AgentAttentionState.needsInput),
+        reviewer: reviewer,
+      );
+      await begin(tester);
+      await talk(tester, 'review');
+      expect(await hear(tester), 'Reviewing api.');
+      await talk(tester, 'revê o api');
+      expect(await hear(tester), 'Reviewing api.');
+      expect(reviewer.reviewed, ['s-api', 's-api']);
+    });
+
+    testWidgets('without a reviewer the guide says it is not available', (
+      tester,
+    ) async {
+      await setUpGuide(tester, world: onChat(AgentAttentionState.idle));
+      await begin(tester);
+      await talk(tester, 'review the changes');
+      expect(
+        await hear(tester),
+        "Review isn't available for api. Update the agent hooks on its "
+        'machine.',
+      );
+    });
+  });
 }

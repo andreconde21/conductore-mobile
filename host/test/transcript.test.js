@@ -6,11 +6,11 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+const { tempDir, cleanup } = require('./helpers/cleanup')
 const { readTranscript, normalizeEntry } = require('../lib/transcript')
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tr-'))
+const dir = tempDir('cnd-tr-')
 let n = 0
 function file (lines, trailing = '') {
   const f = path.join(dir, `t${n++}.jsonl`)
@@ -156,13 +156,80 @@ test('maxBytes caps one read; the next read continues', () => {
   assert.equal(seen[39], 'u39')
 })
 
-test('a single line longer than maxBytes is skipped instead of stalling', () => {
+test('a single line longer than maxBytes is read on its own instead of stalling', () => {
   const f = file([user('u0', 'q'.repeat(5000)), user('u1', 'after')])
   const r = readTranscript(f, { since: 0, maxBytes: 1024 })
   assert.equal(r.oversized, true)
-  assert.deepEqual(r.entries, [])
+  assert.deepEqual(r.entries.map(e => e.uuid), ['u0'])
+  assert.equal(r.entries[0].message.content, 'q'.repeat(5000))
+  assert.equal(r.offset, Buffer.byteLength(JSON.stringify(user('u0', 'q'.repeat(5000))) + '\n'))
   const r2 = readTranscript(f, { since: r.offset, maxBytes: 1024 })
   assert.deepEqual(r2.entries.map(e => e.uuid), ['u1'])
+})
+
+test('a prompt with images past maxBytes still arrives, images dropped', () => {
+  // Pasted screenshots make the line megabytes long; the prompt was lost.
+  const data = 'A'.repeat(400 * 1024)
+  const f = file([
+    user('u0', [
+      { type: 'text', text: '[Image #1] why is this red?' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data } }
+    ]),
+    user('u1', 'after')
+  ])
+  const r = readTranscript(f, { since: 0 })
+  assert.equal(r.oversized, true)
+  assert.deepEqual(r.entries.map(e => e.uuid), ['u0'])
+  assert.deepEqual(r.entries[0].message.content, [
+    { type: 'text', text: '[Image #1] why is this red?' },
+    { type: 'image', omitted: true, mediaType: 'image/png' }
+  ])
+  assert.ok(!JSON.stringify(r).includes('AAAA'))
+  const r2 = readTranscript(f, { since: r.offset })
+  assert.deepEqual(r2.entries.map(e => e.uuid), ['u1'])
+})
+
+test('a prompt typed while the agent worked (queued_command) becomes a user entry', () => {
+  // Claude Code absorbs it into the running turn and records it only as an
+  // attachment; the chat view never showed it.
+  const queued = (uuid, attachment, extra) => base('attachment', uuid, { attachment: { type: 'queued_command', timestamp: '2026-09-25T10:00:01.000Z', ...attachment }, ...extra })
+  const f = file([
+    queued('q1', { prompt: 'also check the logs', commandMode: 'prompt', origin: { kind: 'human' }, humanTurn: true, source_uuid: 's' }),
+    { type: 'queue-operation', operation: 'remove', content: 'also check the logs', reason: 'absorbed_mid_turn' },
+    // Older Claude Code: no origin.
+    queued('q2', { prompt: 'and the tests', commandMode: 'prompt' }),
+    // With a pasted image.
+    queued('q3', { prompt: [{ type: 'text', text: '[Image #2] this one' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBOR' } }], commandMode: 'prompt', origin: { kind: 'human' }, imagePasteIds: [2] }),
+    // Not typed by the user: dropped as before.
+    queued('q4', { prompt: '<task-notification><summary>done</summary></task-notification>', commandMode: 'task-notification' }),
+    queued('q5', { prompt: '<agent-message from="x">hi</agent-message>', commandMode: 'prompt', origin: { kind: 'peer' }, isMeta: true }),
+    queued('q6', { prompt: 'coordinator note', origin: { kind: 'coordinator' }, isMeta: true }, { isSidechain: true }),
+    base('attachment', 'x1', { attachment: { type: 'edited_text_file', filename: '/a' } })
+  ])
+  const r = readTranscript(f)
+  assert.deepEqual(r.entries.map(e => e.uuid), ['q1', 'q2', 'q3'])
+  assert.deepEqual(r.entries[0], {
+    type: 'user',
+    uuid: 'q1',
+    parentUuid: null,
+    timestamp: '2026-09-25T10:00:00.000Z',
+    isSidechain: false,
+    queued: true,
+    message: { role: 'user', content: 'also check the logs' }
+  })
+  assert.equal(r.entries[1].message.content, 'and the tests')
+  assert.deepEqual(r.entries[2].message.content, [
+    { type: 'text', text: '[Image #2] this one' },
+    { type: 'image', omitted: true, mediaType: 'image/png' }
+  ])
+  assert.ok(!JSON.stringify(r).includes('iVBOR'))
+})
+
+test('a long queued prompt is capped like a user line', () => {
+  const long = 'w'.repeat(40 * 1024)
+  const e = normalizeEntry(base('attachment', 'q1', { attachment: { type: 'queued_command', prompt: long, commandMode: 'prompt', origin: { kind: 'human' } } }))
+  assert.equal(e.message.truncated, true)
+  assert.equal(e.message.content.length, 32 * 1024)
 })
 
 test('an offset past the end (file replaced) resets to the tail', () => {
@@ -184,3 +251,5 @@ test('normalizeEntry drops unknown line types', () => {
   assert.equal(normalizeEntry({ type: 'file-history-snapshot' }), null)
   assert.equal(normalizeEntry(null), null)
 })
+
+test.after(() => cleanup())

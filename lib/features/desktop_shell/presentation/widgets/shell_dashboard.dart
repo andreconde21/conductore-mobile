@@ -63,6 +63,7 @@ class ShellDashboard extends StatelessWidget {
     this.onDecide,
     this.isDeciding,
     this.usage,
+    this.agents,
     this.actions = const [],
     this.notice,
     super.key,
@@ -93,6 +94,10 @@ class ShellDashboard extends StatelessWidget {
 
   /// The usage summary; null keeps the slot with a note.
   final Widget? usage;
+
+  /// The agents dashboard (facts and summaries per agent), above the
+  /// sessions; null leaves it out.
+  final Widget? agents;
 
   /// Buttons on the dashboard's title row (panel toggles).
   final List<Widget> actions;
@@ -456,6 +461,10 @@ class _MainColumn extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (dashboard.agents case final agents?) ...[
+          const _SectionTitle('Agents', icon: Icons.space_dashboard_outlined),
+          KeyedSubtree(key: const ValueKey('dashboard-agents'), child: agents),
+        ],
         _SectionTitle(
           'Recent sessions',
           detail: sessions.isEmpty ? 'none open' : '${sessions.length} open',

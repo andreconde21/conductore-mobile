@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:conduit/features/usage/domain/usage_explorer.dart';
+import 'package:conduit/features/usage/domain/usage_range.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Usage settings of this device. Never synced or backed up: an alert that
@@ -9,6 +11,9 @@ class UsagePreferences {
     this.alertEnabled = false,
     this.barCollapsed = false,
     this.alertedWindow,
+    this.explorerRange = UsageRangePreset.last7,
+    this.explorerCustom,
+    this.explorerMetric = UsageMetric.tokens,
   });
 
   /// Settings › Agents: "Alert at 80% of the 5-hour window".
@@ -21,14 +26,25 @@ class UsagePreferences {
   /// again.
   final DateTime? alertedWindow;
 
+  /// The usage explorer's last range, custom dates and measure.
+  final UsageRangePreset explorerRange;
+  final UsageDateRange? explorerCustom;
+  final UsageMetric explorerMetric;
+
   UsagePreferences copyWith({
     bool? alertEnabled,
     bool? barCollapsed,
     DateTime? alertedWindow,
+    UsageRangePreset? explorerRange,
+    UsageDateRange? explorerCustom,
+    UsageMetric? explorerMetric,
   }) => UsagePreferences(
     alertEnabled: alertEnabled ?? this.alertEnabled,
     barCollapsed: barCollapsed ?? this.barCollapsed,
     alertedWindow: alertedWindow ?? this.alertedWindow,
+    explorerRange: explorerRange ?? this.explorerRange,
+    explorerCustom: explorerCustom ?? this.explorerCustom,
+    explorerMetric: explorerMetric ?? this.explorerMetric,
   );
 
   Map<String, Object?> toJson() => {
@@ -36,6 +52,10 @@ class UsagePreferences {
     'barCollapsed': barCollapsed,
     if (alertedWindow case final window?)
       'alertedWindow': window.millisecondsSinceEpoch,
+    'explorerRange': explorerRange.name,
+    if (explorerCustom case final custom?)
+      'explorerCustom': [custom.from, custom.to],
+    'explorerMetric': explorerMetric.name,
   };
 
   static UsagePreferences fromJson(Object? json) {
@@ -43,12 +63,27 @@ class UsagePreferences {
       return const UsagePreferences();
     }
     final window = json['alertedWindow'];
+    final custom = json['explorerCustom'];
     return UsagePreferences(
       alertEnabled: json['alertEnabled'] == true,
       barCollapsed: json['barCollapsed'] == true,
       alertedWindow: window is int
           ? DateTime.fromMillisecondsSinceEpoch(window, isUtc: true)
           : null,
+      explorerRange:
+          UsageRangePreset.byName(json['explorerRange']) ??
+          UsageRangePreset.last7,
+      explorerCustom:
+          custom is List &&
+              custom.length == 2 &&
+              custom[0] is String &&
+              custom[1] is String &&
+              parseUsageDate(custom[0] as String) != null &&
+              parseUsageDate(custom[1] as String) != null
+          ? UsageDateRange(custom[0] as String, custom[1] as String)
+          : null,
+      explorerMetric:
+          UsageMetric.byName(json['explorerMetric']) ?? UsageMetric.tokens,
     );
   }
 }

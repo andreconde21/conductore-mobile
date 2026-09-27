@@ -128,4 +128,7 @@ flutter {
 dependencies {
     // JVM unit tests of the plain-Kotlin rules (src/test).
     testImplementation("junit:junit:4.13.2")
+    // The real org.json for the widget payload parsing tests (android.jar
+    // only has stubs on the JVM).
+    testImplementation("org.json:json:20240303")
 }

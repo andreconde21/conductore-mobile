@@ -192,7 +192,8 @@ class UsageTotals {
       Object.hash(input, output, cacheWrite, cacheRead, messages, costUsd);
 }
 
-/// One day, project and model of one agent on one machine.
+/// One day (or hour, or session), project and model of one agent on one
+/// machine.
 class UsageRow {
   const UsageRow({
     required this.date,
@@ -201,6 +202,9 @@ class UsageRow {
     required this.totals,
     this.agent = UsageAgent.claude,
     this.machine = '',
+    this.hour,
+    this.account,
+    this.session,
   });
 
   /// `YYYY-MM-DD` in the machine's time zone.
@@ -213,6 +217,16 @@ class UsageRow {
   /// Display name of the machine (filled in by the controller).
   final String machine;
 
+  /// 0 to 23, local to the machine: only in `--hourly` replies.
+  final int? hour;
+
+  /// The cswap account seen active at the time; null without cswap or
+  /// before the companion first saw one.
+  final String? account;
+
+  /// The first 8 characters of the session id: only in `bySession` rows.
+  final String? session;
+
   UsageRow withMachine(String name) => UsageRow(
     date: date,
     project: project,
@@ -220,6 +234,9 @@ class UsageRow {
     totals: totals,
     agent: agent,
     machine: name,
+    hour: hour,
+    account: account,
+    session: session,
   );
 
   static UsageRow? fromJson(Object? json, UsageAgent agent) {
@@ -232,12 +249,18 @@ class UsageRow {
     }
     final project = json['project'];
     final model = json['model'];
+    final hour = json['hour'];
+    final account = json['account'];
+    final session = json['session'];
     return UsageRow(
       date: date,
       project: project is String ? project : '(unknown)',
       model: model is String ? model : 'unknown',
       totals: UsageTotals.fromJson(json),
       agent: agent,
+      hour: hour is num && hour >= 0 && hour < 24 ? hour.toInt() : null,
+      account: account is String && account.isNotEmpty ? account : null,
+      session: session is String && session.isNotEmpty ? session : null,
     );
   }
 }
@@ -383,6 +406,7 @@ class UsageSection {
     this.today = UsageTotals.zero,
     this.range = UsageTotals.zero,
     this.rows = const [],
+    this.bySession = const [],
     this.accounts = const [],
     this.cswap = false,
   });
@@ -396,6 +420,9 @@ class UsageSection {
   final UsageTotals today;
   final UsageTotals range;
   final List<UsageRow> rows;
+
+  /// Per day and session (`--sessions`); empty from older companions.
+  final List<UsageRow> bySession;
 
   /// Claude only: every account cswap manages on the machine. Empty
   /// without cswap and from companions before it.
@@ -421,6 +448,7 @@ class UsageSection {
       today: UsageTotals.fromJson(json['today']),
       range: UsageTotals.fromJson(json['range']),
       rows: list('rows', (item) => UsageRow.fromJson(item, agent)),
+      bySession: list('bySession', (item) => UsageRow.fromJson(item, agent)),
       accounts: list('accounts', UsageAccount.fromJson),
       cswap: json['cswap'] is Map && (json['cswap'] as Map)['present'] == true,
     );
@@ -441,6 +469,12 @@ class UsageReport {
     this.pricingNote,
     this.unpricedModels = const [],
     this.partial = false,
+    this.to,
+    this.hourly = false,
+    this.detailFrom,
+    this.historyFrom,
+    this.utcOffsetMinutes,
+    this.rebuilding = false,
   });
 
   /// The host's name for itself.
@@ -459,6 +493,28 @@ class UsageReport {
 
   /// The scan stopped at its per-call cap; the next call goes on.
   final bool partial;
+
+  /// The last day answered. Null from companions before ranges, which
+  /// answer `--days` up to [today] whatever else is asked.
+  final String? to;
+
+  /// The rows carry hours (`--hourly` on a companion that has them).
+  final bool hourly;
+
+  /// Hours and sessions exist from this day, daily sums from
+  /// [historyFrom].
+  final String? detailFrom;
+  final String? historyFrom;
+
+  /// The machine's offset from UTC when it answered.
+  final int? utcOffsetMinutes;
+
+  /// The companion is re-reading transcripts after an upgrade (daily sums
+  /// only until it is done).
+  final bool rebuilding;
+
+  /// The companion understands `--from`, `--to`, `--hourly`.
+  bool get supportsRanges => to != null;
 
   Iterable<UsageSection> get agents => [claude, codex];
 }
@@ -526,8 +582,26 @@ UsageAccountSwitchResult parseAccountSwitchResult(String stdout) {
   );
 }
 
-/// The command that asks for [days] of usage.
-String companionUsageArguments({int days = 7}) => 'usage --days $days';
+/// The command that asks for [days] of usage, or the days [from] to [to]
+/// (`YYYY-MM-DD`; [days] then only tells an older companion, which ignores
+/// the range, how much to send), per hour and per session on request.
+String companionUsageArguments({
+  int days = 7,
+  String? from,
+  String? to,
+  bool hourly = false,
+  bool sessions = false,
+}) => [
+  'usage --days $days',
+  if (from != null && from == to)
+    '--day $from'
+  else ...[
+    if (from != null) '--from $from',
+    if (to != null) '--to $to',
+  ],
+  if (hourly) '--hourly',
+  if (sessions) '--sessions',
+].join(' ');
 
 /// Parses `conductore-hostd usage` output. Null for anything that is not a
 /// usage report (an older companion answers with an error).
@@ -574,5 +648,14 @@ UsageReport? parseUsageReport(String stdout) {
           if (model is String) model,
     ],
     partial: scan is Map && scan['partial'] == true,
+    to: text0('to'),
+    hourly: decoded['hourly'] == true,
+    detailFrom: text0('detailFrom'),
+    historyFrom: text0('historyFrom'),
+    utcOffsetMinutes: switch (decoded['utcOffsetMin']) {
+      final num offset => offset.toInt(),
+      _ => null,
+    },
+    rebuilding: scan is Map && scan['rebuilding'] == true,
   );
 }

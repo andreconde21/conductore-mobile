@@ -2,8 +2,15 @@ import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 
 /// Where the app is asked to go when launched from the widget or tile.
 enum AgentStatusLaunchTarget {
-  /// Open the agent attention sheet.
+  /// Open the agent attention sheet (widgets placed before the
+  /// dashboard counts, until they redraw).
   agents,
+
+  /// Open the agents dashboard (a tap on the widget, or on the tile).
+  dashboard,
+
+  /// Open Claude's usage (a tap on the widget's limit rings).
+  usage,
 
   /// Start the voice guide (its quick-settings tile, the headset's
   /// voice-assistant button).

@@ -67,13 +67,22 @@ class ChatAgentMatched extends ChatAgentMatch {
 /// Several fit and nothing tells them apart: the user picks one of
 /// [candidates].
 class ChatAgentAmbiguous extends ChatAgentMatch {
-  const ChatAgentAmbiguous(this.candidates, {this.elsewhere = false});
+  const ChatAgentAmbiguous(
+    this.candidates, {
+    this.elsewhere = false,
+    this.inPlace = false,
+  });
 
   final List<AgentInfo> candidates;
 
   /// None of [candidates] is where the session is (its Herdr workspace or
   /// tmux session runs no Claude): ask even when there is only one.
   final bool elsewhere;
+
+  /// Every one of [candidates] is where the session is (several Claude
+  /// sessions in its Herdr workspace or tmux session), as opposed to a
+  /// session that says nothing about where it is.
+  final bool inPlace;
 }
 
 /// No live Claude session on the machine.
@@ -104,6 +113,11 @@ List<AgentInfo> _latestPerPane(List<AgentInfo> agents) {
   }
   return result;
 }
+
+/// The one of [agents] (not empty) whose state changed last; the first
+/// when none says.
+AgentInfo mostRecentAgent(List<AgentInfo> agents) =>
+    agents.reduce((best, agent) => _newer(agent, best) ? agent : best);
 
 bool _newer(AgentInfo a, AgentInfo b) {
   final at = a.stateChangedAt;
@@ -184,7 +198,7 @@ ChatAgentMatch resolveChatAgent(
     return ChatAgentMatched(scoped.single);
   }
   if (scoped.length > 1) {
-    return ChatAgentAmbiguous(scoped);
+    return ChatAgentAmbiguous(scoped, inPlace: true);
   }
   if (located) {
     return ChatAgentAmbiguous(live, elsewhere: true);
@@ -394,7 +408,9 @@ ChatViewAccess _blockedBy(CompanionStatus status, SavedHost host) {
 /// Opens the chat view for [agent] on [host] as a full-screen route, or
 /// through the nearest [ChatViewPresenter] (the desktop shell's tabs).
 /// [onOpenTerminal] runs after the route is popped by its Terminal button
-/// (the caller shows that session's TUI).
+/// (the caller shows that session's TUI). [initialSend] is sent as a prompt
+/// as the chat opens (a message passed on from another chat), showing as
+/// its pending bubble.
 Future<void> openChatView({
   required BuildContext context,
   required AgentAttentionController attention,
@@ -404,6 +420,7 @@ Future<void> openChatView({
   DictationController? dictation,
   Widget Function(BuildContext routeContext)? accessoryBuilder,
   String initialDraft = '',
+  String initialSend = '',
   PromptImageAttacher? imageAttacher,
   bool pasteImages = true,
 }) async {
@@ -442,6 +459,10 @@ Future<void> openChatView({
     decide: decide,
     agentChanges: changes,
   );
+  if (initialSend.trim().isNotEmpty) {
+    // A failure stays on the bubble, with Retry.
+    unawaited(controller.send(initialSend).onError((_, _) {}));
+  }
   // The desktop shell shows the chat as a tab in its panes.
   final presenter = ChatViewPresenter.maybeOf(context);
   if (presenter != null) {

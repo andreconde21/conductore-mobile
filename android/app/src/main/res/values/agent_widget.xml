@@ -1,17 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="agent_widget_title">Agents</string>
-    <string name="agent_widget_description">Which coding agents need your input, at a glance.</string>
+    <string name="agent_widget_description">How many coding agents need you, are stuck, working or done, at a glance.</string>
     <string name="agent_widget_empty">Open Conductore to monitor agents</string>
-    <string name="agent_widget_no_agents">No agents running</string>
     <string name="agent_widget_all_clear">All clear</string>
-    <string name="agent_widget_one_needs_input">agent needs input</string>
-    <string name="agent_widget_needs_input">agents need input</string>
-    <string name="agent_widget_updated">Updated %1$s</string>
+    <!-- A count not known yet (stuck and done before the dashboard's first answer). -->
+    <string name="agent_widget_unknown_count">–</string>
+    <!-- 2x1: beside the needs-you count. -->
+    <plurals name="agent_widget_need_you_label">
+        <item quantity="one">needs you</item>
+        <item quantity="other">need you</item>
+    </plurals>
+    <!-- 4x2: under each count. -->
+    <string name="agent_widget_caption_need_you">need you</string>
+    <string name="agent_widget_caption_stuck">stuck</string>
+    <string name="agent_widget_caption_working">working</string>
+    <string name="agent_widget_caption_done">done</string>
+    <!-- When the stuck and done counts were fetched (they may be stale). -->
+    <string name="agent_widget_as_of">as of %1$s</string>
+    <!-- The tile's subtitle, joined with " · ": "2 need you · 1 stuck". -->
+    <plurals name="agent_widget_n_need_you">
+        <item quantity="one">%d needs you</item>
+        <item quantity="other">%d need you</item>
+    </plurals>
+    <string name="agent_widget_n_stuck">%d stuck</string>
+    <string name="agent_widget_n_working">%d working</string>
+    <string name="agent_widget_n_done">%d done</string>
+    <!-- Read out for a count not known yet. -->
+    <string name="agent_widget_count_unknown_description">%1$s: not known yet</string>
+    <!-- Read out for an agent line: "Needs you: api on dev box, approve Bash". -->
+    <string name="agent_widget_line_needs_description">Needs you: %1$s</string>
+    <string name="agent_widget_line_stuck_description">Stuck: %1$s</string>
     <string name="agent_tile_label">Agents</string>
     <string name="agent_tile_not_monitoring">Open app to monitor</string>
-    <string name="agent_tile_one_needs_input">1 needs input</string>
-    <string name="agent_tile_needs_input">%1$d need input</string>
     <string name="agent_widget_limit_5h">5h</string>
     <string name="agent_widget_limit_7d">wk</string>
     <!-- Tile subtitle with Claude's limits: "5h 42% · wk 18%". -->
@@ -19,9 +40,11 @@
     <string name="agent_widget_limit_description">%1$s limit %2$d%% used</string>
 
     <!-- Omarchy Everforest (themes/everforest/colors.toml), the app's default
-         theme, in every mode: the widget matches the app, not the wallpaper.
-         on_surface_variant is the foreground 30% toward the background, as
-         the app's muted text. -->
+         theme: the widget's colours until the app pushes its own theme's
+         (payload 3), then those, dark or light, so the widget matches the
+         app, not the wallpaper. on_surface_variant is the foreground 30%
+         toward the background, as the app's muted text. Mirrored by
+         WidgetTheme.EVERFOREST. -->
     <color name="agent_widget_surface">#2D353B</color>
     <color name="agent_widget_on_surface">#D3C6AA</color>
     <color name="agent_widget_on_surface_variant">#A19B89</color>

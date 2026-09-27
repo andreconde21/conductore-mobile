@@ -6,6 +6,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_save_result.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
 
 /// The files of "This computer": the [SftpRepository] interface over the
@@ -166,6 +167,14 @@ class LocalFileSession implements SftpSession {
     } finally {
       await sink?.close();
     }
+  }
+
+  /// Local disks do not drop out mid-write the way a connection does, so
+  /// this stays a plain write.
+  @override
+  Future<SftpSaveResult> save(String path, Uint8List bytes) async {
+    await write(path, Stream.value(bytes), bytes.length);
+    return const SftpSaveResult(SftpSaveMethod.inPlace);
   }
 
   @override

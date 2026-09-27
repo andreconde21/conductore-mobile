@@ -170,6 +170,8 @@ class LivePreviewController extends ChangeNotifier {
   /// Updates the address bar path; WebView navigation reports land here
   /// so the field follows in-page links.
   void setPath(String path) {
+    // A WebView callback can land after the tab closed.
+    if (_disposed) return;
     final normalized = normalizePath(path);
     if (normalized == _path) {
       return;

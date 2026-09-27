@@ -151,6 +151,8 @@ class GuideContext {
         return ref == null || isAgent(ref) ? GuideRead(ref) : reject();
       case 'usage':
         return const GuideUsage();
+      case 'catchUp':
+        return const GuideCatchUp();
       case 'home':
         return const GuideHome();
       case 'say':

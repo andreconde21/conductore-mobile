@@ -19,6 +19,7 @@ import 'package:conduit/features/desktop_shell/presentation/widgets/shell_tab_st
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -764,7 +765,7 @@ void main() {
       observeLifecycle: false,
     );
     addTearDown(usage.dispose);
-    await pumpShell(tester, before: (h) => h.usageController = usage);
+    final h = await pumpShell(tester, before: (h) => h.usageController = usage);
     UsageSummaryView inSlot(String key) => tester.widget<UsageSummaryView>(
       find.descendant(
         of: find.byKey(ValueKey(key)),
@@ -775,10 +776,20 @@ void main() {
     expect(inSlot('sidebar-usage-slot').layout, UsageSummaryLayout.compact);
     // Not the phone's home bar.
     expect(find.byType(UsageHomeBar), findsNothing);
-    // A tap opens the breakdown in the right panel.
+    // A tap opens the explorer in the main area, with room for it.
     inSlot('dashboard-usage-slot').onTap!();
     await tester.pump();
-    expect(find.byKey(const ValueKey('shell-usage-panel')), findsOneWidget);
+    expect(h.shell.showUsage, isTrue);
+    expect(find.byType(UsageExplorerView), findsOneWidget);
+    expect(find.byKey(const ValueKey('usage-explorer-close')), findsOneWidget);
+    // Going home (or to a session) leaves it.
+    h.shell.showHome = true;
+    await tester.pump();
+    expect(h.shell.showUsage, isFalse);
+    expect(find.byType(UsageExplorerView), findsNothing);
+    // The right panel's breakdown opens it there too.
+    h.shell.rightPanel = ShellRightPanel.usage;
+    await tester.pump();
     expect(find.byType(UsageBreakdown), findsOneWidget);
     await tearDownShell(tester);
   }, variant: _linux);

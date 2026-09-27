@@ -18,6 +18,7 @@
 //   tmux=/tmp/tmux-1000/default,123,0      only when set
 //   tmux_pane=%5
 //   herdr_workspace=w1 / herdr_tab / herdr_pane / herdr_name
+//   herdr_socket=/run/user/1000/herdr.sock   $HERDR_SOCKET_PATH, when set
 //   fifo=<state dir>/tmp/p.12345          PermissionRequest only
 //   timeout=120
 //

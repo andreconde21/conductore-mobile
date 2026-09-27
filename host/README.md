@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|trust|rules|transcript|send|ports|usage|summarize|guide"
+    phone ──ssh user@host "conductore-hostd status|events|decide|trust|rules|transcript|send|ports|usage|summarize|guide|digest|turns|diff|undo"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -34,7 +34,8 @@ host/install.sh --uninstall
 ```
 
 `install.sh` ends by running `conductore-hostd install`, which merges nine
-hook handlers into `~/.claude/settings.json` (backup in `settings.json.bak`),
+hook handlers (eleven on a Claude Code that knows the two newer events, see
+How it works) into `~/.claude/settings.json` (backup in `settings.json.bak`),
 wires the statusline (see Usage below) and records the path of `node` for
 the sh clients (`~/.conductore/node`: hooks may run with a PATH without node).
 Existing hooks are left untouched; running it again changes nothing and does
@@ -65,10 +66,14 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/spawn.at` | time of the last start attempt |
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
 | `~/.conductore/ports.json` | listening ports and the seq each first appeared at (`ports`) |
-| `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets and daily token sums, last 31 days (about 1.3 MB for 1,100 transcripts) |
+| `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets, token sums per hour and per session for the last 31 days, daily sums to 62 days, and the cswap accounts seen active (about 1.35 MB for 1,050 transcripts) |
 | `~/.conductore/cswap-cache.json` | `usage` with cswap: the last `cswap list` answer (masked rows only), 60 s |
 | `~/.conductore/summarize.lock` | pid of the running `summarize` (one at a time; never the text) |
 | `~/.conductore/guide.lock` | pid of the running `guide` (one at a time; never the request) |
+| `~/.conductore/activity.json` | per-agent activity log for `digest` (compact entries, no tool input; see `digest`), mode 0600 |
+| `~/.conductore/digest.json` | `digest --summaries`: the rolling summary per agent and today's token use of those calls, mode 0600 |
+| `~/.conductore/digest.lock` | pid of the running `digest --summaries` (one at a time) |
+| `~/.conductore/turns.json` | per-turn snapshot records for `turns` / `diff` / `undo` (prompt headline, times, snapshot commits, changed files), mode 0600 |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 | `~/.conductore/rules.json` | approval rules and time-boxed trust the hook answers by itself (see Approval rules), mode 0600 |
@@ -93,8 +98,20 @@ The phone should run commands as
 ## How it works
 
 `conductore-hostd install` registers `conductore-hook <Event>` for
-SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest,
-Notification, Stop, SubagentStop and SessionEnd, all with an empty matcher.
+SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure,
+PermissionRequest, Notification, Stop, StopFailure, SubagentStop and
+SessionEnd, all with an empty matcher. PostToolUseFailure (a failed tool
+call, e.g. a command that exited non-zero) and StopFailure (a turn that
+ended on an API error) feed `digest`, and are registered only when
+`claude --version` says the local Claude Code knows them: 2.1.119 or newer
+for PostToolUseFailure (the first release its changelog names it in),
+2.1.78 for StopFailure. Before 2.1.101 Claude Code ignored the whole
+settings.json over one unknown hook event name, so with no `claude`, no
+answer in 5 s or an unreadable version neither is registered. Running
+`install` again after a Claude Code update (or downgrade) adds (or takes
+off) them; `install` prints them in `skipped` with the reason, `doctor`
+reports them as `optional hooks`, `uninstall` removes them. Without them
+`digest` reads failures and API errors from the transcripts instead.
 Every handler except PermissionRequest is `async: true`, so it can never stall
 Claude Code; SessionEnd gets a 5 s timeout because Claude Code only waits
 briefly on exit.
@@ -137,7 +154,7 @@ Without `/proc` (macOS) an agent ends after 24 h without any event.
 | state | set by |
 | --- | --- |
 | `working` | UserPromptSubmit, PreToolUse, PostToolUse, a permission decision |
-| `waiting_input` | SessionStart, Stop, Notification `idle_prompt` / `agent_needs_input`, PreToolUse of AskUserQuestion or ExitPlanMode |
+| `waiting_input` | SessionStart, Stop, StopFailure, Notification `idle_prompt` / `agent_needs_input`, PreToolUse of AskUserQuestion or ExitPlanMode |
 | `needs_permission` | PermissionRequest (until decided), Notification `permission_prompt`, a PermissionRequest that timed out (the prompt is now in the terminal) |
 | `ended` | SessionEnd; its Claude Code process gone, or 24 h without an event when the process is unknown (`expired`) |
 
@@ -189,7 +206,7 @@ Every command prints one JSON document on stdout and exits 0, or prints
       ]
     }
   ],
-  "capabilities": ["smart-approvals"]
+  "capabilities": ["smart-approvals", "digest"]
 }
 ```
 
@@ -216,7 +233,8 @@ Every command prints one JSON document on stdout and exits 0, or prints
   agent's requests; the phone refreshes its `approvals` list when it moves.
 * `capabilities`: what this companion supports, for the phone to gate on
   (also in `version`). `smart-approvals`: risk labels, `rules`, `trust`,
-  `approve-low`, `approvals`, `classify`.
+  `approve-low`, `approvals`, `classify`. `digest`: the `digest` command.
+  `snapshots`: per-turn snapshots and `turns`, `diff`, `undo`, `redo`.
 * `source` is `daemon`, `snapshot` (daemon down, read from `state.json`, with
   `writtenAt`) or `none` (never ran). Timestamps are Unix milliseconds.
 * Agents are sorted by `updatedAt`, newest first.
@@ -329,7 +347,7 @@ Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
 
 ```json
 {"sessionId":"0f2c…","offset":183422,"size":183422,"start":0,"skipped":0,
- "agent":{"name":"Foo","state":"working","lastMessage":null,"startedAt":1790286139217,"updatedAt":1790286139530,"endedAt":null,"pending":[]},
+ "agent":{"name":"Foo","state":"working","lastEvent":"PreToolUse","lastToolName":"Bash","lastMessage":null,"startedAt":1790286139217,"updatedAt":1790286139530,"endedAt":null,"pending":[]},
  "entries":[
   {"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-25T10:00:00.000Z","isSidechain":false,
    "message":{"role":"user","content":"fix the failing test"}},
@@ -347,6 +365,8 @@ Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
 
 * `agent` is the session's live status (fields as in `status`, `pending`
   included), so one poll refreshes both the thread and the header.
+  `lastEvent` `Stop` with `state` `waiting_input` means the turn ended
+  (the phone opens Review then, when asked to).
 * Without `--since` it returns the last `--tail-bytes` (default: `--max-bytes`)
   of the file; `start` is the byte offset of the first line returned, so
   `--before <start>` pages backwards (it returns the whole lines in the
@@ -358,11 +378,16 @@ Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
   are read per call; poll again until `offset` equals `size`.
 * `reset: true`: `--since` was past the end (the file was replaced), so this
   is a fresh tail read. `oversized: true`: one line was longer than
-  `--max-bytes` and was skipped.
+  `--max-bytes` (a prompt with pasted images, a big tool result); it is read
+  and returned on its own, or skipped when it is over 64 MB.
 * Kept line types: `user`, `assistant`, `system` (`subtype`, `content`
-  capped at 500 chars, `level`) and `summary`. Attachments, queue
-  operations, file-history snapshots, cost state and other bookkeeping lines
-  are dropped. `isMeta`, `isCompactSummary` and `isApiErrorMessage` are
+  capped at 500 chars, `level`) and `summary`. A prompt the user typed while
+  the agent was working, which Claude Code records only as a
+  `queued_command` attachment, comes back as a `user` entry with
+  `queued: true` (the attachment's `prompt` as `message.content`); queued
+  task notifications and teammate or coordinator messages do not. Other
+  attachments, queue operations, file-history snapshots, cost state and
+  other bookkeeping lines are dropped. `isMeta`, `isCompactSummary` and `isApiErrorMessage` are
   passed through when set.
 * Content blocks: `text` (capped at 32 KB, `truncated` when cut), `thinking`
   (text never sent, only `hasText`), `tool_use` (`id`, `name`, `input`; long
@@ -449,7 +474,7 @@ it first appeared; a port that closes is dropped, and when it opens again
   language servers) unless the command line is a known dev server.
 * `source`: `ss`, `lsof`, `proc` (no process details) or `none`.
 
-### `conductore-hostd usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]`
+### `conductore-hostd usage [--days 7] [--since <iso>] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--day YYYY-MM-DD] [--hourly] [--sessions] [--max-bytes N] [--max-ms N]`
 
 Usage at a glance, computed on this machine from local files (no network,
 no Anthropic or OpenAI API): the account's rate limits, each live
@@ -458,7 +483,9 @@ project and model.
 
 ```json
 {"version":"0.7.0","schema":1,"machine":"devbox","generatedAt":1790340104253,
- "timeZone":"Europe/Lisbon","today":"2026-09-25","from":"2026-09-19",
+ "timeZone":"Europe/Lisbon","utcOffsetMin":60,"today":"2026-09-25",
+ "from":"2026-09-19","to":"2026-09-25","hourly":false,
+ "detailFrom":"2026-08-26","historyFrom":"2026-07-26",
  "claude":{"present":true,
    "limits":[{"label":"5h","usedPct":42,"resetsAt":1790348400000,"expired":false},
              {"label":"7d","usedPct":18,"resetsAt":1790697600000,"expired":false}],
@@ -468,13 +495,14 @@ project and model.
             "tokens":9549200,"messages":212,"costUsd":8.93},
    "range":{…same fields, from `from` to `today`…},
    "rows":[{"date":"2026-09-25","project":"api","model":"claude-opus-5",
+            "account":"work",
             "input":1200,"output":98000,"cacheWrite":350000,"cacheRead":9100000,
             "messages":212,"costUsd":8.93}]},
  "codex":{"present":false},
  "pricing":{"estimate":true,"asOf":"2026-09-25","note":"Estimate at public API list prices. …",
             "sources":{"claude":"…","codex":"…"},"unpriced":[]},
  "scan":{"ms":61,"files":1137,"filesRead":0,"bytesRead":0,"partial":false,
-         "pendingFiles":0,"busy":false,"cacheBytes":1311180}}
+         "pendingFiles":0,"busy":false,"rebuilding":false,"cacheBytes":1348310}}
 ```
 
 * `claude.limits`: the 5-hour and 7-day windows (and `spend` when set)
@@ -494,8 +522,14 @@ project and model.
   rows are fast mode.
 * `project`: the repository the entry's cwd is in (the main checkout's
   name for a linked worktree), `~` for the home directory, else the cwd's
-  name. `rows` hold one line per day, project, model and speed; the phone
-  groups them by machine, project, model or day.
+  name. `rows` hold one line per day, project, model, speed and account;
+  the phone groups them by machine, project, model, account or day.
+* `account` (with cswap only, else absent): the cswap account the
+  companion last saw active before the message. The companion sees the
+  active account each time `usage` runs (`cswap list`, 60 s cache), so a
+  switch made while nothing asked for usage is noticed late, and messages
+  before the first sighting have no account. The sightings are kept in the
+  usage cache (`accountLog`, 500 at most).
 * `costUsd`: an **estimate** at public API list prices from
   `lib/pricing.js` (one dated table, applied when answering, so an update
   also reprices history). On a subscription plan it is the API-equivalent
@@ -506,8 +540,26 @@ project and model.
   session logs (running totals turned into per-day deltas, `input` without
   the cached part, `cacheRead` = cached input) and `limits` from the newest
   event's `rate_limits` (primary 5h, secondary 7d). Read only.
-* `--days` (1–31, default 7) or `--since <iso>` (day granularity) set
-  `from`. Only the last 31 days are kept.
+* The range: `--from`/`--to` (local dates; `--from` alone runs to today,
+  `--to` alone takes `--days` days up to it), or `--day D` for one day;
+  otherwise `--since <iso>` (day granularity) or `--days` (1–62, default 7)
+  up to today. `to` is never after today and `from` never before
+  `historyFrom`; `today` totals are today's whatever the range. Older
+  companions ignore these flags and answer `--days`: a caller that sends
+  `--days 31 --from … --to …` gets the range from a new companion and 31
+  days from an old one (which sends no `to`).
+* Kept: the last 31 days in full (from `detailFrom`: hours, sessions),
+  days 32 to 62 as daily sums only (from `historyFrom`), so a 30-day range
+  can be compared with the one before.
+* `--hourly`: `rows` are per hour as well, with `hour` (0–23, local; none
+  on history days). `hourly: true` says the rows carry hours.
+* `--sessions`: `claude.bySession` (and `codex.bySession`): one line per
+  day, session (the first 8 characters of its id; subagents count for
+  their parent), project, model, speed and account, with the same totals.
+* After an upgrade from a companion before hours and sessions (a version 1
+  cache), the transcripts are read again; until that is done the answer
+  comes from the old daily sums, with `scan.rebuilding: true`,
+  `hourly: false`, no `bySession` and `detailFrom: null`.
 * Cost: incremental. The cache holds, per file, the byte offset read so
   far; only files whose size or mtime changed are opened, from there, and
   only lines containing `"usage"` and `"assistant"` (Codex: `token_count`,
@@ -515,7 +567,12 @@ project and model.
   `--max-bytes` (256 MB) or `--max-ms` (2500 ms), newest files first, then
   answers with `scan.partial: true`; the next call goes on (the phone
   polls again sooner). A first scan of 2 GB of transcripts takes about five
-  calls; afterwards a call takes ~60 ms. It runs at nice 10, never touches
+  calls on an idle machine; afterwards a call takes ~60 ms. Hours, sessions
+  and accounts cost little: on development-central (2.2 GB, 1,053
+  transcripts in 31 days, load 40) the cache went from 1.20 MB to 1.35 MB
+  (hour buckets 24 KB to 73 KB, sessions 31 KB, file offsets 319 KB to
+  388 KB) and a warm call stayed at ~48 ms median; a `--day --hourly
+  --sessions` answer is ~13 KB. It runs at nice 10, never touches
   the daemon's event path, and a second concurrent call answers from the
   cache with `scan.busy: true` instead of scanning too.
 
@@ -631,7 +688,8 @@ every case:
 ```
 
 * `action` is one of `open`, `chat`, `terminal`, `approve`, `deny`,
-  `approveAllSafe`, `trust`, `send`, `read`, `usage`, `home`, `say`;
+  `approveAllSafe`, `trust`, `send`, `read`, `usage`, `catchUp`, `home`,
+  `say`;
   `target` is an id from the context or empty, `text` the prompt for
   `send`, `minutes` (1–480) for `trust`, `speak` one short sentence to say.
 * The answer is checked here too: an action outside the list, an id the
@@ -655,6 +713,279 @@ every case:
 * Older companions answer `unknown command guide`: the phone then asks the
   next machine, or says the guide's brain needs an update.
 
+### `conductore-hostd digest [--since <ms>] [--summaries] [--max-agents 10] [--max-ms 30000] [--lang en|pt] [--stuck-working-min 30] [--stuck-errors 3] [--stuck-repeats 5] [--stuck-approval-min 60]`
+
+The phone's agents dashboard: for every agent, what it did since `--since`
+(epoch ms, the user's last look; default two hours ago), whether it looks
+stuck, and a one- or two-sentence summary. Exactly one JSON document on
+stdout and exit 0 in every case (bad flags: `{"schema":1,"error":"failed","message":…}`).
+
+```json
+{"version":"0.8.0","schema":1,"machine":"devbox","generatedAt":1790516991122,"since":1790509791122,
+ "source":"daemon","activity":true,
+ "thresholds":{"workingMin":30,"sameError":3,"sameCommand":5,"approvalMin":60,"windowMin":60},
+ "counts":{"needsYou":1,"stuck":1,"working":2,"done":3,"total":7},
+ "agents":[{"sessionId":"0f2c…","name":"api","machine":"devbox","project":"api","cwd":"/home/andre/api",
+   "state":"needs_permission","attention":"permission","live":true,"startedAt":…,"endedAt":null,
+   "lastActivityAt":1790516900000,"headline":"Tests pass; pushing the branch next.","lastError":null,
+   "pending":[{"id":"3671d8715ac1","toolName":"Bash","summary":"git push","createdAt":…,"risk":{"level":"medium","reason":"…"}}],
+   "facts":{"turns":3,"files":["lib/a.js","test/a.test.js"],"filesEdited":2,"linesAdded":48,"linesRemoved":9,"lines":"git",
+            "commands":14,"failedCommands":2,"testRuns":4,"testsPassed":3,"testsFailed":1,
+            "lastTest":{"ok":true,"at":…,"command":"npm test"},
+            "waitingPermissionMs":120000,"waitingInputMs":0,
+            "tokens":{"input":210,"output":9800,"cacheWrite":42000,"cacheRead":910000,"total":962010},"costUsd":0.41,"partial":false},
+   "stuck":[],
+   "summary":{"text":"Fixed the date parsing bug and the tests pass. It wants to push the branch: approve or deny.","at":…,"fresh":true},
+   "summaryPending":false}],
+ "summaries":{"enabled":true,"pending":0,"done":1,"calls":1,"ms":4100,
+              "tokens":{"input":2900,"output":60,"cacheWrite":0,"cacheRead":0,"total":2960},"costUsd":0.0032,"model":"claude-haiku-4-5-20251001"},
+ "summaryUsageToday":{"runs":3,"calls":4,"tokens":{…},"costUsd":0.011},
+ "ms":4180}
+```
+
+Facts (free; no Claude):
+
+* The daemon keeps a per-agent activity log from the hook events it
+  already parses (`lib/activity.js`): prompts, turn ends, API-error stops,
+  edits (file path and an estimate of lines added and removed), Bash
+  commands (first line, cut to 120 characters, and whether it is a test
+  runner), failed tool calls (PostToolUseFailure: the command or tool and
+  the first line of its error) and state changes. Never tool input. At most
+  300 entries, 200 file paths and 60 command labels per agent and 64
+  agents; an agent stays 24 h after its last entry, so agents the state
+  pruned an hour after they ended still show under "done". In memory,
+  written to `activity.json` (0600) with the state snapshot's 1 s debounce;
+  nothing runs at idle.
+* `turns` counts prompts; `files` (relative to the agent's cwd, at most 12)
+  and `filesEdited` the edited files; `linesAdded` / `linesRemoved` come
+  from `git diff --numstat HEAD` of those files (uncommitted changes, one
+  call per repository, 1.5 s cap), else from the edit estimate
+  (`lines`: `git`, `mixed`, `estimate`, or null without edits);
+  `testRuns`, `testsPassed`, `testsFailed` and `lastTest` from Bash
+  commands that run a test runner (npm/yarn/pnpm/bun test, pytest, go test,
+  cargo test, flutter/dart test, node --test, jest, vitest, rspec, …) and
+  whether they succeeded (PostToolUse) or failed (PostToolUseFailure);
+  `failedCommands` every failed tool call; `waitingPermissionMs` /
+  `waitingInputMs` the time spent in those states within the window.
+* `tokens` and `costUsd` (estimate, `lib/pricing.js`): the assistant
+  messages of the window, from the last 2 MB of the agent's transcript
+  (`partial: true` when the window starts before that, or before the
+  activity log's oldest entry). Only for agents active in the window.
+* `attention`: `permission` (a pending request or a terminal prompt),
+  `question` (it asked something: AskUserQuestion, ExitPlanMode, or its
+  last reply ends with a question mark) or null (working, done, idle). `headline`: the first line of the last assistant
+  message (markdown stripped, 160 characters). `live: false`: the agent
+  is only in the activity log (it ended and was pruned); nothing can be
+  sent to it. `lastError`: `{type, at}` when the last turn ended on an API
+  error (also on `status`).
+* Agents that ended before `--since` and were quiet since are left out.
+  `counts`: needsYou (attention), stuck, working, done (the rest).
+* `sources`: where failures and API errors come from: `hooks`, or
+  `transcript` when PostToolUseFailure / StopFailure are not registered.
+  Then the Bash calls and failed tool calls in the transcript tail (the
+  last 2 MB, `partial` when the window starts before it) replace the log's
+  command entries, and an API error message the last turn ended on (with
+  no prompt after it) counts as an error stop.
+* `activity: false`: the daemon predates `digest` (only `status` facts).
+  `source` as in `status`.
+
+Stuck flags (free), each `{rule, reason}`:
+
+| rule | when (defaults; flags change them) |
+| --- | --- |
+| `no-progress` | working for 30 min (`--stuck-working-min`) without editing a file |
+| `same-failure` | the same failed command, or the same error, 3 times (`--stuck-errors`) |
+| `repeating` | the same command 5 times (`--stuck-repeats`; `git status`, `ls`, `cat` and similar are ignored) |
+| `waiting-approval` | a permission request waiting 60 min (`--stuck-approval-min`) |
+| `error` | the last turn ended on an API error (rate limit, overload, auth, …) and nobody prompted since |
+
+Repeats count within the last 60 minutes and since the last prompt.
+
+Summaries (`--summaries` only, never on a schedule):
+
+* Without the flag, `digest` answers at once with the facts and the cached
+  summaries (`summary.fresh: false` when the agent did something since),
+  and sets `summaryPending` on the agents a `--summaries` call would
+  summarise: active in the window, changed since their last summary. The
+  phone shows the facts, then makes the second call.
+* With it, up to `--max-agents` (1–30, default 10) of those, most recently
+  active first, are summarised: five agents per `claude -p` call, at most
+  two calls at once, all within `--max-ms` (5–120 s, default 30 s,
+  counted from the start). Each agent goes in as its facts, stuck reasons,
+  what it waits for, its previous summary, its last prompt (500
+  characters) and its last three replies since that summary (1,500
+  characters each; at most 12,000 characters per agent), never a whole
+  transcript. The answer (`--json-schema`: one `{id, summary}` per agent,
+  in `--lang`) is stored in `digest.json` (0600) with the activity time it
+  covers; the next run of an agent with nothing new reuses it without a
+  call. Entries of agents gone for 24 h are dropped, at most 64 are kept.
+* It runs `claude -p --tools "" --safe-mode --no-session-persistence
+  --output-format json --model haiku --system-prompt <fixed instruction>
+  --json-schema <fixed schema>` with the agents on stdin between random
+  delimiters, `MAX_THINKING_TOKENS=0`: the same lock-down as `summarize`
+  and `guide`. Nice 10, claude in its own process group killed on timeout
+  or a signal, one run per user at a time (`digest.lock`; a second run
+  gets `summaries.error: "busy"` and the facts).
+* `summaries`: `done`, `pending` (still to do: over the cap or failed),
+  `calls`, `ms`, `tokens` and `costUsd` as claude reported them, `error`
+  (`claude-missing`, `not-logged-in`, `timeout`, `busy`, `failed`).
+  `summaryUsageToday` adds up today's runs; `usage` reports the same as
+  `companion.digest` (these calls write no transcript, so the transcript
+  scan never sees them).
+* Cost: one call for five changed agents sends about 2–3k tokens per agent
+  (plus ~600 of instruction) and gets ~60 back per agent. See CHANGELOG
+  for the measured numbers.
+
+### Turn snapshots: `turns`, `diff`, `undo`, `redo`
+
+For the phone's Review mode and "Undo this turn". The daemon snapshots the
+agent's repository at the start of every turn (UserPromptSubmit) and at its
+end (Stop or StopFailure; a turn interrupted with Escape sends neither, so
+it ends where the next prompt's snapshot starts).
+
+A snapshot is an ordinary commit object whose tree is the work tree as it
+is on disk (tracked files, and untracked files that are not ignored) and
+whose parent is HEAD, kept by a ref
+`refs/conductore/snapshots/<session>/<turn>/before|after`. It is built with
+plumbing and a temporary index, never the user's:
+
+    cp .git/index ~/.conductore/tmp/snap-….index        (read once: stat data)
+    GIT_INDEX_FILE=<tmp> git add -u
+    GIT_INDEX_FILE=<tmp> git ls-files -z -o --exclude-standard
+    GIT_INDEX_FILE=<tmp> git update-index --add --remove -z --stdin   (untracked)
+    GIT_INDEX_FILE=<tmp> git write-tree
+    git commit-tree <tree> -p HEAD      (author Conductore; no hooks run)
+    git update-ref refs/conductore/snapshots/<session>/<turn>/before <commit>
+
+So the branch, HEAD, the index, the stash and the work tree are never
+touched; `git status`, `git log`, `git stash list` and `git branch` look the
+same. Every git runs with `GIT_OPTIONAL_LOCKS=0` (a read never rewrites the
+real index), without inherited `GIT_*` variables, at nice 10 (Linux derives
+the I/O priority from it), in its own process group, killed after 20 s
+(`CONDUCTORE_SNAPSHOT_TIMEOUT_MS`). The hook itself is unchanged: it spools
+the event and exits; the daemon queues the snapshot (one at a time) and
+never waits for it. Anything that fails makes the snapshot a skip with a
+reason in the turn record (logged, unless the cwd is simply not in a git
+repository); the agent never notices.
+
+Skipped, before anything is hashed: a cwd outside a git work tree, a repo
+whose index is over 16 MB (about 150,000 tracked files;
+`CONDUCTORE_SNAPSHOT_MAX_INDEX_BYTES`), more than 20,000 untracked files
+(`…_MAX_UNTRACKED`) or 256 MB of them (`…_MAX_UNTRACKED_BYTES`). One
+untracked file over 32 MB (`…_MAX_FILE_BYTES`) and nested repositories are
+left out of the snapshot (listed as `excluded` in its commit message), and
+`undo` never deletes them. `CONDUCTORE_SNAPSHOTS=0` turns snapshots off.
+
+A change the agent makes before the "before" snapshot finished may be in
+it: the turn then carries `late: true` (an Edit, Write or Bash call arrived
+first). Under normal load the snapshot is done long before the model's
+first tool call.
+
+Pruning: the last 50 turns per session (`CONDUCTORE_SNAPSHOT_KEEP_TURNS`)
+and 7 days (`CONDUCTORE_SNAPSHOT_KEEP_MS`); a session quiet for 7 days goes
+with all its refs. Each repo is also swept (at most every 6 h, after a
+snapshot) for snapshot refs older than 7 days whose record was lost. The
+refs have no reflog, so `git gc` removes their objects as it does any
+unreachable object (after `gc.pruneExpire`, two weeks by default).
+
+Cost measured on development-central on a copy of this repository (1,188
+tracked files, 180 MB with `.git`), with the machine at load 75-95 on 12
+cores from other builds: 40 ms of CPU per snapshot, 210-230 ms wall at nice
+10 (a single `git` start alone takes ~140 ms at nice 10 under that load, 19
+ms at nice 0). A snapshot with nothing changed adds one commit object (and
+none when it is identical to the last one); with one edited file, four
+objects (the blob, the trees on its path, the commit), 24 KB on disk as
+loose objects. Hook latency is unchanged (see CHANGELOG).
+
+#### `conductore-hostd turns <sessionId> [--limit 20]`
+
+```json
+{"sessionId":"0f2c…","snapshots":true,"source":"daemon","agent":{"name":"api","state":"waiting_input","cwd":"/home/andre/api","endedAt":null},
+ "cwd":"/home/andre/api","pending":0,
+ "turns":[{"turn":3,"prompt":"Fix the date parsing bug","startedAt":1790526091313,"endedAt":1790526151964,"running":false,
+   "repo":"/home/andre/api","files":[{"path":"lib/date.js","status":"M","added":12,"removed":3}],"filesTotal":1,"added":12,"removed":3,
+   "committed":false,"late":false,
+   "before":{"ref":"refs/conductore/snapshots/0f2c…/3/before","commit":"b9d2…","head":"f2c6…","ms":175,"untracked":0,"excluded":0,"at":…},
+   "after":{"ref":"refs/conductore/snapshots/0f2c…/3/after","commit":"63c5…","head":"f2c6…","ms":193,"untracked":1,"excluded":0,"at":…},
+   "others":[],"undone":null}]}
+```
+
+* Newest first. `prompt`: the first line of the prompt (160 characters).
+  `files` (at most 50; `filesTotal` counts all): the paths that differ
+  between the two snapshots, `status` `A` `M` `D` `T` (no rename
+  detection). `committed`: HEAD moved during the turn.
+* `before` / `after` are `null` while queued, or `{"skipped": reason}`.
+  `after.fromNext`: the turn was interrupted; its end is the next turn's
+  start.
+* `others`: sessions with a turn in the same repository at the same time.
+  Their changes are in this turn's snapshots too (and an undo reverts them).
+* `undone`: `{at, kind: "turn"|"file", ref}` while the last `undo` of the
+  turn has not been redone.
+* `pending`: snapshots of this session still queued. `source`: `daemon`,
+  `file` (daemon down: `turns.json`) or `none`.
+
+#### `conductore-hostd diff <sessionId> <turn> [--file <path>]… [--max-bytes 1048576] [--max-file-bytes 65536] [--context 3]`
+
+The turn's changes between its before and after snapshots (waits up to 25 s
+for the session's queued snapshots). A turn still running (or whose end
+was not captured) is compared with the work tree as it is now (`live: true`).
+
+```json
+{"sessionId":"0f2c…","turn":3,"prompt":"Fix the date parsing bug","repo":"/home/andre/api","startedAt":…,"endedAt":…,
+ "live":false,"committed":false,"late":false,"others":[],"added":13,"removed":3,"truncated":false,
+ "files":[{"path":"lib/date.js","status":"M","added":12,"removed":3,"binary":false,"mode":"100644","patch":"@@ -10,7 +10,16 @@ …\n"},
+          {"path":"logo.png","status":"A","added":0,"removed":0,"binary":true,"patch":null,"oldSize":null,"newSize":48213,"mode":"100644"}]}
+```
+
+* `patch`: the hunks of a unified diff (from the first `@@`), capped at
+  `--max-file-bytes` per file (`truncated: true`) and `--max-bytes` in all
+  (later files `omitted: true`, `patch: null`). Binary files and
+  submodules have no patch, only `oldSize` / `newSize`.
+* `--file` (repeatable) limits the answer to those paths.
+* Errors: `no before snapshot for this turn (<reason>)`, `unknown turn N`,
+  `no turns recorded for session …`.
+
+#### `conductore-hostd undo <sessionId> <turn> [--file <path>]… [--dry-run] [--keep-commits]`
+
+Restores the work tree (or only the `--file` paths) to the turn's "before"
+snapshot: files the turn changed or deleted come back exactly (content,
+mode, symlinks), files created since are deleted (and their directories
+when left empty). Without `--file` it restores the whole tree to that
+moment, so later turns are undone too (`laterTurns` lists them).
+
+```json
+{"ok":true,"sessionId":"0f2c…","turn":3,"dryRun":false,"repo":"/home/andre/api",
+ "restored":[{"path":"lib/date.js","action":"write","added":3,"removed":12,"binary":false},
+             {"path":"lib/new.js","action":"delete","added":0,"removed":20,"binary":false}],
+ "skipped":[],"redo":{"ref":"refs/conductore/snapshots/0f2c…/3/undo-1790526094125"},
+ "headMoved":false,"laterTurns":[],"others":[]}
+```
+
+* Safety: refused while the agent is `working` or `needs_permission`
+  (`code: "busy"`). It first snapshots the current state (the `redo` ref,
+  whose message lists the paths restored), then writes files from a
+  temporary index with `git read-tree` and `git checkout-index`: the real
+  index, HEAD, branches, commits and the stash are never touched. When the
+  index stages changes to a restored file, `staged` lists them with a
+  `note`.
+* Commits: if HEAD is no longer where it was when the turn started (the
+  agent committed during the turn, or anyone did since), undo is refused
+  with `code: "head-moved"` and the number of commits. There is
+  deliberately no option that resets the branch: moving a branch can lose
+  work the phone cannot see (other worktrees, pushed commits) and would
+  break "never touches HEAD". `--keep-commits` restores the files anyway;
+  the commits stay and the work tree shows their changes reverted, ready
+  for `git commit` or a manual reset.
+* `--dry-run` lists `restored` and `skipped` and changes nothing.
+* `added` / `removed` are what the undo does to the file.
+
+#### `conductore-hostd redo <sessionId> <turn> [--dry-run]`
+
+Puts back what the last `undo` of that turn changed (only those paths),
+from the snapshot the undo took first; it snapshots the state it replaces
+too (`redo-*` ref). Refused while the agent works or when HEAD moved since
+the undo. `nothing to redo for this turn` when the last undo was redone.
+
 ### `conductore-hostd statusline [--chain '<cmd>']`
 
 Not for the phone: the Node statusline of 0.3, kept so a not yet migrated
@@ -669,7 +1000,7 @@ instead. See Usage.
   latency is measured around the spawn from Node, so it includes a little
   process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1","capabilities":["smart-approvals"]}`
+* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1","capabilities":["smart-approvals","digest"]}`
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 
@@ -848,6 +1179,13 @@ sample table.
   only the user can drop events in (the same user can already run the CLI).
   The daemon only opens FIFOs that are directly inside its own `tmp/`, and
   opens them write-only and non-blocking.
+* Snapshots write only objects and refs under `refs/conductore/` in the
+  agent's own repository, with git plumbing (no hooks run, no reflog, no
+  config read beyond git's own). `undo` / `redo` write files inside the
+  repository's work tree only (paths resolving outside it are skipped) and
+  refuse while the agent works. A snapshot holds what is on disk, so it can
+  contain untracked secrets the repository does not ignore; they stay in
+  `.git` until pruned and collected, like any stash.
 * `send` types into the agent's pane, which is what the SSH user could do by
   attaching to tmux/Herdr anyway. It refuses while a permission prompt is
   waiting so a prompt cannot answer it by accident.
@@ -950,7 +1288,15 @@ tool calls) and the shell reader, `test/rules.test.js` rule syntax,
 matching, scopes, expiry and suggestions, `test/approvals.test.js` trust,
 rules, `approve-low`, the auto-approved log and the hook's auto-answer
 latency through a real daemon, `test/audit.test.js` the log's byte cap,
-`test/summarize.test.js` the `summarize` command with a fake `claude`
+`test/digest.test.js` the activity log (facts from synthetic events, caps,
+pruning), the stuck rules and `digest` with a fake `claude` (argv, stdin,
+schema, only changed agents, rolling summaries, batches and caps, timeout
+kill, lock, the 0600 store) and through a real daemon,
+`test/snapshots.test.js` per-turn snapshots through a real daemon on
+throwaway repos (the index, stash, HEAD and branch unchanged, untracked in
+and ignored out, a slow git never delaying the hook, `turns`, `diff`,
+`undo`, per-file undo, `redo`, refusal while working and after a commit,
+pruning, the size limits), `test/summarize.test.js` the `summarize` command with a fake `claude`
 (argv, passthrough, markdown and word cap, timeout kill, busy, truncation),
 `test/cswap.test.js` cswap accounts with a fake `cswap` and a fixture of
 the real `list --json` shape (email masking, timeout kill, 60 s cache and

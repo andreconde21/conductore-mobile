@@ -14,6 +14,8 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
@@ -23,6 +25,7 @@ import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
+import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
 import 'package:conduit/features/hosts/data/secure_home_preferences_repository.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -68,6 +71,7 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
 import 'package:flutter/material.dart';
@@ -111,8 +115,13 @@ class HostsPage extends StatefulWidget {
     this.desktopShell,
     this.shellMode,
     this.usageSummary,
+    this.launchRequests,
     super.key,
   });
+
+  /// Screens asked for from outside the page (the home-screen widget's
+  /// dashboard and usage taps).
+  final HomeLaunchRequests? launchRequests;
 
   /// The desktop shell's state (sidebar, splits, unread). Null makes the
   /// page own one in secure storage when it runs as the shell.
@@ -258,6 +267,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.hostsController.addListener(_syncBoards);
     widget.workspaceController.addListener(_syncBoards);
     flow?.terminalRequests.addListener(_handleTerminalRequest);
+    widget.launchRequests?.addListener(_handleLaunchRequest);
     widget.sessionRestore?.addListener(_handleRestoreChanged);
     widget.localDataChanges?.addListener(_handleLocalDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -271,6 +281,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       _syncBoards();
       _syncVisibility();
       unawaited(_loadTrustedEndpoints());
+      _handleLaunchRequest();
     });
     widget.promptCoordinator.addListener(_handlePromptChanged);
   }
@@ -315,6 +326,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.hostsController.removeListener(_syncBoards);
     widget.workspaceController.removeListener(_syncBoards);
     widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
+    widget.launchRequests?.removeListener(_handleLaunchRequest);
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
     widget.localDataChanges?.removeListener(_handleLocalDataChanged);
     widget.sessionRestore?.setHomeVisible(false);
@@ -534,6 +546,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                           onSettings: _openSettings,
                           onSwitcher: () => unawaited(_openSwitcher()),
                           onGuide: _guideButton(context),
+                          onAgents: DigestScope.maybeOf(context) == null
+                              ? null
+                              : _openAgentsDashboard,
+                          agentsBadge: widget.agentAttention.attentionCount,
                           machine: _machineChip(),
                         ),
                       ),
@@ -614,8 +630,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               machineMenu: _handleMenu,
               openSession: (session) {
                 widget.workspaceController.activate(session);
-                unawaited(_openTerminalWorkspace());
-                _openPreferredChat(session);
+                unawaited(_showSession(session));
               },
               sessionActions: _showSessionActions,
               noticeAction: _handleNoticeAction,
@@ -644,14 +659,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           await _openPane(host, workspace, null);
           return;
         }
-        await flow.openAgentLocation(
+        final session = await flow.openAgentLocation(
           host,
           workspaceId: workspace.id,
           tabId: tab.id,
           label: workspace.label,
         );
         if (!mounted) return;
-        await _openTerminalWorkspace();
+        await _showSession(session);
       case TmuxSessionTarget(:final host, :final session):
         await _openTmux(host, session.name);
       case TmuxWindowTarget(:final host, :final session, :final window):
@@ -662,8 +677,56 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             .firstOrNull;
         if (session == null) return;
         widget.workspaceController.activate(session);
-        await _openTerminalWorkspace();
+        await _showSession(session);
     }
+  }
+
+  /// The home-screen widget's taps: the dashboard, or usage.
+  void _handleLaunchRequest() {
+    if (!mounted) return;
+    switch (widget.launchRequests?.take()) {
+      case HomeLaunchRequest.dashboard:
+        _openAgentsDashboard();
+      case HomeLaunchRequest.usage:
+        if (UsageScope.maybeOf(context) case final usage?) {
+          unawaited(openUsageExplorer(context, usage));
+        }
+      case null:
+        break;
+    }
+  }
+
+  /// The phone's agents dashboard (home bar button).
+  void _openAgentsDashboard() {
+    final digest = DigestScope.maybeOf(context);
+    if (digest == null) return;
+    unawaited(
+      showAgentsDashboard(
+        context,
+        controller: digest,
+        attention: widget.agentAttention,
+        onOpenChat: (host, agent) => unawaited(_openChatForAgent(host, agent)),
+        onOpenTerminal: (host, agent) =>
+            unawaited(_openAgentTerminal(host, agent)),
+      ),
+    );
+  }
+
+  /// The dashboard's Terminal button: the agent's own pane, in the
+  /// terminal (a new session when none is open there).
+  Future<void> _openAgentTerminal(SavedHost host, AgentInfo agent) async {
+    final flow = widget.connectFlow;
+    if (flow != null) {
+      await flow.openAgent(host, agent);
+    } else {
+      final session = widget.workspaceController.sessions
+          .where((session) => session.host.id == host.id)
+          .firstOrNull;
+      if (session != null) widget.workspaceController.activate(session);
+      unawaited(widget.agentAttention.focusAgent(host.id, agent));
+    }
+    if (!mounted || !widget.workspaceController.hasSessions) return;
+    await _openTerminalWorkspace();
   }
 
   /// The agents panel's and the dashboard's Chat buttons.
@@ -851,8 +914,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
     void open(TerminalSessionController session) {
       widget.workspaceController.activate(session);
-      unawaited(_openTerminalWorkspace());
-      _openPreferredChat(session);
+      unawaited(_showSession(session));
     }
 
     // The "+" tile fills the last row's gap (or stands alone when nothing
@@ -1296,12 +1358,18 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final existing = _sessionsFor(
       host,
     ).where((s) => HomeSessionInfo.tmuxSessionOf(s) == sessionName).firstOrNull;
+    // A window picked by hand is a place in the terminal: it stays there.
+    final preferredView = window == null;
     if (existing != null) {
       widget.workspaceController.activate(existing);
-      await _openTerminalWorkspace();
+      await _showSession(preferredView ? existing : null);
       return;
     }
-    await _openTarget(host, ConnectTarget.tmux(sessionName));
+    await _openTarget(
+      host,
+      ConnectTarget.tmux(sessionName),
+      preferredView: preferredView,
+    );
   }
 
   /// The gear: the full-screen Settings page.
@@ -1313,6 +1381,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       hostsController: widget.hostsController,
       hostKeyVerifier: widget.hostKeyVerifier,
       agentAttention: widget.agentAttention,
+      digest: DigestScope.maybeOf(context),
       onLockNow: _lock,
     ),
   );
@@ -1472,7 +1541,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     if (flow != null) {
       // Lands on the exact workspace, tab and pane: reuses (and if needed
       // reconnects) an open Herdr tab, or attaches a new one focused there.
-      await flow.openAgentLocation(
+      final session = await flow.openAgentLocation(
         host,
         workspaceId: workspace.id,
         tabId: pane?.agent.tab ?? '',
@@ -1480,7 +1549,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         label: workspace.label,
       );
       if (!mounted) return;
-      await _openTerminalWorkspace();
+      await _showSession(session, agent: pane?.agent);
       return;
     }
     final board = _boards?[host.id];
@@ -1494,7 +1563,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           unawaited(board.focusWorkspace(workspace.id));
         }
       }
-      await _openTerminalWorkspace();
+      await _showSession(existing, agent: pane?.agent);
       return;
     }
     if (pane != null && board != null) {
@@ -1509,6 +1578,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     await _openTarget(
       host,
       ConnectTarget.herdr(workspaceId: workspace.id, label: workspace.label),
+      agent: pane?.agent,
     );
   }
 
@@ -1528,40 +1598,64 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     return anyHerdr;
   }
 
-  Future<void> _openTarget(SavedHost host, ConnectTarget target) async {
+  /// Opens [target] on [host] and shows it (see [_showSession]; with
+  /// [preferredView] false, always in the terminal).
+  Future<void> _openTarget(
+    SavedHost host,
+    ConnectTarget target, {
+    AgentInfo? agent,
+    bool preferredView = true,
+  }) async {
     await widget.hostsController.markConnected(host);
     final flow = widget.connectFlow;
+    final TerminalSessionController session;
     if (flow != null) {
-      flow.open(host, target);
+      session = flow.open(host, target);
     } else {
-      widget.workspaceController.open(
+      session = widget.workspaceController.open(
         target.apply(host),
         startupCommand: target.startupCommand,
         target: target,
       );
     }
     if (!mounted) return;
-    await _openTerminalWorkspace();
+    await _showSession(preferredView ? session : null, agent: agent);
   }
 
-  /// After [session]'s terminal was pushed: Chat View on top when its pane
-  /// runs a Claude session the companion knows and it opens in Chat View.
-  /// Its Terminal button leaves the terminal, at the agent's pane.
-  void _openPreferredChat(TerminalSessionController session) {
-    final attention = widget.agentAttention;
-    openPreferredChatView(
-      _actionContext,
-      attention: attention,
-      host: session.host,
-      onOpenTerminal: (agent) {
-        final flow = widget.connectFlow;
-        if (flow != null) {
-          unawaited(flow.openAgent(session.host, agent));
-        } else {
-          unawaited(attention.focusAgent(session.host.id, agent));
-        }
-      },
-    );
+  /// Shows [session] (just opened or activated): the terminal, with Chat
+  /// View on top when its pane runs a Claude session and it opens in Chat
+  /// View, as soon as its agents are known (see [openPreferredChatView]).
+  /// [agent] pins which Claude session. Its Terminal button leaves the
+  /// terminal, at the agent's pane. Completes when the terminal page is
+  /// left, like [_openTerminalWorkspace].
+  Future<void> _showSession(
+    TerminalSessionController? session, {
+    AgentInfo? agent,
+  }) {
+    // Pushed first: Chat View goes over it and remembers it for back.
+    final shown = _openTerminalWorkspace();
+    if (session != null) {
+      final attention = widget.agentAttention;
+      final flow = widget.connectFlow;
+      unawaited(
+        openPreferredChatView(
+          _actionContext,
+          attention: attention,
+          workspace: widget.workspaceController,
+          session: session,
+          agent: agent,
+          herdr: flow?.herdr,
+          onOpenTerminal: (host, agent) {
+            if (flow != null) {
+              unawaited(flow.openAgent(host, agent));
+            } else {
+              unawaited(attention.focusAgent(host.id, agent));
+            }
+          },
+        ),
+      );
+    }
+    return shown;
   }
 
   Future<void> _showSessionActions(TerminalSessionController session) async {
@@ -1648,8 +1742,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   /// A deep link (notification, widget, agent sheet) opened a session.
   void _handleTerminalRequest() {
+    final opened = widget.connectFlow?.takeOpenedAgent();
     if (mounted && widget.workspaceController.hasSessions) {
-      unawaited(_openTerminalWorkspace());
+      unawaited(_showSession(opened?.session, agent: opened?.agent));
     }
   }
 
@@ -1775,19 +1870,21 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   Future<void> _connect(SavedHost host, {bool forcePicker = false}) async {
     final flow = widget.connectFlow;
+    final TerminalSessionController session;
     if (flow == null) {
       await widget.hostsController.markConnected(host);
-      widget.workspaceController.open(host);
+      session = widget.workspaceController.open(host);
     } else {
-      final session = await flow.connect(
+      final connected = await flow.connect(
         context,
         host,
         forcePicker: forcePicker,
       );
-      if (session == null) return;
+      if (connected == null) return;
+      session = connected;
     }
     if (!mounted) return;
-    await _openTerminalWorkspace();
+    await _showSession(session);
   }
 
   Future<void> _lock() async {

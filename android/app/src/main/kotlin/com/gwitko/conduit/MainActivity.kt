@@ -95,6 +95,25 @@ class MainActivity : FlutterFragmentActivity() {
         }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
+            SHARE_TEXT_CHANNEL, // Chat View message "Share"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "share" -> {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, call.argument<String>("text") ?: "")
+                        call.argument<String>("subject")?.let {
+                            putExtra(Intent.EXTRA_SUBJECT, it)
+                        }
+                    }
+                    startActivity(Intent.createChooser(send, null))
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
             FIDO_USB_CHANNEL,
         ).setMethodCallHandler { call, result ->
             fidoUsbCtapTransport.handle(call, result)
@@ -208,6 +227,7 @@ class MainActivity : FlutterFragmentActivity() {
         const val BACKGROUND_KEEPALIVE_CHANNEL = "conduit/background_keepalive"
         const val FIDO_USB_CHANNEL = "conduit/fido_usb"
         const val LOCAL_SHELL_CHANNEL = "conduit/local_shell"
+        const val SHARE_TEXT_CHANNEL = "conduit/share_text"
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2001
         private const val SHARED_STORAGE_PERMISSION_REQUEST_CODE = 2002
     }
