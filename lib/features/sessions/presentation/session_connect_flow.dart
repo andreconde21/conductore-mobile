@@ -225,7 +225,7 @@ class SessionConnectFlow {
       useSafeArea: true,
       builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
         value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
-        child: _HostChooser(hostsController: hostsController),
+        child: HostChooser(hostsController: hostsController),
       ),
     );
     if (host == null || !context.mounted) {
@@ -235,23 +235,42 @@ class SessionConnectFlow {
   }
 }
 
-class _HostChooser extends StatelessWidget {
-  const _HostChooser({required this.hostsController});
+/// The "New session" machine list. On desktop a filter field sits on top
+/// (the dialog focuses it) and Enter picks the first match.
+@visibleForTesting
+class HostChooser extends StatefulWidget {
+  const HostChooser({required this.hostsController, super.key});
 
   final HostsController hostsController;
 
   @override
+  State<HostChooser> createState() => _HostChooserState();
+}
+
+class _HostChooserState extends State<HostChooser> {
+  String _query = '';
+
+  bool _matches(SavedHost host) {
+    final query = _query.trim().toLowerCase();
+    return query.isEmpty ||
+        host.name.toLowerCase().contains(query) ||
+        host.endpoint.toLowerCase().contains(query);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final desktop = useDesktopModals(context);
     final bottomInset = shouldApplyBottomSafeArea(context)
         ? MediaQuery.viewPaddingOf(context).bottom
         : 0.0;
     return ListenableBuilder(
-      listenable: hostsController,
+      listenable: widget.hostsController,
       builder: (context, _) {
-        final hosts = hostsController.sortedMachines
+        final machines = widget.hostsController.sortedMachines
             .where((host) => !host.isLocal)
             .toList();
+        final hosts = machines.where(_matches).toList();
         return ListView(
           shrinkWrap: true,
           padding: EdgeInsets.fromLTRB(8, 12, 8, 16 + bottomInset),
@@ -260,7 +279,25 @@ class _HostChooser extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: Text('New session', style: theme.textTheme.titleMedium),
             ),
-            if (hosts.isEmpty)
+            if (desktop && machines.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: TextField(
+                  key: const ValueKey('host-chooser-filter'),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    prefixIcon: Icon(Icons.search_rounded, size: 18),
+                    hintText: 'Filter machines',
+                  ),
+                  textInputAction: TextInputAction.go,
+                  onChanged: (value) => setState(() => _query = value),
+                  onSubmitted: (_) {
+                    if (hosts.isEmpty) return;
+                    Navigator.of(context).pop(hosts.first);
+                  },
+                ),
+              ),
+            if (machines.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: Text(
