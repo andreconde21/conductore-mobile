@@ -80,16 +80,32 @@ class SessionConnectFlow {
   /// listens and opens the terminal workspace if it is not showing.
   final ValueNotifier<int> terminalRequests = ValueNotifier<int>(0);
 
+  /// The session and agent of the last [openAgent] that asked for the
+  /// preferred view, until the page showing the terminal takes it.
+  ({TerminalSessionController session, AgentInfo agent})? _openedAgent;
+
+  /// What the last [openAgent] with `preferredView` opened, once: the page
+  /// that shows the terminal on [terminalRequests] shows it in Chat View
+  /// when that is where its session opens.
+  ({TerminalSessionController session, AgentInfo agent})? takeOpenedAgent() {
+    final opened = _openedAgent;
+    _openedAgent = null;
+    return opened;
+  }
+
   /// Deep link to [agent] on [host] (a notification, the agent sheet, the
   /// home-screen widget): with a tmux location (the companion reports
   /// `tab` = `session:window`, `pane` = `%N`), the tab attached to that
   /// tmux session with the pane selected; with a Herdr location, the exact
   /// workspace, tab and pane; otherwise the host's open session, if any.
-  /// Asks for the terminal to be shown when something was opened.
+  /// Asks for the terminal to be shown when something was opened; with
+  /// [preferredView] (a notification tap), in the session's preferred
+  /// view (see [takeOpenedAgent]) rather than always its terminal.
   Future<TerminalSessionController?> openAgent(
     SavedHost host,
-    AgentInfo agent,
-  ) async {
+    AgentInfo agent, {
+    bool preferredView = false,
+  }) async {
     final workspaceId = agent.workspace ?? '';
     final tmuxLocation = TmuxAgentLocation.parse(
       tab: agent.tab,
@@ -119,6 +135,7 @@ class SessionConnectFlow {
       }
     }
     if (session != null) {
+      _openedAgent = preferredView ? (session: session, agent: agent) : null;
       terminalRequests.value += 1;
     }
     return session;
