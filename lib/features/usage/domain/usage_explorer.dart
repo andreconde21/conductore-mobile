@@ -298,11 +298,13 @@ class UsageChartMarker {
 }
 
 /// Where the weekly limit window of [weekly] begins and resets within
-/// [range], in the machine's local time ([utcOffsetMinutes]).
+/// [range], in the machine's local time ([utcOffsetMinutes]). A reset
+/// before [now] is told as past.
 List<UsageChartMarker> usageWeeklyMarkers(
   UsageLimit? weekly,
   UsageDateRange range, {
   required int utcOffsetMinutes,
+  DateTime? now,
 }) {
   final resets = weekly?.resetsAt;
   if (resets == null) {
@@ -326,9 +328,11 @@ List<UsageChartMarker> usageWeeklyMarkers(
       UsageChartMarker(
         date: date,
         fraction: (local.hour * 60 + local.minute) / (24 * 60),
-        label: upcoming
-            ? 'Weekly limit resets ${usageWeekday(date)} ${clock(local)}'
-            : 'Weekly window began ${usageWeekday(date)} ${clock(local)}',
+        label: !upcoming
+            ? 'Weekly window began ${usageWeekday(date)} ${clock(local)}'
+            : now != null && !at.isAfter(now)
+            ? 'Weekly limit reset ${usageWeekday(date)} ${clock(local)}'
+            : 'Weekly limit resets ${usageWeekday(date)} ${clock(local)}',
         upcoming: upcoming,
       ),
     );

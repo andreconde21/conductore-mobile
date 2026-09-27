@@ -296,6 +296,15 @@ void main() {
       expect(markers.single.upcoming, isTrue);
       expect(markers.single.fraction, closeTo((15 * 60 + 30) / 1440, 1e-9));
       expect(markers.single.label, 'Weekly limit resets Thu 15:30');
+      expect(
+        usageWeeklyMarkers(
+          weekly,
+          week,
+          utcOffsetMinutes: 60,
+          now: DateTime.utc(2026, 9, 25),
+        ).single.label,
+        'Weekly limit reset Thu 15:30',
+      );
       final twoWeeks = usageWeeklyMarkers(
         weekly,
         const UsageDateRange('2026-09-12', '2026-09-25'),

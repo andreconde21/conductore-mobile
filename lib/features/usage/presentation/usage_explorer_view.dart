@@ -366,6 +366,7 @@ class _UsageExplorerViewState extends State<UsageExplorerView>
               widget.usage.summary.weekly,
               range,
               utcOffsetMinutes: offset ?? _now.timeZoneOffset.inMinutes,
+              now: _now,
             )
           : const [],
       onSelect: (day) => _openDay(context, day),

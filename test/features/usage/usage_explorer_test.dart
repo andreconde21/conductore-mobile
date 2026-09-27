@@ -346,7 +346,8 @@ void main() {
         find.byKey(const ValueKey('usage-weekly-marker-reset')),
         findsOneWidget,
       );
-      expect(find.text('Weekly limit resets Thu 15:30'), findsOneWidget);
+      // It reset yesterday (the test's now is Friday noon).
+      expect(find.text('Weekly limit reset Thu 15:30'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
 
       // Opening again starts on the week, in cost.
