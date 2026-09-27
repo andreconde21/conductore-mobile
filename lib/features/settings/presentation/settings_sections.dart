@@ -6,6 +6,7 @@ import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
@@ -359,6 +360,42 @@ class SettingsSectionBody extends StatelessWidget {
                     onNotifyLevel: (level) =>
                         hosts.upsert(host.copyWith(agentNotifyLevel: level)),
                   ),
+                  const SizedBox(height: 10),
+                ],
+                if (attention != null) ...[
+                  const SettingsHeading('Approval rules'),
+                  const SettingsNote(
+                    'Rules and time-boxed trust the companion answers by '
+                    'itself, per machine. High-risk requests always ask.',
+                  ),
+                  const SizedBox(height: 6),
+                  if (machines.isNotEmpty)
+                    SettingsCard(
+                      child: Column(
+                        children: [
+                          for (final host in machines)
+                            ListTile(
+                              key: ValueKey(
+                                'settings-approval-rules-${host.id}',
+                              ),
+                              leading: const Icon(Icons.rule_rounded),
+                              title: Text(
+                                host.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: const Icon(Icons.chevron_right_rounded),
+                              onTap: () => unawaited(
+                                showApprovalRules(
+                                  context,
+                                  controller: attention,
+                                  host: host,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   const SizedBox(height: 10),
                 ],
                 const SettingsHeading('Notifications'),
