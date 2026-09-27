@@ -26,6 +26,7 @@ import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.da
 import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/live_terminal_preview.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
@@ -154,6 +155,7 @@ class DesktopHomeState extends State<DesktopHome> {
   bool _appResumed = true;
   ModalRoute<Object?>? _route;
   Timer? _previewTimer;
+  final _previewTicks = ValueNotifier<int>(0);
   Timer? _feedTimer;
   AppLifecycleListener? _lifecycle;
 
@@ -244,6 +246,7 @@ class DesktopHomeState extends State<DesktopHome> {
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
     _lifecycle?.dispose();
     _previewTimer?.cancel();
+    _previewTicks.dispose();
     _feedTimer?.cancel();
     for (final MapEntry(key: session, value: listener)
         in _paintListeners.entries) {
@@ -599,8 +602,10 @@ class DesktopHomeState extends State<DesktopHome> {
   void _syncPreviewTimer() {
     final dashboard = !terminalVisible && !_controller.showUsage && _appResumed;
     if (dashboard && widget.workspace.hasSessions) {
+      // Tiles redraw their own previews on a tick, only after output
+      // (see TerminalSnapshotBuilder); the shell itself does not rebuild.
       _previewTimer ??= Timer.periodic(widget.previewRefreshInterval, (_) {
-        if (mounted) setState(() {});
+        if (mounted) _previewTicks.value += 1;
       });
     } else {
       _previewTimer?.cancel();
@@ -894,80 +899,83 @@ class DesktopHomeState extends State<DesktopHome> {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final palette = AppPalette.of(context);
-        final showTerminal = terminalVisible;
-        final chrome = !_fullscreen;
-        final panel = controller.rightPanel;
-        final shell = ColoredBox(
-          color: palette.canvas,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (chrome) ...[
-                SizedBox(
-                  width: controller.sidebarCollapsed
-                      ? DesktopShellController.collapsedSidebarWidth
-                      : controller.sidebarWidth,
-                  child: controller.sidebarCollapsed
-                      ? _collapsedSidebar()
-                      : _sidebar(),
-                ),
-                if (controller.sidebarCollapsed)
-                  VerticalDivider(width: 1, color: palette.hairline)
-                else
-                  _ResizeHandle(
-                    key: const ValueKey('sidebar-resize'),
-                    onDrag: (delta) => controller.sidebarWidth =
-                        controller.sidebarWidth + delta,
+    return PreviewClock(
+      ticks: _previewTicks,
+      child: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final palette = AppPalette.of(context);
+          final showTerminal = terminalVisible;
+          final chrome = !_fullscreen;
+          final panel = controller.rightPanel;
+          final shell = ColoredBox(
+            color: palette.canvas,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (chrome) ...[
+                  SizedBox(
+                    width: controller.sidebarCollapsed
+                        ? DesktopShellController.collapsedSidebarWidth
+                        : controller.sidebarWidth,
+                    child: controller.sidebarCollapsed
+                        ? _collapsedSidebar()
+                        : _sidebar(),
                   ),
-              ],
-              Expanded(
-                child: IndexedStack(
-                  index: controller.showUsage
-                      ? 2
-                      : showTerminal
-                      ? 0
-                      : 1,
-                  sizing: StackFit.expand,
-                  children: [
-                    TickerMode(
-                      enabled: showTerminal,
-                      child: widget.terminalBuilder(embedding),
+                  if (controller.sidebarCollapsed)
+                    VerticalDivider(width: 1, color: palette.hairline)
+                  else
+                    _ResizeHandle(
+                      key: const ValueKey('sidebar-resize'),
+                      onDrag: (delta) => controller.sidebarWidth =
+                          controller.sidebarWidth + delta,
                     ),
-                    TickerMode(
-                      enabled: !showTerminal && !controller.showUsage,
-                      child: _dashboard(context),
-                    ),
-                    _usageMain(context),
-                  ],
+                ],
+                Expanded(
+                  child: IndexedStack(
+                    index: controller.showUsage
+                        ? 2
+                        : showTerminal
+                        ? 0
+                        : 1,
+                    sizing: StackFit.expand,
+                    children: [
+                      TickerMode(
+                        enabled: showTerminal,
+                        child: widget.terminalBuilder(embedding),
+                      ),
+                      TickerMode(
+                        enabled: !showTerminal && !controller.showUsage,
+                        child: _dashboard(context),
+                      ),
+                      _usageMain(context),
+                    ],
+                  ),
                 ),
-              ),
-              if (chrome && panel != ShellRightPanel.none) ...[
-                _ResizeHandle(
-                  key: const ValueKey('right-panel-resize'),
-                  onDrag: (delta) => controller.rightPanelWidth =
-                      controller.rightPanelWidth - delta,
-                ),
-                SizedBox(
-                  width: controller.rightPanelWidth,
-                  child: _rightPanel(context, panel),
-                ),
+                if (chrome && panel != ShellRightPanel.none) ...[
+                  _ResizeHandle(
+                    key: const ValueKey('right-panel-resize'),
+                    onDrag: (delta) => controller.rightPanelWidth =
+                        controller.rightPanelWidth - delta,
+                  ),
+                  SizedBox(
+                    width: controller.rightPanelWidth,
+                    child: _rightPanel(context, panel),
+                  ),
+                ],
               ],
-            ],
-          ),
-        );
-        // "Explore" in a usage view opens the explorer in the main area.
-        final usage = UsageScope.maybeOf(context);
-        if (usage == null) return shell;
-        return UsageScope(
-          controller: usage,
-          openExplorer: _openUsage,
-          child: shell,
-        );
-      },
+            ),
+          );
+          // "Explore" in a usage view opens the explorer in the main area.
+          final usage = UsageScope.maybeOf(context);
+          if (usage == null) return shell;
+          return UsageScope(
+            controller: usage,
+            openExplorer: _openUsage,
+            child: shell,
+          );
+        },
+      ),
     );
   }
 
