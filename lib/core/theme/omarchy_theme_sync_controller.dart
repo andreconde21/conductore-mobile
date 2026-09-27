@@ -32,6 +32,7 @@ class OmarchyThemeSyncController extends ChangeNotifier
     required this._theme,
     required this._hosts,
     required this._runnerFactory,
+    this._findHost,
     this._clock = DateTime.now,
     this.minInterval = const Duration(seconds: 60),
     this.timeout = const Duration(seconds: 12),
@@ -40,6 +41,11 @@ class OmarchyThemeSyncController extends ChangeNotifier
   final ThemeController _theme;
   final Future<List<SavedHost>> Function() _hosts;
   final AgentCommandRunner Function(SavedHost host) _runnerFactory;
+
+  /// Finds the followed machine by id; defaults to a lookup in [_hosts].
+  /// On a desktop it also finds the synced machine that is this device,
+  /// which is folded into "This computer" and not listed.
+  final Future<SavedHost?> Function(String id)? _findHost;
   final DateTime Function() _clock;
   final Duration minInterval;
   final Duration timeout;
@@ -115,7 +121,10 @@ class OmarchyThemeSyncController extends ChangeNotifier
 
   Future<void> _sync(String hostId, {required bool explicit}) async {
     _lastAttempt = _clock();
-    final host = (await _hosts()).where((h) => h.id == hostId).firstOrNull;
+    final findHost = _findHost;
+    final host = findHost != null
+        ? await findHost(hostId)
+        : (await _hosts()).where((h) => h.id == hostId).firstOrNull;
     if (host == null) {
       _set(OmarchySyncState.failed, 'That machine is no longer saved.');
       return;

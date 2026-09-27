@@ -93,6 +93,7 @@ class AppLocalSyncStore implements LocalSyncStore {
 
   static const _hostSecretFields = ['password', 'privateKey', 'passphrase'];
   static const _hubLoginFields = ['authMethod', 'externalAuthOfferKey'];
+  static const _followSetting = 'omarchySyncHostId';
 
   Future<void> _whenLoaded() async {
     await ready;
@@ -151,7 +152,14 @@ class AppLocalSyncStore implements LocalSyncStore {
     }
 
     if (on.contains(SyncCategory.appearance)) {
-      AppSettingsCodec.encode(theme).forEach((name, value) {
+      final settings = AppSettingsCodec.encode(theme);
+      // A desktop following "This computer" follows, for the other
+      // devices, the saved machine that is this desktop.
+      final self = hosts.selfMachine?.id;
+      if (theme.omarchySyncHostId == thisComputerHostId && self != null) {
+        settings[_followSetting] = self;
+      }
+      settings.forEach((name, value) {
         out[SyncKeys.setting(name)] = value;
       });
     }
@@ -273,7 +281,13 @@ class AppLocalSyncStore implements LocalSyncStore {
               values.containsKey(SyncKeys.setting(name)))
             name: values[SyncKeys.setting(name)],
       };
+      // The saved machine that is this desktop is not listed here: its
+      // theme is read as "This computer".
+      final self = hosts.hiddenSelfMachine?.id;
+      final followSelf = self != null && settings[_followSetting] == self;
+      if (followSelf) settings.remove(_followSetting);
       if (settings.isNotEmpty) await AppSettingsCodec.apply(theme, settings);
+      if (followSelf) await theme.setOmarchySyncHost(thisComputerHostId);
     }
     if (on.contains(SyncCategory.connections)) {
       await _applyConnections(values, changedKeys);

@@ -208,4 +208,53 @@ void main() {
     expect(target.recentDirs.values['a'], ['~/src']);
     expect(target.sessions.stored.entries.single.hostId, 'a');
   });
+
+  group('the followed Omarchy machine', () {
+    const follow = 'setting:omarchySyncHostId';
+    const appearance = LocalSyncOptions(categories: {SyncCategory.appearance});
+
+    test('"This computer" syncs as the saved machine that is this desktop, '
+        'or not at all', () async {
+      final desktop = await LocalDevice.create(
+        hosts: [machine('omarchy')],
+        desktop: true,
+      );
+      await desktop.theme.setOmarchySyncHost(thisComputerHostId);
+
+      expect(
+        (await desktop.store.snapshot(appearance)).containsKey(follow),
+        isFalse,
+      );
+
+      desktop.hosts.setSelfMachineId('omarchy');
+      expect((await desktop.store.snapshot(appearance))[follow], 'omarchy');
+    });
+
+    test('following the machine that is this desktop follows "This '
+        'computer" there', () async {
+      final desktop = await LocalDevice.create(
+        hosts: [machine('omarchy')],
+        desktop: true,
+      );
+      desktop.hosts.setSelfMachineId('omarchy');
+
+      await desktop.store.apply({follow: 'omarchy'}, {follow}, appearance);
+
+      expect(desktop.theme.omarchySyncHostId, thisComputerHostId);
+      expect((await desktop.store.snapshot(appearance))[follow], 'omarchy');
+    });
+
+    test('a device-local id from another device is ignored', () async {
+      final phone = await LocalDevice.create(hosts: [machine('omarchy')]);
+      await phone.theme.setOmarchySyncHost('omarchy');
+
+      await phone.store.apply(
+        {follow: thisComputerHostId},
+        {follow},
+        appearance,
+      );
+
+      expect(phone.theme.omarchySyncHostId, 'omarchy');
+    });
+  });
 }

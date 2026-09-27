@@ -229,6 +229,11 @@ void main() {
       await hostsController.firstLoad;
       return hostsController.machines;
     },
+    // A synced machine that is this desktop reads as "This computer".
+    findHost: (id) async {
+      await hostsController.selfMachineKnown();
+      return hostsController.findById(id);
+    },
     runnerFactory: hostChannels.runner,
   );
   themeController.omarchySync = omarchyThemeSync;

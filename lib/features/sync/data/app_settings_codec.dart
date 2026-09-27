@@ -3,6 +3,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/this_computer/data/device_local_sync.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 
@@ -38,12 +39,15 @@ abstract final class AppSettingsCodec {
   ];
 
   static Map<String, Object?> encode(ThemeController theme) {
+    final followed = theme.omarchySyncHostId;
     return {
       'themeMode': theme.themeMode.name,
       'palette': theme.selectedPalette.name,
       // Null (not following a machine) is a value too: stopping follow on
-      // one device stops it on the others.
-      'omarchySyncHostId': theme.omarchySyncHostId ?? '',
+      // one device stops it on the others. "This computer" is a different
+      // machine on every device, so following it stays here.
+      if (followed == null || !isDeviceLocalHostId(followed))
+        'omarchySyncHostId': followed ?? '',
       'terminalFont': theme.terminalFont.name,
       'terminalFontSize': theme.terminalFontSize,
       'terminalKeyboardRows': [
@@ -89,8 +93,10 @@ abstract final class AppSettingsCodec {
         await theme.setOmarchySyncHost(following);
       }
     }
-    if (json.containsKey('omarchySyncHostId')) {
-      final hostId = json['omarchySyncHostId'];
+    final hostId = json['omarchySyncHostId'];
+    // Older versions synced "This computer": it means another device here.
+    if (json.containsKey('omarchySyncHostId') &&
+        !(hostId is String && isDeviceLocalHostId(hostId))) {
       await theme.setOmarchySyncHost(
         hostId is String && hostId.isNotEmpty ? hostId : null,
       );

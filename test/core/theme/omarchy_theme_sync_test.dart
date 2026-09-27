@@ -238,6 +238,29 @@ void main() {
       expect(sync.message, 'Gruvbox, JetBrainsMono Nerd Font');
     });
 
+    test('follows a synced machine that is this desktop through '
+        'findHost, though the machine list leaves it out', () async {
+      final read = <String>[];
+      final sync = OmarchyThemeSyncController(
+        theme: theme,
+        hosts: () async => hosts,
+        findHost: (id) async => id == 'self'
+            ? SavedHost.thisComputer(name: 'This computer · omarchy')
+            : null,
+        runnerFactory: (host) {
+          read.add(host.id);
+          return runner;
+        },
+        clock: () => now,
+      );
+
+      await sync.follow('self');
+
+      expect(read, [thisComputerHostId]);
+      expect(sync.state, OmarchySyncState.synced);
+      expect(theme.palette, AppPalette.gruvbox);
+    });
+
     test('a custom theme and an unbundled font', () async {
       runner.reply = () => _probeOutput(
         name: 'my-dusk',
