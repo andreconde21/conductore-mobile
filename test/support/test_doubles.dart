@@ -14,6 +14,7 @@ import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_save_result.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
@@ -625,6 +626,12 @@ class FakeSftpSession implements SftpSession {
       onProgress?.call(bytes.length);
     }
     writtenFiles[path] = bytes;
+  }
+
+  @override
+  Future<SftpSaveResult> save(String path, Uint8List bytes) async {
+    writtenFiles[path] = bytes;
+    return const SftpSaveResult(SftpSaveMethod.atomic);
   }
 
   @override
