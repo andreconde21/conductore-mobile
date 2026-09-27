@@ -7,6 +7,7 @@ import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/ssh_error_formatter.dart';
+import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:dartssh2/dartssh2.dart';
 
@@ -20,7 +21,10 @@ class DartSshSftpRepository implements SftpRepository {
   Future<SftpSession> connect(SavedHost host) async {
     SSHClient? client;
     try {
-      client = await _clientFactory.connect(host);
+      // Opened by the user, who may decide on a changed host key.
+      client = await withInteractiveHostKeyCheck<SSHClient>(
+        () => _clientFactory.connect(host),
+      );
 
       final sftp = await client.sftp();
       return DartSshSftpSession(client: client, sftp: sftp);

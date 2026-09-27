@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
+import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/mosh_server_cleanup.dart';
 import 'package:conduit/features/terminal/domain/predictive_terminal_session.dart';
@@ -39,7 +40,10 @@ class MoshTerminalRepository implements SshTerminalRepository {
   }) async {
     SSHClient? client;
     try {
-      client = await _clientFactory.connect(host);
+      // Opened by the user, who may decide on a changed host key.
+      client = await withInteractiveHostKeyCheck<SSHClient>(
+        () => _clientFactory.connect(host),
+      );
       final server = await _bootstrap(client, host);
       final socket = client.socket;
       final address = socket is TcpSshSocket ? socket.remoteAddress : null;

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:conduit/features/terminal/data/host_key_capture.dart';
 import 'package:dartssh2/dartssh2.dart';
 
 class TcpSshSocket implements SSHSocket {
@@ -26,8 +27,18 @@ class TcpSshSocket implements SSHSocket {
     }
   }
 
+  // The host key is read off the unencrypted key exchange for its SHA256
+  // fingerprint (see HostKeyCapture).
+  late final Stream<Uint8List> _stream = () {
+    final capture = HostKeyCapture();
+    return _socket.map((chunk) {
+      capture.add(chunk);
+      return chunk;
+    });
+  }();
+
   @override
-  Stream<Uint8List> get stream => _socket;
+  Stream<Uint8List> get stream => _stream;
 
   @override
   StreamSink<List<int>> get sink => _socket;
