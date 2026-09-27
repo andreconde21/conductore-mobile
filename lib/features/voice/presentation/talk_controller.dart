@@ -71,7 +71,9 @@ class TalkQuestion extends TalkTarget {
 ///
 /// Approvals are answered by saying allow, deny or always, questions by
 /// an option's number or name (see [VoiceAnswers]). All audio stays on
-/// the device: recognition and speech are Android's on-device engines.
+/// the device where the platform allows: recognition and speech are the
+/// phone's own engines (iOS falls back to Apple's recognizer for a
+/// language without an on-device model).
 ///
 /// The page feeds [update] after every poll, after [ReadAloudController]
 /// has seen the same state (so the answer is already queued).

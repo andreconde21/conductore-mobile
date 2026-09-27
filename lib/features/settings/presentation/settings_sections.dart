@@ -324,8 +324,8 @@ class SettingsSectionBody extends StatelessWidget {
       SpeechSettingsControls(controller: theme),
     ] else
       const SettingsNote(
-        'Dictation, read aloud and Talk use Android speech services, so '
-        'they are not available on this device.',
+        'Dictation, read aloud and Talk use the phone\'s speech services, '
+        'so they are not available on this device.',
       ),
   ];
 

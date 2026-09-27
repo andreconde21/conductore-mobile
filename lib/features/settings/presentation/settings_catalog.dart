@@ -96,6 +96,7 @@ bool _omarchy(SettingsServices s) => s.theme.omarchySync != null;
 bool _speech(SettingsServices _) =>
     PlatformFeatures.dictation || PlatformFeatures.textToSpeech;
 bool _tts(SettingsServices _) => PlatformFeatures.textToSpeech;
+bool _beeps(SettingsServices _) => PlatformFeatures.muteRestartBeeps;
 bool _homeWidget(SettingsServices _) => PlatformFeatures.homeWidget;
 bool _backup(SettingsServices s) => s.backupService != null;
 bool _machines(SettingsServices s) => s.hostsController != null;
@@ -264,7 +265,7 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.chatVoice,
     'Silence beeps between phrases',
     keywords: ['beep', 'mute', 'experimental'],
-    availableWhen: _speech,
+    availableWhen: _beeps,
   ),
   SettingsEntry(
     SettingsSection.chatVoice,

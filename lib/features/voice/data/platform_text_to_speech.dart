@@ -1,10 +1,11 @@
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:flutter/services.dart';
 
-/// Android implementation over the `conduit/tts` method channel and the
-/// `conduit/tts_events` event channel (see TextToSpeechBridge.kt).
+/// Android and iOS implementation over the `conduit/tts` method channel and
+/// the `conduit/tts_events` event channel (see TextToSpeechBridge.kt and
+/// ios/Runner/TextToSpeechBridge.swift).
 ///
-/// Without a native handler (iOS, tests) it reports itself unavailable and
+/// Without a native handler (desktops, tests) it reports itself unavailable and
 /// every call is a harmless no-op.
 class PlatformTextToSpeech implements TextToSpeech {
   PlatformTextToSpeech({MethodChannel? methods, EventChannel? events})
