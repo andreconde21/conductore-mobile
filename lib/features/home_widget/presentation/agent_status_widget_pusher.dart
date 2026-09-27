@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_initializing_formals
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
@@ -14,7 +15,9 @@ import 'package:flutter/foundation.dart';
 /// Pushes one snapshot on [start] and then at most one per [debounce]
 /// window after the source changes (the dashboard notifies on every poll of
 /// every host, so bursts are common). Pushes never overlap: a change that
-/// arrives while a push is in flight schedules exactly one more.
+/// arrives while a push is in flight schedules exactly one more. A snapshot
+/// that differs from the last one pushed only by its time is skipped until
+/// [unchangedRefresh] has passed (the widget shows the time to the minute).
 class AgentStatusWidgetPusher {
   AgentStatusWidgetPusher({
     required Listenable source,
@@ -48,7 +51,12 @@ class AgentStatusWidgetPusher {
   final AgentStatusWidgetChannel _channel;
   final Duration debounce;
 
+  /// How long a snapshot with nothing new but its time is held back.
+  static const unchangedRefresh = Duration(minutes: 1);
+
   Timer? _timer;
+  String? _lastContent;
+  DateTime? _lastPushedAt;
   bool _pushing = false;
   bool _pushAgain = false;
   bool _started = false;
@@ -125,7 +133,17 @@ class AgentStatusWidgetPusher {
       do {
         _pushAgain = false;
         try {
-          await _channel.push(_snapshot());
+          final snapshot = _snapshot();
+          final content = jsonEncode(snapshot.toJson()..remove('updatedAt'));
+          final last = _lastPushedAt;
+          if (content == _lastContent &&
+              last != null &&
+              snapshot.updatedAt.difference(last) < unchangedRefresh) {
+            continue;
+          }
+          await _channel.push(snapshot);
+          _lastContent = content;
+          _lastPushedAt = snapshot.updatedAt;
         } catch (_) {
           // The widget is best-effort; never let it break the dashboard.
         }

@@ -88,7 +88,7 @@ class TerminalSessionController extends ChangeNotifier {
   TerminalEnterSequence _enterSequence = TerminalEnterSequence.cr;
   int _connectionGeneration = 0;
   int? _lastIosEnterOutputMs;
-  String _terminalTitle = '';
+  final _terminalTitle = ValueNotifier<String>('');
   final _remoteClipboardWrites = StreamController<String>.broadcast();
   final _workingDirectoryReports = StreamController<String>.broadcast();
   String? _workingDirectory;
@@ -128,7 +128,12 @@ class TerminalSessionController extends ChangeNotifier {
 
   /// The window title the remote application last set (OSC 0/2), empty
   /// until one arrives. Herdr and tmux both keep it current.
-  String get terminalTitle => _terminalTitle;
+  String get terminalTitle => _terminalTitle.value;
+
+  /// Notifies each change of [terminalTitle]. Kept apart from this
+  /// controller's own notifications: a TUI that animates its title (a
+  /// spinner) would otherwise rebuild everything listening to the session.
+  ValueListenable<String> get terminalTitleListenable => _terminalTitle;
 
   /// Text the remote asked to put on the clipboard with OSC 52 (vim, tmux
   /// `set-clipboard on`, Claude Code's copy). Already decoded, capped at
@@ -699,11 +704,10 @@ class TerminalSessionController extends ChangeNotifier {
     };
     terminal.onOutput = _sendTerminalOutput;
     terminal.onTitleChange = (title) {
-      if (title == _terminalTitle || _disposed) {
+      if (_disposed) {
         return;
       }
-      _terminalTitle = title;
-      notifyListeners();
+      _terminalTitle.value = title;
     };
     terminal.onPrivateOSC = _handlePrivateOsc;
   }
@@ -1011,6 +1015,7 @@ class TerminalSessionController extends ChangeNotifier {
     }
     keyboard.dispose();
     _terminalPaintNotifier.dispose();
+    _terminalTitle.dispose();
     unawaited(_remoteClipboardWrites.close());
     unawaited(_workingDirectoryReports.close());
     super.dispose();
