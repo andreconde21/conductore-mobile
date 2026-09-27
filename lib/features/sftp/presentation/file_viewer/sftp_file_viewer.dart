@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -10,6 +9,7 @@ import 'package:conduit/features/sftp/presentation/file_viewer/file_viewer_toolb
 import 'package:conduit/features/sftp/presentation/file_viewer/media_file_views.dart';
 import 'package:conduit/features/sftp/presentation/widgets/center_message.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 
 typedef SftpFileRead =
@@ -198,7 +198,7 @@ class SftpFileViewerState extends State<SftpFileViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final column = Column(
       children: [
         _buildToolbar(),
         if (_saving)
@@ -212,6 +212,21 @@ class SftpFileViewerState extends State<SftpFileViewer> {
         Expanded(child: _buildBody()),
       ],
     );
+    if (!PlatformFeatures.isDesktop) return column;
+    // Desktop: Ctrl+S (Cmd+S on macOS) saves, like any editor.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true):
+            _saveFromKeyboard,
+        const SingleActivator(LogicalKeyboardKey.keyS, meta: true):
+            _saveFromKeyboard,
+      },
+      child: column,
+    );
+  }
+
+  void _saveFromKeyboard() {
+    if (_dirty && _editable && !_saving) _save();
   }
 
   Widget _buildToolbar() {

@@ -63,6 +63,7 @@ class _SftpFileViewerPageState extends State<SftpFileViewerPage> {
                 Row(
                   children: [
                     IconButton(
+                      tooltip: 'Back',
                       onPressed: () => _handlePop(false),
                       icon: const Icon(Icons.arrow_back_rounded),
                     ),

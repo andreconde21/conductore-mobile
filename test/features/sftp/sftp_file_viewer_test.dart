@@ -1,10 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_editor/re_editor.dart';
 
@@ -213,5 +214,47 @@ void main() {
       ),
     );
     expect(save.onPressed, isNull);
+  });
+
+  Future<void> editAndPressSave(WidgetTester tester) async {
+    await tester.pumpWidget(
+      build(
+        path: '/etc/motd',
+        read: () async => Uint8List.fromList(utf8.encode('hello\n')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CodeEditor));
+    await tester.pump();
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.controller!.text = 'bye\n';
+    await tester.pump();
+    final modifier = defaultTargetPlatform == TargetPlatform.macOS
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    await tester.sendKeyDownEvent(modifier);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await tester.sendKeyUpEvent(modifier);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'desktop Ctrl/Cmd+S saves the edited file',
+    (tester) async {
+      await editAndPressSave(tester);
+      expect(utf8.decode(written!), 'bye\n');
+      expect(viewerKey.currentState!.isDirty, isFalse);
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
+
+  testWidgets('phones do not bind Ctrl+S', (tester) async {
+    await editAndPressSave(tester);
+    expect(written, isNull);
+    expect(viewerKey.currentState!.isDirty, isTrue);
   });
 }
