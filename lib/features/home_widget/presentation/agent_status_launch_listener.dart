@@ -7,8 +7,9 @@ import 'package:conduit/features/sessions/presentation/session_connect_flow.dart
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
 
-/// Opens the agent attention sheet when the app is launched (or brought
-/// back) from the home-screen widget or the quick-settings tile.
+/// Opens what the home-screen widget or the quick-settings tile asked for
+/// when the app is launched (or brought back) from it: the agents
+/// dashboard, usage, or the agent attention sheet.
 ///
 /// Mount it around the unlocked home page: the pending target is consumed
 /// when this widget mounts, so a launch while the app is locked waits for
@@ -21,11 +22,19 @@ class AgentStatusLaunchListener extends StatefulWidget {
     required this.child,
     this.connectFlow,
     this.onGuide,
+    this.onDashboard,
+    this.onUsage,
     super.key,
   });
 
   /// Starts the voice guide; null ignores its launches.
   final VoidCallback? onGuide;
+
+  /// Shows the agents dashboard; null shows the agent sheet instead.
+  final VoidCallback? onDashboard;
+
+  /// Shows Claude's usage; null shows the agent sheet (its limits).
+  final VoidCallback? onUsage;
 
   /// Opens agents at their exact Herdr place; without it the sheet only
   /// activates the host's tab and asks the provider to focus the agent.
@@ -75,6 +84,12 @@ class _AgentStatusLaunchListenerState extends State<AgentStatusLaunchListener> {
       switch (target) {
         case AgentStatusLaunchTarget.agents:
           await _openAgents();
+        case AgentStatusLaunchTarget.dashboard:
+          final open = widget.onDashboard;
+          open == null ? await _openAgents() : open();
+        case AgentStatusLaunchTarget.usage:
+          final open = widget.onUsage;
+          open == null ? await _openAgents() : open();
         case AgentStatusLaunchTarget.guide:
           widget.onGuide?.call();
       }

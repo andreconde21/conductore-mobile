@@ -31,8 +31,10 @@ import 'package:conduit/features/app_lock/presentation/lock_page.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
+import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
+import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
 import 'package:conduit/features/hosts/data/secure_saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
@@ -237,9 +239,14 @@ void main() {
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
   addTelemetryTerms(() => usage.summary.accountTerms);
+  // The widget's dashboard counts read the digest's cached answers only;
+  // its colours follow the app theme.
   AgentStatusWidgetPusher.forController(
     agentAttention,
     usage: usage,
+    digest: digest,
+    theme: () => AgentStatusTheme.fromPalette(themeController.palette),
+    themeChanges: themeController,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();
   const fileExport = FilePickerFileExport();
@@ -712,6 +719,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     if (PlatformFeatures.backgroundKeepalive) {
       unawaited(_backgroundKeepalive.stop().catchError((_) {}));
     }
+    _launchRequests.dispose();
     super.dispose();
   }
 
@@ -767,6 +775,9 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       child: home,
     );
   }
+
+  /// The widget's dashboard and usage taps, for the home page.
+  final _launchRequests = HomeLaunchRequests();
 
   AppPalette? _themedPalette;
   late ThemeData _lightTheme;
@@ -858,6 +869,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 sessionRestore: widget.sessionRestore,
                 localDataChanges: widget.localDataChanges,
                 hostChannels: widget.hostChannels,
+                launchRequests: _launchRequests,
               );
               return _wrapShareTargetHost(
                 AgentStatusLaunchListener(
@@ -866,6 +878,10 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   workspace: widget.workspaceController,
                   connectFlow: widget.connectFlow,
                   onGuide: widget.guide?.start,
+                  onDashboard: () =>
+                      _launchRequests.request(HomeLaunchRequest.dashboard),
+                  onUsage: () =>
+                      _launchRequests.request(HomeLaunchRequest.usage),
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
                     agentAttention: widget.agentAttention,
