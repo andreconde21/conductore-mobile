@@ -53,6 +53,7 @@ class OmarchyThemeSyncController extends ChangeNotifier
   OmarchySyncState _state = OmarchySyncState.idle;
   String _message = '';
   Future<void>? _inFlight;
+  String? _inFlightHostId;
   DateTime? _lastAttempt;
   bool _started = false;
   bool _disposed = false;
@@ -98,7 +99,8 @@ class OmarchyThemeSyncController extends ChangeNotifier
 
   /// Reads the followed machine's theme. Automatic calls are throttled to
   /// [minInterval] and skip security-key machines; [explicit] (a tap on
-  /// "Sync now") always runs. Concurrent calls share one run.
+  /// "Sync now") always runs. Concurrent calls for the same machine share
+  /// one run.
   Future<void> refresh({bool explicit = false}) {
     final hostId = _theme.omarchySyncHostId;
     if (hostId == null) {
@@ -106,7 +108,10 @@ class OmarchyThemeSyncController extends ChangeNotifier
     }
     final running = _inFlight;
     if (running != null) {
-      return running;
+      if (_inFlightHostId == hostId) return running;
+      // Another machine is still being read (its result is dropped):
+      // read this one after it.
+      return running.then((_) => refresh(explicit: explicit));
     }
     final last = _lastAttempt;
     if (!explicit && last != null && _clock().difference(last) < minInterval) {
@@ -114,8 +119,10 @@ class OmarchyThemeSyncController extends ChangeNotifier
     }
     final future = _sync(hostId, explicit: explicit).whenComplete(() {
       _inFlight = null;
+      _inFlightHostId = null;
     });
     _inFlight = future;
+    _inFlightHostId = hostId;
     return future;
   }
 
