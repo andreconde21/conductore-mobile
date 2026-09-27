@@ -3,6 +3,7 @@ package com.gwitko.conduit
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.SecureRandom
 
 /**
  * One agent line as rendered by the widget and tile. Mirrors
@@ -32,33 +33,44 @@ data class AgentStatusLimitRing(val label: String, val usedPct: Int, val level: 
         .apply { if (resetsAtMillis > 0) put("resetsAt", resetsAtMillis) }
 }
 
-/** Mirrors `AgentStatusSnapshot` on the Dart side. */
+/**
+ * Mirrors `AgentStatusSnapshot` on the Dart side. [dashboard] is always
+ * set: from payload 3 as Dart derived it, from older ones the attention
+ * count alone ([WidgetDashboard.legacy]). [theme] is null before payload 3.
+ */
 data class AgentStatusSnapshot(
     val monitoring: Boolean,
     val attentionCount: Int,
     val agents: List<AgentStatusLine>,
     val updatedAtMillis: Long,
     val limits: List<AgentStatusLimitRing> = emptyList(),
+    val version: Int = 3,
+    val dashboard: WidgetDashboard = WidgetDashboard.legacy(attentionCount, agents),
+    val theme: WidgetTheme? = null,
 ) {
     fun limit(label: String): AgentStatusLimitRing? = limits.firstOrNull { it.label == label }
 
     companion object {
+        /** Reads every payload version; null for something that is not one. */
         fun parse(json: String): AgentStatusSnapshot? = try {
             val root = JSONObject(json)
-            val agents = root.optJSONArray("agents") ?: JSONArray()
+            val version = root.optInt("version", 1)
+            val agentsJson = root.optJSONArray("agents") ?: JSONArray()
             val limits = root.optJSONArray("limits") ?: JSONArray()
+            val attentionCount = root.optInt("attentionCount", 0)
+            val agents = (0 until agentsJson.length()).map { index ->
+                val agent = agentsJson.getJSONObject(index)
+                AgentStatusLine(
+                    name = agent.optString("name"),
+                    host = agent.optString("host"),
+                    state = agent.optString("state"),
+                    label = agent.optString("label"),
+                )
+            }
             AgentStatusSnapshot(
                 monitoring = root.optBoolean("monitoring", false),
-                attentionCount = root.optInt("attentionCount", 0),
-                agents = (0 until agents.length()).map { index ->
-                    val agent = agents.getJSONObject(index)
-                    AgentStatusLine(
-                        name = agent.optString("name"),
-                        host = agent.optString("host"),
-                        state = agent.optString("state"),
-                        label = agent.optString("label"),
-                    )
-                },
+                attentionCount = attentionCount,
+                agents = agents,
                 updatedAtMillis = root.optLong("updatedAt", 0L),
                 limits = (0 until limits.length()).map { index ->
                     val limit = limits.getJSONObject(index)
@@ -69,7 +81,75 @@ data class AgentStatusSnapshot(
                         resetsAtMillis = limit.optLong("resetsAt", 0L),
                     )
                 },
+                version = version,
+                dashboard = (if (version >= 3) parseDashboard(root.optJSONObject("dashboard")) else null)
+                    ?: WidgetDashboard.legacy(attentionCount, agents),
+                theme = if (version >= 3) parseTheme(root.optJSONObject("theme")) else null,
             )
+        } catch (_: Exception) {
+            null
+        }
+
+        private fun JSONObject.optCount(key: String): Int? = if (has(key) && !isNull(key)) optInt(key) else null
+
+        private fun parseDashboard(json: JSONObject?): WidgetDashboard? {
+            if (json == null) return null
+            val lines = json.optJSONArray("lines") ?: JSONArray()
+            return WidgetDashboard(
+                needsYou = json.optInt("needsYou", 0),
+                working = json.optCount("working"),
+                stuck = json.optCount("stuck"),
+                done = json.optCount("done"),
+                factsAtMillis = json.optLong("factsAt", 0L),
+                lines = (0 until lines.length()).mapNotNull { index ->
+                    val line = lines.optJSONObject(index) ?: return@mapNotNull null
+                    DashboardLine(
+                        stuck = line.optString("kind") == "stuck",
+                        name = line.optString("name"),
+                        host = line.optString("host"),
+                        reason = line.optString("reason"),
+                        hostId = line.optString("hostId"),
+                        agentId = line.optString("agentId"),
+                        workspace = line.optString("workspace"),
+                        tab = line.optString("tab"),
+                        pane = line.optString("pane"),
+                    )
+                }.take(WidgetDashboard.MAX_LINES),
+            )
+        }
+
+        private fun parseTheme(json: JSONObject?): WidgetTheme? {
+            if (json == null) return null
+            val keys = listOf("surface", "onSurface", "muted", "border", "accent", "onAccent", "warning", "urgent")
+            if (keys.any { !json.has(it) }) return null
+            // Dart writes ARGB as an unsigned 32-bit number.
+            fun color(key: String): Int = json.optLong(key).toInt()
+            return WidgetTheme(
+                dark = json.optBoolean("dark", true),
+                surface = color("surface"),
+                onSurface = color("onSurface"),
+                muted = color("muted"),
+                border = color("border"),
+                accent = color("accent"),
+                onAccent = color("onAccent"),
+                warning = color("warning"),
+                urgent = color("urgent"),
+            )
+        }
+
+        /**
+         * [json] as it is stored once the engine went away: not monitoring,
+         * no agents or dashboard (they no longer reflect a live session).
+         * The version, the limit rings (per account, 0 once their window
+         * resets) and the theme stay. Null when [json] is not a payload.
+         */
+        fun notMonitoring(json: String): String? = try {
+            val root = JSONObject(json)
+            root.put("monitoring", false)
+                .put("attentionCount", 0)
+                .put("agents", JSONArray())
+                .remove("dashboard")
+            root.toString()
         } catch (_: Exception) {
             null
         }
@@ -85,40 +165,88 @@ object AgentStatusStore {
     private const val PREFS = "agent_status_widget"
     private const val KEY_SNAPSHOT = "snapshot"
     private const val KEY_LAUNCH_TARGET = "launch_target"
+    private const val KEY_LINE_TOKENS = "line_tokens"
 
-    /** Intent extra carrying the launch target ("agents"). */
+    /** Intent extra carrying the launch target. */
     const val EXTRA_LAUNCH_TARGET = "com.gwitko.conduit.LAUNCH_TARGET"
-    const val LAUNCH_TARGET_AGENTS = "agents"
 
-    /** Distinct action so the widget/tile PendingIntents never collide with the notification ones. */
+    /** Intent extra carrying an agent line's token ([WidgetLineGuard]). */
+    const val EXTRA_LINE_TOKEN = "com.gwitko.conduit.WIDGET_LINE_TOKEN"
+
+    /** The agent attention sheet (widgets drawn before the dashboard counts). */
+    const val LAUNCH_TARGET_AGENTS = "agents"
+    const val LAUNCH_TARGET_DASHBOARD = "dashboard"
+    const val LAUNCH_TARGET_USAGE = "usage"
+
+    /** An agent line: resolved here, never handed to Dart as such. */
+    const val LAUNCH_TARGET_AGENT = "agent"
+
+    /** The targets Dart is told about; anything else in an intent is dropped. */
+    val DART_LAUNCH_TARGETS = setOf(
+        LAUNCH_TARGET_AGENTS,
+        LAUNCH_TARGET_DASHBOARD,
+        LAUNCH_TARGET_USAGE,
+        GuideTileService.LAUNCH_TARGET_GUIDE,
+    )
+
+    /** Distinct actions so the widget/tile PendingIntents never collide with the notification ones. */
     const val ACTION_OPEN_AGENTS = "com.gwitko.conduit.action.OPEN_AGENTS"
+    const val ACTION_OPEN_USAGE = "com.gwitko.conduit.action.OPEN_USAGE"
+    const val ACTION_OPEN_AGENT_LINE = "com.gwitko.conduit.action.OPEN_AGENT_LINE"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /** Stores [json] and the tokens of its agent lines. */
+    @Synchronized
     fun save(context: Context, json: String) {
-        prefs(context).edit().putString(KEY_SNAPSHOT, json).apply()
+        val lines = AgentStatusSnapshot.parse(json)?.dashboard?.lines.orEmpty().filter { it.tappable }
+        val tokens = WidgetLineGuard.reissue(lineTokens(context), lines.map { it.key }, ::newToken)
+        prefs(context).edit()
+            .putString(KEY_SNAPSHOT, json)
+            .putString(KEY_LINE_TOKENS, JSONObject(tokens).toString())
+            .apply()
     }
 
     fun load(context: Context): AgentStatusSnapshot? =
         prefs(context).getString(KEY_SNAPSHOT, null)?.let(AgentStatusSnapshot::parse)
 
+    /** The token a tap on [line] carries; null when it has none (not tappable). */
+    fun lineToken(context: Context, line: DashboardLine): String? =
+        if (line.tappable) lineTokens(context)[line.key] else null
+
     /**
-     * Marks the snapshot as no longer live (the engine went away). The limit
-     * rings stay: they are per account and fall to 0 when their window
-     * resets.
+     * The line of the stored snapshot [token] was issued for; null for a
+     * forged intent or a line no longer shown.
+     */
+    fun lineForToken(context: Context, token: String?): DashboardLine? {
+        val key = WidgetLineGuard.resolve(lineTokens(context), token) ?: return null
+        return load(context)?.dashboard?.lines?.firstOrNull { it.tappable && it.key == key }
+    }
+
+    private fun lineTokens(context: Context): Map<String, String> {
+        val raw = prefs(context).getString(KEY_LINE_TOKENS, null) ?: return emptyMap()
+        return try {
+            val json = JSONObject(raw)
+            json.keys().asSequence().associateWith { json.optString(it) }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun newToken(): String {
+        val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Marks the snapshot as no longer live (the engine went away); see
+     * [AgentStatusSnapshot.notMonitoring].
      */
     fun markNotMonitoring(context: Context) {
-        val current = load(context) ?: return
-        if (!current.monitoring) return
-        val json = JSONObject()
-            .put("version", 2)
-            .put("monitoring", false)
-            .put("attentionCount", 0)
-            .put("updatedAt", current.updatedAtMillis)
-            .put("agents", JSONArray())
-            .put("limits", JSONArray(current.limits.map { it.toJson() }))
-        save(context, json.toString())
+        val raw = prefs(context).getString(KEY_SNAPSHOT, null) ?: return
+        if (load(context)?.monitoring != true) return
+        AgentStatusSnapshot.notMonitoring(raw)?.let { save(context, it) }
     }
 
     fun setLaunchTarget(context: Context, target: String?) {

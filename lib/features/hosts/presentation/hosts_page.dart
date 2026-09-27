@@ -25,6 +25,7 @@ import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
+import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
 import 'package:conduit/features/hosts/data/secure_home_preferences_repository.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -113,8 +114,13 @@ class HostsPage extends StatefulWidget {
     this.desktopShell,
     this.shellMode,
     this.usageSummary,
+    this.launchRequests,
     super.key,
   });
+
+  /// Screens asked for from outside the page (the home-screen widget's
+  /// dashboard and usage taps).
+  final HomeLaunchRequests? launchRequests;
 
   /// The desktop shell's state (sidebar, splits, unread). Null makes the
   /// page own one in secure storage when it runs as the shell.
@@ -260,6 +266,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.hostsController.addListener(_syncBoards);
     widget.workspaceController.addListener(_syncBoards);
     flow?.terminalRequests.addListener(_handleTerminalRequest);
+    widget.launchRequests?.addListener(_handleLaunchRequest);
     widget.sessionRestore?.addListener(_handleRestoreChanged);
     widget.localDataChanges?.addListener(_handleLocalDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -273,6 +280,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       _syncBoards();
       _syncVisibility();
       unawaited(_loadTrustedEndpoints());
+      _handleLaunchRequest();
     });
     widget.promptCoordinator.addListener(_handlePromptChanged);
   }
@@ -317,6 +325,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.hostsController.removeListener(_syncBoards);
     widget.workspaceController.removeListener(_syncBoards);
     widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
+    widget.launchRequests?.removeListener(_handleLaunchRequest);
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
     widget.localDataChanges?.removeListener(_handleLocalDataChanged);
     widget.sessionRestore?.setHomeVisible(false);
@@ -668,6 +677,21 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         if (session == null) return;
         widget.workspaceController.activate(session);
         await _showSession(session);
+    }
+  }
+
+  /// The home-screen widget's taps: the dashboard, or usage.
+  void _handleLaunchRequest() {
+    if (!mounted) return;
+    switch (widget.launchRequests?.take()) {
+      case HomeLaunchRequest.dashboard:
+        _openAgentsDashboard();
+      case HomeLaunchRequest.usage:
+        if (UsageScope.maybeOf(context) case final usage?) {
+          unawaited(showUsageSheet(context, usage));
+        }
+      case null:
+        break;
     }
   }
 

@@ -3,7 +3,10 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
@@ -16,8 +19,9 @@ import 'package:flutter/foundation.dart';
 /// window after the source changes (the dashboard notifies on every poll of
 /// every host, so bursts are common). Pushes never overlap: a change that
 /// arrives while a push is in flight schedules exactly one more. A snapshot
-/// that differs from the last one pushed only by its time is skipped until
-/// [unchangedRefresh] has passed (the widget shows the time to the minute).
+/// that differs from the last one pushed only by its times (the update
+/// time, and the "as of" of the dashboard's cached facts) is skipped until
+/// [unchangedRefresh] has passed (the widget shows times to the minute).
 class AgentStatusWidgetPusher {
   AgentStatusWidgetPusher({
     required Listenable source,
@@ -29,18 +33,28 @@ class AgentStatusWidgetPusher {
        _channel = channel;
 
   /// Wires the pusher to the live [AgentAttentionController].
-  /// With [usage], the widget also shows Claude's limit rings.
+  /// With [usage], the widget also shows Claude's limit rings; with
+  /// [digest], the dashboard's stuck and done counts from its cached
+  /// answers (the pusher only reads them: it never makes the dashboard
+  /// fetch, let alone summarise). [theme] gives the app's colours and
+  /// [themeChanges] tells when they may have changed.
   factory AgentStatusWidgetPusher.forController(
     AgentAttentionController controller, {
     required AgentStatusWidgetChannel channel,
     UsageController? usage,
+    DigestController? digest,
+    AgentStatusTheme Function()? theme,
+    Listenable? themeChanges,
     Duration debounce = const Duration(milliseconds: 500),
   }) {
     return AgentStatusWidgetPusher(
-      source: usage == null
-          ? controller
-          : Listenable.merge([controller, usage]),
-      snapshot: () => snapshotOf(controller, usage: usage),
+      source: Listenable.merge([controller, ?usage, ?digest, ?themeChanges]),
+      snapshot: () => snapshotOf(
+        controller,
+        usage: usage,
+        digest: digest,
+        theme: theme?.call(),
+      ),
       channel: channel,
       debounce: debounce,
     );
@@ -66,24 +80,73 @@ class AgentStatusWidgetPusher {
   static AgentStatusSnapshot snapshotOf(
     AgentAttentionController controller, {
     UsageController? usage,
+    DigestController? digest,
+    AgentStatusTheme? theme,
     DateTime? now,
   }) {
-    final hosts = controller.monitoredHosts;
+    final hosts = [
+      for (final host in controller.monitoredHosts)
+        (
+          hostId: host.id,
+          hostName: host.name,
+          agents: controller.statusFor(host.id)?.agents ?? const <AgentInfo>[],
+        ),
+    ];
     final at = now ?? DateTime.now();
+    final facts = digest == null ? null : cachedDigest(digest);
     return AgentStatusSnapshot.build(
       hosts: [
         for (final host in hosts)
-          (
-            hostName: host.name,
-            agents: controller.statusFor(host.id)?.agents ?? const [],
-          ),
+          (hostName: host.hostName, agents: host.agents),
       ],
       monitoring: hosts.isNotEmpty,
       now: at,
       limits: usage == null
           ? const []
           : widgetLimits(usage.summary.claudeLimits, at),
+      dashboard: AgentStatusDashboard.derive(
+        hosts: hosts,
+        digest: facts?.overview,
+        factsAt: facts?.at,
+      ),
+      theme: theme,
     );
+  }
+
+  /// The dashboard's cached `digest` answers, as they are: null when no
+  /// machine answered one yet (a companion without `digest` counts as
+  /// none: it has no stuck flags). [at] is the oldest answer's time.
+  static ({DigestOverview overview, DateTime? at})? cachedDigest(
+    DigestController digest,
+  ) {
+    final answered = [
+      for (final machine in digest.machines)
+        if (machine.report case final report?
+            when !report.fromStatus && !machine.needsUpdate)
+          (report: report, at: machine.fetchedAt),
+    ];
+    if (answered.isEmpty) return null;
+    DateTime? oldest;
+    for (final (report: _, :at) in answered) {
+      if (at != null && (oldest == null || at.isBefore(oldest))) oldest = at;
+    }
+    return (
+      overview: DigestOverview([
+        for (final (:report, at: _) in answered) ...report.agents,
+      ], since: digest.since),
+      at: oldest,
+    );
+  }
+
+  /// What a push is compared on: everything but the update time and the
+  /// "as of" of the cached facts.
+  static String contentOf(AgentStatusSnapshot snapshot) {
+    final json = snapshot.toJson()..remove('updatedAt');
+    final dashboard = json['dashboard'];
+    if (dashboard is Map<String, Object?>) {
+      json['dashboard'] = Map.of(dashboard)..remove('factsAt');
+    }
+    return jsonEncode(json);
   }
 
   /// The 5-hour and weekly windows as the widget's rings.
@@ -134,7 +197,7 @@ class AgentStatusWidgetPusher {
         _pushAgain = false;
         try {
           final snapshot = _snapshot();
-          final content = jsonEncode(snapshot.toJson()..remove('updatedAt'));
+          final content = contentOf(snapshot);
           final last = _lastPushedAt;
           if (content == _lastContent &&
               last != null &&

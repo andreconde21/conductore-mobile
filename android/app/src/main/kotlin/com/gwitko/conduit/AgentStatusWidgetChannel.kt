@@ -78,13 +78,41 @@ class AgentStatusWidgetChannel : FlutterPlugin, ActivityAware, PluginRegistry.Ne
         return true
     }
 
-    /** Stores the intent's launch target, if it carries one, and clears it from the intent. */
+    /**
+     * Stores the intent's launch target, if it carries one, and clears it
+     * from the intent. MainActivity is exported, so nothing in the intent is
+     * trusted: an unknown target is dropped, and an agent line opens only
+     * when its token was issued for a line of the stored snapshot; the agent
+     * then comes from that snapshot and goes to Dart through the
+     * notification tap's deep link. A stale or forged line token opens the
+     * dashboard, which only navigates.
+     */
     private fun stashLaunchTarget(intent: Intent?): Boolean {
         val target = intent?.getStringExtra(AgentStatusStore.EXTRA_LAUNCH_TARGET) ?: return false
-        val ctx = context ?: return false
-        AgentStatusStore.setLaunchTarget(ctx, target)
+        val token = intent.getStringExtra(AgentStatusStore.EXTRA_LINE_TOKEN)
         // Never re-deliver on a configuration change or a task resume.
         intent.removeExtra(AgentStatusStore.EXTRA_LAUNCH_TARGET)
+        intent.removeExtra(AgentStatusStore.EXTRA_LINE_TOKEN)
+        val ctx = context ?: return false
+        if (target == AgentStatusStore.LAUNCH_TARGET_AGENT) {
+            val line = AgentStatusStore.lineForToken(ctx, token)
+            if (line != null) {
+                AgentNotificationBridge.deliverOpen(
+                    AgentNotificationStore.OpenTarget(
+                        hostId = line.hostId,
+                        agentId = line.agentId,
+                        workspaceId = line.workspace,
+                        tabId = line.tab,
+                        paneId = line.pane,
+                    ),
+                )
+                return false
+            }
+            AgentStatusStore.setLaunchTarget(ctx, AgentStatusStore.LAUNCH_TARGET_DASHBOARD)
+            return true
+        }
+        if (target !in AgentStatusStore.DART_LAUNCH_TARGETS) return false
+        AgentStatusStore.setLaunchTarget(ctx, target)
         return true
     }
 

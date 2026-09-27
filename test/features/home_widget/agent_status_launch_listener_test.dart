@@ -2,6 +2,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
+import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
@@ -78,6 +79,58 @@ void main() {
     channel.deliver(AgentStatusLaunchTarget.agents);
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsOneWidget);
+  });
+
+  testWidgets('the widget\'s dashboard and ring taps go to their screens', (
+    tester,
+  ) async {
+    final opened = <String>[];
+    final channel = FakeAgentStatusWidgetChannel();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AgentStatusLaunchListener(
+          channel: channel,
+          agentAttention: controller,
+          workspace: workspace,
+          onDashboard: () => opened.add('dashboard'),
+          onUsage: () => opened.add('usage'),
+          child: const Scaffold(body: Text('home')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    channel.deliver(AgentStatusLaunchTarget.dashboard);
+    await tester.pumpAndSettle();
+    channel.deliver(AgentStatusLaunchTarget.usage);
+    await tester.pumpAndSettle();
+    expect(opened, ['dashboard', 'usage']);
+    expect(find.byType(BottomSheet), findsNothing);
+  });
+
+  testWidgets('without a dashboard, its tap shows the agent sheet', (
+    tester,
+  ) async {
+    final channel = FakeAgentStatusWidgetChannel()
+      ..pendingTarget = AgentStatusLaunchTarget.dashboard;
+    await tester.pumpWidget(app(channel));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+  });
+
+  testWidgets('home launch requests wait until the home page takes them', (
+    tester,
+  ) async {
+    final requests = HomeLaunchRequests();
+    addTearDown(requests.dispose);
+    var notified = 0;
+    requests
+      ..request(HomeLaunchRequest.usage)
+      ..addListener(() => notified++)
+      ..request(HomeLaunchRequest.dashboard);
+    expect(notified, 1);
+    expect(requests.take(), HomeLaunchRequest.dashboard);
+    expect(requests.take(), isNull);
   });
 
   testWidgets('unregisters its listener on dispose', (tester) async {

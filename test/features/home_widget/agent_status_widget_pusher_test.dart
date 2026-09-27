@@ -4,6 +4,9 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
+import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -13,6 +16,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
+import '../agents_digest/digest_fakes.dart';
 import '../usage/usage_fakes.dart';
 import 'fake_agent_status_widget_channel.dart';
 
@@ -270,6 +274,170 @@ void main() {
     expect(limit.label, '5h');
     expect(limit.usedPct, 96);
     expect(limit.level, 'critical');
+  });
+
+  testWidgets('the "as of" of the cached facts refreshes at most once a '
+      'minute; a new count goes out at once', (tester) async {
+    final source = ChangeNotifier();
+    final channel = FakeAgentStatusWidgetChannel();
+    var now = DateTime.utc(2026, 9, 27, 10);
+    var factsAt = now;
+    var stuck = 1;
+    final pusher = AgentStatusWidgetPusher(
+      source: source,
+      snapshot: () => AgentStatusSnapshot.build(
+        hosts: const [],
+        monitoring: true,
+        now: now,
+        dashboard: AgentStatusDashboard(
+          needsYou: 0,
+          working: 1,
+          stuck: stuck,
+          done: 2,
+          factsAt: factsAt,
+        ),
+      ),
+      channel: channel,
+    );
+    addTearDown(pusher.dispose);
+    pusher.start();
+    await tester.pump();
+    expect(channel.pushed, hasLength(1));
+
+    // The dashboard re-fetching the same facts every 20 s moves only the
+    // "as of": held back.
+    for (var i = 0; i < 2; i++) {
+      now = now.add(const Duration(seconds: 20));
+      factsAt = now;
+      source.notifyListeners();
+      await tester.pump(debounce);
+    }
+    expect(channel.pushed, hasLength(1));
+
+    // A minute on, the newer "as of" goes out.
+    now = now.add(const Duration(seconds: 20));
+    factsAt = now;
+    source.notifyListeners();
+    await tester.pump(debounce);
+    expect(channel.pushed, hasLength(2));
+    expect(channel.pushed.last.dashboard!.factsAt, factsAt);
+
+    // A changed count never waits.
+    stuck = 2;
+    source.notifyListeners();
+    await tester.pump(debounce);
+    expect(channel.pushed, hasLength(3));
+    expect(channel.pushed.last.dashboard!.stuck, 2);
+
+    // And an identical snapshot is skipped.
+    source.notifyListeners();
+    await tester.pump(debounce);
+    expect(channel.pushed, hasLength(3));
+  });
+
+  test('contentOf ignores only the update time and the "as of"', () {
+    AgentStatusSnapshot at(DateTime time, {int done = 2}) =>
+        AgentStatusSnapshot.build(
+          hosts: const [],
+          monitoring: true,
+          now: time,
+          dashboard: AgentStatusDashboard(
+            needsYou: 0,
+            working: 0,
+            done: done,
+            factsAt: time,
+          ),
+        );
+    final a = DateTime.utc(2026, 9, 27, 10);
+    final b = a.add(const Duration(minutes: 3));
+    expect(
+      AgentStatusWidgetPusher.contentOf(at(a)),
+      AgentStatusWidgetPusher.contentOf(at(b)),
+    );
+    expect(
+      AgentStatusWidgetPusher.contentOf(at(a)),
+      isNot(AgentStatusWidgetPusher.contentOf(at(a, done: 3))),
+    );
+  });
+
+  testWidgets('reads the dashboard\'s cached digest without ever asking a '
+      'machine, and never for summaries', (tester) async {
+    final workspace = TerminalWorkspaceController(
+      ImmediateTerminalRepository(TrackableTerminalSession()),
+    );
+    final attention = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => ScriptedAgentCommandRunner(const []),
+      provider: const HerdrAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    final runner = FakeDigestRunner(
+      facts: digestReplyJson([
+        digestAgentJson(
+          'web',
+          state: 'working',
+          stuck: [
+            {'rule': 'tests', 'reason': 'npm test failed 3 times'},
+          ],
+          summaryPending: true,
+        ),
+        digestAgentJson('doc'),
+      ]),
+    );
+    final digestSource = FakeDigestSource(
+      [digestHost('box', name: 'Box')],
+      {'box': runner},
+    );
+    final fetchedAt = DateTime.utc(2026, 9, 27, 14);
+    final digest = DigestController(
+      source: digestSource,
+      preferences: MemoryDigestPreferencesStore(),
+      clock: () => fetchedAt,
+      observeLifecycle: false,
+    );
+    final channel = FakeAgentStatusWidgetChannel();
+    final pusher = AgentStatusWidgetPusher.forController(
+      attention,
+      digest: digest,
+      channel: channel,
+      debounce: const Duration(milliseconds: 10),
+    )..start();
+    addTearDown(() {
+      pusher.dispose();
+      digest.dispose();
+      attention.dispose();
+      workspace.dispose();
+    });
+    await tester.pump(const Duration(minutes: 5));
+    // Nothing cached: stuck and done unknown, and nobody was asked.
+    expect(runner.commands, isEmpty);
+    expect(AgentStatusWidgetPusher.cachedDigest(digest), isNull);
+    expect(
+      AgentStatusWidgetPusher.snapshotOf(attention, digest: digest).dashboard,
+      isNull, // nothing monitored
+    );
+
+    // The user opens the dashboard once (facts, and the summaries the
+    // opened view asks for).
+    final detach = digest.attachView();
+    await tester.pump();
+    await tester.pump();
+    detach();
+    await tester.pump();
+    final asked = runner.commands.length;
+    final summarised = runner.summaryCommands.length;
+
+    final cached = AgentStatusWidgetPusher.cachedDigest(digest)!;
+    expect(cached.at, fetchedAt);
+    expect(cached.overview.section(DigestSection.stuck).single.name, 'web');
+
+    // Pushes keep reading the cache; the machine is never asked again.
+    for (var i = 0; i < 3; i++) {
+      digest.notifyListeners();
+      await tester.pump(const Duration(minutes: 2));
+    }
+    expect(runner.commands, hasLength(asked));
+    expect(runner.summaryCommands, hasLength(summarised));
   });
 }
 
