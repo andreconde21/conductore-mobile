@@ -28,10 +28,10 @@ const Map<String, String> _noticeAssets = {
 };
 
 const String _notice = '''
-The on-device local Linux shell includes Android (aarch64) binaries that
-Conductore redistributes but did not create. They are built from pinned Termux
-package recipes (https://termux.dev) and are used under their respective
-open-source licenses:
+Builds of Conductore that include the on-device local Linux shell bundle
+Android (aarch64) binaries that Conductore redistributes but did not create.
+They are built from pinned Termux package recipes (https://termux.dev) and are
+used under their respective open-source licenses:
 
   proot ................. GPL-2.0      (github.com/termux/proot)
   busybox ............... GPL-2.0      (busybox.net)
@@ -54,18 +54,19 @@ openSUSE, Void Linux, and Manjaro.
 Conductore is based on Conduit by gwitko; both are Apache-2.0. These bundled
 components and downloaded rootfs packages are not relicensed by either.
 
-For GPL/LGPL components, Conduit publishes corresponding-source details, exact
-upstream source archives, package checksums, pinned Termux package recipes and
-patches, license texts, component notices, and binary rewrite notes with the
-Conduit source repository:
+For GPL/LGPL components, Conductore publishes corresponding-source details,
+exact upstream source archives, package checksums, pinned Termux package
+recipes and patches, license texts, component notices, and binary rewrite notes
+with the Conductore source repository:
 
-  https://github.com/gwitko/Conduit
+  https://github.com/andreconde21/conductore-mobile
 
 This is a written offer, valid for at least three years from distribution, to
 give any third party a complete machine-readable copy of the corresponding
 source for the GPL- and LGPL-licensed binaries, for the exact versions shipped,
-for no more than the cost of distribution. The source is published at the
-repository above; requests may also be sent to the maintainer there.
+for no more than the cost of distribution. The source is published at
+https://github.com/andreconde21/conductore-mobile; requests may be sent to
+Conductore's maintainer through that repository's issues.
 
 See THIRD_PARTY_NOTICES.md and third_party/source-offer/README.md there.
 
