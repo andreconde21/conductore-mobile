@@ -106,14 +106,22 @@ function readSettings (file = settingsPath()) {
   }
 }
 
+// Atomic replace of the file a symlink points to (a dotfiles checkout keeps
+// its link), with the original mode: settings can hold API keys, so a new
+// file is 0600 and the umask never widens an existing one.
 function writeSettings (settings, file = settingsPath()) {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.conductore-${process.pid}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n')
+  let target = file
+  try { target = fs.realpathSync(file) } catch {}
+  let mode = 0o600
+  try { mode = fs.statSync(target).mode & 0o7777 } catch {}
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  const tmp = `${target}.conductore-${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', { mode })
+  fs.chmodSync(tmp, mode)
   try {
-    fs.copyFileSync(file, `${file}.bak`)
+    fs.copyFileSync(target, `${file}.bak`)
   } catch {}
-  fs.renameSync(tmp, file)
+  fs.renameSync(tmp, target)
 }
 
 function clone (v) {
