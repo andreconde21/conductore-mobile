@@ -282,9 +282,10 @@ class Daemon {
     }
   }
 
-  async process ({ header, body, mtime }) {
+  async process ({ header, body, mtime, oversize }) {
     if (header.kind === 'usage') return this.onUsageReport(body, true, mtime)
     if (header.kind !== 'hook') return
+    if (oversize) log('daemon', `dropped an oversized ${header.event} event`)
     const event = body && typeof body === 'object' && !Array.isArray(body) ? body : {}
     if (!event.hook_event_name && header.event) event.hook_event_name = header.event
     const fifo = header.fifo || null

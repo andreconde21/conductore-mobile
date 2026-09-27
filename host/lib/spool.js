@@ -28,6 +28,17 @@ const path = require('path')
 
 const MAGIC = 'conductore 1'
 const MAX_FILE_BYTES = 8 * 1024 * 1024
+const HEAD_BYTES = 16 * 1024
+
+function readHead (file, bytes) {
+  const fd = fs.openSync(file, 'r')
+  try {
+    const buf = Buffer.alloc(bytes)
+    return buf.toString('utf8', 0, fs.readSync(fd, buf, 0, bytes, 0))
+  } finally {
+    fs.closeSync(fd)
+  }
+}
 
 function parse (text) {
   const nl = text.indexOf('\n')
@@ -65,13 +76,17 @@ const TMP_NAME = /^[a-z]\.[0-9]+(\.n)*$/
 
 // Reads and removes one entry and its staging twin in tmpDir (only when it
 // still is the same file). Returns { header, body, mtime } or null.
+// An entry over MAX_FILE_BYTES yields its header only (body null), so a
+// waiting PermissionRequest hook is still answered at once.
 function take (entry, tmpDir) {
   let text = null
   try {
     if (entry.size <= MAX_FILE_BYTES) text = fs.readFileSync(entry.file, 'utf8')
+    else text = readHead(entry.file, HEAD_BYTES)
   } catch {}
   try { fs.unlinkSync(entry.file) } catch {}
-  const item = text === null ? null : parse(text)
+  let item = text === null ? null : parse(text)
+  if (item && entry.size > MAX_FILE_BYTES) item = { header: item.header, body: null, oversize: true }
   if (item && tmpDir && TMP_NAME.test(item.header.tmp || '')) {
     const twin = path.join(tmpDir, item.header.tmp)
     try {

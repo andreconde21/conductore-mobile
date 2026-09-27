@@ -8,6 +8,7 @@
 - fix (M20): agents that never send SessionEnd (Claude Code killed, crashed, SSH dropped, a reboot) no longer stay forever. The hook passes Claude Code's pid (`claude_pid`, its parent or grandparent through `sh -c`, read from `/proc` without a fork); the daemon records it with its start time as `process` when it is Claude Code and ends the agent (`reason: expired`) once it is gone, checked at start and on `status` / `events`. Without `/proc`, an agent ends after 24 h without an event.
 - fix (M18): the prompt relay (`send`, `interrupt`, `focus`) can no longer type into the wrong pane. Agents' `tmux` records carry the server `socket` (from `$TMUX`) and the `panePid`; every tmux command goes to that server (`-S`), and right before typing the pane must still run that process, a Herdr pane must still run this Claude session (`herdr pane list`), and Claude Code must still run. Otherwise nothing is typed and the error says why. Records from older daemons are refused until the agent's next event.
 - fix (M22): `install` / `uninstall` rewrite `~/.claude/settings.json` through its symlink (a dotfiles link stays a link and its target is updated) and keep the file's mode, 0600 when new, instead of the process umask (a 0600 file holding an API key became 0644).
+- fix (L18): a PermissionRequest spool file over 8 MB is answered at once (the terminal asks) instead of leaving its hook waiting the full timeout; the daemon reads only its header and logs the drop. An unparseable one already was.
 
 ## 0.7.0 (2026-09-25)
 

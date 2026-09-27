@@ -394,6 +394,16 @@ test('version matches package.json', async () => {
   assert.equal(v.json.protocol, 1)
 })
 
+test('an oversized PermissionRequest is answered at once, leaving the prompt to the terminal', async () => {
+  const t0 = Date.now()
+  const r = await hook(ev('s1', 'PermissionRequest', { tool_name: 'Write', tool_input: { file_path: '/x', content: 'y'.repeat(9 * 1024 * 1024) } }),
+    { CONDUCTORE_PERMISSION_TIMEOUT: '60' })
+  assert.equal(r.code, 0)
+  assert.equal(r.stdout, '')
+  assert.ok(Date.now() - t0 < 5000, `${Date.now() - t0} ms`)
+  assert.deepEqual(fs.readdirSync(path.join(home, 'tmp')).filter(n => n.startsWith('p.')), [])
+})
+
 test('a PermissionRequest with no daemon that can start gives up after 5 s, printing nothing', async () => {
   const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lone-'))
   fs.writeFileSync(path.join(lone, 'node'), '/bin/false\n')
