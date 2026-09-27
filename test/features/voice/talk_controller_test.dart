@@ -376,6 +376,56 @@ void main() {
     talk.stop();
   });
 
+  testWidgets('another mic taking the recognizer stops Talk without sending '
+      'what it had heard', (tester) async {
+    await setUpTalk(tester);
+    final terminal = DictationController(mic, language: () => 'en-US');
+    addTearDown(terminal.dispose);
+    talk.start();
+    await settle(tester);
+    mic.emit(const SpeechReady());
+    mic.emit(const SpeechPartial('delete the'));
+    await settle(tester);
+    expect(talk.transcript, 'delete the');
+
+    final heard = <String>[];
+    await terminal.start(
+      DictationSink(
+        onBegin: () {},
+        onPartial: (_) {},
+        onFinish: heard.add,
+        onCancel: () {},
+      ),
+    );
+    await settle(tester, const Duration(seconds: 5));
+    expect(sent, isEmpty, reason: 'a cut-off phrase is not a prompt');
+    expect(talk.phase, TalkPhase.off);
+    expect(talk.message, TalkController.takenOver);
+    expect(dictation.isActive, isFalse);
+    expect(terminal.isActive, isTrue);
+  });
+
+  testWidgets('nothing heard yet: Talk stops instead of listening again '
+      'beside the other mic', (tester) async {
+    await setUpTalk(tester);
+    final terminal = DictationController(mic, language: () => 'en-US');
+    addTearDown(terminal.dispose);
+    talk.start();
+    await settle(tester);
+    await terminal.start(
+      DictationSink(
+        onBegin: () {},
+        onPartial: (_) {},
+        onFinish: (_) {},
+        onCancel: () {},
+      ),
+    );
+    await settle(tester, const Duration(seconds: 5));
+    expect(talk.phase, TalkPhase.off);
+    expect(dictation.isActive, isFalse);
+    expect(terminal.isActive, isTrue);
+  });
+
   testWidgets('no microphone permission stops the loop', (tester) async {
     await setUpTalk(tester);
     mic.permission = false;

@@ -95,6 +95,7 @@ class TalkController extends ChangeNotifier {
       onPartial: _onPartial,
       onFinish: _onHeard,
       onCancel: _onDictationFailed,
+      onTakenOver: _onTakenOver,
     );
     _readAloud.addListener(_onReadAloudChanged);
   }
@@ -154,6 +155,9 @@ class TalkController extends ChangeNotifier {
 
   /// Spoken when the session the loop talks to ends.
   static const sessionEnded = 'That session ended.';
+
+  /// Shown when another mic takes the recognizer while Talk listens.
+  static const takenOver = 'Talk stopped: another microphone is in use.';
 
   TalkPhase get phase => _phase;
   bool get active => _phase != TalkPhase.off;
@@ -349,6 +353,16 @@ class TalkController extends ChangeNotifier {
           unawaited(_deliver(() => answer(number)));
         }
     }
+  }
+
+  /// Another mic (the terminal's, the voice guide's) took the recognizer:
+  /// what was heard is cut off, not a finished sentence, so nothing is
+  /// sent and the loop stops rather than fight for the microphone.
+  void _onTakenOver(String _) {
+    if (_phase != TalkPhase.listening) return;
+    stop();
+    _message = takenOver;
+    notifyListeners();
   }
 
   void _onDictationFailed({bool force = false}) {
