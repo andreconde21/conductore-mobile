@@ -165,6 +165,14 @@ Events carrying `agent_id` (subagents) never move the parent to a waiting state.
 Every command prints one JSON document on stdout and exits 0, or prints
 `{"error":"..."}` and exits 1. `events` prints one JSON object per line.
 
+`--gzip` (on `status`, `transcript`, `usage`, `digest`, `turns` and `diff`,
+anywhere after the command): a reply over 4 KB prints as
+`{"encoding":"gzip","data":"<base64>"}`, the base64 of the gzipped JSON
+document; smaller replies and errors print as usual. A 64 KB `usage` reply
+becomes 17 KB, a 52 KB first `transcript` page 18 KB. Older companions ignore
+the flag (put it last for them: `transcript` would otherwise read the next
+word as its value) and answer plain JSON, so check for `encoding`.
+
 ### `conductore-hostd status [--etag <etag>]`
 
 ```json

@@ -103,11 +103,27 @@ const USAGE = `usage: conductore-hostd <command>
   statusline [--chain '<cmd>']    legacy Node statusLine command (install
                                   now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
+
+  --gzip (status, transcript, usage, digest, turns, diff): a reply over 4 KB
+  prints as {"encoding":"gzip","data":"<base64 of the gzipped JSON>"}
   doctor | stop | version
 `
 
+// `--gzip` (status, transcript, usage, digest, turns, diff): a reply above
+// GZIP_MIN_CHARS goes out as {"encoding":"gzip","data":"<base64>"}, the
+// base64 of the gzipped JSON document. Errors always stay plain.
+const GZIP_COMMANDS = new Set(['status', 'transcript', 'usage', 'digest', 'turns', 'diff'])
+const GZIP_MIN_CHARS = 4096
+let gzipOut = false
+
 function out (obj) {
-  process.stdout.write(JSON.stringify(obj) + '\n')
+  const json = JSON.stringify(obj)
+  if (gzipOut && json.length > GZIP_MIN_CHARS) {
+    const data = require('zlib').gzipSync(json).toString('base64')
+    process.stdout.write(JSON.stringify({ encoding: 'gzip', data }) + '\n')
+    return 0
+  }
+  process.stdout.write(json + '\n')
   return 0
 }
 
@@ -976,7 +992,9 @@ function daemonCmd (args) {
 }
 
 async function main (argv) {
-  const [cmd, ...args] = argv
+  let [cmd, ...args] = argv
+  gzipOut = GZIP_COMMANDS.has(cmd) && args.includes('--gzip')
+  if (gzipOut) args = args.filter(a => a !== '--gzip')
   switch (cmd) {
     case 'daemon': return daemonCmd(args)
     case 'status': return status(args)

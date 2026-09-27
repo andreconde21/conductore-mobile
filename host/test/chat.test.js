@@ -91,6 +91,11 @@ fs.writeFileSync(transcriptFile,
   line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', isSidechain: false, timestamp: '2026-09-25T10:00:01Z', message: { role: 'assistant', content: [{ type: 'text', text: 'On it.' }] } }) +
   '{"type":"assistant","uuid":"a2"')
 
+// Big enough (over 4 KB of entries) for --gzip to compress.
+const bigFile = path.join(home, 'big.jsonl')
+fs.writeFileSync(bigFile, Array.from({ length: 40 }, (_, i) =>
+  line({ type: 'assistant', uuid: `b${i}`, parentUuid: null, isSidechain: false, timestamp: '2026-09-25T10:00:01Z', message: { role: 'assistant', content: [{ type: 'text', text: `Step ${i} done. `.repeat(20) }] } })).join(''))
+
 const agent = (sessionId, extra) => ({
   sessionId, name: sessionId, cwd: '/work', transcriptPath: null, tmux: null, herdr: null,
   state: 'waiting_input', lastEvent: 'Stop', lastToolName: null, lastMessage: null,
@@ -115,7 +120,8 @@ fs.writeFileSync(path.join(home, 'state.json'), JSON.stringify({
     agent('hs', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p2', name: null, socket: HERDR_OTHER } }),
     // Recorded before the socket was: checked against the default server.
     agent('hs-old', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p2', name: null } }),
-    agent('exited', { tmux: tmuxPane('%3'), process: { pid: 2 ** 22 + 7, startTime: '1' } })
+    agent('exited', { tmux: tmuxPane('%3'), process: { pid: 2 ** 22 + 7, startTime: '1' } }),
+    agent('big', { transcriptPath: bigFile })
   ]
 }))
 
@@ -155,6 +161,27 @@ test('transcript errors: unknown session, no transcript, bad flags, bad path', a
   assert.match((await cli(['transcript', 'tm', '--since', '1', '--before', '2'])).json.error, /not both/)
   assert.match((await cli(['transcript', 'rel'])).json.error, /absolute \.jsonl/)
   assert.match((await cli(['transcript'])).json.error, /^usage/)
+})
+
+test('--gzip: a big reply is the base64 of the gzipped JSON; small replies and errors stay plain', async () => {
+  const zlib = require('zlib')
+  const unzip = j => {
+    assert.deepEqual(Object.keys(j), ['encoding', 'data'])
+    assert.equal(j.encoding, 'gzip')
+    return JSON.parse(zlib.gunzipSync(Buffer.from(j.data, 'base64')).toString('utf8'))
+  }
+  const plain = await cli(['transcript', 'big'])
+  const packed = await cli(['transcript', 'big', '--gzip'])
+  assert.equal(packed.code, 0)
+  assert.deepEqual(unzip(packed.json), plain.json)
+  assert.ok(JSON.stringify(packed.json).length < JSON.stringify(plain.json).length / 3)
+  // The flag may come anywhere after the command, like any other.
+  assert.deepEqual(unzip((await cli(['transcript', '--gzip', 'big', '--since', '0'])).json), (await cli(['transcript', 'big', '--since', '0'])).json)
+  const st = await cli(['status', '--gzip'])
+  assert.deepEqual(unzip(st.json).agents, (await cli(['status'])).json.agents)
+  // Under 4 KB: as it was.
+  assert.deepEqual((await cli(['transcript', 'tm', '--gzip'])).json.entries.map(e => e.uuid), ['u1', 'a1'])
+  assert.deepEqual(await cli(['transcript', 'nope', '--gzip']), { code: 1, json: { error: 'unknown session nope' } })
 })
 
 test('send types single-line text literally into the tmux pane, then Enter', async () => {
