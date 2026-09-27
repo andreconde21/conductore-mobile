@@ -444,6 +444,10 @@ void main() {
       usage: (code) => guideUsageText(usage.summary, code),
       catchUp: digest.catchUp,
       accounts: UsageGuideAccounts(usage),
+      reviewer: AppGuideReviewer(
+        navigatorKey: navigatorKey,
+        attention: agentAttention,
+      ),
       locked: () => !lockController.isUnlocked,
     );
   }

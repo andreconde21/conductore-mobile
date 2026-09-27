@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/diff_view/domain/git_diff_source.dart';
 import 'package:conduit/features/diff_view/domain/unified_diff.dart';
 import 'package:conduit/features/diff_view/domain/word_diff.dart';
+import 'package:conduit/features/diff_view/presentation/diff_syntax.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:flutter/material.dart';
 
@@ -69,10 +70,13 @@ class DiffRows {
   /// Longest rendered line in characters, for the horizontal extent.
   final int maxLineLength;
 
+  /// [fileHeaders] false leaves out the per-file header rows (a view that
+  /// shows one file under its own header, like Review's cards).
   static DiffRows build(
     UnifiedDiff diff, {
     required bool Function(DiffFile file) isCollapsed,
     bool wordDiff = true,
+    bool fileHeaders = true,
   }) {
     final rows = <DiffRow>[];
     final offsets = <DiffFile, double>{};
@@ -80,8 +84,10 @@ class DiffRows {
     var maxLength = 0;
     for (final file in diff.files) {
       offsets[file] = offset;
-      rows.add(DiffFileHeaderRow(file));
-      offset += diffFileHeaderHeight;
+      if (fileHeaders) {
+        rows.add(DiffFileHeaderRow(file));
+        offset += diffFileHeaderHeight;
+      }
       if (isCollapsed(file)) {
         continue;
       }
@@ -122,6 +128,17 @@ class DiffRows {
 
   /// Vertical offset of [file]'s header, or null when it is not listed.
   double? offsetOfFile(DiffFile file) => _fileOffsets[file];
+
+  /// Vertical offset of every hunk header, top to bottom (n / p jumps).
+  List<double> get hunkOffsets {
+    final out = <double>[];
+    var offset = 0.0;
+    for (final row in rows) {
+      if (row is DiffHunkHeaderRow) out.add(offset);
+      offset += row.height;
+    }
+    return out;
+  }
 }
 
 /// Renders [DiffRows] as a vertically lazy, horizontally scrollable list.
@@ -137,6 +154,9 @@ class DiffRowsList extends StatelessWidget {
     required this.onToggleFile,
     required this.isCollapsed,
     this.onOpenFile,
+    this.syntax = false,
+    this.onTapLine,
+    this.isLineMarked,
     super.key,
   });
 
@@ -150,6 +170,15 @@ class DiffRowsList extends StatelessWidget {
   final ValueChanged<DiffFile> onToggleFile;
   final bool Function(DiffFile file) isCollapsed;
   final ValueChanged<DiffFile>? onOpenFile;
+
+  /// Colours code by the file's language ([DiffSyntax]).
+  final bool syntax;
+
+  /// Tapping a line (Review's line comments); null: lines are not tappable.
+  final void Function(DiffFile file, DiffLine line)? onTapLine;
+
+  /// Lines drawn with a comment mark in the gutter.
+  final bool Function(DiffFile file, DiffLine line)? isLineMarked;
 
   static const _gutterWidth = 92.0;
   static const _tabWidth = 4;
@@ -251,6 +280,13 @@ class DiffRowsList extends StatelessWidget {
         textStyle: textStyle,
         tabWidth: _tabWidth,
         gutterWidth: _gutterWidth,
+        language: syntax && row.line.kind != DiffLineKind.meta
+            ? DiffSyntax.languageFor(row.file.displayPath)
+            : null,
+        marked: isLineMarked?.call(row.file, row.line) ?? false,
+        onTap: onTapLine == null || row.line.kind == DiffLineKind.meta
+            ? null
+            : () => onTapLine!(row.file, row.line),
       ),
     };
   }
@@ -407,10 +443,20 @@ class _LineRow extends StatelessWidget {
     required this.textStyle,
     required this.tabWidth,
     required this.gutterWidth,
+    this.language,
+    this.marked = false,
+    this.onTap,
   });
 
   final DiffLine line;
   final List<WordDiffSpan>? spans;
+
+  /// Syntax language id, or null for plain text.
+  final String? language;
+
+  /// Has a comment (Review).
+  final bool marked;
+  final VoidCallback? onTap;
   final AppPalette palette;
   final Brightness brightness;
   final TextStyle textStyle;
@@ -441,7 +487,37 @@ class _LineRow extends StatelessWidget {
     final expanded = line.text.replaceAll('\t', ' ' * tabWidth);
     final Widget content;
     final wordSpans = spans;
-    if (wordSpans == null || wordSpans.every((span) => !span.changed)) {
+    final colours = language == null
+        ? null
+        : DiffSyntax.highlight(expanded, language!, brightness);
+    if (colours != null) {
+      final runs = DiffSyntax.merge(colours, [
+        for (final span in wordSpans ?? const <WordDiffSpan>[])
+          WordDiffSpan(
+            span.text.replaceAll('\t', ' ' * tabWidth),
+            changed: span.changed,
+          ),
+      ]);
+      content = Text.rich(
+        TextSpan(
+          style: contentStyle,
+          children: [
+            for (final run in runs)
+              TextSpan(
+                text: run.text,
+                style: run.changed
+                    ? (run.style ?? const TextStyle()).copyWith(
+                        backgroundColor: highlight,
+                      )
+                    : run.style,
+              ),
+          ],
+        ),
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.visible,
+      );
+    } else if (wordSpans == null || wordSpans.every((span) => !span.changed)) {
       content = Text(
         expanded,
         maxLines: 1,
@@ -468,7 +544,7 @@ class _LineRow extends StatelessWidget {
         overflow: TextOverflow.visible,
       );
     }
-    return Container(
+    final row = Container(
       height: diffLineHeight,
       color: background,
       child: Row(
@@ -495,18 +571,24 @@ class _LineRow extends StatelessWidget {
                 ),
                 SizedBox(
                   width: 16,
-                  child: Text(
-                    marker,
-                    textAlign: TextAlign.center,
-                    style: textStyle.copyWith(
-                      color: switch (line.kind) {
-                        DiffLineKind.addition => palette.success,
-                        DiffLineKind.deletion => palette.danger,
-                        _ => muted,
-                      },
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                  child: marked
+                      ? Icon(
+                          Icons.mode_comment_rounded,
+                          size: 12,
+                          color: palette.accent,
+                        )
+                      : Text(
+                          marker,
+                          textAlign: TextAlign.center,
+                          style: textStyle.copyWith(
+                            color: switch (line.kind) {
+                              DiffLineKind.addition => palette.success,
+                              DiffLineKind.deletion => palette.danger,
+                              _ => muted,
+                            },
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                 ),
               ],
             ),
@@ -514,6 +596,13 @@ class _LineRow extends StatelessWidget {
           content,
         ],
       ),
+    );
+    final tap = onTap;
+    if (tap == null) return row;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: tap,
+      child: row,
     );
   }
 }

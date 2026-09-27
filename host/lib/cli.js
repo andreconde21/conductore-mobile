@@ -26,6 +26,7 @@ const digestMod = lazy('./digest')
 const cswapMod = lazy('./cswap')
 const rulesMod = lazy('./rules')
 const riskMod = lazy('./risk')
+const reviewMod = lazy('./review')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -80,6 +81,20 @@ const USAGE = `usage: conductore-hostd <command>
                                   every agent's facts since a time, stuck
                                   flags, and (--summaries) a short summary of
                                   the agents that changed (claude -p, no tools)
+  turns <sessionId> [--limit 20]  the session's recent turns: prompt, time,
+                                  files changed, snapshot refs, undo state
+  diff <sessionId> <turn> [--file <path>]... [--max-bytes 1048576]
+       [--max-file-bytes 65536] [--context 3]
+                                  per-file unified diff of one turn (between
+                                  its before and after snapshots)
+  undo <sessionId> <turn> [--file <path>]... [--dry-run] [--keep-commits]
+                                  restore the work tree (or those files) to
+                                  before the turn; snapshots the current
+                                  state first (see redo); never touches
+                                  commits, branches, HEAD or the index
+  redo <sessionId> <turn> [--dry-run]
+                                  put back what the last undo of that turn
+                                  changed
   guide [--timeout-ms 15000]      the voice guide: one action for the
                                   {utterance, context} JSON on stdin
                                   (claude -p, no tools)
@@ -352,7 +367,7 @@ async function transcriptCmd (args) {
   try {
     const a = found.agent
     // The agent's live status rides along so one poll refreshes the whole view.
-    const agent = { name: a.name, state: a.state, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
+    const agent = { name: a.name, state: a.state, lastEvent: a.lastEvent || null, lastToolName: a.lastToolName || null, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
     return out({ sessionId, agent, ...transcriptMod().readTranscript(file, opts) })
   } catch (err) {
     if (err.code === 'ENOENT') return fail(`transcript not found: ${file}`)
@@ -672,6 +687,49 @@ async function digestCmd (args) {
   }
 }
 
+// --file may repeat.
+function fileFlags (args) {
+  const files = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--file' && typeof args[i + 1] === 'string') files.push(args[++i])
+    else if (args[i].startsWith('--file=')) files.push(args[i].slice(7))
+  }
+  return files
+}
+
+function turnArg (value) {
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+async function reviewCmd (cmd, args) {
+  const { flags, positional } = parseFlags(args)
+  const [sessionId, turnText] = positional
+  const n = turnArg(turnText)
+  const usage = {
+    turns: 'usage: turns <sessionId> [--limit 20]',
+    diff: 'usage: diff <sessionId> <turn> [--file <path>]... [--max-bytes N] [--max-file-bytes N] [--context 3]',
+    undo: 'usage: undo <sessionId> <turn> [--file <path>]... [--dry-run] [--keep-commits]',
+    redo: 'usage: redo <sessionId> <turn> [--dry-run]'
+  }[cmd]
+  if (!sessionId || (cmd !== 'turns' && !n)) return fail(usage)
+  const num = name => (flags[name] === undefined ? undefined : optNumber(flags, name))
+  for (const name of ['limit', 'max-bytes', 'max-file-bytes', 'context']) if (Number.isNaN(num(name))) return fail(`--${name} must be a non-negative number`)
+  const review = reviewMod()
+  let res
+  switch (cmd) {
+    case 'turns': res = await review.turnsCmd(sessionId, { limit: Math.min(num('limit') || 20, 50) }); break
+    case 'diff': res = await review.diffCmd(sessionId, n, { files: fileFlags(args), maxBytes: num('max-bytes'), maxFileBytes: num('max-file-bytes'), context: num('context') }); break
+    case 'undo': res = await review.undoCmd(sessionId, n, { files: fileFlags(args), dryRun: !!flags['dry-run'], keepCommits: !!flags['keep-commits'] }); break
+    case 'redo': res = await review.redoCmd(sessionId, n, { dryRun: !!flags['dry-run'] }); break
+  }
+  if (res.error) {
+    process.stdout.write(JSON.stringify(res.code ? { error: res.error, code: res.code } : { error: res.error }) + '\n')
+    return 1
+  }
+  return out(res)
+}
+
 async function portsCmd (args) {
   const { flags } = parseFlags(args)
   const since = optNumber(flags, 'since')
@@ -934,6 +992,7 @@ async function main (argv) {
     case 'guide': return guideCmd(args)
     case 'digest': return digestCmd(args)
     case 'cswap-switch': return cswapSwitchCmd(args)
+    case 'turns': case 'diff': case 'undo': case 'redo': return reviewCmd(cmd, args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()

@@ -35,3 +35,22 @@ RouteSettings chatRouteSettings({
       ? arguments
       : null;
 }
+
+/// Settings for a Review route (the machine as session host id, and the
+/// agent), so the voice guide knows which agent "undo that" means.
+RouteSettings reviewRouteSettings({
+  required String hostId,
+  required String agentId,
+}) => RouteSettings(
+  name: '/review',
+  arguments: (hostId: hostId, agentId: agentId),
+);
+
+/// The machine and agent a Review route shows, or null for any other route.
+({String hostId, String agentId})? reviewRouteTarget(Route<Object?> route) {
+  final arguments = route.settings.arguments;
+  return route.settings.name == '/review' &&
+          arguments is ({String hostId, String agentId})
+      ? arguments
+      : null;
+}

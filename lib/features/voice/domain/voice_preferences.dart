@@ -35,6 +35,21 @@ enum ToolActivity {
   final String label;
 }
 
+/// When Review mode (the changed files of an agent turn) opens from Chat
+/// View.
+enum ReviewOpens {
+  /// Only from the Review buttons (Chat View, the dashboard, the inbox) or
+  /// the voice guide.
+  onDemand('On demand'),
+
+  /// As soon as a turn ends while its Chat View is on screen.
+  afterEachTurn('After each turn');
+
+  const ReviewOpens(this.label);
+
+  final String label;
+}
+
 /// Read-aloud and continuous-dictation settings (Settings → Speech), and
 /// how Chat View shows tool activity.
 ///
@@ -56,6 +71,7 @@ class VoicePreferences {
     this.talkSendSilenceSeconds = defaultTalkSendSeconds,
     this.readAloudLength = ReadAloudLength.brief,
     this.toolActivity = ToolActivity.collapsed,
+    this.reviewOpens = ReviewOpens.onDemand,
     this.guide = GuidePreferences.defaults,
   });
 
@@ -123,6 +139,9 @@ class VoicePreferences {
   /// How Chat View shows tool calls.
   final ToolActivity toolActivity;
 
+  /// Whether Review opens by itself when a turn ends in Chat View.
+  final ReviewOpens reviewOpens;
+
   /// The voice guide (Settings › Chat & Voice › Voice guide).
   final GuidePreferences guide;
 
@@ -163,6 +182,7 @@ class VoicePreferences {
     int? talkSendSilenceSeconds,
     ReadAloudLength? readAloudLength,
     ToolActivity? toolActivity,
+    ReviewOpens? reviewOpens,
     GuidePreferences? guide,
   }) {
     return VoicePreferences(
@@ -190,6 +210,7 @@ class VoicePreferences {
           ),
       readAloudLength: readAloudLength ?? this.readAloudLength,
       toolActivity: toolActivity ?? this.toolActivity,
+      reviewOpens: reviewOpens ?? this.reviewOpens,
       guide: guide ?? this.guide,
     );
   }
@@ -209,6 +230,7 @@ class VoicePreferences {
     'talkSendSilenceSeconds': talkSendSilenceSeconds,
     'readAloudLength': readAloudLength.name,
     'toolActivity': toolActivity.name,
+    'reviewOpens': reviewOpens.name,
     'guide': guide.toJson(),
     if (includeSessions) 'readAloudSessions': readAloudSessions,
   };
@@ -281,6 +303,11 @@ class VoicePreferences {
         'toolActivity',
         ToolActivity.values,
         fallback.toolActivity,
+      ),
+      reviewOpens: named(
+        'reviewOpens',
+        ReviewOpens.values,
+        fallback.reviewOpens,
       ),
       guide: raw['guide'] is Map
           ? GuidePreferences.fromJson(raw['guide'])

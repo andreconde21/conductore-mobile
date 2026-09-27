@@ -113,6 +113,26 @@ class GuideSend extends GuideIntent {
   bool get risky => true;
 }
 
+/// Open Review of an agent's last turn (null: the one on screen).
+class GuideReview extends GuideIntent {
+  const GuideReview([this.target]);
+
+  final GuideRef? target;
+}
+
+/// "Undo that": restore an agent's work tree to before its last turn
+/// (null target: the agent on screen, or the only one that just finished).
+/// [turn] is set once the user heard which turn and said yes.
+class GuideUndo extends GuideIntent {
+  const GuideUndo([this.target, this.turn]);
+
+  final GuideRef? target;
+  final int? turn;
+
+  @override
+  bool get risky => true;
+}
+
 /// Read an agent's last reply (null: the one on screen).
 class GuideRead extends GuideIntent {
   const GuideRead([this.target]);

@@ -466,6 +466,11 @@ class AgentAttentionController extends ChangeNotifier {
         (monitor.capabilities?.contains(smartApprovalsCapability) ?? false);
   }
 
+  /// Whether [hostId]'s companion snapshots each agent turn (Review mode
+  /// and "Undo this turn"; capability `snapshots`).
+  bool supportsSnapshots(String hostId) =>
+      _monitors[hostId]?.capabilities?.contains(snapshotsCapability) ?? false;
+
   /// Every waiting request on the monitored hosts, oldest first.
   List<PendingApproval> get pendingApprovals {
     final all = <PendingApproval>[

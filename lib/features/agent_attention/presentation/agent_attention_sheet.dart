@@ -15,6 +15,7 @@ import 'package:conduit/features/agent_attention/presentation/widgets/usage_upda
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -384,6 +385,19 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
       showHost: showHost,
       onOpen: () => widget.onOpenAgent(host, agent),
       onOpenChat: openChat == null ? null : () => openChat(host, agent),
+      onReview:
+          reviewAvailable(controller, host) &&
+              agentCanBeReviewed(agent) &&
+              agent.state != AgentAttentionState.finished
+          ? () => unawaited(
+              openReview(
+                context: context,
+                attention: controller,
+                host: host,
+                agent: agent,
+              ),
+            )
+          : null,
       pending: agent.pendingRequests.isEmpty
           ? null
           : Column(

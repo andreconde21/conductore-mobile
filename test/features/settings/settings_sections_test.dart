@@ -8,6 +8,7 @@ import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -176,6 +177,24 @@ void main() {
       tester,
       SettingsSection.chatVoice,
       find.text('Keep listening until I tap stop'),
+    );
+  });
+
+  testWidgets('Chat & Voice: Review opens on demand or after each turn', (
+    tester,
+  ) async {
+    await openSection(tester, SettingsSection.chatVoice);
+    final card = find.byKey(const ValueKey('chat-review-opens'));
+    await reveal(tester, SettingsSection.chatVoice, card);
+    expect(controller.voice.reviewOpens, ReviewOpens.onDemand);
+    await tester.tap(
+      find.descendant(of: card, matching: find.text('After each turn')),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.voice.reviewOpens, ReviewOpens.afterEachTurn);
+    expect(
+      find.textContaining('When a turn ends in Chat View'),
+      findsOneWidget,
     );
   });
 

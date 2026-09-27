@@ -449,6 +449,11 @@ class AgentRateLimit {
   int get hashCode => Object.hash(label, usedPct, resetsAt);
 }
 
+/// The companion capability behind Review mode and "Undo this turn": per
+/// turn git snapshots and the `turns`, `diff`, `undo` and `redo` commands
+/// (`host/README.md`, "Turn snapshots").
+const snapshotsCapability = 'snapshots';
+
 /// One poll's worth of agent information for a host.
 class AgentAttentionSnapshot {
   const AgentAttentionSnapshot({

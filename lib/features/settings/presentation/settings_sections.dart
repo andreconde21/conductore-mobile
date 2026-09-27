@@ -312,6 +312,25 @@ class SettingsSectionBody extends StatelessWidget {
           theme.setVoice(theme.voice.copyWith(toolActivity: mode)),
     ),
     _gap,
+    SettingsSegmentCard<ReviewOpens>(
+      key: const ValueKey('chat-review-opens'),
+      icon: Icons.rate_review_outlined,
+      title: 'Review changes',
+      description: switch (theme.voice.reviewOpens) {
+        ReviewOpens.onDemand =>
+          'Review opens from its button in Chat View, the Agents dashboard '
+              'and the inbox, or when you tell the voice guide "review".',
+        ReviewOpens.afterEachTurn =>
+          'When a turn ends in Chat View, Review opens with a card per '
+              'changed file: accept, reject, comment, or undo the turn.',
+      },
+      values: ReviewOpens.values,
+      label: (mode) => mode.label,
+      selected: theme.voice.reviewOpens,
+      onChanged: (mode) =>
+          theme.setVoice(theme.voice.copyWith(reviewOpens: mode)),
+    ),
+    _gap,
     if (PlatformFeatures.dictation || PlatformFeatures.textToSpeech) ...[
       const SettingsHeading('Where to find voice'),
       const SettingsNote(

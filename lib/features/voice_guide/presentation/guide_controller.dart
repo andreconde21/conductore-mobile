@@ -80,6 +80,7 @@ class GuideController extends ChangeNotifier {
     this.usage,
     this.catchUp,
     this.accounts,
+    this.reviewer,
     this.locked,
     this.afterSpeechPause = const Duration(milliseconds: 400),
     this.retryDelay = const Duration(milliseconds: 1500),
@@ -118,6 +119,9 @@ class GuideController extends ChangeNotifier {
 
   /// Claude account switching; null (or not available) says so.
   final GuideAccounts? accounts;
+
+  /// Review and "undo that"; null says they are not available.
+  final GuideReviewer? reviewer;
 
   /// True while the app is locked: the guide does nothing then.
   final bool Function()? locked;
@@ -349,6 +353,8 @@ class GuideController extends ChangeNotifier {
       GuideShowChat(:final target) => target,
       GuideShowTerminal(:final target) => target,
       GuideTrust(:final target) => target,
+      GuideReview(:final target) => target,
+      GuideUndo(:final target) => target,
       _ => null,
     };
     if (target is! GuideByName) return false;
@@ -500,7 +506,56 @@ class GuideController extends ChangeNotifier {
         return _trust(minutes, target, now, s, confirmed: confirmed != null);
       case GuideSend(:final target, :final text):
         return _send(target, text, now, s, confirmed: confirmed != null);
+      case GuideReview(:final target):
+        return _review(target, now, s);
+      case GuideUndo():
+        return _undo(intent, now, s, confirmed: confirmed != null);
     }
+  }
+
+  Future<String> _review(
+    GuideRef? target,
+    GuideWorld now,
+    GuideStrings s,
+  ) async {
+    final (agent, problem) = _agent(target, now, s);
+    if (agent == null) return problem!;
+    final reviewer = this.reviewer;
+    if (reviewer == null || !reviewer.canReview(agent)) {
+      return s.notAvailableReview(agent.label);
+    }
+    final opened = await reviewer.review(agent);
+    return opened ? s.openingReview(agent.label) : s.notFound(agent.label);
+  }
+
+  /// "Undo that": always asks first, naming the turn and how many files
+  /// go back; the yes carries that exact turn.
+  Future<String?> _undo(
+    GuideUndo intent,
+    GuideWorld now,
+    GuideStrings s, {
+    required bool confirmed,
+  }) async {
+    final (agent, problem) = _agent(intent.target, now, s);
+    if (agent == null) return problem;
+    final reviewer = this.reviewer;
+    if (reviewer == null || !reviewer.canUndo(agent)) {
+      return s.notAvailableReview(agent.label);
+    }
+    if (agent.info.state == AgentAttentionState.working) {
+      return s.undoWhileWorking(agent.label);
+    }
+    final turn = intent.turn;
+    if (!confirmed || turn == null) {
+      final last = await reviewer.lastTurn(agent);
+      if (last == null || last.files == 0) return s.nothingToUndo(agent.label);
+      return _ask(
+        s.confirmUndo(agent.label, last),
+        _Confirm(GuideUndo(GuideAgentRef(agent.hostId, agent.id), last.turn)),
+      );
+    }
+    final files = await reviewer.undo(agent, turn);
+    return s.undone(agent.label, files);
   }
 
   /// The agent [target] names (null: the one on screen), or what to say

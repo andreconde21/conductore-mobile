@@ -318,4 +318,64 @@ void main() {
       }
     });
   });
+
+  group('review and undo', () {
+    test('undo, in English and Portuguese, with or without a name', () {
+      for (final phrase in [
+        'undo that',
+        'Undo it',
+        'undo the last turn',
+        'revert that',
+        'roll back the changes',
+        'desfaz isso',
+        'Desfazer',
+        'anula o último turno',
+      ]) {
+        final intent = GuidePhrases.match(phrase);
+        expect(intent, isA<GuideUndo>(), reason: phrase);
+        expect((intent! as GuideUndo).target, isNull, reason: phrase);
+        expect(intent.risky, isTrue);
+      }
+      expect(
+        nameOf((GuidePhrases.match('undo that for api') as GuideUndo).target),
+        'api',
+      );
+      expect(
+        nameOf((GuidePhrases.match('desfaz isso no web') as GuideUndo).target),
+        'web',
+      );
+    });
+
+    test('review, revê, show the changes', () {
+      for (final phrase in [
+        'review',
+        'Review the changes',
+        'show me the diff',
+        'what changed',
+        'revê',
+        'rever',
+        'revê as alterações',
+        'mostra as alterações',
+      ]) {
+        final intent = GuidePhrases.match(phrase);
+        expect(intent, isA<GuideReview>(), reason: phrase);
+        expect((intent! as GuideReview).target, isNull, reason: phrase);
+      }
+      expect(
+        nameOf((GuidePhrases.match('review api') as GuideReview).target),
+        'api',
+      );
+      expect(
+        nameOf(
+          (GuidePhrases.match('review the changes of api') as GuideReview)
+              .target,
+        ),
+        'api',
+      );
+      expect(
+        nameOf((GuidePhrases.match('revê o api') as GuideReview).target),
+        'api',
+      );
+    });
+  });
 }

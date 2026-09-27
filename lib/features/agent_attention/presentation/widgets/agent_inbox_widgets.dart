@@ -271,6 +271,7 @@ class AgentInboxRow extends StatelessWidget {
     required this.onOpen,
     this.showHost = true,
     this.onOpenChat,
+    this.onReview,
     this.pending,
     super.key,
   });
@@ -283,6 +284,9 @@ class AgentInboxRow extends StatelessWidget {
 
   /// Renders a "Chat" button when set.
   final VoidCallback? onOpenChat;
+
+  /// Renders a "Review" button (the last turn's changes) when set.
+  final VoidCallback? onReview;
 
   /// The approval cards, shown under the row (pinned approvals).
   final Widget? pending;
@@ -374,19 +378,39 @@ class AgentInboxRow extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                            if (onOpenChat case final openChat?)
+                            if (onOpenChat != null || onReview != null)
                               Align(
                                 alignment: AlignmentDirectional.centerEnd,
-                                child: TextButton.icon(
-                                  style: TextButton.styleFrom(
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  onPressed: openChat,
-                                  icon: const Icon(
-                                    Icons.chat_bubble_outline_rounded,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Chat'),
+                                child: Wrap(
+                                  children: [
+                                    if (onReview case final review?)
+                                      TextButton.icon(
+                                        key: ValueKey(
+                                          'agent-review-${entry.key}',
+                                        ),
+                                        style: TextButton.styleFrom(
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        onPressed: review,
+                                        icon: const Icon(
+                                          Icons.rate_review_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const Text('Review'),
+                                      ),
+                                    if (onOpenChat case final openChat?)
+                                      TextButton.icon(
+                                        style: TextButton.styleFrom(
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        onPressed: openChat,
+                                        icon: const Icon(
+                                          Icons.chat_bubble_outline_rounded,
+                                          size: 18,
+                                        ),
+                                        label: const Text('Chat'),
+                                      ),
+                                  ],
                                 ),
                               ),
                           ],

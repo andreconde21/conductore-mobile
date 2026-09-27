@@ -110,5 +110,7 @@ module.exports = {
   // The daemon's per-agent activity log (what `digest` counts).
   activityPath: () => path.join(homeDir(), 'activity.json'),
   // `digest --summaries`: rolling summary per agent and its token use.
-  digestPath: () => path.join(homeDir(), 'digest.json')
+  digestPath: () => path.join(homeDir(), 'digest.json'),
+  // Per-turn snapshot records (`turns`, `diff`, `undo`).
+  turnsPath: () => path.join(homeDir(), 'turns.json')
 }
