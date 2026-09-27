@@ -109,7 +109,8 @@ class _ChatAgentMessageCardState extends State<ChatAgentMessageCard> {
   }
 }
 
-/// "int-148 is idle", expandable to the result it reported.
+/// "int-148 finished" with the first line of the result it reported,
+/// expandable to the whole result; "int-148 is idle" without one.
 class _IdleChip extends StatefulWidget {
   const _IdleChip({required this.item});
 
@@ -127,12 +128,14 @@ class _IdleChipState extends State<_IdleChip> {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final item = widget.item;
+    final firstLine = item.body.split('\n').first.trim();
+    // More than fits on the collapsed line.
+    final more = item.body.trim() != firstLine || firstLine.length > 60;
     return Padding(
+      key: const ValueKey('agent-idle-row'),
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: InkWell(
-        onTap: item.body.isEmpty
-            ? null
-            : () => setState(() => _expanded = !_expanded),
+        onTap: !more ? null : () => setState(() => _expanded = !_expanded),
         borderRadius: BorderRadius.circular(AppTheme.radius),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
@@ -145,11 +148,16 @@ class _IdleChipState extends State<_IdleChip> {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '${item.from} is idle',
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                      item.body.isEmpty
+                          ? '${item.from} is idle'
+                          : '${item.from} finished',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: muted,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                  if (item.body.isNotEmpty)
+                  if (more)
                     Icon(
                       _expanded
                           ? Icons.expand_less_rounded
@@ -159,11 +167,14 @@ class _IdleChipState extends State<_IdleChip> {
                     ),
                 ],
               ),
-              if (_expanded)
+              if (item.body.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(left: 22, top: 4),
+                  padding: const EdgeInsets.only(left: 22, top: 2),
                   child: Text(
-                    item.body,
+                    _expanded ? item.body : firstLine,
+                    key: const ValueKey('agent-idle-result'),
+                    maxLines: _expanded ? null : 1,
+                    overflow: _expanded ? null : TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(color: muted),
                   ),
                 ),
