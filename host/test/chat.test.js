@@ -4,6 +4,8 @@
 // the CLI falls back to state.json, which the test writes. Fake `tmux` and
 // `herdr` binaries on PATH record their argv and stdin, so the tests see
 // exactly what would reach the multiplexer (and that no shell is involved).
+// They answer the relay's pane checks from PANES: tmux pane id -> pane pid,
+// Herdr pane id -> Claude session id.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -18,6 +20,9 @@ const binDir = path.join(home, 'bin')
 const callLog = path.join(home, 'calls.jsonl')
 fs.mkdirSync(binDir)
 
+const SOCK = '/tmp/fake-tmux-0/default'
+const PANES = { tmux: { '%3': 1003, '%4': 1004, '%9': 1009, '%6': 1006 }, herdr: { 'w1:p2': 'hd', 'w1:p7': 'someone-else' } }
+
 // A fake multiplexer: logs {bin, args, stdin}; FAKE_<BIN>_FAIL makes it fail.
 for (const bin of ['tmux', 'herdr']) {
   const f = path.join(binDir, bin)
@@ -28,7 +33,17 @@ let stdin = ''
 try { if (args.includes('load-buffer')) stdin = fs.readFileSync(0, 'utf8') } catch {}
 fs.appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({ bin: ${JSON.stringify(bin)}, args, stdin }) + '\\n')
 const fail = process.env.FAKE_${bin.toUpperCase()}_FAIL
-if (fail) { process.stdout.write(fail + '\\n'); process.exit(1) }
+const isCheck = args.includes('display-message') || args[1] === 'list'
+if (fail && isCheck === !!process.env.FAKE_FAIL_CHECK) { process.stdout.write(fail + '\\n'); process.exit(1) }
+const panes = ${JSON.stringify(PANES)}.${bin}
+if (args.includes('display-message')) {
+  const pane = args[args.indexOf('-t') + 1]
+  if (!(pane in panes)) { process.stderr.write("can't find pane: " + pane + '\\n'); process.exit(1) }
+  process.stdout.write(panes[pane] + '\\n')
+}
+if (args[0] === 'pane' && args[1] === 'list') {
+  process.stdout.write(JSON.stringify({ result: { panes: Object.entries(panes).map(([id, sid]) => ({ pane_id: id, workspace_id: 'w1', tab_id: 'w1:t1', agent_session: { agent: 'claude', kind: 'id', value: sid } })) } }))
+}
 `, { mode: 0o755 })
 }
 
@@ -39,6 +54,10 @@ const env = {
   CONDUCTORE_SOCKET: path.join(home, 'none.sock'),
   CONDUCTORE_SEND_ENTER_DELAY_MS: '0'
 }
+// Even a tmux call without -S (the fake on PATH aside) can only reach a
+// private "default" server, never the real one.
+env.TMUX_TMPDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tmux-'))
+for (const k of Object.keys(env)) if (/^(TMUX$|TMUX_PANE$|HERDR_)/.test(k)) delete env[k]
 
 function cli (args, { input, extraEnv } = {}) {
   return new Promise((resolve, reject) => {
@@ -56,6 +75,10 @@ function calls () {
   } catch { return [] }
 }
 function resetCalls () { try { fs.unlinkSync(callLog) } catch {} }
+// The calls that type or focus, without the pane checks before them.
+const isCheck = c => c.args.includes('display-message') || (c.args[0] === 'pane' && c.args[1] === 'list')
+const typed = () => calls().filter(c => !isCheck(c))
+const tmuxPane = (paneId, extra) => ({ session: 'main', window: 1, paneId, windowName: 'x', socket: SOCK, panePid: PANES.tmux[paneId], ...extra })
 
 const transcriptFile = path.join(home, 'sess.jsonl')
 const line = o => JSON.stringify(o) + '\n'
@@ -74,12 +97,18 @@ fs.writeFileSync(path.join(home, 'state.json'), JSON.stringify({
   seq: 7,
   writtenAt: Date.now(),
   agents: [
-    agent('tm', { transcriptPath: transcriptFile, tmux: { session: 'main', window: 1, paneId: '%3', windowName: 'x' } }),
-    agent('hd', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p2', name: null }, tmux: { session: 'main', window: 2, paneId: '%9' } }),
+    agent('tm', { transcriptPath: transcriptFile, tmux: tmuxPane('%3') }),
+    agent('hd', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p2', name: null }, tmux: tmuxPane('%9', { window: 2 }) }),
     agent('bare', {}),
-    agent('perm', { state: 'needs_permission', tmux: { session: 'main', window: 3, paneId: '%4' } }),
-    agent('gone', { state: 'ended', endedAt: Date.now(), tmux: { session: 'main', window: 4, paneId: '%5' } }),
-    agent('rel', { transcriptPath: 'relative.jsonl' })
+    agent('perm', { state: 'needs_permission', tmux: tmuxPane('%4', { window: 3 }) }),
+    agent('gone', { state: 'ended', endedAt: Date.now(), tmux: tmuxPane('%5', { window: 4 }) }),
+    agent('rel', { transcriptPath: 'relative.jsonl' }),
+    // Pane checks: %3 now runs another process, %6 closed; w1:p7 runs another session.
+    agent('reused', { tmux: tmuxPane('%3', { panePid: 4242 }) }),
+    agent('closed', { tmux: { ...tmuxPane('%6'), paneId: '%8' } }),
+    agent('old', { tmux: { session: 'main', window: 1, paneId: '%3', windowName: 'x' } }),
+    agent('other', { herdr: { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p7', name: null } }),
+    agent('exited', { tmux: tmuxPane('%3'), process: { pid: 2 ** 22 + 7, startTime: '1' } })
   ]
 }))
 
@@ -126,8 +155,9 @@ test('send types single-line text literally into the tmux pane, then Enter', asy
   assert.equal(r.code, 0)
   assert.deepEqual(r.json, { ok: true, sessionId: 'tm', via: 'tmux', paneId: '%3', chars: nasty.length, enter: true })
   assert.deepEqual(calls().map(c => c.args), [
-    ['send-keys', '-t', '%3', '-l', '--', nasty],
-    ['send-keys', '-t', '%3', 'Enter']
+    ['-S', SOCK, 'display-message', '-p', '-t', '%3', '#{pane_pid}'],
+    ['-S', SOCK, 'send-keys', '-t', '%3', '-l', '--', nasty],
+    ['-S', SOCK, 'send-keys', '-t', '%3', 'Enter']
   ])
   assert.equal(fs.existsSync(path.join(home, 'pwned')), false)
 })
@@ -137,34 +167,34 @@ test('send --text-b64 and stdin; multiline goes through a bracketed paste buffer
   const text = 'line one\nline "two" $HOME\n'
   const r = await cli(['send', 'tm', '--text-b64', Buffer.from(text).toString('base64')])
   assert.equal(r.code, 0)
-  const [load, paste, enter] = calls()
-  assert.equal(load.args[0], 'load-buffer')
-  assert.equal(load.args[3], '-')
+  const [load, paste, enter] = typed()
+  assert.deepEqual(load.args.slice(0, 3), ['-S', SOCK, 'load-buffer'])
+  assert.equal(load.args[5], '-')
   assert.equal(load.stdin, text)
-  const buffer = load.args[2]
+  const buffer = load.args[4]
   assert.match(buffer, /^conductore-[0-9a-f]{8}$/)
-  assert.deepEqual(paste.args, ['paste-buffer', '-p', '-d', '-b', buffer, '-t', '%3'])
-  assert.deepEqual(enter.args, ['send-keys', '-t', '%3', 'Enter'])
+  assert.deepEqual(paste.args, ['-S', SOCK, 'paste-buffer', '-p', '-d', '-b', buffer, '-t', '%3'])
+  assert.deepEqual(enter.args, ['-S', SOCK, 'send-keys', '-t', '%3', 'Enter'])
 
   resetCalls()
   const s = await cli(['send', 'tm'], { input: 'from stdin\n' })
   assert.equal(s.code, 0)
   assert.equal(s.json.chars, 'from stdin'.length)
-  assert.deepEqual(calls()[0].args, ['send-keys', '-t', '%3', '-l', '--', 'from stdin'])
+  assert.deepEqual(typed()[0].args, ['-S', SOCK, 'send-keys', '-t', '%3', '-l', '--', 'from stdin'])
 })
 
 test('send --no-enter types without submitting', async () => {
   resetCalls()
   const r = await cli(['send', 'tm', '--text', '2', '--no-enter'])
   assert.equal(r.json.enter, false)
-  assert.deepEqual(calls().map(c => c.args), [['send-keys', '-t', '%3', '-l', '--', '2']])
+  assert.deepEqual(typed().map(c => c.args), [['-S', SOCK, 'send-keys', '-t', '%3', '-l', '--', '2']])
 })
 
 test('send prefers Herdr (agent prompt) and falls back to tmux when it fails', async () => {
   resetCalls()
   const r = await cli(['send', 'hd', '--text', 'hello\nworld'])
   assert.equal(r.json.via, 'herdr')
-  assert.deepEqual(calls().map(c => [c.bin, ...c.args]), [['herdr', 'agent', 'prompt', 'w1:p2', 'hello\nworld']])
+  assert.deepEqual(typed().map(c => [c.bin, ...c.args]), [['herdr', 'agent', 'prompt', 'w1:p2', 'hello\nworld']])
 
   resetCalls()
   const f = await cli(['send', 'hd', '--text', 'hi'], { extraEnv: { FAKE_HERDR_FAIL: '{"error":{"code":"agent_not_found"}}' } })
@@ -176,7 +206,7 @@ test('send prefers Herdr (agent prompt) and falls back to tmux when it fails', a
   const blocked = await cli(['send', 'hd', '--text', 'hi'], { extraEnv: { FAKE_HERDR_FAIL: '{"error":{"code":"agent_blocked"}}' } })
   assert.equal(blocked.code, 1)
   assert.match(blocked.json.error, /agent_blocked/)
-  assert.deepEqual(calls().map(c => c.bin), ['herdr'])
+  assert.deepEqual(typed().map(c => c.bin), ['herdr'])
 })
 
 test('send refuses unknown, ended, permission-blocked and paneless sessions', async () => {
@@ -190,9 +220,9 @@ test('send refuses unknown, ended, permission-blocked and paneless sessions', as
 })
 
 test('send reports a tmux failure', async () => {
-  const r = await cli(['send', 'tm', '--text', 'x'], { extraEnv: { FAKE_TMUX_FAIL: "can't find pane: %3" } })
+  const r = await cli(['send', 'tm', '--text', 'x'], { extraEnv: { FAKE_TMUX_FAIL: 'server exited unexpectedly' } })
   assert.equal(r.code, 1)
-  assert.match(r.json.error, /tmux send-keys failed: can't find pane/)
+  assert.match(r.json.error, /tmux send-keys failed: server exited unexpectedly/)
 })
 
 test('interrupt sends Escape, also while a permission prompt is up', async () => {
@@ -200,10 +230,53 @@ test('interrupt sends Escape, also while a permission prompt is up', async () =>
   assert.deepEqual((await cli(['interrupt', 'perm'])).json, { ok: true, sessionId: 'perm', via: 'tmux', paneId: '%4', key: 'Escape' })
   const h = await cli(['interrupt', 'hd'])
   assert.equal(h.json.via, 'herdr')
-  assert.deepEqual(calls().map(c => [c.bin, ...c.args]), [
-    ['tmux', 'send-keys', '-t', '%4', 'Escape'],
+  assert.deepEqual(typed().map(c => [c.bin, ...c.args]), [
+    ['tmux', '-S', SOCK, 'send-keys', '-t', '%4', 'Escape'],
     ['herdr', 'pane', 'send-keys', 'w1:p2', 'esc']
   ])
   assert.deepEqual((await cli(['interrupt', 'nope'])).json, { error: 'unknown session nope' })
   assert.deepEqual((await cli(['interrupt', 'gone'])).json, { error: 'session has ended' })
 })
+
+test('send refuses a pane that no longer holds the session, and types nothing', async () => {
+  resetCalls()
+  const reused = await cli(['send', 'reused', '--text', 'meant-for-reused'])
+  assert.equal(reused.code, 1)
+  assert.equal(reused.json.error, 'tmux pane %3 no longer holds this session (closed, or its id reused)')
+  const closed = await cli(['send', 'closed', '--text', 'x'])
+  assert.match(closed.json.error, /^tmux pane %8 is gone: can't find pane: %8/)
+  const old = await cli(['send', 'old', '--text', 'x'])
+  assert.match(old.json.error, /^cannot verify tmux pane %3 \(recorded by an older companion\)/)
+  const other = await cli(['send', 'other', '--text', 'x'])
+  assert.equal(other.json.error, 'Herdr pane w1:p7 no longer holds this session')
+  const exited = await cli(['send', 'exited', '--text', 'x'])
+  assert.match(exited.json.error, /Claude Code process has exited/)
+  assert.deepEqual(typed(), [])
+  // Nothing about the old record is ever sent to the default tmux server.
+  assert.ok(calls().every(c => c.bin !== 'tmux' || c.args[0] === '-S'))
+
+  resetCalls()
+  assert.equal((await cli(['interrupt', 'reused'])).code, 1)
+  assert.equal((await cli(['focus', 'reused'])).code, 1)
+  assert.deepEqual(typed(), [])
+})
+
+test('a Herdr pane that fails its check falls back to the verified tmux pane', async () => {
+  resetCalls()
+  const r = await cli(['send', 'hd', '--text', 'hi'], { extraEnv: { FAKE_HERDR_FAIL: 'no server', FAKE_FAIL_CHECK: '1' } })
+  assert.equal(r.code, 0)
+  assert.equal(r.json.via, 'tmux')
+  assert.deepEqual(typed().map(c => c.bin), ['tmux', 'tmux'])
+})
+
+test('focus checks the pane and selects it on the agent\'s own tmux server', async () => {
+  resetCalls()
+  const r = await cli(['focus', 'tm'])
+  assert.deepEqual(r.json, { ok: true, via: 'tmux', target: 'main:1', paneId: '%3' })
+  assert.deepEqual(typed().map(c => c.args), [
+    ['-S', SOCK, 'select-window', '-t', '%3'],
+    ['-S', SOCK, 'select-pane', '-t', '%3']
+  ])
+})
+
+test.after(() => fs.rmSync(env.TMUX_TMPDIR, { recursive: true, force: true }))

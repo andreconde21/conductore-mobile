@@ -20,7 +20,7 @@ const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-bin-'))
 const tmuxLog = path.join(fakeBin, 'tmux.log')
 fs.writeFileSync(path.join(fakeBin, 'tmux'), `#!/bin/sh
 printf '%s\n' "$*" >> '${tmuxLog}'
-printf 'main\t2\t%s\t/work/t\tfixer\n' "$6"
+printf 'main\t2\t%s\t/work/t\tfixer\t4242\n' "$6"
 `, { mode: 0o755 })
 // A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9.
 const herdrLog = path.join(fakeBin, 'herdr.log')
@@ -40,6 +40,10 @@ const env = {
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json')
 }
+// Even a tmux call without -S (the fake on PATH aside) can only reach a
+// private "default" server, never the real one.
+env.TMUX_TMPDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-tmux-'))
+for (const k of Object.keys(env)) if (/^(TMUX$|TMUX_PANE$|HERDR_)/.test(k)) delete env[k]
 for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_AGENT_NAME']) delete env[k]
 
 process.env.CONDUCTORE_HOME = env.CONDUCTORE_HOME
@@ -141,7 +145,7 @@ test('tmux location is resolved by the daemon from the variables in the spool he
   const r = await hook(ev('t1', 'SessionStart'), { TMUX: '/tmp/fake-tmux-sock,123,0', TMUX_PANE: '%7' })
   assert.equal(r.code, 0)
   const a = (await status()).agents.find(a => a.sessionId === 't1')
-  assert.deepEqual(a.tmux, { session: 'main', window: 2, paneId: '%7', windowName: 'fixer' })
+  assert.deepEqual(a.tmux, { session: 'main', window: 2, paneId: '%7', windowName: 'fixer', socket: '/tmp/fake-tmux-sock', panePid: 4242 })
   assert.equal(a.name, 'fixer')
   assert.match(fs.readFileSync(tmuxLog, 'utf8'), /^-S \/tmp\/fake-tmux-sock display-message -p -t %7 /m)
   // Herdr comes straight from the header.
@@ -411,4 +415,5 @@ test.after(async () => {
   await sleep(200)
   fs.rmSync(home, { recursive: true, force: true })
   fs.rmSync(fakeBin, { recursive: true, force: true })
+  fs.rmSync(env.TMUX_TMPDIR, { recursive: true, force: true })
 })

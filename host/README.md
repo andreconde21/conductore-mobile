@@ -157,7 +157,8 @@ Every command prints one JSON document on stdout and exits 0, or prints
       "name": "reviewer",
       "cwd": "/home/andre/Projects/Foo",
       "transcriptPath": "/home/andre/.claude/projects/-home-andre-Projects-Foo/0f2c….jsonl",
-      "tmux": { "session": "main", "window": 2, "paneId": "%5", "windowName": "reviewer" },
+      "tmux": { "session": "main", "window": 2, "paneId": "%5", "windowName": "reviewer",
+                "socket": "/tmp/tmux-1000/default", "panePid": 48213 },
       "herdr": { "workspaceId": "w1", "tabId": "w1:t1", "paneId": "w1:p1", "name": null },
       "process": { "pid": 31515, "startTime": "81423907" },
       "state": "needs_permission",
@@ -242,8 +243,8 @@ terminal` (the hook process is gone). `--message` is passed to Claude on deny.
 ### `conductore-hostd focus <sessionId>`
 
 Runs `herdr agent focus <paneId>` when the agent has a Herdr pane, else
-`tmux select-window -t <session>:<window>` and `tmux select-pane -t <paneId>`.
-Prints `{"ok":true,"via":"tmux","target":"main:2","paneId":"%5"}`.
+`tmux -S <socket> select-window -t <paneId>` and `select-pane -t <paneId>`,
+after the same pane check as `send`. Prints `{"ok":true,"via":"tmux","target":"main:2","paneId":"%5"}`.
 
 ### `conductore-hostd transcript <sessionId> [--since <offset> | --before <offset>] [--tail-bytes N] [--max-bytes 262144]`
 
@@ -310,7 +311,7 @@ issues) or stdin; at most 100 000 characters.
   submit, multiline-safe; it refuses an agent that is blocked on a prompt).
   With `--no-enter`: `herdr pane send-text`. If Herdr fails for another
   reason and the agent also has a tmux pane, tmux is tried.
-* tmux: single line `tmux send-keys -t <pane> -l -- <text>`; multiline
+* tmux (always `tmux -S <socket> …`): single line `tmux send-keys -t <pane> -l -- <text>`; multiline
   `tmux load-buffer -b conductore-<rand> -` (text on stdin) then
   `tmux paste-buffer -p -d -b … -t <pane>` (bracketed paste, so newlines do
   not submit). Enter follows as a separate `send-keys … Enter` after 150 ms
@@ -318,9 +319,23 @@ issues) or stdin; at most 100 000 characters.
   read as a paste and would insert a newline instead of submitting.
 * Everything goes through `execFile`/`spawn` with an argument array; the
   text never passes through a shell.
+* Pane check, right before typing (also for `interrupt` and `focus`): a
+  recorded pane id can belong to someone else by now (tmux reuses ids after
+  a pane closes or its server restarts; the agent may run on another tmux
+  server). tmux commands go to the agent's own server (`-S`, the socket from
+  the hook's `$TMUX`), and the pane must still run the process recorded with
+  it (`#{pane_pid}`); a Herdr pane must still run this Claude session
+  (`herdr pane list`); and Claude Code itself must still run (`process`).
+  Otherwise nothing is typed and the error says why: `tmux pane %5 no longer
+  holds this session (closed, or its id reused)`, `tmux pane %5 is gone: …`,
+  `Herdr pane w1:p1 no longer holds this session`, `the agent's Claude Code
+  process has exited; nothing was typed`, `cannot verify tmux pane %5
+  (recorded by an older companion); …` (fixed by the agent's next event).
+  A Herdr pane that fails its check falls back to a tmux pane that passes.
 * Errors: `unknown session <id>`, `session has ended`, `agent is waiting for
   a permission decision; answer it first` (typing would answer the prompt),
-  `session not in tmux or Herdr`, and the multiplexer's own error.
+  `session not in tmux or Herdr`, the pane check's, and the multiplexer's
+  own error.
 
 ### `conductore-hostd interrupt <sessionId>`
 

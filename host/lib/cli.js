@@ -165,23 +165,10 @@ async function focus (args) {
   if (!sessionId) return fail('usage: focus <sessionId>')
   const found = await findAgent(sessionId)
   if (found.error) return fail(found.error)
-  const agent = found.agent
-  if (agent.herdr && agent.herdr.paneId) {
-    const r = await run('herdr', ['agent', 'focus', agent.herdr.paneId])
-    if (!r.err) return out({ ok: true, via: 'herdr', paneId: agent.herdr.paneId })
-    log('cli', 'herdr focus failed', (r.stderr || r.err.message).trim())
-  }
-  if (agent.tmux && agent.tmux.session) {
-    const target = `${agent.tmux.session}:${agent.tmux.window}`
-    const r1 = await run('tmux', ['select-window', '-t', target])
-    if (r1.err) return fail(`tmux select-window failed: ${(r1.stderr || r1.err.message).trim()}`)
-    if (agent.tmux.paneId) {
-      const r2 = await run('tmux', ['select-pane', '-t', agent.tmux.paneId])
-      if (r2.err) return fail(`tmux select-pane failed: ${(r2.stderr || r2.err.message).trim()}`)
-    }
-    return out({ ok: true, via: 'tmux', target, paneId: agent.tmux.paneId || null })
-  }
-  return fail('agent has no tmux or Herdr location')
+  if (!paneMod().targets(found.agent).length) return fail('agent has no tmux or Herdr location')
+  // Checks the panes first, like send (the ids may belong to someone else by now).
+  const r = await paneMod().focus(found.agent)
+  return r.error ? fail(r.error) : out(r)
 }
 
 const optNumber = (flags, name) => {

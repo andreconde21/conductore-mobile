@@ -99,7 +99,11 @@ function pickName (event, cwd) {
 function applyContext (agent, event) {
   if (event.cwd) agent.cwd = event.cwd
   if (typeof event.transcript_path === 'string' && event.transcript_path) agent.transcriptPath = event.transcript_path
-  if (event.tmux) agent.tmux = { session: event.tmux.session, window: event.tmux.window, paneId: event.tmux.paneId, windowName: event.tmux.windowName || null }
+  if (event.tmux) {
+    agent.tmux = { session: event.tmux.session, window: event.tmux.window, paneId: event.tmux.paneId, windowName: event.tmux.windowName || null }
+    if (event.tmux.socket) agent.tmux.socket = event.tmux.socket
+    if (event.tmux.panePid) agent.tmux.panePid = event.tmux.panePid
+  }
   if (event.herdr) agent.herdr = event.herdr
   if (event.process) agent.process = event.process
   const name = pickName(event, agent.cwd)
