@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
@@ -69,6 +71,49 @@ void main() {
     await tester.pump();
     expect(find.byKey(const ValueKey('preview-ready-chip')), findsNothing);
 
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
+  testWidgets('a route on top pauses the port polls', (tester) async {
+    final workspace = TerminalWorkspaceController(
+      ImmediateTerminalRepository(TrackableTerminalSession()),
+    );
+    addTearDown(workspace.dispose);
+    final session = workspace.open(buildHost('a'));
+    await tester.runAsync(session.connect);
+    workspace.activate(session);
+    PreviewReadyController? watcher;
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        home: TerminalPage(
+          workspace: workspace,
+          themeController: ThemeController(InMemoryThemePreferences()),
+          sftpRepository: NoNetworkSftpRepository(),
+          previewWatcherFactory: (session) => watcher = PreviewReadyController(
+            runnerFactory: () => ScriptedAgentCommandRunner([
+              const AgentCommandResult(stdout: '', stderr: '', exitCode: 0),
+            ]),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(watcher?.isForeground, isTrue);
+    unawaited(
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(watcher?.isForeground, isFalse);
+    navigator.currentState!.pop();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(watcher?.isForeground, isTrue);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(milliseconds: 300));
   });

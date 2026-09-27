@@ -233,6 +233,10 @@ class _TerminalPageState extends State<TerminalPage>
   AppLifecycleListener? _lifecycle;
   bool _appResumed = true;
 
+  /// False while a route covers the page or the desktop dashboard hides
+  /// it (tickers are off): port polling pauses then.
+  bool _onScreen = true;
+
   /// "Uploading image…" while a pasted image goes to the host.
   String? _pasteStatus;
 
@@ -453,6 +457,13 @@ class _TerminalPageState extends State<TerminalPage>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _route = ModalRoute.of(context);
+    final onScreen = TickerMode.valuesOf(context).enabled;
+    if (onScreen != _onScreen) {
+      _onScreen = onScreen;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncPreviewWatchers();
+      });
+    }
     final shareTarget = ShareTargetScope.maybeOf(context);
     if (shareTarget == _shareTarget) {
       return;
@@ -618,7 +629,7 @@ class _TerminalPageState extends State<TerminalPage>
               _TerminalScreen(session.terminal),
               () => _TerminalScreen.visibleRows(session.terminal),
             );
-      watcher.setForeground(_appResumed && session == active);
+      watcher.setForeground(_appResumed && _onScreen && session == active);
     }
   }
 
