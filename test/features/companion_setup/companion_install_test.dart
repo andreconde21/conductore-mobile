@@ -202,9 +202,13 @@ void main() {
       // Fails when host/ changed without re-running
       // tools/bundle-companion.sh.
       final hostFiles = [
-        for (final dir in ['bin', 'lib'])
-          for (final entity in Directory('host/$dir').listSync())
-            if (entity is File) '$dir/${entity.uri.pathSegments.last}',
+        for (final dir in ['bin', 'lib', 'vendor'])
+          if (Directory('host/$dir').existsSync())
+            for (final entity in Directory(
+              'host/$dir',
+            ).listSync(recursive: true))
+              if (entity is File)
+                entity.path.substring('host/'.length).replaceAll(r'\\', '/'),
         'install.sh',
         'package.json',
         'README.md',
