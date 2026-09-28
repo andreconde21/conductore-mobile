@@ -315,3 +315,11 @@ test('the reducer records Claude\'s permission mode', () => {
   state.reduce(st, { session_id: 's1', hook_event_name: 'Stop', cwd: '/w' })
   assert.equal(st.agents.s1.permissionMode, 'bypassPermissions', 'kept until an event says otherwise')
 })
+
+test('the shared scan samples: the server, the companion and the app agree', async () => {
+  const guards = await import(pathToFileURL(path.join(VENDOR, 'guards.mjs')).href)
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'talkbawt-secret-samples.json'), 'utf8'))
+  const text = fixture.lines.join('\n')
+  assert.deepEqual(guards.scanForSecrets(text), fixture.findings, 'regenerate the fixture from the vendored guards.mjs')
+  assert.deepEqual(tb.scanForSecrets(text), fixture.findings)
+})

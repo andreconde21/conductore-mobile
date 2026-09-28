@@ -234,6 +234,7 @@ class AgentInfo {
     this.project,
     this.usage,
     this.lastAutoApprovedAt,
+    this.permissionMode,
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -279,6 +280,12 @@ class AgentInfo {
   /// the host (the companion's `lastAutoApprovedAt`).
   final DateTime? lastAutoApprovedAt;
 
+  /// Claude Code's permission mode (`default`, `plan`, `acceptEdits`,
+  /// `auto`, `bypassPermissions`), when the companion recorded it from a
+  /// hook event. Talkbawt never types link content into an agent that acts
+  /// without asking.
+  final String? permissionMode;
+
   /// The project the inbox groups this agent under: the provider's
   /// [project], else the basename of a path-like [workspace] (the
   /// companion puts the agent's cwd there). Herdr's opaque workspace ids
@@ -316,6 +323,7 @@ class AgentInfo {
       project: project,
       usage: usage,
       lastAutoApprovedAt: lastAutoApprovedAt,
+      permissionMode: permissionMode,
     );
   }
 
@@ -335,6 +343,7 @@ class AgentInfo {
         other.project == project &&
         other.usage == usage &&
         other.lastAutoApprovedAt == lastAutoApprovedAt &&
+        other.permissionMode == permissionMode &&
         _sameRequests(other.pendingRequests, pendingRequests);
   }
 
@@ -368,6 +377,7 @@ class AgentInfo {
     project,
     usage,
     lastAutoApprovedAt,
+    permissionMode,
     Object.hashAll(pendingRequests),
   );
 }

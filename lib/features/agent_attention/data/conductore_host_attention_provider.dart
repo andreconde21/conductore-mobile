@@ -434,6 +434,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       project: _string(item['project']) ?? _basename(cwd),
       usage: parseUsage(item['usage']),
       lastAutoApprovedAt: _timestamp(item['lastAutoApprovedAt']),
+      permissionMode: _string(item['permissionMode']),
     );
   }
 
