@@ -170,11 +170,6 @@ class HerdrSessionFocus {
     }
   }
 
-  /// The session whose workspace [session]'s Herdr server shows, as far as
-  /// the app put it there; null before the app focused anything on it.
-  TerminalSessionController? focusOwnerOf(TerminalSessionController session) =>
-      _owners[serverKey(session)];
-
   /// Focuses the active session's workspace again, holding its input until
   /// Herdr confirms. For when the app comes back to the foreground: the
   /// laptop, or another client, may have moved the shared focus meanwhile.
