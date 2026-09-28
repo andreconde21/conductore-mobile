@@ -99,6 +99,10 @@ class TerminalSessionController extends ChangeNotifier {
   final _workingDirectoryReports = StreamController<String>.broadcast();
   String? _workingDirectory;
   late final _inputHold = SessionInputHold(deliver: _deliverInput);
+
+  /// Set while remote output is being written: what the terminal sends
+  /// then is its answer to a query, not input.
+  bool _answeringRemote = false;
   final _sharedView = ValueNotifier<SharedViewSnapshot?>(null);
   final _focusElsewhere = ValueNotifier<String?>(null);
 
@@ -876,6 +880,13 @@ class TerminalSessionController extends ChangeNotifier {
     if (_shouldSuppressDuplicateIosEnter(normalized)) {
       return;
     }
+    if (_answeringRemote) {
+      // The terminal answering the remote program (device attributes,
+      // cursor position, size): it goes back to that program (the Herdr
+      // client itself), never to a pane, so it is never held.
+      _deliverInput(normalized);
+      return;
+    }
     if (_inputHold.offer(normalized)) {
       return;
     }
@@ -944,7 +955,12 @@ class TerminalSessionController extends ChangeNotifier {
   }
 
   void _writeTerminalOutput(String data) {
-    terminal.write(data);
+    _answeringRemote = true;
+    try {
+      terminal.write(data);
+    } finally {
+      _answeringRemote = false;
+    }
     if (_predictiveEcho.hasPredictions) {
       _predictiveEcho.removeWhere(_isConfirmedPrediction);
       _notifyTerminalPaint();

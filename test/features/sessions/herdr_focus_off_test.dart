@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
+import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/presentation/session_input_hold.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -281,4 +285,50 @@ void main() {
     });
     expect(server.focusedWorkspace, 'w1');
   });
+
+  test(
+    'the terminal\'s answers to the remote program are never held',
+    () async {
+      final remote = _ScriptedSession();
+      final session = TerminalSessionController(
+        host: host,
+        repository: ImmediateTerminalRepository(remote),
+      )..inputCheck = (_) => Future.value(InputHoldDecision.block);
+      addTearDown(session.dispose);
+      await session.connect();
+
+      session.sendText('ls'); // Typed: held.
+      await settle();
+      remote.output.add(utf8.encode('\x1b[c')); // The client asks for DA1.
+      await settle();
+
+      expect(session.inputHold.value, isA<InputHoldBlocked>());
+      final sent = remote.sent.map(utf8.decode).toList();
+      expect(sent, hasLength(1));
+      expect(sent.single, startsWith('\x1b[?'));
+    },
+  );
+}
+
+class _ScriptedSession implements SshTerminalSession {
+  final output = StreamController<List<int>>();
+  final sent = <List<int>>[];
+
+  @override
+  Future<void> get done => Completer<void>().future;
+
+  @override
+  Stream<List<int>> get stderr => const Stream.empty();
+
+  @override
+  Stream<List<int>> get stdout => output.stream;
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  void resize(int columns, int rows, int pixelWidth, int pixelHeight) {}
+
+  @override
+  Future<void> send(List<int> data) async => sent.add(data);
 }
