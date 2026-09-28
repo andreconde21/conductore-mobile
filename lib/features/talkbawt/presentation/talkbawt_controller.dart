@@ -685,11 +685,13 @@ class TalkbawtController extends ChangeNotifier {
   /// turn ended.
   Future<void> pairedTick() async {
     final s = _paired;
-    if (s == null || !s.active || _pairedBusy) return;
+    if (s == null || !s.active) return;
+    // The deadline wins over a relay step still in flight.
     if (!_now().isBefore(s.endsAt)) {
       await stopPaired(PairedStopReason.expired);
       return;
     }
+    if (_pairedBusy) return;
     _pairedBusy = true;
     try {
       final hostA = _host(s.a.hostId);
