@@ -432,6 +432,7 @@ class TerminalKeyboardBar extends StatelessWidget {
   void _sendSnippet(TerminalSnippet snippet) {
     final text = snippet.submit ? '${snippet.text}\r' : snippet.text;
     if (text.isNotEmpty) {
+      controller.claimInput();
       _sendText(text);
     } else {
       _focusTerminal();

@@ -9,6 +9,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/mosh_server_cleanup.dart';
 import 'package:conduit/features/terminal/domain/network_connectivity.dart';
@@ -22,6 +23,7 @@ import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/terminal_string_sequence_filter.dart';
 import 'package:conduit/features/terminal/presentation/desktop_keyboard.dart';
+import 'package:conduit/features/terminal/presentation/session_input_hold.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/foundation.dart';
@@ -96,6 +98,8 @@ class TerminalSessionController extends ChangeNotifier {
   final _remoteClipboardWrites = StreamController<String>.broadcast();
   final _workingDirectoryReports = StreamController<String>.broadcast();
   String? _workingDirectory;
+  late final _inputHold = SessionInputHold(deliver: _deliverInput);
+  final _sharedView = ValueNotifier<SharedViewSnapshot?>(null);
 
   static const _iosDuplicateEnterWindow = Duration(milliseconds: 80);
   static const _gracefulMoshCloseTimeout = Duration(milliseconds: 1500);
@@ -152,6 +156,39 @@ class TerminalSessionController extends ChangeNotifier {
   /// Each change of [workingDirectory].
   Stream<String> get workingDirectoryReports => _workingDirectoryReports.stream;
   bool get isConnected => _status == TerminalConnectionStatus.connected;
+
+  /// Whether typed input is being held (see [holdInput]), and why the last
+  /// held input was dropped; null when input flows.
+  ValueListenable<InputHoldState?> get inputHold => _inputHold.state;
+
+  /// Holds everything sent into this session (keys, pastes, composed
+  /// prompts) until [ready] completes: true sends it in order, false or
+  /// [timeout] drops it and says so on [inputHold]. Herdr sessions use it
+  /// while their server's shared focus is moved back to them.
+  void holdInput(
+    Future<bool> ready, {
+    String label = '',
+    Duration timeout = SessionInputHold.defaultTimeout,
+  }) => _inputHold.hold(ready, label: label, timeout: timeout);
+
+  /// Called before the app itself types into this session (the composer,
+  /// a snippet, a quick action, an image path) so its Herdr focus can be
+  /// checked first; set by whoever keeps that focus.
+  void Function(TerminalSessionController session)? inputClaimer;
+
+  /// Makes sure what the app types next lands in this session's own place
+  /// (see [inputClaimer]). Cheap and safe to call before any write.
+  void claimInput() => inputClaimer?.call(this);
+
+  /// While set, this session's screen mirrors another session's Herdr
+  /// workspace (they share a Herdr server, whose focus is on the other),
+  /// and previews show this snapshot of its own instead.
+  ValueListenable<SharedViewSnapshot?> get sharedView => _sharedView;
+
+  set sharedViewSnapshot(SharedViewSnapshot? snapshot) {
+    if (!_disposed) _sharedView.value = snapshot;
+  }
+
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
   Listenable get terminalPaintListenable => _terminalPaintNotifier;
@@ -386,6 +423,7 @@ class TerminalSessionController extends ChangeNotifier {
 
     final session = _session;
     _session = null;
+    _inputHold.reset();
     try {
       final leavesServer = await _closeRemoteMoshSession(session);
       await session?.close();
@@ -436,6 +474,7 @@ class TerminalSessionController extends ChangeNotifier {
   }
 
   void paste(String text) {
+    claimInput();
     terminal.paste(text);
     keyboard.clearModifiers();
   }
@@ -467,6 +506,7 @@ class TerminalSessionController extends ChangeNotifier {
   /// in CR as a paste and insert the trailing CR literally instead of
   /// submitting; an isolated Enter keypress submits regardless.
   Future<void> sendComposed(String text, {required bool submit}) async {
+    claimInput();
     final sanitized = sanitizeComposedText(text);
     if (terminal.bracketedPasteMode) {
       terminal.paste(sanitized);
@@ -746,7 +786,13 @@ class TerminalSessionController extends ChangeNotifier {
     if (_shouldSuppressDuplicateIosEnter(normalized)) {
       return;
     }
+    if (_inputHold.offer(normalized)) {
+      return;
+    }
+    _deliverInput(normalized);
+  }
 
+  void _deliverInput(String normalized) {
     final session = _session;
     if (session == null) {
       return;
@@ -1024,6 +1070,8 @@ class TerminalSessionController extends ChangeNotifier {
       unawaited(session.close());
     }
     keyboard.dispose();
+    _inputHold.dispose();
+    _sharedView.dispose();
     _terminalPaintNotifier.dispose();
     _terminalTitle.dispose();
     unawaited(_remoteClipboardWrites.close());

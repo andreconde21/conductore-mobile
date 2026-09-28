@@ -149,7 +149,9 @@ class _PromptMenuStripState extends State<PromptMenuStrip> {
   }
 
   void _send(PromptMenu menu, List<PromptMenuKeystroke> keystrokes) {
-    final session = widget.session;
+    // An answer typed into another Herdr workspace would answer the
+    // wrong agent: make sure the shared focus is on this one first.
+    final session = widget.session..claimInput();
     for (final keystroke in keystrokes) {
       switch (keystroke) {
         case PromptMenuText(:final text):

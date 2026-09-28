@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/foundation.dart';
 
 /// A downscaled text snapshot of a terminal's viewport for the session grid.
 class TerminalPreview {
@@ -37,6 +38,23 @@ class TerminalPreview {
     }
     final begin = math.max(0, end - rows);
     return TerminalPreview(lines.sublist(begin, end));
+  }
+
+  /// The last [rows] non-blank rows of [preview], each cut to [columns].
+  factory TerminalPreview.fromStyled(
+    StyledTerminalPreview preview, {
+    int rows = 12,
+    int columns = 48,
+  }) {
+    final lines = [
+      for (final line in preview.lines)
+        line.length > columns ? line.substring(0, columns) : line,
+    ];
+    var end = lines.length;
+    while (end > 0 && lines[end - 1].trim().isEmpty) {
+      end -= 1;
+    }
+    return TerminalPreview(lines.sublist(math.max(0, end - rows), end));
   }
 
   @override
@@ -182,4 +200,52 @@ class StyledTerminalPreview {
     columns,
     Object.hashAll([for (final row in rows) Object.hashAll(row)]),
   );
+}
+
+/// What a Herdr session's screen showed the last time its Herdr server's
+/// focus was on it.
+///
+/// Every client of one Herdr server shows the same focused workspace, so a
+/// session whose server is focused for another session mirrors that one's
+/// screen. Its previews show this snapshot instead, with its time.
+@immutable
+class SharedViewSnapshot {
+  const SharedViewSnapshot({
+    required this.preview,
+    required this.capturedAt,
+    this.label = '',
+  });
+
+  /// Captures [terminal] as it is now.
+  factory SharedViewSnapshot.capture(
+    Terminal terminal, {
+    String label = '',
+    DateTime? at,
+  }) => SharedViewSnapshot(
+    preview: StyledTerminalPreview.capture(terminal),
+    capturedAt: at ?? DateTime.now(),
+    label: label,
+  );
+
+  final StyledTerminalPreview preview;
+  final DateTime capturedAt;
+
+  /// The Herdr workspace the session is on, when known.
+  final String label;
+
+  /// The last non-blank line of [preview].
+  String get tail {
+    final lines = preview.lines;
+    for (final line in lines.reversed) {
+      if (line.trim().isNotEmpty) return line.trim();
+    }
+    return '';
+  }
+
+  /// "05:54": when it was taken, for the tile's caption.
+  String get timeLabel {
+    String two(int value) => value.toString().padLeft(2, '0');
+    final local = capturedAt.toLocal();
+    return '${two(local.hour)}:${two(local.minute)}';
+  }
 }

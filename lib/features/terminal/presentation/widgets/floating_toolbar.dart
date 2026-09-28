@@ -504,6 +504,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       _focusTerminal();
       return;
     }
+    _controller.claimInput();
     if (snippet.submit) {
       _submitLine(snippet.text);
     } else {

@@ -12,7 +12,6 @@ import 'package:conduit/features/session_navigation/presentation/quick_switcher_
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_model.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/live_terminal_preview.dart';
-import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -589,17 +588,19 @@ class _Thumbnail extends StatelessWidget {
         border: Border.all(color: palette.hairlineFor(brightness)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: TerminalSnapshotBuilder(
-        terminal: session.terminal,
-        builder: (context) => LiveTerminalPreview(
-          preview: StyledTerminalPreview.capture(session.terminal),
+      child: SessionPreviewBuilder(
+        session: session,
+        builder: (context, preview, shared) => LiveTerminalPreview(
+          preview: preview,
           theme: theme,
           fontFamily: fontFamily,
-          placeholder: switch (session.status) {
-            TerminalConnectionStatus.connected => '',
-            TerminalConnectionStatus.connecting => '…',
-            _ => '—',
-          },
+          placeholder: shared != null
+              ? 'Herdr'
+              : switch (session.status) {
+                  TerminalConnectionStatus.connected => '',
+                  TerminalConnectionStatus.connecting => '…',
+                  _ => '—',
+                },
           placeholderColor: palette.mutedForegroundFor(brightness),
         ),
       ),

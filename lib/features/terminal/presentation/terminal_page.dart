@@ -98,6 +98,7 @@ import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_c
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_strip.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/session_focus_frame.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
@@ -1614,7 +1615,9 @@ class _TerminalPageState extends State<TerminalPage>
     unawaited(directories.record(hostId, pick.directory));
     switch (pick.action) {
       case RecentDirectoryAction.cd:
-        session.sendText(cdCommand(pick.directory));
+        session
+          ..claimInput()
+          ..sendText(cdCommand(pick.directory));
         _sendEnterSoon(session);
       case RecentDirectoryAction.tmuxWindow:
         session.sendPrefix(host.tmuxPrefixKey);
@@ -2386,56 +2389,65 @@ class _TerminalPageState extends State<TerminalPage>
     AppPalette palette,
     Brightness brightness,
   ) {
-    return TerminalGestureLayer(
-      key: ValueKey(session.host.id),
-      target: _gestureTargetFor(session),
-      herdrControl: _herdrControlFor(session),
-      onHerdrWorkspaceFocused: (workspaceId) =>
-          widget.connectFlow?.herdr.noteWorkspace(session, workspaceId),
-      preferences: widget.themeController.terminalGestures,
+    return SessionFocusFrame(
+      key: ValueKey('focus-frame-${session.host.id}'),
       session: session,
-      fontSize: widget.themeController.terminalFontSize,
-      onFontSizeChanged: (fontSize) {
-        unawaited(widget.themeController.setTerminalFontSize(fontSize));
-      },
-      scrollMode: session == activeSession && _tmuxScrollMode,
-      onEnterScrollMode: () {
-        setState(() => _tmuxScrollMode = true);
-        _focusNode.requestFocus();
-      },
-      onExitScrollMode: () {
-        setState(() => _tmuxScrollMode = false);
-        _focusNode.requestFocus();
-      },
-      onOpenSessionGrid: _openSwitcher,
-      onOpenAgentPanel: _agentPanelOpener(),
-      child: TerminalSurface(
+      palette: palette,
+      brightness: brightness,
+      fontFamily: widget.themeController.terminalFont.fontFamily,
+      // Only a desktop split shows sessions that are not the active one.
+      showSharedView: widget.shell != null && session != activeSession,
+      child: TerminalGestureLayer(
+        key: ValueKey(session.host.id),
+        target: _gestureTargetFor(session),
+        herdrControl: _herdrControlFor(session),
+        onHerdrWorkspaceFocused: (workspaceId) =>
+            widget.connectFlow?.herdr.noteWorkspace(session, workspaceId),
+        preferences: widget.themeController.terminalGestures,
         session: session,
-        onLinkOpen: (url) => unawaited(_openInBrowser(url)),
-        autoConnect: widget.workspace.mayAutoConnect(session),
-        palette: palette,
-        brightness: brightness,
-        fontFamily: widget.themeController.terminalFont.fontFamily,
         fontSize: widget.themeController.terminalFontSize,
-        predictiveEchoEnabled: session.host.predictiveEchoEnabled,
-        terminalMouseInput: widget.themeController.terminalMouseInput,
-        focusNode: session == activeSession && activeFileTab == null
-            ? _focusNode
-            : null,
-        tmuxScrollMode: session == activeSession && _tmuxScrollMode,
-        onExitTmuxScrollMode: () {
+        onFontSizeChanged: (fontSize) {
+          unawaited(widget.themeController.setTerminalFontSize(fontSize));
+        },
+        scrollMode: session == activeSession && _tmuxScrollMode,
+        onEnterScrollMode: () {
+          setState(() => _tmuxScrollMode = true);
+          _focusNode.requestFocus();
+        },
+        onExitScrollMode: () {
           setState(() => _tmuxScrollMode = false);
           _focusNode.requestFocus();
         },
-        onPathTap: (path) => _handlePathTap(session, path),
-        onLinkTap: (url) => _handleLinkTap(session, url),
-        dragScrollsRemote:
-            widget.themeController.terminalGestures.dragScrollsRemote,
-        onEnterScrollMode: _dragScrollModeEntry(session),
-        onKeyEvent: (_, event) => _handleTerminalKey(session, event),
-        onLinkLongPress: (url, line) =>
-            _handleLinkLongPress(session, url, line),
-        onPasteImage: () => _pasteImageInto(session),
+        onOpenSessionGrid: _openSwitcher,
+        onOpenAgentPanel: _agentPanelOpener(),
+        child: TerminalSurface(
+          session: session,
+          onLinkOpen: (url) => unawaited(_openInBrowser(url)),
+          autoConnect: widget.workspace.mayAutoConnect(session),
+          palette: palette,
+          brightness: brightness,
+          fontFamily: widget.themeController.terminalFont.fontFamily,
+          fontSize: widget.themeController.terminalFontSize,
+          predictiveEchoEnabled: session.host.predictiveEchoEnabled,
+          terminalMouseInput: widget.themeController.terminalMouseInput,
+          focusNode: session == activeSession && activeFileTab == null
+              ? _focusNode
+              : null,
+          tmuxScrollMode: session == activeSession && _tmuxScrollMode,
+          onExitTmuxScrollMode: () {
+            setState(() => _tmuxScrollMode = false);
+            _focusNode.requestFocus();
+          },
+          onPathTap: (path) => _handlePathTap(session, path),
+          onLinkTap: (url) => _handleLinkTap(session, url),
+          dragScrollsRemote:
+              widget.themeController.terminalGestures.dragScrollsRemote,
+          onEnterScrollMode: _dragScrollModeEntry(session),
+          onKeyEvent: (_, event) => _handleTerminalKey(session, event),
+          onLinkLongPress: (url, line) =>
+              _handleLinkLongPress(session, url, line),
+          onPasteImage: () => _pasteImageInto(session),
+        ),
       ),
     );
   }
@@ -2828,7 +2840,9 @@ class _TerminalPageState extends State<TerminalPage>
                             // of submitting — so a wrapping compose line silently fails
                             // to send. Delivering Enter in its own read makes it an
                             // isolated keypress that submits regardless of line length.
-                            activeSession.sendText(line);
+                            activeSession
+                              ..claimInput()
+                              ..sendText(line);
                             Future.delayed(
                               const Duration(milliseconds: 120),
                               () {

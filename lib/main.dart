@@ -207,6 +207,8 @@ void main() {
     runnerFactory: hostChannels.runner,
     preferences: const SecureConnectPreferencesRepository(secureStorage),
     recentDirectories: recentDirectories,
+    // The app coming back re-focuses the Herdr workspace in use.
+    watchLifecycle: true,
   );
   // Collects recent directories (OSC 7, tmux on detach, companion agents)
   // for the app's whole lifetime, like the widget pusher below.
