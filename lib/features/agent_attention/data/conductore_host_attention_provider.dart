@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/data/companion_reply.dart';
+import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
@@ -118,6 +119,8 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
         [
           'status',
           if (copy != null) '--etag ${shellQuoteArgument(copy.etag)}',
+          // Agents only Herdr sees (any kind); older companions ignore it.
+          '--herdr-agents',
           // Last: an older companion would read a word after it as its
           // value.
           companionGzipFlag,
@@ -168,7 +171,8 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
   }) async {
     final result = await runner.run(
       remoteCommand(
-        'events --since ${since ?? 0} --timeout ${watchTimeout.inSeconds}',
+        'events --since ${since ?? 0} --timeout ${watchTimeout.inSeconds} '
+        '--herdr-agents',
       ),
       timeout: _watchCommandTimeout,
     );
@@ -181,6 +185,17 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
   String? focusCommand(AgentInfo agent) {
     if (agent.id.isEmpty) {
       return null;
+    }
+    // Only Herdr knows it: Herdr focuses its pane.
+    final herdr = RegExp(
+      r'^herdr(?:@([A-Za-z0-9._-]+))?/(.+)$',
+    ).firstMatch(agent.id);
+    if (herdr != null) {
+      final session = herdr.group(1);
+      return HerdrAttentionProvider.remoteCommand(
+        '${session == null ? '' : '--session ${shellQuoteArgument(session)} '}'
+        'agent focus ${shellQuoteArgument(herdr.group(2)!)}',
+      );
     }
     return remoteCommand('focus ${shellQuoteArgument(agent.id)}');
   }
@@ -434,6 +449,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       project: _string(item['project']) ?? _basename(cwd),
       usage: parseUsage(item['usage']),
       lastAutoApprovedAt: _timestamp(item['lastAutoApprovedAt']),
+      stateSequence: _int(item['stateSeq']),
       permissionMode: _string(item['permissionMode']),
     );
   }
@@ -484,6 +500,11 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       'needs_permission' || 'waiting_input' => AgentAttentionState.needsInput,
       'ended' => AgentAttentionState.finished,
       'idle' => AgentAttentionState.idle,
+      // Herdr-only agents (`--herdr-agents`): Herdr's own states. `done`
+      // is a turn nobody looked at yet; `blocked` a question or approval
+      // waiting in the terminal.
+      'blocked' => AgentAttentionState.needsInput,
+      'done' => AgentAttentionState.finished,
       _ =>
         pending.isNotEmpty
             ? AgentAttentionState.needsInput

@@ -27,7 +27,13 @@ const AUDIT_MAX_BYTES = 128 * 1024
 //                    trust (`rules`, `trust`), `approve-low`, `approvals`
 //   digest           `digest`: facts, stuck flags and summaries per agent
 //   snapshots        per-turn git snapshots: `turns`, `diff`, `undo`, `redo`
-const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots']
+//   live             `status`/`events` --live: Herdr and tmux pushed as
+//                    entities (docs/herdr-live.md)
+//   herdr-agents     --herdr-agents: agents only Herdr detects
+//   agent-messaging  `agents`, `agent-send`, `agent-wait`, `agent-read`
+//   herdr-sidebar    pending approvals and cost as Herdr sidebar tokens
+//   config           `config get|set`
+const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config']
 
 const rulesFile = () => path.join(paths.homeDir(), 'rules.json')
 const auditFile = () => path.join(paths.homeDir(), 'auto-approved.json')

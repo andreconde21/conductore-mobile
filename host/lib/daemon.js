@@ -25,6 +25,9 @@ const approvalOps = require('./approval-ops')
 const { usageFrom } = require('./statusline')
 const { Activity } = require('./activity')
 const { Turns } = require('./turns')
+const { LiveBridge } = require('./live')
+const { Sidebar } = require('./sidebar')
+const config = require('./config')
 const { log, debug } = require('./log')
 
 const CHANGE_BUFFER = 1000
@@ -244,6 +247,21 @@ class Daemon {
     // With seq, names one exact state: a restarted daemon (whose seq may
     // repeat after reloading state.json) never matches an older etag.
     this.epoch = `${process.pid.toString(36)}${Date.now().toString(36)}`
+    // Herdr and tmux pushed to the phone while one asks (docs/herdr-live.md).
+    this.live = new LiveBridge({
+      onChange: r => this.onLive(r),
+      companionAgents: () => Object.values(this.state.agents),
+      tmuxEnabled: () => config.get('tmux-live') === 'on',
+      extraSockets: () => [...new Set(Object.values(this.state.agents).map(a => a.herdr && a.herdr.socket).filter(Boolean))]
+    })
+    this.sidebar = new Sidebar({
+      enabled: () => config.get('herdr-sidebar') !== 'off',
+      holds: a => {
+        const pane = this.live.store.get(`pane:${require('./herdr-api').idForSocket(a.herdr.socket || null)}:${a.herdr.paneId}`)
+        return !!pane && pane.sessionId === a.sessionId
+      }
+    })
+    this.sidebarQueued = false
   }
 
   start () {
@@ -548,18 +566,51 @@ class Daemon {
       if (ch.type === 'remove' || ch.reason === 'SessionEnd' || ch.reason === 'expired') pruneRelevant = true
       this.activity.onChange(ch)
       const line = JSON.stringify(ch)
-      this.changes.push({ seq: ch.seq, sessionId: ch.sessionId, line })
+      this.changes.push({ seq: ch.seq, sessionId: ch.sessionId, line, kind: 'agent' })
       this.changeChars += line.length
       debug('change', `${ch.type} ${ch.sessionId} ${ch.reason} -> ${ch.agent ? ch.agent.state : 'removed'} seq ${ch.seq}`)
     }
-    while (this.changes.length > CHANGE_BUFFER || (this.changes.length > 1 && this.changeChars > CHANGE_BUFFER_CHARS)) {
-      this.changeChars -= this.changes.shift().line.length
-    }
+    this.trimChanges()
     for (const p of [...this.pollers]) this.servePoller(p)
+    this.live.companionChanged()
+    this.sidebar.update(this.state.agents)
     if (pruneRelevant) this.schedulePrune()
     if (!this.snapshotTimer) {
       this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
       this.snapshotTimer.unref()
+    }
+  }
+
+  trimChanges () {
+    while (this.changes.length > CHANGE_BUFFER || (this.changes.length > 1 && this.changeChars > CHANGE_BUFFER_CHARS)) {
+      this.changeChars -= this.changes.shift().line.length
+    }
+  }
+
+  // A live entity or a Herdr-only agent changed: one record in the same
+  // sequence as the agents' changes, for the pollers that asked for it.
+  // Only the live bridge's own agents go to `herdr` pollers.
+  onLive (r) {
+    this.state.seq += 1
+    const seq = this.state.seq
+    let entry
+    if (r.agent !== undefined) {
+      const ch = r.record
+        ? { seq, type: 'change', sessionId: r.agent, reason: 'herdr', agent: r.record }
+        : { seq, type: 'remove', sessionId: r.agent, reason: 'herdr', agent: null }
+      entry = { seq, sessionId: r.agent, line: JSON.stringify(ch), kind: 'herdr' }
+    } else {
+      const ch = { seq, type: 'live', key: r.key, entity: r.entity }
+      if (r.lazy) ch.lazy = true
+      entry = { seq, sessionId: `live:${r.key}`, line: JSON.stringify(ch), kind: 'live', lazy: !!r.lazy }
+    }
+    this.changes.push(entry)
+    this.changeChars += entry.line.length
+    this.trimChanges()
+    for (const p of [...this.pollers]) this.servePoller(p)
+    if (r.key && r.key.startsWith('pane:') && !this.sidebarQueued) {
+      this.sidebarQueued = true
+      setImmediate(() => { this.sidebarQueued = false; this.sidebar.update(this.state.agents) })
     }
   }
 
@@ -652,6 +703,10 @@ class Daemon {
       }
       case 'status':
         await this.drain()
+        if (req.live || req.herdrAgents) {
+          this.live.touch()
+          await this.live.ready()
+        }
         this.expireAgents()
         this.commit(state.prune(this.state))
         this.replyStatus(req, c); c.end(); return
@@ -664,6 +719,7 @@ class Daemon {
         this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES, activity: this.activity.toJSON(), now: Date.now() }); c.end(); return
       case 'events':
         await this.drain()
+        if (req.live || req.herdrAgents) this.live.touch()
         this.expireAgents()
         return this.handleEvents(req, c)
       case 'decide':
@@ -685,6 +741,16 @@ class Daemon {
       }
       case 'approve-low': case 'trust': case 'rules': case 'approvals':
         this.reply(c, approvalOps.handle(this, req)); c.end(); return
+      case 'agents':
+        // The messaging commands' view: the daemon's agents with the
+        // Herdr-only ones the bridge knows (none while it is not running).
+        await this.drain()
+        this.reply(c, { ok: true, agents: state.snapshot(this.state).agents, herdrAgents: this.live.herdrAgents(), live: this.live.running }); c.end(); return
+      case 'config':
+        this.reply(c, { ok: true, config: config.reload() }); c.end()
+        this.sidebar.update(this.state.agents, { force: true })
+        this.live.syncTmux()
+        return
       case 'stop':
         this.reply(c, { ok: true }); c.end()
         setImmediate(() => this.shutdown(0))
@@ -716,12 +782,28 @@ class Daemon {
   // `status`; with the etag of the phone's last copy, only a marker when
   // nothing changed since (an idle machine's poll stays a few bytes).
   replyStatus (req, c) {
-    const etag = `${this.epoch}.${this.state.seq}`
+    const variant = `${req.live ? 'l' : ''}${req.herdrAgents ? 'h' : ''}`
+    const etag = `${this.epoch}.${this.state.seq}${variant ? '.' + variant : ''}`
     if (typeof req.etag === 'string' && req.etag === etag) {
       this.reply(c, { version: this.state.version, seq: this.state.seq, etag, unchanged: true, source: 'daemon', capabilities: CAPABILITIES })
       return
     }
-    this.reply(c, { ...state.snapshot(this.state), etag, source: 'daemon', capabilities: CAPABILITIES })
+    this.reply(c, { ...this.snapshotFor(req), etag, source: 'daemon', capabilities: CAPABILITIES })
+  }
+
+  // `status` / a resync snapshot, with what the request asked for.
+  snapshotFor (req) {
+    const snap = state.snapshot(this.state)
+    if (req.herdrAgents) snap.agents = snap.agents.concat(this.live.herdrAgents())
+    if (req.live) snap.live = { running: this.live.running, entities: this.live.entities() }
+    return snap
+  }
+
+  // Whether a poller asked for this buffered change.
+  wants (poller, ch) {
+    if (ch.kind === 'live') return poller.live
+    if (poller.onlyLive) return false
+    return ch.kind !== 'herdr' || poller.herdrAgents
   }
 
   handleEvents (req, c) {
@@ -729,16 +811,18 @@ class Daemon {
     let timeout = Number(req.timeout)
     if (!Number.isFinite(timeout) || timeout < 0) timeout = DEFAULT_POLL_TIMEOUT_S
     timeout = Math.min(timeout, MAX_POLL_TIMEOUT_S)
-    const poller = { socket: c, since, timer: null }
+    const poller = { socket: c, since, timer: null, live: !!req.live, herdrAgents: !!req.herdrAgents, onlyLive: !!req.onlyLive }
     // If the client's cursor is not covered by our buffer, resync with a snapshot.
     const oldest = this.changes.length ? this.changes[0].seq : this.state.seq + 1
     if (since > this.state.seq || (since < oldest - 1 && this.changes.length)) {
-      this.reply(c, { type: 'snapshot', ...state.snapshot(this.state) }); c.end(); return
+      this.reply(c, { type: 'snapshot', ...this.snapshotFor(poller) }); c.end(); return
     }
     if (this.servePoller(poller)) return
     this.pollers.add(poller)
     poller.timer = setTimeout(() => {
       this.pollers.delete(poller)
+      // Lazy changes (activity times only) waited for this moment.
+      if (this.servePoller(poller, { flushLazy: true })) return
       this.reply(c, { type: 'timeout', seq: this.state.seq }); c.end()
     }, timeout * 1000)
     c.on('close', () => { this.pollers.delete(poller); clearTimeout(poller.timer) })
@@ -748,16 +832,21 @@ class Daemon {
   // did. Each change carries the whole agent, so only the last one per
   // session is sent (in seq order): a phone back after a few minutes gets
   // one line per busy agent, not one per tool call.
-  servePoller (poller) {
+  // Lazy changes alone do not answer a waiting poll (flushLazy: the
+  // timeout, which then delivers them).
+  servePoller (poller, { flushLazy = false } = {}) {
     const seen = new Set()
     const batch = []
+    let urgent = false
     for (let i = this.changes.length - 1; i >= 0 && this.changes[i].seq > poller.since; i--) {
       const ch = this.changes[i]
+      if (!this.wants(poller, ch)) continue
       if (seen.has(ch.sessionId)) continue
       seen.add(ch.sessionId)
       batch.push(ch)
+      if (!ch.lazy) urgent = true
     }
-    if (!batch.length) return false
+    if (!batch.length || (!urgent && !flushLazy)) return false
     batch.reverse()
     this.pollers.delete(poller)
     clearTimeout(poller.timer)
@@ -773,6 +862,8 @@ class Daemon {
     for (const id of [...this.waiters.keys()]) this.settle(id, 'timeout')
     for (const p of this.pollers) { this.reply(p.socket, { type: 'timeout', seq: this.state.seq }); p.socket.end() }
     for (const e of this.usageEmits.values()) clearTimeout(e.timer)
+    this.live.stop()
+    this.sidebar.stop()
     for (const [sid, timer] of this.holds) {
       clearTimeout(timer)
       try { fs.unlinkSync(path.join(paths.usageDir(), `${sid}.hold`)) } catch {}

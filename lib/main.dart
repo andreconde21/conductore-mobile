@@ -23,6 +23,8 @@ import 'package:conduit/features/agent_attention/domain/agent_notifications.dart
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
+import 'package:conduit/features/agent_messaging/data/agent_messenger.dart';
+import 'package:conduit/features/agent_messaging/domain/agent_message.dart';
 import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
@@ -46,6 +48,7 @@ import 'package:conduit/features/home_widget/presentation/home_launch_requests.d
 import 'package:conduit/features/hosts/data/secure_saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
+import 'package:conduit/features/live/presentation/companion_preferences.dart';
 import 'package:conduit/features/local_shell/data/local_terminal_repository.dart';
 import 'package:conduit/features/local_shell/local_shell_licenses.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
@@ -74,6 +77,7 @@ import 'package:conduit/features/sync/domain/local_data_changes.dart';
 import 'package:conduit/features/sync/presentation/sync_controller.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/talkbawt/data/conductore_talkbawt_client.dart';
+import 'package:conduit/features/talkbawt/domain/talkbawt_settings.dart';
 import 'package:conduit/features/talkbawt/presentation/paired_mode_page.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_controller.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
@@ -264,6 +268,12 @@ void main() {
   );
   // An agent's expanded notification ends with its dashboard line.
   agentAttention.notificationDetail = digest.cachedLineFor;
+  // Herdr sidebar tokens and the worktree location, per companion; read
+  // from storage only once a companion that takes them connects.
+  final companionPreferences = CompanionPreferences.instance =
+      CompanionPreferences.secure(secureStorage, attention: agentAttention);
+  agentAttention.onCompanionCapabilities = (host, capabilities) =>
+      unawaited(companionPreferences.hostConnected(host, capabilities));
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
   addTelemetryTerms(() => usage.summary.accountTerms);
@@ -307,6 +317,20 @@ void main() {
     ),
   );
   unawaited(talkbawt.load());
+  // "Message agents" to another machine: the relay setting (Settings ›
+  // Agents › Talkbawt) picks the phone relay (default) or Talkbawt.
+  AgentMessenger.routeSetting = () =>
+      talkbawt.settings.relay == TalkbawtRelayMode.talkbawt
+      ? AgentRelayRoute.talkbawt
+      : AgentRelayRoute.phone;
+  AgentMessenger.talkbawt =
+      ({required from, required fromLabel, required target, required text}) =>
+          talkbawt.relayViaTalkbawt(
+            from: from,
+            fromLabel: fromLabel,
+            to: TalkbawtRelayTarget(host: target.host, agent: target.agent),
+            text: text,
+          );
   const fileExport = FilePickerFileExport();
   final shareTarget = ShareTargetController(
     source: PlatformShareTargetSource(),

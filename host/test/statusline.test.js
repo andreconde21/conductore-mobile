@@ -41,7 +41,8 @@ test('usageFrom maps the statusline fields', () => {
     limits: [
       { label: '5h', usedPct: 23.5, resetsAt: 1738425600000 },
       { label: '7d', usedPct: 41.2, resetsAt: 1738857600000 }
-    ]
+    ],
+    costUsd: 1.23
   })
   assert.equal(sl.windowLabel(1000000), '1M')
   // Nulls dropped, absent windows omitted, nothing known -> null.

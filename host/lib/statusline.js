@@ -58,6 +58,9 @@ function usageFrom (input) {
     }
     if (limits.length) usage.limits = limits
   }
+  // The session's estimated cost so far (the Herdr sidebar's tokens).
+  const cost = input.cost && num(input.cost.total_cost_usd)
+  if (cost !== null && cost !== undefined && cost >= 0) usage.costUsd = Math.round(cost * 10000) / 10000
   return Object.keys(usage).length ? usage : null
 }
 

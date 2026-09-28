@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:conduit/features/agent_messaging/data/agent_messenger.dart';
+import 'package:conduit/features/agent_messaging/presentation/agent_message_sheet.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_search_text.dart';
@@ -322,6 +324,10 @@ mixin ChatThreadExtras on State<ChatViewPage> {
   Widget wrapThread(Widget thread) => ChatMessageActionsScope(
     onQuote: quoteInReply,
     onForward: _canForward ? (text) => unawaited(forwardMessage(text)) : null,
+    onMessageAgents: widget.attention == null
+        ? null
+        : (text, {required fromAgent}) =>
+              unawaited(messageAgents(text, fromAgent: fromAgent)),
     share: widget.share,
     child: thread,
   );
@@ -336,6 +342,33 @@ mixin ChatThreadExtras on State<ChatViewPage> {
       selection: TextSelection.collapsed(offset: value.length),
     );
     composerFocus.requestFocus();
+  }
+
+  /// "Ask or send to agents…" / "Relay to agents…": the agents sheet, with
+  /// an agent's own output framed as context.
+  Future<void> messageAgents(String text, {required bool fromAgent}) async {
+    final attention = widget.attention;
+    if (attention == null) return;
+    final hostId = widget.hostId;
+    final host = hostId == null
+        ? null
+        : attention.monitoredHosts.where((h) => h.id == hostId).firstOrNull;
+    await showAgentMessageSheet(
+      context,
+      messenger: AgentMessenger(attention: attention),
+      text: text,
+      source: AgentMessageSource(
+        host: host,
+        agentId: widget.controller.sessionId,
+        agentLabel: fromAgent
+            ? [
+                widget.controller.name,
+                if (widget.hostName case final name? when name.isNotEmpty)
+                  'on $name',
+              ].join(' ')
+            : null,
+      ),
+    );
   }
 
   bool get _canForward =>

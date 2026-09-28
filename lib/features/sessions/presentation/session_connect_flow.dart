@@ -7,6 +7,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/live/presentation/live_host_hub.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
@@ -44,7 +45,8 @@ class SessionConnectFlow {
        tmux = TmuxSessionFocus(
          workspace: workspace,
          runnerFactory: runnerFactory,
-       );
+       ),
+       live = LiveHostHub(runnerFactory: runnerFactory);
 
   final HostsController hostsController;
   final TerminalWorkspaceController workspace;
@@ -61,6 +63,10 @@ class SessionConnectFlow {
 
   /// Deep links to agents running in tmux (the companion's tmux location).
   final TmuxSessionFocus tmux;
+
+  /// Herdr and tmux pushed by each machine's companion (the home board,
+  /// tab strips and the navigator read it instead of polling).
+  final LiveHostHub live;
 
   /// Opens [host] at an agent's exact place in Herdr (see
   /// [HerdrSessionFocus.openAgentLocation]).

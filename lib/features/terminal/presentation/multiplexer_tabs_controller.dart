@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
+import 'package:conduit/features/live/presentation/live_host_hub.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
 import 'package:flutter/foundation.dart';
@@ -170,20 +172,51 @@ class MultiplexerTabsKeys {
   final bool Function()? create;
 }
 
+/// Where a tab strip reads its tabs when the machine's companion pushes
+/// them: the feed, and this session's tabs in its model (null while the
+/// model does not know the session).
+class MultiplexerLiveTabs {
+  const MultiplexerLiveTabs({
+    required this.feed,
+    required this.read,
+    this.server,
+  });
+
+  final LiveHostFeed feed;
+  final List<MultiplexerTab>? Function(LiveHostModel model) read;
+
+  /// The live server these tabs come from; when the companion does not
+  /// push it (tmux with `tmux-live` off), the strip polls instead.
+  final String? server;
+
+  bool covers(LiveHostModel model) =>
+      server == null || model.serverState(server!) != LiveServerState.off;
+}
+
 /// The live tab list of one multiplexer session, for the tab strip.
 ///
 /// Polls every [pollInterval] while [setVisible] says the strip is on
 /// screen, and at once after every action; one fetch at a time over the
-/// backend's command channel (no new connection per poll).
+/// backend's command channel (no new connection per poll). With [live] on
+/// a machine whose companion pushes Herdr and tmux, it polls nothing and
+/// redraws from the pushed model; actions still go through the backend.
 class MultiplexerTabsController extends ChangeNotifier {
   MultiplexerTabsController({
     required this.backend,
     this.initialPollInterval = const Duration(seconds: 2),
     this.agentStateFor,
     this.keys = const MultiplexerTabsKeys(),
+    this.live,
   });
 
   final MultiplexerTabsBackend backend;
+
+  /// The machine's pushed feed, when the app has one.
+  final MultiplexerLiveTabs? live;
+  VoidCallback? _releaseFeed;
+
+  /// Whether the tabs come from the pushed model.
+  bool get pushed => live?.feed.support == LiveSupport.supported;
 
   /// How often the tabs are listed while visible, until [setPollInterval].
   final Duration initialPollInterval;
@@ -234,7 +267,7 @@ class MultiplexerTabsController extends ChangeNotifier {
   void _repace(VoidCallback change) {
     final before = pollInterval;
     change();
-    if (_disposed || !_visible || pollInterval == before) return;
+    if (_disposed || !_visible || pollInterval == before || _usesFeed) return;
     _timer?.cancel();
     _timer = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
   }
@@ -263,14 +296,65 @@ class MultiplexerTabsController extends ChangeNotifier {
     _timer?.cancel();
     _timer = null;
     if (visible) {
+      if (_attachFeed()) return;
       _timer = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
       unawaited(refresh());
+    } else {
+      _detachFeed();
     }
   }
 
-  /// Lists the tabs now (or right after the fetch in flight).
+  /// Whether the strip listens to the feed rather than polling (its
+  /// support may still be unknown).
+  bool get _usesFeed =>
+      _releaseFeed != null && live?.feed.support != LiveSupport.unsupported;
+
+  bool _attachFeed() {
+    final live = this.live;
+    if (live == null || live.feed.support == LiveSupport.unsupported) {
+      return false;
+    }
+    live.feed.addListener(_onFeed);
+    _releaseFeed = live.feed.acquire();
+    _onFeed();
+    return true;
+  }
+
+  void _detachFeed() {
+    live?.feed.removeListener(_onFeed);
+    _releaseFeed?.call();
+    _releaseFeed = null;
+  }
+
+  void _onFeed() {
+    final live = this.live;
+    if (_disposed || live == null || _releaseFeed == null) return;
+    switch (live.feed.support) {
+      case LiveSupport.unknown:
+        return;
+      case LiveSupport.supported when !live.covers(live.feed.model):
+      case LiveSupport.unsupported:
+        // No push here (or not for this multiplexer): poll as before.
+        _detachFeed();
+        if (_visible) {
+          _timer?.cancel();
+          _timer = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
+          unawaited(refresh());
+        }
+      case LiveSupport.supported:
+        final tabs = live.read(live.feed.model);
+        if (tabs != null) _publish(tabs);
+    }
+  }
+
+  /// Lists the tabs now (or right after the fetch in flight). Pushed tabs
+  /// are current already: nothing runs.
   Future<void> refresh() async {
     if (_disposed) return;
+    if (_usesFeed) {
+      _onFeed();
+      return;
+    }
     if (_fetching) {
       _again = true;
       return;
@@ -291,7 +375,7 @@ class MultiplexerTabsController extends ChangeNotifier {
   /// A refresh shortly after something outside the strip may have moved
   /// the multiplexer (a swipe, keys typed into the session).
   void refreshSoon([Duration delay = const Duration(milliseconds: 250)]) {
-    if (_disposed || !_visible) return;
+    if (_disposed || !_visible || _usesFeed) return;
     _soon?.cancel();
     _soon = Timer(delay, () => unawaited(refresh()));
   }
@@ -410,6 +494,7 @@ class MultiplexerTabsController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _detachFeed();
     _timer?.cancel();
     _soon?.cancel();
     unawaited(backend.dispose());

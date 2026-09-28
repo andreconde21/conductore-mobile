@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 
 /// Canned `herdr` output for the home board tests.
@@ -144,4 +146,79 @@ class HerdrFakeRunner implements AgentCommandRunner {
   Future<void> close() async {
     closeCount += 1;
   }
+}
+
+/// A companion that pushes Herdr and tmux (`status --live`), showing the
+/// same board as [HerdrFixtures] and [TmuxFixtures].
+abstract final class LiveFixtures {
+  static const entities =
+      '{"srv:herdr":{"kind":"server","id":"herdr","type":"herdr",'
+      '"default":true,"session":"","state":"up","mode":"events"},'
+      '"srv:tmux":{"kind":"server","id":"tmux","type":"tmux","default":true,'
+      '"session":"","state":"up","mode":"control"},'
+      '"ws:herdr:w1":{"kind":"workspace","server":"herdr","id":"w1",'
+      '"label":"Infrastructure","number":1,"focused":true,'
+      '"agentStatus":"working","activeTabId":"w1:t1","tabCount":2},'
+      '"ws:herdr:w2":{"kind":"workspace","server":"herdr","id":"w2",'
+      '"label":"TheCalendar","number":2,"focused":false,'
+      '"agentStatus":"idle","activeTabId":"w2:t1","tabCount":1},'
+      '"tab:herdr:w1:t1":{"kind":"tab","server":"herdr","id":"w1:t1",'
+      '"workspaceId":"w1","label":"main","number":1,"focused":true,'
+      '"agentStatus":"working","paneCount":1},'
+      '"tab:herdr:w1:t2":{"kind":"tab","server":"herdr","id":"w1:t2",'
+      '"workspaceId":"w1","label":"review","number":2,"focused":false,'
+      '"agentStatus":"blocked","paneCount":1},'
+      '"tab:herdr:w2:t1":{"kind":"tab","server":"herdr","id":"w2:t1",'
+      '"workspaceId":"w2","label":"","number":1,"focused":false,'
+      '"agentStatus":"done","paneCount":1},'
+      '"pane:herdr:w1:p1":{"kind":"pane","server":"herdr","id":"w1:p1",'
+      '"workspaceId":"w1","tabId":"w1:t1","focused":true,'
+      '"title":"Deploying images","cwd":"/srv","agent":"claude",'
+      '"agentStatus":"working","name":null,"sessionId":null,"seq":3},'
+      '"pane:herdr:w1:p2":{"kind":"pane","server":"herdr","id":"w1:p2",'
+      '"workspaceId":"w1","tabId":"w1:t2","focused":false,'
+      '"title":"Proofing PR 398","cwd":"/srv","agent":"claude",'
+      '"agentStatus":"blocked","name":null,"sessionId":null,"seq":2},'
+      '"pane:herdr:w2:p1":{"kind":"pane","server":"herdr","id":"w2:p1",'
+      '"workspaceId":"w2","tabId":"w2:t1","focused":false,'
+      '"title":"Nightly E2E","cwd":"/cal","agent":"codex",'
+      '"agentStatus":"done","name":null,"sessionId":null,"seq":1},'
+      r'"tses:tmux:$0":{"kind":"tmuxSession","server":"tmux","id":"$0",'
+      '"name":"main","windows":3,"attached":1,"activity":1790229500,'
+      '"created":1790229000},'
+      r'"twin:tmux:$0:@1":{"kind":"tmuxWindow","server":"tmux","id":"@1",'
+      r'"sessionId":"$0","session":"main","index":0,"name":"zsh",'
+      '"active":false,"panes":1,"activity":1790229400,'
+      '"activityFlag":false,"bellFlag":false},'
+      r'"twin:tmux:$0:@2":{"kind":"tmuxWindow","server":"tmux","id":"@2",'
+      r'"sessionId":"$0","session":"main","index":1,"name":"claude",'
+      '"active":true,"panes":2,"activity":1790229500,'
+      '"activityFlag":false,"bellFlag":false}}';
+
+  /// `status --live` of a companion with `tmux-live` off (the default):
+  /// Herdr pushed, tmux left to the phone.
+  static String get statusTmuxOff {
+    final doc = jsonDecode(status) as Map<String, Object?>;
+    final live = doc['live']! as Map<String, Object?>;
+    final entities = (live['entities']! as Map<String, Object?>)
+      ..removeWhere(
+        (key, _) => key.startsWith('tses:') || key.startsWith('twin:'),
+      )
+      ..['srv:tmux'] = {
+        'kind': 'server',
+        'id': 'tmux',
+        'type': 'tmux',
+        'default': true,
+        'session': '',
+        'state': 'off',
+        'mode': 'poll',
+      };
+    live['entities'] = entities;
+    return jsonEncode(doc);
+  }
+
+  /// `status --live` with `tmux-live` on.
+  static const status =
+      '{"version":1,"seq":7,"agents":[],"source":"daemon",'
+      '"capabilities":["live"],"live":{"running":true,"entities":$entities}}';
 }

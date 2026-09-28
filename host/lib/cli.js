@@ -27,15 +27,34 @@ const cswapMod = lazy('./cswap')
 const rulesMod = lazy('./rules')
 const riskMod = lazy('./risk')
 const reviewMod = lazy('./review')
+const agentsMod = lazy('./agents')
+const configMod = lazy('./config')
 const talkbawtCliMod = lazy('./talkbawt-cli')
 
 const USAGE = `usage: conductore-hostd <command>
 
-  status [--etag <etag>]          agents and pending permission requests;
+  status [--etag <etag>] [--live] [--herdr-agents]
+                                  agents and pending permission requests;
                                   with the etag of an earlier reply, only
-                                  {unchanged: true} when nothing changed
-  events --since <seq> [--timeout 55]
+                                  {unchanged: true} when nothing changed;
+                                  --live adds Herdr and tmux as entities,
+                                  --herdr-agents the agents only Herdr sees
+  events --since <seq> [--timeout 55] [--live] [--herdr-agents] [--only live]
                                   long-poll: one JSON line per change
+  agents                          every agent a message can go to, with its
+                                  target (session/<id> or herdr/<pane>)
+  agent-send --to <target> [--to <target>]... [--text "..." | --text-b64 <b64>]
+             [--context-from <label>] [--wait] [--timeout 120] [--dry-run]
+                                  type a prompt into other agents; refused
+                                  while one is blocked; a timeout is never
+                                  retried; --context-from frames relayed
+                                  text as context, not an instruction
+  agent-wait <target> [--until idle,done,blocked] [--timeout 120]
+  agent-read <target> [--lines 80]
+                                  the agent's latest answer, else its screen
+  config [get [<key>] | set <key> <value>]
+                                  herdr-sidebar on|off, tmux-live off|on,
+                                  worktree-location
   decide <requestId> allow|deny|always [--message "..."]
   approve-low [--ids <id,id,...>] [--session <sessionId>]
                                   allow every waiting low-risk request (only
@@ -168,6 +187,16 @@ async function status (args) {
   const { flags } = parseFlags(args)
   const req = { op: 'status' }
   if (typeof flags.etag === 'string') req.etag = flags.etag
+  if (flags.live) req.live = true
+  if (flags['herdr-agents']) req.herdrAgents = true
+  // The bridge lives in the daemon: start it rather than read the file.
+  if (req.live || req.herdrAgents) {
+    try {
+      await client.ensureDaemon()
+      const [res] = await client.request(req, { timeoutMs: 5000 })
+      if (res && !res.error) return out(res)
+    } catch {}
+  }
   try {
     const [res] = await client.request(req, { timeoutMs: 5000 })
     if (res && !res.error) return out(res)
@@ -196,7 +225,11 @@ async function events (args) {
   if (flags.since !== undefined && !Number.isFinite(since)) return fail('--since must be a number')
   try {
     await client.ensureDaemon()
-    await client.request({ op: 'events', since, timeout }, {
+    const req = { op: 'events', since, timeout }
+    if (flags.live) req.live = true
+    if (flags['herdr-agents']) req.herdrAgents = true
+    if (flags.only === 'live') { req.onlyLive = true; req.live = true }
+    await client.request(req, {
       onLine: line => process.stdout.write(JSON.stringify(line) + '\n'),
       timeoutMs: (timeout + 15) * 1000
     })
@@ -314,6 +347,88 @@ async function rulesCmd (args) {
 async function approvalsCmd (args) {
   const { flags } = parseFlags(args)
   return daemonOp({ op: 'approvals', hours: flags.hours !== undefined ? Number(flags.hours) : 24 })
+}
+
+// --to may repeat.
+function repeatedFlag (args, name) {
+  const values = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === `--${name}` && typeof args[i + 1] === 'string') values.push(args[++i])
+    else if (args[i].startsWith(`--${name}=`)) values.push(args[i].slice(name.length + 3))
+  }
+  return values
+}
+
+async function agentsCmd () {
+  try {
+    return out({ agents: await agentsMod().listAgents() })
+  } catch (err) {
+    return fail(`cannot list agents: ${err.message}`)
+  }
+}
+
+async function agentSendCmd (args) {
+  const { flags } = parseFlags(args)
+  const targets = repeatedFlag(args, 'to')
+  if (!targets.length) return fail('usage: agent-send --to <target> [--to <target>]... [--text "..." | --text-b64 <b64>] [--context-from <label>] [--wait] [--timeout 120] [--dry-run]')
+  if (targets.length > 20) return fail('at most 20 targets')
+  let text
+  if (typeof flags['text-b64'] === 'string') text = Buffer.from(flags['text-b64'], 'base64').toString('utf8')
+  else if (typeof flags.text === 'string') text = flags.text
+  else {
+    try { text = (await readStdin()).replace(/\r?\n$/, '') } catch (err) { return fail(err.message) }
+  }
+  text = text.replace(/\r\n?/g, '\n')
+  if (!text.trim()) return fail('nothing to send')
+  const am = agentsMod()
+  if (typeof flags['context-from'] === 'string' && flags['context-from'].trim()) text = am.frameContext(flags['context-from'].trim().slice(0, 200), text)
+  if (text.length > paneMod().MAX_TEXT) return fail(`text too long (${text.length} > ${paneMod().MAX_TEXT} characters)`)
+  for (const t of targets) if (!am.parseTarget(t)) return fail(`bad target ${t} (session/<id> or herdr/<pane>)`)
+  if (flags['dry-run']) return out({ ok: true, dryRun: true, text, targets })
+  const timeoutS = flags.timeout !== undefined ? Number(flags.timeout) : am.DEFAULT_WAIT_S
+  if (!Number.isFinite(timeoutS) || timeoutS <= 0) return fail('--timeout must be a positive number of seconds')
+  // One after the other: never two prompts racing into one pane.
+  const results = []
+  for (const target of targets) results.push(await am.sendOne(target, text, { wait: !!flags.wait, timeoutS }))
+  return out({ ok: results.every(r => r.ok), text, results })
+}
+
+async function agentWaitCmd (args) {
+  const { flags, positional } = parseFlags(args)
+  const [target] = positional
+  if (!target) return fail('usage: agent-wait <target> [--until idle,done,blocked] [--timeout 120]')
+  const until = typeof flags.until === 'string' ? flags.until.split(',').map(x => x.trim()).filter(Boolean) : undefined
+  const timeoutS = flags.timeout !== undefined ? Number(flags.timeout) : agentsMod().DEFAULT_WAIT_S
+  if (!Number.isFinite(timeoutS) || timeoutS <= 0) return fail('--timeout must be a positive number of seconds')
+  const r = await agentsMod().waitFor(target, { until, timeoutS })
+  return r.ok ? out(r) : fail(r.error)
+}
+
+async function agentReadCmd (args) {
+  const { flags, positional } = parseFlags(args)
+  const [target] = positional
+  if (!target) return fail('usage: agent-read <target> [--lines 80]')
+  const lines = optNumber(flags, 'lines')
+  if (Number.isNaN(lines)) return fail('--lines must be a non-negative number')
+  const r = await agentsMod().read(target, { lines: lines || undefined })
+  return r.ok ? out(r) : fail(r.error)
+}
+
+async function configCmd (args) {
+  const [action = 'get', key, value] = args
+  const cm = configMod()
+  if (action === 'get') {
+    const all = cm.get()
+    if (key === undefined) return out({ ok: true, config: all })
+    if (!(key in all)) return fail(`unknown key ${key}`)
+    return out({ ok: true, key, value: all[key] })
+  }
+  if (action !== 'set' || key === undefined || value === undefined) return fail('usage: config [get [<key>] | set <key> <value>]')
+  let config
+  try { config = cm.set(key, value) } catch (err) { return fail(err.message) }
+  // A running daemon picks it up now.
+  try { await client.request({ op: 'config' }, { timeoutMs: 2000 }) } catch {}
+  return out({ ok: true, config })
 }
 
 // Pure: risk label and suggestions, no daemon.
@@ -1035,6 +1150,11 @@ async function main (argv) {
     case 'cswap-switch': return cswapSwitchCmd(args)
     case 'talkbawt': return talkbawtCmd(args)
     case 'turns': case 'diff': case 'undo': case 'redo': return reviewCmd(cmd, args)
+    case 'agents': return agentsCmd()
+    case 'agent-send': return agentSendCmd(args)
+    case 'agent-wait': return agentWaitCmd(args)
+    case 'agent-read': return agentReadCmd(args)
+    case 'config': return configCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()

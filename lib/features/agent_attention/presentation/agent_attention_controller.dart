@@ -13,6 +13,7 @@ import 'package:conduit/features/agent_attention/domain/agent_notifications.dart
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -163,6 +164,12 @@ class AgentAttentionController extends ChangeNotifier {
   /// (host id, agent id), shown in its expanded notification. The app
   /// wires it to the digest once that exists.
   String? Function(String hostId, String agentId)? notificationDetail;
+
+  /// A monitored machine's companion reported (other) capabilities: the
+  /// app pushes its companion settings there (herdr-sidebar, worktree
+  /// location).
+  void Function(SavedHost host, Set<String> capabilities)?
+  onCompanionCapabilities;
   bool _appActive = true;
   bool _foreground = true;
   bool _disposed = false;
@@ -529,6 +536,10 @@ class AgentAttentionController extends ChangeNotifier {
   /// and "Undo this turn"; capability `snapshots`).
   bool supportsSnapshots(String hostId) =>
       _monitors[hostId]?.capabilities?.contains(snapshotsCapability) ?? false;
+
+  /// Whether [hostId]'s companion reported [capability] (`status`).
+  bool companionSupports(String hostId, String capability) =>
+      _monitors[hostId]?.capabilities?.contains(capability) ?? false;
 
   /// Every waiting request on the monitored hosts, oldest first.
   List<PendingApproval> get pendingApprovals {
@@ -1289,7 +1300,9 @@ class AgentAttentionController extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     if (snapshot.capabilities case final capabilities?) {
+      final changed = !setEquals(monitor.capabilities, capabilities);
       monitor.capabilities = capabilities;
+      if (changed) onCompanionCapabilities?.call(monitor.host, capabilities);
     }
     _noticeAutoApprovals(monitor, snapshot.agents);
     await _syncNotifications(
@@ -1337,8 +1350,12 @@ class AgentAttentionController extends ChangeNotifier {
         previous: notice,
         entered: isEntered,
         previousState: previous[agent.id]?.state,
-        // The companion reports a session that ended as finished.
-        ended: companion && agent.state == AgentAttentionState.finished,
+        // The companion reports a session that ended as finished; a
+        // Herdr-only agent's finished is a turn that ended.
+        ended:
+            companion &&
+            agent.state == AgentAttentionState.finished &&
+            !isHerdrOnlyAgent(agent),
         initial: initial,
         level: host.agentNotifyLevel,
         preferences: preferences,

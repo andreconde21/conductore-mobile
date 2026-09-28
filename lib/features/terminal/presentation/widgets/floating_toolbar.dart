@@ -9,6 +9,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live/presentation/live_host_hub.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/presentation/multiplexer_pill_actions.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
@@ -67,6 +68,7 @@ class FloatingTerminalToolbar extends StatefulWidget {
     this.items = defaultTerminalPillItems,
     this.onItemsChanged,
     this.runnerFactory,
+    this.liveFeed,
     super.key,
   });
 
@@ -86,6 +88,10 @@ class FloatingTerminalToolbar extends StatefulWidget {
   /// Opens the command channel the Herdr pane list runs over. Null limits
   /// the Herdr navigator to its shortcuts.
   final PillCommandRunnerFactory? runnerFactory;
+
+  /// The machine's pushed Herdr state, when its companion pushes it: the
+  /// navigator lists from it instead of running `herdr` commands.
+  final LiveHostFeed? Function(SavedHost host)? liveFeed;
 
   @override
   State<FloatingTerminalToolbar> createState() =>
@@ -443,6 +449,10 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       widget.runnerFactory;
 
   @override
+  LiveHostFeed? Function(SavedHost host)? get multiplexerLiveFeed =>
+      widget.liveFeed;
+
+  @override
   void focusTerminalAfterMultiplexer() => _focusTerminal();
 
   void _handleSwipeEnd(DragEndDetails details) {
@@ -609,6 +619,7 @@ extension FloatingToolbarStyle on TerminalKeyboardBar {
     List<TerminalPillItem> pillItems = defaultTerminalPillItems,
     ValueChanged<List<TerminalPillItem>>? onPillItemsChanged,
     PillCommandRunnerFactory? runnerFactory,
+    LiveHostFeed? Function(SavedHost host)? liveFeed,
   }) {
     if (style == TerminalToolbarStyle.keyRows) {
       return this;
@@ -619,6 +630,7 @@ extension FloatingToolbarStyle on TerminalKeyboardBar {
       items: pillItems,
       onItemsChanged: onPillItemsChanged,
       runnerFactory: runnerFactory,
+      liveFeed: liveFeed,
     );
   }
 }

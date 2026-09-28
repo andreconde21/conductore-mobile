@@ -11,8 +11,10 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
+import 'package:conduit/features/live/presentation/live_host_hub.dart';
 import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
+import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
@@ -60,6 +62,8 @@ class NetworkLog {
   static String _kind(String command) {
     for (final (pattern, kind) in [
       ('conductore-hostd version', 'version'),
+      ('status --live', 'status-live'),
+      ('--only live', 'events-live'),
       ('conductore-hostd status', 'status'),
       ('conductore-hostd events', 'events'),
       ('conductore-hostd transcript', 'transcript'),
@@ -77,12 +81,24 @@ class NetworkLog {
 
 /// One fake SSH connection: answers the companion, Herdr and tmux.
 class FakeConnection implements StdinAgentCommandRunner {
-  FakeConnection(this.host, this.log) {
+  FakeConnection(
+    this.host,
+    this.log, {
+    this.live = false,
+    this.tmuxLive = false,
+  }) {
     log.open(host);
   }
 
   final String host;
   final NetworkLog log;
+
+  /// A companion that pushes Herdr and tmux (`--live`); else one that
+  /// ignores the flag, like 1.1.0.
+  final bool live;
+
+  /// With `tmux-live` on (off by default): tmux pushed too.
+  final bool tmuxLive;
   bool _closed = false;
 
   @override
@@ -95,6 +111,8 @@ class FakeConnection implements StdinAgentCommandRunner {
     String out = '';
     if (command.contains('conductore-hostd version')) {
       out = '{"version":"1.0.0"}';
+    } else if (live && command.contains('status --live')) {
+      out = tmuxLive ? LiveFixtures.status : LiveFixtures.statusTmuxOff;
     } else if (command.contains('conductore-hostd status')) {
       out =
           '{"version":1,"seq":1,"agents":[{"sessionId":"s-1","name":"api",'
@@ -141,7 +159,7 @@ class FakeConnection implements StdinAgentCommandRunner {
 enum Scene { home, background, chat, terminal }
 
 void main() {
-  void measure(Scene scene) {
+  void measure(Scene scene, {bool live = false, bool tmuxLive = false}) {
     fakeAsync((async) {
       final log = NetworkLog();
       // The app's side channels, over fake SSH connections.
@@ -150,7 +168,8 @@ void main() {
         localRunner: () => throw StateError('no local machine here'),
         sshFiles: NoNetworkSftpRepository(),
         localFiles: NoNetworkSftpRepository(),
-        sshRunner: (host) => FakeConnection(host.id, log),
+        sshRunner: (host) =>
+            FakeConnection(host.id, log, live: live, tmuxLive: tmuxLive),
       );
       final open = channels.runner;
 
@@ -168,7 +187,9 @@ void main() {
         provider: const HerdrAttentionProvider(),
         companionProvider: const ConductoreHostAttentionProvider(),
       );
-      final boards = HomeBoards(runnerFactory: open);
+      // The app's one feed per machine (SessionConnectFlow.live).
+      final hub = LiveHostHub(runnerFactory: open);
+      final boards = HomeBoards(runnerFactory: open, liveFeed: hub.feedFor);
       final usage = UsageController(
         source: AttentionUsageHostSource(attention: attention),
         observeLifecycle: false,
@@ -199,17 +220,26 @@ void main() {
             ..setVisible(true);
       }
       PreviewReadyController? preview;
-      SerialCommandChannel? tabs;
-      Timer? tabsTimer;
+      MultiplexerTabsController? tabs;
       if (scene == Scene.terminal) {
         // The terminal page in front: the monitor's long-poll, the tab
-        // strip's 2 s tmux poll and the preview watcher's port poll.
+        // strip (a 2 s tmux poll, or the pushed feed) and the preview
+        // watcher's port poll.
         attention.setAppForeground(true);
-        tabs = SerialCommandChannel(runnerFactory: () => open(machines.first));
-        tabsTimer = Timer.periodic(
-          const Duration(seconds: 2),
-          (_) => unawaited(tabs!.query('tmux list-windows -t =main')),
-        );
+        final feed = hub.feedFor(machines.first)!;
+        tabs = MultiplexerTabsController(
+          backend: TmuxTabsBackend(
+            channel: SerialCommandChannel(
+              runnerFactory: () => open(machines.first),
+            ),
+            sessionName: 'main',
+          ),
+          live: MultiplexerLiveTabs(
+            feed: feed,
+            read: (model) => model.tmuxWindows('main'),
+            server: 'tmux',
+          ),
+        )..setVisible(true);
         preview = PreviewReadyController(
           runnerFactory: () => open(machines.first),
         )..setForeground(true);
@@ -222,7 +252,8 @@ void main() {
 
       final monitored = machines.first.id;
       final other = machines[1].id;
-      perfReport('network.${scene.name}', {
+      final variant = live ? (tmuxLive ? '.live' : '.live-tmux-off') : '';
+      perfReport('network.${scene.name}$variant', {
         'connections_opened_to_settle': openedToSettle,
         'monitored_connections': log.peakLive[monitored] ?? 0,
         'monitored_opened_per_min': log.opened[monitored] ?? 0,
@@ -237,14 +268,31 @@ void main() {
       // One connection per machine for every side channel (before: the
       // monitor, board, tab strip and preview watcher each had one).
       expect(log.peakLive[monitored] ?? 0, lessThanOrEqualTo(1));
+      if (live) {
+        // Pushed: nothing lists Herdr on a timer any more, nor tmux when
+        // the machine pushes it too.
+        for (final kind in [
+          'herdr-workspaces',
+          'herdr-tabs',
+          'herdr-agents',
+          if (tmuxLive) 'tmux',
+        ]) {
+          expect(log.commands[monitored]?[kind] ?? 0, 0, reason: kind);
+          expect(log.commands[other]?[kind] ?? 0, 0, reason: kind);
+        }
+        if (scene == Scene.home) {
+          expect(log.total(other), lessThanOrEqualTo(tmuxLive ? 2 : 6));
+          expect(log.total(monitored), lessThanOrEqualTo(tmuxLive ? 6 : 10));
+        }
+      }
       chat?.dispose();
-      tabsTimer?.cancel();
-      unawaited(tabs?.close());
+      tabs?.dispose();
       preview?.dispose();
       detachUsage?.call();
       usage.dispose();
       boards.dispose();
       attention.dispose();
+      hub.dispose();
       unawaited(workspace.closeAll());
       async.elapse(const Duration(minutes: 2));
     });
@@ -254,4 +302,20 @@ void main() {
   test('app in the background', () => measure(Scene.background));
   test('chat view open', () => measure(Scene.chat));
   test('terminal page in front', () => measure(Scene.terminal));
+  // A companion that pushes Herdr and tmux (CON-050).
+  // Herdr pushed, tmux polled (`tmux-live` off, the default).
+  test('home on screen, pushed', () => measure(Scene.home, live: true));
+  test(
+    'terminal page in front, pushed',
+    () => measure(Scene.terminal, live: true),
+  );
+  // tmux pushed too (`tmux-live` on).
+  test(
+    'home on screen, pushed with live tmux',
+    () => measure(Scene.home, live: true, tmuxLive: true),
+  );
+  test(
+    'terminal page in front, pushed with live tmux',
+    () => measure(Scene.terminal, live: true, tmuxLive: true),
+  );
 }

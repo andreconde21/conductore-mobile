@@ -20,6 +20,8 @@ import 'package:conduit/features/home_widget/data/platform_agent_status_widget_c
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/live/presentation/companion_preferences.dart';
+import 'package:conduit/features/live/presentation/companion_preferences_settings.dart';
 import 'package:conduit/features/quick_actions/presentation/personal_quick_actions_card.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/settings/presentation/privacy_settings.dart';
@@ -501,6 +503,12 @@ class SettingsSectionBody extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         DigestSettingsCards(controller: digest),
+      ],
+      if (CompanionPreferences.instance case final companion?) ...[
+        _gap,
+        const SettingsHeading('Herdr and worktrees'),
+        const SizedBox(height: 6),
+        CompanionPreferencesCards(preferences: companion),
       ],
       if (PlatformFeatures.agentNotifications)
         if (UsageScope.maybeOf(context) case final usage?) ...[
