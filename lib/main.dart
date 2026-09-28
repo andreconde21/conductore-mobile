@@ -31,6 +31,12 @@ import 'package:conduit/features/app_lock/presentation/app_lock_gate.dart';
 import 'package:conduit/features/app_lock/presentation/lock_page.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
+import 'package:conduit/features/continuity/data/secure_continuity_store.dart';
+import 'package:conduit/features/continuity/domain/continuity_rules.dart';
+import 'package:conduit/features/continuity/presentation/continuity_controller.dart';
+import 'package:conduit/features/continuity/presentation/continuity_places.dart';
+import 'package:conduit/features/continuity/presentation/continuity_scope.dart';
+import 'package:conduit/features/continuity/presentation/continuity_sync_link.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
@@ -325,6 +331,24 @@ void main() {
       ).start(),
     );
   }
+  // Continue where you left off (CON-008): where this device is, its
+  // drafts, and the other devices' places, through device sync.
+  final continuitySync = SyncControllerContinuityLink();
+  final continuity = ContinuityController(
+    store: const SecureContinuityStore(secureStorage),
+    sync: continuitySync,
+    // A desktop's "This computer" and the phone's saved machine for that
+    // desktop are the same place.
+    machineFor: (id) => localMachineFor(
+      id,
+      findById: hostsController.findById,
+      selfMachineId: hostsController.selfMachine?.id,
+      thisComputer: hostsController.thisComputer,
+    ),
+    selfMachineId: () => hostsController.selfMachine?.id,
+    platform: defaultTargetPlatform.name,
+    desktop: PlatformFeatures.isDesktop,
+  );
   // This device's data as sync records: file backups and device sync
   // (Settings › Sync) read and write the app through it.
   final localSyncStore = AppLocalSyncStore(
@@ -351,6 +375,7 @@ void main() {
     ),
     ready: themeLoaded,
     changes: localDataChanges,
+    continuity: continuity,
   );
   // Settings › Sync: this device's data, end-to-end encrypted, through
   // one saved machine (the hub) over the same SSH/SFTP stack.
@@ -374,7 +399,9 @@ void main() {
     platform: defaultTargetPlatform.name,
     defaultDeviceName: defaultSyncDeviceName(),
   );
+  continuitySync.controller = syncController;
   unawaited(themeLoaded.then((_) => syncController.start()));
+  unawaited(continuity.start());
   final backupService = AppBackupService(
     hostsController: hostsController,
     themeController: themeController,
@@ -485,40 +512,44 @@ void main() {
       services: settingsServices,
       child: SyncScope(
         controller: syncController,
-        child: VoiceSettingsScope(
-          settings: themeController,
-          child: SessionViewScope(
-            controller: sessionViews,
-            child: CompanionSetupScope(
-              controller: companionSetup,
-              agentAttention: agentAttention,
-              child: UsageScope(
-                controller: usage,
-                child: DigestScope(
-                  controller: digest,
-                  child: ConduitApp(
-                    themeController: themeController,
-                    lockController: lockController,
-                    hostsController: hostsController,
-                    terminalRepository: terminalRepository,
-                    workspaceController: workspaceController,
-                    localShellController: localShellController,
-                    hostKeyVerifier: hostKeyVerifier,
-                    promptCoordinator: promptCoordinator,
-                    sftpRepository: sftpRepository,
-                    sftpBookmarksRepository: sftpBookmarksRepository,
-                    agentAttention: agentAttention,
-                    backupService: backupService,
-                    fileExport: fileExport,
-                    connectFlow: connectFlow,
-                    shareTarget: shareTarget,
-                    sessionRestore: sessionRestore,
-                    localDataChanges: localDataChanges,
-                    hostChannels: hostChannels,
-                    navigatorKey: navigatorKey,
-                    voice: voice,
-                    guide: guide,
-                    guideWake: guide == null ? null : GuideWakeChannel(),
+        child: ContinuityScope(
+          controller: continuity,
+          child: VoiceSettingsScope(
+            settings: themeController,
+            child: SessionViewScope(
+              controller: sessionViews,
+              child: CompanionSetupScope(
+                controller: companionSetup,
+                agentAttention: agentAttention,
+                child: UsageScope(
+                  controller: usage,
+                  child: DigestScope(
+                    controller: digest,
+                    child: ConduitApp(
+                      themeController: themeController,
+                      lockController: lockController,
+                      hostsController: hostsController,
+                      terminalRepository: terminalRepository,
+                      workspaceController: workspaceController,
+                      localShellController: localShellController,
+                      hostKeyVerifier: hostKeyVerifier,
+                      promptCoordinator: promptCoordinator,
+                      sftpRepository: sftpRepository,
+                      sftpBookmarksRepository: sftpBookmarksRepository,
+                      agentAttention: agentAttention,
+                      backupService: backupService,
+                      fileExport: fileExport,
+                      connectFlow: connectFlow,
+                      shareTarget: shareTarget,
+                      sessionRestore: sessionRestore,
+                      localDataChanges: localDataChanges,
+                      hostChannels: hostChannels,
+                      navigatorKey: navigatorKey,
+                      voice: voice,
+                      guide: guide,
+                      guideWake: guide == null ? null : GuideWakeChannel(),
+                      continuity: continuity,
+                    ),
                   ),
                 ),
               ),
@@ -554,6 +585,7 @@ class ConduitApp extends StatefulWidget {
     this.voice,
     this.guide,
     this.guideWake,
+    this.continuity,
     super.key,
   });
 
@@ -596,6 +628,9 @@ class ConduitApp extends StatefulWidget {
   /// The headset-button wake for [guide].
   final GuideWakeChannel? guideWake;
 
+  /// Where this device is, for the other devices; null leaves it out.
+  final ContinuityController? continuity;
+
   @override
   State<ConduitApp> createState() => _ConduitAppState();
 }
@@ -607,9 +642,26 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
   int _keepaliveSessionCount = 0;
   bool _notificationPermissionRequested = false;
 
+  /// Reports the phone's place (Chat View, terminal, home) to continuity.
+  ContinuityRouteTracker? _continuityTracker;
+
+  /// One list for every rebuild: the navigator keeps its observers.
+  late final List<NavigatorObserver> _navigatorObservers = [
+    ?_continuityTracker,
+  ];
+
   @override
   void initState() {
     super.initState();
+    if (widget.continuity case final continuity?) {
+      _continuityTracker = ContinuityRouteTracker(
+        continuity: continuity,
+        workspace: widget.workspaceController,
+        attention: widget.agentAttention,
+        hosts: widget.hostsController,
+        herdrWorkspaceOf: widget.connectFlow?.herdr.workspaceOf,
+      );
+    }
     WidgetsBinding.instance.addObserver(this);
     widget.workspaceController.addListener(_syncBackgroundKeepalive);
     widget.themeController.addListener(_syncTerminalPreferences);
@@ -730,6 +782,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     widget.themeController.removeListener(_syncGuideWake);
     widget.lockController.removeListener(_stopGuideWhenLocked);
     widget.guideWake?.setListener(null);
+    _continuityTracker?.dispose();
     if (PlatformFeatures.backgroundKeepalive) {
       unawaited(_backgroundKeepalive.stop().catchError((_) {}));
     }
@@ -759,6 +812,17 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       workspace: widget.workspaceController,
       terminalPageBuilder: _buildTerminalPage,
       child: home,
+    );
+  }
+
+  /// Every tap counts as use of this device (continuity's "in use").
+  Widget _wrapActivity(Widget app) {
+    final continuity = widget.continuity;
+    if (continuity == null) return app;
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => continuity.noteActivity(),
+      child: app,
     );
   }
 
@@ -828,6 +892,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
         _updateThemes(widget.themeController.palette);
         final app = MaterialApp(
           navigatorKey: widget.navigatorKey,
+          navigatorObservers: _navigatorObservers,
           title: 'Conductore',
           debugShowCheckedModeBanner: false,
           theme: _lightTheme,
@@ -840,15 +905,17 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
             SystemChrome.setSystemUIOverlayStyle(overlayStyle);
             final content = AnnotatedRegion<SystemUiOverlayStyle>(
               value: overlayStyle,
-              child: Stack(
-                children: [
-                  child ?? const SizedBox.shrink(),
-                  AndroidThreeButtonNavigationBackground(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                  ),
-                  if (widget.guide case final guide?)
-                    GuideOverlay(controller: guide),
-                ],
+              child: _wrapActivity(
+                Stack(
+                  children: [
+                    child ?? const SizedBox.shrink(),
+                    AndroidThreeButtonNavigationBackground(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                    ),
+                    if (widget.guide case final guide?)
+                      GuideOverlay(controller: guide),
+                  ],
+                ),
               ),
             );
             // The builder sits above the Navigator, so pushed routes (the

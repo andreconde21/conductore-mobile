@@ -22,6 +22,11 @@ import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_it
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/talk_panel.dart';
+import 'package:conduit/features/continuity/domain/continuity_record.dart';
+import 'package:conduit/features/continuity/domain/continuity_rules.dart';
+import 'package:conduit/features/continuity/presentation/continuity_controller.dart';
+import 'package:conduit/features/continuity/presentation/continuity_scope.dart';
+import 'package:conduit/features/continuity/presentation/continuity_widgets.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -295,6 +300,141 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   ShareTargetController? _shareTarget;
 
+  // --- Continuity -------------------------------------------------------------
+
+  /// Other devices' drafts and reading position for this session (see
+  /// [ContinuityController]); null without continuity.
+  ContinuityController? _continuity;
+
+  /// Another device's draft on offer next to the composer.
+  DraftResolution _draftOffer = const DraftKeep();
+
+  /// The device whose draft went into the empty composer ("Draft from
+  /// Omarchy"), until the hint is closed.
+  DeviceContinuity? _draftFrom;
+
+  /// Whether the thread has looked for an anchor to scroll to (once,
+  /// after it first loads).
+  bool _arrived = false;
+  Timer? _anchorTimer;
+
+  void _attachContinuity(ContinuityController? continuity) {
+    if (identical(continuity, _continuity)) return;
+    final first = _continuity == null;
+    _continuity?.removeListener(_onContinuity);
+    _continuity = continuity?..addListener(_onContinuity);
+    if (continuity == null || !first) return;
+    // This device's own unsent draft comes back with the chat.
+    if (_composerText.text.isEmpty) {
+      final own = continuity.draftFor(_chat.sessionId);
+      if (own.isNotEmpty) _setComposer(own);
+    }
+    _composerText.addListener(_noteDraft);
+    _chat.addListener(_arrive);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onContinuity();
+      _arrive();
+    });
+  }
+
+  void _setComposer(String text) {
+    _composerText.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  void _noteDraft() {
+    _continuity?.noteDraft(_chat.sessionId, _composerText.text);
+    if (_composerText.text.isEmpty && _draftFrom != null && mounted) {
+      setState(() => _draftFrom = null);
+    }
+  }
+
+  /// Another device's draft for this session: into an empty composer (with
+  /// a hint), else offered next to the local one, never over it.
+  void _onContinuity() {
+    final continuity = _continuity;
+    if (continuity == null || !mounted) return;
+    final resolution = continuity.resolveDraftFor(
+      _chat.sessionId,
+      _composerText.text,
+    );
+    if (resolution case DraftFill(:final device, :final draft)) {
+      continuity.settleDraft(resolution);
+      _setComposer(draft.text);
+      setState(() {
+        _draftFrom = device;
+        _draftOffer = const DraftKeep();
+      });
+      return;
+    }
+    final showing = _draftOffer;
+    final same =
+        (showing is DraftKeep && resolution is DraftKeep) ||
+        (showing is RemoteDraftResolution &&
+            resolution is RemoteDraftResolution &&
+            showing.runtimeType == resolution.runtimeType &&
+            showing.key == resolution.key);
+    if (!same) setState(() => _draftOffer = resolution);
+  }
+
+  void _settleDraft(String Function(String mine, String theirs)? compose) {
+    final offer = _draftOffer;
+    if (offer is! RemoteDraftResolution) return;
+    _continuity?.settleDraft(offer);
+    if (compose != null) {
+      _setComposer(compose(_composerText.text, offer.draft.text));
+    }
+    setState(() {
+      _draftOffer = const DraftKeep();
+      if (compose != null && _composerText.text.isNotEmpty) {
+        _draftFrom = offer.device;
+      }
+    });
+  }
+
+  Widget? _draftBar() {
+    if (_draftOffer is DraftKeep && _draftFrom == null) return null;
+    return ContinuityDraftBar(
+      resolution: _draftOffer,
+      filledFrom: _draftFrom,
+      onUseTheirs: () => _settleDraft((_, theirs) => theirs),
+      onAppend: () =>
+          _settleDraft((mine, theirs) => '${mine.trimRight()}\n\n$theirs'),
+      onKeepMine: () => _settleDraft(null),
+      onClear: () => _settleDraft((_, _) => ''),
+      onDismissHint: () => setState(() => _draftFrom = null),
+    );
+  }
+
+  /// Opened from another device's place: scroll to where it was reading.
+  void _arrive() {
+    final continuity = _continuity;
+    if (_arrived || continuity == null || _chat.loading || !mounted) return;
+    _arrived = true;
+    _chat.removeListener(_arrive);
+    final anchor = continuity.takeArrivalAnchor(_chat.sessionId);
+    if (anchor == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(revealItem(anchor, alignment: 0));
+    });
+  }
+
+  /// Tells continuity what is being read, a moment after scrolling stops.
+  void _noteAnchorSoon() {
+    if (_continuity == null) return;
+    _anchorTimer?.cancel();
+    _anchorTimer = Timer(const Duration(milliseconds: 600), () {
+      if (!mounted || !_scroll.hasClients) return;
+      final away = _scroll.offset > _stickDistance;
+      _continuity?.noteAnchor(
+        _chat.sessionId,
+        away ? newestVisibleItemId() : null,
+      );
+    });
+  }
+
   /// A file shared into the app for this chat's machine lands in this
   /// composer, rather than in the terminal's under the chat.
   bool _receiveSharedDraft(String hostId, String draft) {
@@ -320,6 +460,7 @@ class _ChatViewPageState extends State<ChatViewPage>
       _covered = covered;
       WidgetsBinding.instance.addPostFrameCallback((_) => _syncPolling());
     }
+    _attachContinuity(ContinuityScope.maybeOf(context));
     final shareTarget = ShareTargetScope.maybeOf(context);
     if (!identical(shareTarget, _shareTarget)) {
       _shareTarget?.removeDraftReceiver(_receiveSharedDraft);
@@ -620,6 +761,10 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   @override
   void dispose() {
+    _anchorTimer?.cancel();
+    _continuity?.removeListener(_onContinuity);
+    _composerText.removeListener(_noteDraft);
+    _chat.removeListener(_arrive);
     _shareTarget?.removeDraftReceiver(_receiveSharedDraft);
     WidgetsBinding.instance.removeObserver(this);
     _chat.removeListener(_feedReadAloud);
@@ -681,6 +826,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (position.maxScrollExtent - position.pixels < 400) {
       unawaited(_chat.loadOlder());
     }
+    _noteAnchorSoon();
   }
 
   /// Follows new messages while at the bottom.
@@ -1085,6 +1231,7 @@ class _ChatViewPageState extends State<ChatViewPage>
                     child: _buildThread(context),
                   ),
                 ),
+                ?_draftBar(),
                 if (widget.accessory case final accessory?)
                   Align(
                     alignment: Alignment.centerRight,
