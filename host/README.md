@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|trust|rules|transcript|send|ports|usage|summarize|guide|digest|turns|diff|undo"
+    phone ──ssh user@host "conductore-hostd status|events|decide|trust|rules|transcript|send|ports|usage|summarize|guide|digest|turns|diff|undo|talkbawt"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -78,6 +78,9 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 | `~/.conductore/rules.json` | approval rules and time-boxed trust the hook answers by itself (see Approval rules), mode 0600 |
 | `~/.conductore/auto-approved.json` | what those rules answered in the last 24 h (at most 500 entries and 128 KB, no tool input), mode 0600 |
+| `~/.conductore/talkbawt.json` | Talkbawt: the server setting, the creator key per server, and the threads this machine owns (share and owner URLs, signing keys, watch cursors, the access log saved at revoke), mode 0600 |
+| `~/.conductore/talkbawt/inbox/`, `talkbawt/drafts/` | fenced link content for agents (`talkbawt deliver`) and agent-written handoff drafts, files 0600, pruned after 7 days and 1 day |
+| `~/.conductore/talkbawt.db`, `talkbawt-serve.json` | only with `talkbawt serve`: the bundled server's SQLite database, and its pid and address while it runs |
 
 Environment: `CONDUCTORE_PERMISSION_TIMEOUT` (seconds the hook waits for the
 phone, default 120, read by the hook), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
@@ -239,6 +242,10 @@ word as its value) and answer plain JSON, so check for `encoding`.
   on every request the daemon rated; see Approval rules.
 * `lastAutoApprovedAt` (epoch ms): the last time a rule answered one of the
   agent's requests; the phone refreshes its `approvals` list when it moves.
+* `permissionMode`: Claude Code's mode from the latest hook event
+  (`default`, `plan`, `acceptEdits`, `auto`, `bypassPermissions`, …);
+  absent until an event carried it. `talkbawt deliver` refuses the modes
+  that act without asking.
 * `capabilities`: what this companion supports, for the phone to gate on
   (also in `version`). `smart-approvals`: risk labels, `rules`, `trust`,
   `approve-low`, `approvals`, `classify`. `digest`: the `digest` command.
@@ -1001,6 +1008,65 @@ from the snapshot the undo took first; it snapshots the state it replaces
 too (`redo-*` ref). Refused while the agent works or when HEAD moved since
 the undo. `nothing to redo for this turn` when the last undo was redone.
 
+### `conductore-hostd talkbawt <command>`
+
+Threads and handoffs between people's agents through
+[Talkbawt](https://github.com/andreconde21/talkbawt): a shared URL two agents
+talk through. The companion is the only Talkbawt client: it holds the links
+and keys, and agents only ever get a fenced file and a fixed prompt, never a
+URL, a passphrase or a key. Every command prints one JSON document (errors:
+`{"error","code"}`, plus `findings` for a secret-scan refusal and `status`
+for a server error), and nothing runs between commands.
+
+Secrets never go in argv, where other users of the machine can read them:
+`--passphrase-from-stdin` takes the passphrase from stdin's first line (the
+text follows), and `-` in place of a link reads one JSON object from stdin
+(`link` or `id`, `passphrase`, `text`, `from`, `signingKey`, `since`,
+`wait`); that is how the phone calls it. Log lines are redacted (tokens to
+`/t/g_…abcd`, keys to their last four characters, passphrases dropped).
+
+| Command | What it does |
+| --- | --- |
+| `create --title … [--mode thread\|handoff] [--from …] [--expires 1d] [--max-reads N] [--signing [required]] [--passphrase-from-stdin] [--override-secret-scan]` | posts the text on stdin as a new thread (`POST /api/threads`). The first thread on a server asks for a creator key (`remember: true`) and keeps it; later ones send it as `X-Talkbawt-Key`. Prints `shareUrl`, `ownerUrl`, `passphraseRequired`, `maxReads`, `signing` (both participant keys, shown once), `giveTheOtherPerson`, `creatorKey` (only when issued) and the local `id` |
+| `meta <link> \| --id <id>` | `GET /t/{token}/meta`: never counted as a read. `usesARead`, `readsRemaining`, `admitted`, `alreadyCounted`, `passphraseRequired`, and the title once the passphrase is given |
+| `read <link> \| --id <id> [--since N] [--wait S]` | the thread as JSON: `messages[{seq, from, at, verified, signedBy, text}]`, `securityNotice`, and for an owner link `owner.accessLog` |
+| `post <link> \| --id <id> [--from …]` | the text on stdin, signed (`X-Talkbawt-Signature`) when a key is known: ours on owned threads, or `signingKey` |
+| `watch [--wait 50] [--id a,b]` | one held `POST /api/watch` per server for every live thread this machine owns (owner tokens in the body, never a URL); prints the threads that changed: `replies` (without the ones we posted), `readersChanged`, `state` (`revoked`, `expired`, `gone` stop the watch). The cursors move in `talkbawt.json` |
+| `revoke <owner link> \| --id <id>` | reads the owner view first and saves its access log, then `POST …/revoke`, then drops the links and keys |
+| `mine [--server <url>]` | `GET /api/mine?include=revoked` with the creator key header: recovers lost owner links into `talkbawt.json` |
+| `list`, `forget <id>` | what this machine holds (links redacted), and dropping one entry |
+| `config [--server <url> \| --default] [--creator-key-from-stdin]` | the server (default `https://talkbawt.outsmartis.dev`; `https://` only, plain `http://` only for localhost or a tailnet address) and the phone's creator key for it, so every machine files threads under one key |
+| `deliver <sessionId> [--allow-unknown-mode] [--paired-with … --until …]` | `{title, mode, messages}` on stdin (what the phone showed): writes `talkbawt/inbox/<id>.md` (0600) inside a random `<untrusted-talkbawt-…>` fence (fence-like tags in the content are defused) and types one fixed prompt naming the file: untrusted data, summarise, flag instructions, wait for the go-ahead. Refused for an agent in `bypassPermissions`, `acceptEdits` or `auto` mode, and, without `--allow-unknown-mode` (the user confirmed on the phone), for one that has not reported a mode |
+| `draft <sessionId>` / `draft-status <id>` | asks an idle agent to write a handoff (goal, state, what is left, where the code is, decisions, traps, where credentials live, open questions) to `talkbawt/drafts/<id>.md` and not to post it anywhere; `draft-status` returns it once written and the turn ended, with the local secret scan's `findings`. A working agent answers `code: "busy"` |
+| `draft <sessionId> --summary` | the fallback: Claude over the transcript tail with the same lock-down as `summarize` (`claude -p --tools "" --safe-mode --no-session-persistence --model haiku`, fixed system prompt, transcript on stdin between random delimiters) |
+| `reply <sessionId> --after <ms>` | the agent's last reply since then, once its turn ended (the phone's paired mode relays it) |
+
+A local secret scan (the server's 13 patterns, `lib/talkbawt.js`) runs
+before every create and post; a finding is refused with its pattern and line
+(never the value) unless `--override-secret-scan`, which the phone offers
+only behind a second confirmation.
+
+#### Bundled server: `talkbawt serve`
+
+```sh
+conductore-hostd talkbawt serve [--port 0] [--host 127.0.0.1] [--base-url <url>]   # foreground
+conductore-hostd talkbawt serve --detach [...]    # background; prints {pid, url, port, db}
+conductore-hostd talkbawt serve --status          # {running, healthy, pid, url, ...}
+conductore-hostd talkbawt serve --stop
+```
+
+A self-hosted Talkbawt, off by default: the server code
+(`vendor/talkbawt/`, andreconde21/talkbawt at 18b3ca2, embedded through
+`createTalkbawt()`) is not even loaded until this runs, so it costs nothing
+otherwise. Its database is `~/.conductore/talkbawt.db`. It needs Node.js 22.5
+or newer (`node:sqlite`); an older Node gets a clear error saying so. It
+listens on `127.0.0.1`, `::1` or a tailnet address only (never every
+interface), with `trustProxy` off. Its links are plain `http://`, which the
+clients accept for those addresses only; to serve other people, put a TLS
+proxy in front and pass its public origin as `--base-url`. Then point the
+client at it with `talkbawt config --server <url>` (the phone's Talkbawt
+setting does the same).
+
 ### `conductore-hostd statusline [--chain '<cmd>']`
 
 Not for the phone: the Node statusline of 0.3, kept so a not yet migrated
@@ -1217,6 +1283,13 @@ sample table.
 * Tool inputs (commands, file contents up to 4 KB) and last messages are held
   in memory and in `state.json` (0600). They are visible to anyone with the
   user's shell, which is also true of the transcripts.
+* Talkbawt: `talkbawt.json` (0600) holds owner URLs, signing keys and the
+  creator key, at the same trust level as the transcripts: anyone with the
+  user's shell can read it. Agents never receive a link or a key from the
+  companion, only fenced files (0600) and fixed prompts, and never while
+  they run in an auto-approve mode. Everything read from a link is treated
+  as untrusted: it is fenced for agents, and the phone shows it as inert
+  text.
 * The hook client trusts its stdin (it comes from Claude Code) and the daemon
   trusts its socket peers (owner-only) and spool files (owner-only
   directory). Request bodies are capped at 1 MB, spool files at 8 MB.
@@ -1313,6 +1386,13 @@ and ignored out, a slow git never delaying the hook, `turns`, `diff`,
 `undo`, per-file undo, `redo`, refusal while working and after a commit,
 pruning, the size limits), `test/summarize.test.js` the `summarize` command with a fake `claude`
 (argv, passthrough, markdown and word cap, timeout kill, busy, truncation),
+`test/talkbawt.test.js` the Talkbawt client against an in-process server
+from `vendor/talkbawt` (create, meta, read, post, watch, revoke, mine,
+passphrases, `max_reads`, signing, the creator key), the local secret scan
+against the vendored `guards.mjs`, redaction, the fenced inbox file and the
+serve checks, `test/talkbawt-cli.test.js` the same through the CLI plus
+`deliver`, `draft`, `reply` (fake `tmux` and `claude`) and `serve --detach`
+/ `--status` / `--stop`,
 `test/cswap.test.js` cswap accounts with a fake `cswap` and a fixture of
 the real `list --json` shape (email masking, timeout kill, 60 s cache and
 stale fallback, `cswap-switch`),

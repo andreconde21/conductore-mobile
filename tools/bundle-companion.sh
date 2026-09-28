@@ -6,7 +6,7 @@
 #   tools/bundle-companion.sh --check  exit 1 when assets/companion/ is stale
 #
 # assets/companion/ holds exactly two files:
-#   companion.tar.gz  bin/, lib/, install.sh, package.json, README.md
+#   companion.tar.gz  bin/, lib/, vendor/, install.sh, package.json, README.md
 #                     (never tests), as one gzipped ustar archive
 #   manifest.json     version, archive name and the sha256 of every file
 #                     inside the archive
@@ -32,7 +32,7 @@ ARCHIVE=companion.tar.gz
 
 files() {
   (cd "$SRC" && {
-    find bin lib -type f
+    find bin lib vendor -type f
     echo install.sh
     echo package.json
     echo README.md
@@ -109,7 +109,7 @@ for f in $(files); do
   esac
 done
 
-# File entries only (no directory entries); tar creates bin/ and lib/.
+# File entries only (no directory entries); tar creates bin/, lib/ and vendor/.
 # shellcheck disable=SC2046 # the sorted file list is split on purpose
 (cd "$TMP/stage" && "$TAR" --format=ustar --sort=name --mtime=@0 \
   --owner=0 --group=0 --numeric-owner --no-recursion \
