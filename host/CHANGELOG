@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 1.2.0 (2026-09-28)
 
 - feat: live Herdr and tmux state (capability `live`). `status --live` and `events --live [--only live]` carry workspaces, tabs and panes of every Herdr server and the sessions and windows of the default tmux server as entities (`docs/herdr-live.md`), pushed instead of polled: one read-only `events.subscribe` connection per Herdr server for lifecycle events plus one for per-pane `pane.agent_status_changed` (renewed when panes come and go, retried on `pane_not_found`), a `session.snapshot` after each event and every 60 s; one tmux control client (`-C attach-session -f read-only,ignore-size,no-output`) that only ever gets `list-sessions`, `list-windows -a` and `list-clients`. Activity-only changes are lazy: they wait for the next change or the long-poll's timeout. The bridge runs only while a phone asks (it stops 15 minutes after the last `--live` or `--herdr-agents` request); older phones never start it. Herdr without `events.subscribe` is read by snapshot every 10 s.
 - feat: `--herdr-agents` on `status` and `events` (capability `herdr-agents`): agents only Herdr detects, of any of its kinds, as agent records with `source: "herdr"` and states `working`, `blocked`, `idle`, `done`, `unknown`. New ones show after 5 s, a turn shorter than 5 s never shows as working (so it does not notify "finished"), and a pane the hooks report (same Claude session or same pane) is left out.
