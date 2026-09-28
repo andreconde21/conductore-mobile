@@ -112,7 +112,10 @@ narrower than 900 dp, keep the phone layout.
   preview. Alt+arrows move between panes. Ctrl+Shift+\ splits right and
   Ctrl+Shift+- splits down, with the most recent view that is not on
   screen, or a new session when every view is. The layout is saved and
-  comes back with the sessions (*Restore sessions on launch*).
+  comes back with the sessions (*Restore sessions on launch*). Herdr
+  sessions of one server share one focus: the focused pane owns it and the
+  others show their own last screen until clicked
+  ([herdr-shared-focus.md](herdr-shared-focus.md)).
 - **Dashboard.** With no view open, or after the home button at the left
   of the tabs, the main area shows columns: *Needs you* cards (with
   Allow / Deny for approvals the companion relays), a usage slot, the
