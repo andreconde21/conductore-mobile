@@ -1,0 +1,97 @@
+{
+ "id": "r",
+ "result": {
+  "type": "session_snapshot",
+  "snapshot": {
+   "version": "0.9.1",
+   "protocol": 22,
+   "focused_workspace_id": "w1",
+   "focused_tab_id": "w1:t1",
+   "focused_pane_id": "w1:p1",
+   "workspaces": [
+    {
+     "workspace_id": "w1",
+     "number": 1,
+     "label": "beta",
+     "focused": true,
+     "pane_count": 1,
+     "tab_count": 1,
+     "active_tab_id": "w1:t1",
+     "agent_status": "idle"
+    }
+   ],
+   "tabs": [
+    {
+     "tab_id": "w1:t1",
+     "workspace_id": "w1",
+     "number": 1,
+     "label": "1",
+     "focused": true,
+     "pane_count": 1,
+     "agent_status": "idle"
+    }
+   ],
+   "panes": [
+    {
+     "pane_id": "w1:p1",
+     "terminal_id": "term_65c857750bfbc1",
+     "workspace_id": "w1",
+     "tab_id": "w1:t1",
+     "focused": true,
+     "cwd": "/h",
+     "foreground_cwd": "/h",
+     "agent": "codex",
+     "agent_status": "idle",
+     "scroll": {
+      "offset_from_bottom": 0,
+      "max_offset_from_bottom": 0,
+      "viewport_rows": 40
+     },
+     "revision": 0
+    }
+   ],
+   "layouts": [
+    {
+     "workspace_id": "w1",
+     "tab_id": "w1:t1",
+     "zoomed": false,
+     "area": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+     },
+     "focused_pane_id": "w1:p1",
+     "panes": [
+      {
+       "pane_id": "w1:p1",
+       "focused": true,
+       "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 120,
+        "height": 40
+       }
+      }
+     ],
+     "splits": []
+    }
+   ],
+   "agents": [
+    {
+     "terminal_id": "term_65c857750bfbc1",
+     "agent": "codex",
+     "agent_status": "idle",
+     "workspace_id": "w1",
+     "tab_id": "w1:t1",
+     "pane_id": "w1:p1",
+     "focused": true,
+     "state_change_seq": 1,
+     "cwd": "/h",
+     "foreground_cwd": "/h",
+     "revision": 0
+    }
+   ]
+  }
+ }
+}

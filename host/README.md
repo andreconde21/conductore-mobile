@@ -1019,6 +1019,29 @@ instead. See Usage.
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 
+## Live Herdr and tmux, agent messages
+
+The phone can get Herdr's and tmux's state pushed instead of listing it on a
+timer, see `docs/herdr-live.md` (the wire protocol, the tmux control-mode
+findings and the measured cost). In short:
+
+- `status --live` / `events --live [--only live]`: workspaces, tabs, panes
+  (Herdr) and sessions and windows (tmux) as entities with keys, delivered as
+  `{"type": "live", "key", "entity"}` lines through the same long-poll.
+  `--herdr-agents` adds the agents only Herdr detects (any of its agent kinds)
+  as ordinary agent records with `source: "herdr"`.
+- The bridge starts with the first such request and stops 15 minutes after the
+  last one. It subscribes to each Herdr server's socket (`events.subscribe`,
+  read-only connections) and runs one tmux control client
+  (`-f read-only,ignore-size,no-output`) that is only ever sent list commands.
+- `agents`, `agent-send`, `agent-wait`, `agent-read`: messages between agents
+  on this machine. A blocked target is refused; a timeout is reported as "may
+  have arrived" and never retried; `--context-from` frames relayed text as
+  context; `--dry-run` shows the exact text.
+- `config set herdr-sidebar on|off`: pending approvals and cost as Herdr
+  sidebar tokens (`$conductore_pending`, `$conductore_cost`,
+  `$conductore_today`).
+
 ## Usage (context and rate limits)
 
 Hooks carry no usage data; Claude Code's statusline does. `install` sets
