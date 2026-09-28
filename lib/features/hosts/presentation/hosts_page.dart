@@ -21,6 +21,11 @@ import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/continuity/domain/continuity_record.dart';
+import 'package:conduit/features/continuity/domain/continuity_rules.dart';
+import 'package:conduit/features/continuity/presentation/continuity_opener.dart';
+import 'package:conduit/features/continuity/presentation/continuity_scope.dart';
+import 'package:conduit/features/continuity/presentation/continuity_widgets.dart';
 import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
@@ -569,6 +574,15 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                           SliverToBoxAdapter(
                             child: UsageHomeBar(controller: usage),
                           ),
+                        // Another device was in use since: pick up there.
+                        if (ContinuityScope.maybeOf(context)
+                            case final continuity?)
+                          SliverToBoxAdapter(
+                            child: ContinuityBanner(
+                              controller: continuity,
+                              onOpen: _acceptContinuityOffer,
+                            ),
+                          ),
                         // Once, after the update that added crash reports.
                         const SliverToBoxAdapter(child: PrivacyNotice()),
                         ..._buildMain(context),
@@ -613,50 +627,187 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             shell.showHome = false;
             return host.presentChat(request);
           },
-          child: DesktopHome(
-            key: _desktopHomeKey,
-            controller: shell,
-            hostsController: widget.hostsController,
-            workspace: widget.workspaceController,
-            agentAttention: widget.agentAttention,
-            themeController: widget.themeController,
-            boards: _boards,
-            connectFlow: widget.connectFlow,
-            sessionRestore: widget.sessionRestore,
-            usageSummary: widget.usageSummary,
-            previewRefreshInterval: widget.previewRefreshInterval,
-            terminalBuilder: (embedding) => TerminalPage(
+          child: _withContinuityToast(
+            context,
+            DesktopHome(
+              key: _desktopHomeKey,
+              controller: shell,
+              hostsController: widget.hostsController,
               workspace: widget.workspaceController,
-              themeController: widget.themeController,
-              sftpRepository: widget.sftpRepository,
               agentAttention: widget.agentAttention,
-              hostKeyVerifier: widget.hostKeyVerifier,
+              themeController: widget.themeController,
+              boards: _boards,
               connectFlow: widget.connectFlow,
-              homeBoards: _boards,
-              hostChannels: widget.hostChannels,
-              shell: embedding,
-            ),
-            actions: DesktopHomeActions(
-              openTarget: _openSidebarTarget,
-              newSession: _newSession,
-              openSwitcher: _openSwitcher,
-              openSettings: _openSettings,
-              addMachine: _openForm,
-              machineMenu: _handleMenu,
-              openSession: (session) {
-                widget.workspaceController.activate(session);
-                unawaited(_showSession(session));
-              },
-              sessionActions: _showSessionActions,
-              noticeAction: _handleNoticeAction,
-              openChat: _openChatForAgent,
-              lock: widget.lockController.enabled ? _lock : null,
-              openSettingsAt: _openSettings,
+              sessionRestore: widget.sessionRestore,
+              usageSummary: widget.usageSummary,
+              previewRefreshInterval: widget.previewRefreshInterval,
+              terminalBuilder: (embedding) => TerminalPage(
+                workspace: widget.workspaceController,
+                themeController: widget.themeController,
+                sftpRepository: widget.sftpRepository,
+                agentAttention: widget.agentAttention,
+                hostKeyVerifier: widget.hostKeyVerifier,
+                connectFlow: widget.connectFlow,
+                homeBoards: _boards,
+                hostChannels: widget.hostChannels,
+                shell: embedding,
+              ),
+              actions: DesktopHomeActions(
+                openTarget: _openSidebarTarget,
+                newSession: _newSession,
+                openSwitcher: _openSwitcher,
+                openSettings: _openSettings,
+                addMachine: _openForm,
+                machineMenu: _handleMenu,
+                openSession: (session) {
+                  widget.workspaceController.activate(session);
+                  unawaited(_showSession(session));
+                },
+                sessionActions: _showSessionActions,
+                noticeAction: _handleNoticeAction,
+                openChat: _openChatForAgent,
+                lock: widget.lockController.enabled ? _lock : null,
+                openSettingsAt: _openSettings,
+                continueFrom: _continueFrom,
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// The desktop's offer to continue another device's place: a small card
+  /// in the bottom corner, over the shell.
+  Widget _withContinuityToast(BuildContext context, Widget shell) {
+    final continuity = ContinuityScope.maybeOf(context);
+    if (continuity == null) return shell;
+    return Stack(
+      children: [
+        Positioned.fill(child: shell),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: ContinuityToast(
+            controller: continuity,
+            onOpen: _acceptContinuityOffer,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Continuity: another device's place, opened here.
+
+  void _acceptContinuityOffer(ContinuityOffer offer) {
+    ContinuityScope.maybeOf(context)?.accept(offer);
+    unawaited(_continueFrom(offer.context));
+  }
+
+  /// Opens another device's [place]: the same machine (its "This
+  /// computer" is the saved machine that is that desktop), session and
+  /// view; Chat View then scrolls where it was and offers its draft.
+  Future<void> _continueFrom(ContinuityContext place) async {
+    final continuity = ContinuityScope.maybeOf(context);
+    if (continuity == null) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final result = await openContinuityContext(
+      continuity,
+      place,
+      ContinuityOpenActions(
+        openTerminal: _openContinuityTerminal,
+        openChat: _openContinuityChat,
+      ),
+    );
+    final message = continuityOpenMessage(result, place);
+    if (message != null) {
+      messenger?.showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  /// "Continue on…": the other devices' places to pick from.
+  Future<void> _showContinueOn() async {
+    final continuity = ContinuityScope.maybeOf(context);
+    if (continuity == null) return;
+    final picked = await showContinuitySheet(_actionContext, continuity);
+    if (picked != null && mounted) await _continueFrom(picked);
+  }
+
+  Future<bool> _openContinuityTerminal(
+    SavedHost host,
+    ContinuityPlace place,
+  ) async {
+    final flow = widget.connectFlow;
+    final target = place.target;
+    if (flow != null &&
+        target != null &&
+        target.kind == ConnectTargetKind.herdr &&
+        target.name.isNotEmpty &&
+        !host.isLocal) {
+      final session = await flow.openAgentLocation(
+        host,
+        workspaceId: target.name,
+        tabId: target.tabId,
+        paneId: place.paneId,
+        label: target.label,
+      );
+      if (session == null || !mounted) return false;
+      unawaited(_showSession(null));
+      return true;
+    }
+    if (target != null) {
+      // Exactly the terminal, whatever the session's preferred view.
+      unawaited(_openTarget(host, target, preferredView: false));
+      return true;
+    }
+    final open = _sessionsFor(host).where(
+      (session) => ConnectTarget.keyFromSessionHostId(session.host.id) == null,
+    );
+    if (open.firstOrNull case final session?) {
+      widget.workspaceController.activate(session);
+      unawaited(_showSession(null));
+      return true;
+    }
+    unawaited(
+      _openTarget(host, const ConnectTarget.shell(), preferredView: false),
+    );
+    return true;
+  }
+
+  Future<bool> _openContinuityChat(
+    SavedHost host,
+    ContinuityPlace place,
+  ) async {
+    final attention = widget.agentAttention;
+    final chatContext = _actionContext;
+    final access = await checkChatViewAccessWithProgress(
+      chatContext,
+      attention: attention,
+      host: host,
+    );
+    if (access == null || !access.ready || !mounted) return false;
+    final agent = access.agents
+        .where((agent) => agent.id == place.agentId)
+        .firstOrNull;
+    if (agent == null || !chatContext.mounted) return false;
+    unawaited(
+      openChatView(
+        context: chatContext,
+        attention: attention,
+        host: host,
+        agent: agent,
+        pasteImages: widget.themeController.pasteImagesAsFiles,
+        onOpenTerminal: () {
+          final flow = widget.connectFlow;
+          if (flow != null) {
+            unawaited(flow.openAgent(host, agent));
+          } else {
+            unawaited(attention.focusAgent(host.id, agent));
+          }
+        },
+      ),
+    );
+    return true;
   }
 
   /// A sidebar row: the workspace, tab, pane, tmux session or window it
@@ -1687,6 +1838,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final views = session.host.isLocal
         ? null
         : SessionViewScope.maybeOf(context);
+    final continuity = ContinuityScope.maybeOf(context);
     final action = await showAdaptiveModal<_SessionAction>(
       kind: AdaptiveModalKind.menu,
       context: context,
@@ -1722,6 +1874,15 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 subtitle: Text(sessionViewSummary(views, session.host.id)),
                 onTap: () => Navigator.of(context).pop(_SessionAction.openIn),
               ),
+            if (continuity != null && continuity.active)
+              ListTile(
+                key: const ValueKey('session-action-continue-on'),
+                leading: const Icon(Icons.devices_rounded),
+                title: const Text('Continue on…'),
+                subtitle: const Text('Where your other devices are'),
+                onTap: () =>
+                    Navigator.of(context).pop(_SessionAction.continueOn),
+              ),
             ListTile(
               leading: const Icon(Icons.close_rounded),
               title: const Text('Close session'),
@@ -1746,6 +1907,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             title: session.title,
           );
         }
+      case _SessionAction.continueOn:
+        await _showContinueOn();
       case _SessionAction.close:
         await widget.workspaceController.close(session);
       case null:
@@ -2021,7 +2184,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 }
 
-enum _SessionAction { reconnect, rename, openIn, close }
+enum _SessionAction { reconnect, rename, openIn, continueOn, close }
 
 class _MachineSectionHeader extends StatelessWidget {
   const _MachineSectionHeader();

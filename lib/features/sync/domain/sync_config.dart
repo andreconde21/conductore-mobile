@@ -89,6 +89,9 @@ class SyncConfig {
     'deviceId': deviceId,
     'deviceName': deviceName,
     'categories': [for (final c in categories) c.name],
+    // Every category this build knows, so a later build can tell the
+    // ones this setup never saw (see [SyncCategory.addedOn]).
+    'known': [for (final c in SyncCategory.values) c.name],
     'initialized': [for (final c in initialized) c.name],
     if (lastSyncAt != null) 'lastSyncAt': lastSyncAt!.toUtc().toIso8601String(),
     'lastRevision': lastRevision,
@@ -110,6 +113,18 @@ class SyncConfig {
     Set<SyncCategory> categories(Object? raw) => {
       for (final name in (raw as List?) ?? const []) ?SyncCategory.parse(name),
     };
+    // A category added since this setup was saved starts on when new
+    // setups start with it on.
+    final known = {
+      for (final name in (json['known'] as List?) ?? const []) ?name,
+    };
+    final enabled = categories(json['categories'])
+      ..addAll([
+        for (final category in SyncCategory.addedOn)
+          if (!known.contains(category.name) &&
+              SyncCategory.defaults.contains(category))
+            category,
+      ]);
     final deviceName = json['deviceName'];
     final lastRevision = json['lastRevision'];
     final counter = json['counter'];
@@ -119,7 +134,7 @@ class SyncConfig {
       hubHostId: hubHostId,
       deviceId: deviceId,
       deviceName: deviceName is String ? deviceName : 'Device',
-      categories: categories(json['categories']),
+      categories: enabled,
       initialized: categories(json['initialized']),
       lastSyncAt: DateTime.tryParse(json['lastSyncAt'] as String? ?? ''),
       lastRevision: lastRevision is int ? lastRevision : 0,

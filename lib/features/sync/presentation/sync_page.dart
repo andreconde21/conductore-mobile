@@ -5,6 +5,8 @@ import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/continuity/presentation/continuity_scope.dart';
+import 'package:conduit/features/continuity/presentation/continuity_widgets.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sync/data/sync_crypto.dart';
 import 'package:conduit/features/sync/data/sync_setup.dart';
@@ -178,7 +180,7 @@ class _SyncPageState extends State<SyncPage> {
       ),
       const SizedBox(height: 8),
       const _SectionTitle('What to sync'),
-      for (final category in SyncCategory.values)
+      for (final category in SyncCategory.values) ...[
         SwitchListTile(
           key: ValueKey('sync-category-${category.name}'),
           contentPadding: EdgeInsets.zero,
@@ -187,6 +189,15 @@ class _SyncPageState extends State<SyncPage> {
           value: config.categories.contains(category),
           onChanged: _busy != null ? null : (on) => _setCategory(category, on),
         ),
+        // What "Continue where you left off" shares from this device.
+        if (category == SyncCategory.continuity &&
+            config.categories.contains(category))
+          if (ContinuityScope.maybeOf(context) case final continuity?)
+            ContinuitySettingsTiles(
+              controller: continuity,
+              enabled: _busy == null,
+            ),
+      ],
       const SizedBox(height: 16),
       _SectionTitle(
         'Devices',
@@ -252,6 +263,7 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> _setCategory(SyncCategory category, bool on) async {
+    final continuity = ContinuityScope.maybeOf(context);
     if (category == SyncCategory.credentials && on) {
       final confirmed = await showDialog<bool>(
         context: context,
@@ -282,6 +294,12 @@ class _SyncPageState extends State<SyncPage> {
         ),
       );
       if (confirmed != true) return;
+    }
+    if (category == SyncCategory.continuity && !on && continuity != null) {
+      // The last record says nothing, so the other devices drop this
+      // device's place and drafts rather than keep the old ones.
+      continuity.retract();
+      await _guard('Syncing…', _sync.syncNow);
     }
     await _sync.setCategory(category, on);
   }

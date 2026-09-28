@@ -187,40 +187,90 @@ mixin ChatThreadExtras on State<ChatViewPage> {
     _rowOf = rowOf;
   }
 
-  /// Scrolls the current match into view. The list builds only what is
-  /// near the screen, so it steps towards the row until it is built.
+  /// Scrolls the current match into view.
   Future<void> _revealCurrent() async {
+    await _reveal(() => search.currentMatch?.itemId);
+  }
+
+  /// Scrolls item [itemId] into view (another device's reading position),
+  /// loading older pages until it is in the thread. False when it is not
+  /// found.
+  Future<bool> revealItem(String itemId, {double alignment = 0.5}) async {
+    final chat = widget.controller;
+    for (var page = 0; page < _maxEarlierPages; page++) {
+      if (_rowOf.containsKey(itemId) || !chat.hasOlder || !mounted) break;
+      await chat.loadOlder();
+      if (!mounted) return false;
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted || !_rowOf.containsKey(itemId)) return false;
+    return _reveal(() => itemId, alignment: alignment);
+  }
+
+  /// The newest item wholly or partly on screen, or null when nothing
+  /// is built yet.
+  String? newestVisibleItemId() {
+    if (!threadScroll.hasClients) return null;
+    final viewport = threadScroll.position.context.storageContext
+        .findRenderObject();
+    if (viewport is! RenderBox || !viewport.hasSize) return null;
+    final view = viewport.localToGlobal(Offset.zero) & viewport.size;
+    String? newest;
+    var newestRow = -1;
+    for (final MapEntry(key: id, value: anchor) in _anchors.entries) {
+      if (!anchor.mounted) continue;
+      final box = anchor.findRenderObject();
+      if (box is! RenderBox || !box.hasSize || !box.attached) continue;
+      final rect = box.localToGlobal(Offset.zero) & box.size;
+      if (!rect.overlaps(view)) continue;
+      // Newest first: the lowest row index is the newest item.
+      final row = _rowOf[id] ?? 1 << 30;
+      if (newest == null || row < newestRow) {
+        newest = id;
+        newestRow = row;
+      }
+    }
+    return newest;
+  }
+
+  /// Scrolls [itemId]'s row into view. The list builds only what is near
+  /// the screen, so it steps towards the row until it is built.
+  Future<bool> _reveal(
+    String? Function() itemId, {
+    double alignment = 0.5,
+  }) async {
     for (var step = 0; step < 60 && mounted; step++) {
-      final match = search.currentMatch;
-      if (match == null) return;
-      final anchor = _anchors[match.itemId];
+      final id = itemId();
+      if (id == null) return false;
+      final anchor = _anchors[id];
       if (anchor != null && anchor.mounted) {
         await Scrollable.ensureVisible(
           anchor,
-          alignment: 0.5,
+          alignment: alignment,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
-        return;
+        return true;
       }
-      final target = _rowOf[match.itemId];
-      if (target == null || !threadScroll.hasClients) return;
+      final target = _rowOf[id];
+      if (target == null || !threadScroll.hasClients) return false;
       final built = [for (final id in _anchors.keys) ?_rowOf[id]];
-      if (built.isEmpty) return;
+      if (built.isEmpty) return false;
       // Newest first: a higher row is older, further up the screen.
       final older = target > built.reduce(math.max);
       final newer = target < built.reduce(math.min);
-      if (!older && !newer) return;
+      if (!older && !newer) return false;
       final position = threadScroll.position;
       final move = position.viewportDimension * 0.8;
       final to = (position.pixels + (older ? move : -move)).clamp(
         position.minScrollExtent,
         position.maxScrollExtent,
       );
-      if (to == position.pixels) return;
+      if (to == position.pixels) return false;
       threadScroll.jumpTo(to);
       await WidgetsBinding.instance.endOfFrame;
     }
+    return false;
   }
 
   // --- Message actions -----------------------------------------------------

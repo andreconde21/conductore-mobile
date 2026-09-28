@@ -50,6 +50,7 @@ keys as input; tests run them against a real shell.
 | Appearance and terminal settings | `setting:<name>` per `AppSettingsCodec` key | on |
 | Connect preferences and recents | `connect:<hostId>`, `recentDirs:<hostId>` | on |
 | Session list | `sessions` (the restore-on-launch list) | on |
+| Continue where you left off | `continuity:<device id>`, one per device (see below) | on |
 
 Hardware-key stubs never sync (file backups with credentials keep them).
 Each device keeps its own login to the hub.
@@ -76,6 +77,46 @@ the hub's ids so they merge instead of showing twice.
 Push 5 s after a local change (skipped when nothing really changed), pull on
 start and resume and every 3 minutes while the app is open, and on **Sync
 now**. Leaving the app pushes a pending change at once.
+
+## Continue where you left off
+
+Each device writes one record, `continuity:<device id>`, and only reads the
+others': the merge never takes another device's record for a local edit or
+delete. A record holds when the device was last in use, where it is (the
+saved machine, the tmux session or Herdr workspace and tab, terminal or
+Chat view, the Claude session id, the Chat view message being read, the
+desktop's layout name), its last eight places, and its unsent Chat view
+drafts. Settings › Sync lets each device leave out places, drafts or the
+scroll position; turning the switch off sends an empty record first.
+
+A desktop's "This computer" goes out as the saved machine that is that
+desktop (the phone's SSH entry for it), and a place on that machine comes
+back as "This computer" there. Without such a machine the place is shown
+but cannot be opened elsewhere.
+
+The record goes out at most every 10 s while it changes (2 s after the
+first change of a burst) and at once when the app leaves the screen (a
+desktop window losing focus too). A desktop that regains focus, or gets
+input after 5 minutes without any, pulls. When a device opens or wakes,
+another device used since, within 2 hours, somewhere else, is offered:
+a dismissible row on the phone's home, a corner card on the desktop, and
+"Continue on…" in the desktop palette and the phone's session menu.
+
+Drafts merge last-writer-wins, never silently: another device's newer
+draft fills an empty composer with a "from" hint; next to a different
+local draft both are offered (use it, both, keep mine); a draft sent or
+cleared elsewhere offers to clear it here. Drafts only travel inside the
+encrypted bundle, never in backups, telemetry or the Sync activity list.
+
+Continuity stays out of file backups and the Sync activity list, and a
+continuity change never makes pages reload their saved data.
+
+Why the hub and not the companion: the hub already carries every device's
+data end to end encrypted, works for every machine (tmux-only hosts, "This
+computer", machines without the companion) and needs no host to hold
+drafts in the clear. Its latency is what matters here: a device pulls when
+it opens or wakes, which is exactly when the offer is shown, and the
+device left behind pushed within 10 s or on leaving.
 
 ## Adding a device
 

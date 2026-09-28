@@ -16,6 +16,11 @@ import 'package:conduit/features/agents_digest/presentation/digest_controller.da
 import 'package:conduit/features/command_palette/domain/palette_entry.dart';
 import 'package:conduit/features/command_palette/presentation/command_palette.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/continuity/domain/continuity_record.dart';
+import 'package:conduit/features/continuity/presentation/continuity_controller.dart';
+import 'package:conduit/features/continuity/presentation/continuity_places.dart';
+import 'package:conduit/features/continuity/presentation/continuity_scope.dart';
+import 'package:conduit/features/continuity/presentation/continuity_widgets.dart';
 import 'package:conduit/features/desktop_shell/domain/layout_presets.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
@@ -54,6 +59,7 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
 import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -87,7 +93,12 @@ class DesktopHomeActions {
     required this.openChat,
     this.lock,
     this.openSettingsAt,
+    this.continueFrom,
   });
+
+  /// Opens another device's place here (the palette's "Continue from…");
+  /// null hides continuity.
+  final Future<void> Function(ContinuityContext context)? continueFrom;
 
   /// Settings at a section (the command palette); null opens Settings.
   final Future<void> Function(SettingsSection section)? openSettingsAt;
@@ -263,6 +274,9 @@ class DesktopHomeState extends State<DesktopHome> {
     widget.boards?.addListener(_rebuildTree);
     _controller.addListener(_handleControllerChanged);
     _controller.layout.addListener(_syncViewed);
+    _controller.layout.addListener(_reportContinuity);
+    // The saved machine that is this desktop may be found after start.
+    widget.hostsController.addListener(_reportContinuity);
     _controller.unreadChanges.addListener(_handleUnreadChanged);
     widget.sessionRestore?.addListener(_handleRestoreChanged);
     _lifecycle = AppLifecycleListener(
@@ -287,6 +301,53 @@ class DesktopHomeState extends State<DesktopHome> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _route = ModalRoute.of(context);
+    final continuity = ContinuityScope.maybeOf(context);
+    if (!identical(continuity, _continuity)) {
+      _continuity = continuity?..desktopShell = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reportContinuity());
+    }
+  }
+
+  // Continuity: the focused view is where this desktop is.
+
+  ContinuityController? _continuity;
+
+  /// Tells continuity the focused session or Chat View tab, and the
+  /// layout's name. The dashboard leaves the last place as it is.
+  void _reportContinuity() {
+    final continuity = _continuity;
+    final host = embedding.host;
+    if (continuity == null || !mounted || host == null) return;
+    final views = host.viewIds.toSet();
+    final current = _controller.layout.value.pruned(views);
+    final shown = [
+      for (final pane in current.panes)
+        if (pane.view != null) pane.view!,
+    ];
+    final preset = ShellLayoutPreset.of(current);
+    final saved = _controller.savedLayouts
+        .where((saved) => listEquals(saved.views, shown))
+        .firstOrNull;
+    final layout =
+        saved?.name ??
+        (preset == null || preset == ShellLayoutPreset.single
+            ? ''
+            : preset.label);
+    final viewId = host.activeViewId;
+    final place = !terminalVisible || viewId == null
+        ? null
+        : placeForShellView(
+            viewId,
+            workspace: widget.workspace,
+            attention: widget.agentAttention,
+            hosts: widget.hostsController,
+            herdrWorkspaceOf: widget.connectFlow?.herdr.workspaceOf,
+          );
+    if (place != null) {
+      continuity.reportPlace(place, layout: layout);
+    } else {
+      continuity.reportLayout(layout);
+    }
   }
 
   @override
@@ -311,6 +372,8 @@ class DesktopHomeState extends State<DesktopHome> {
     widget.boards?.removeListener(_rebuildTree);
     _controller.removeListener(_handleControllerChanged);
     _controller.layout.removeListener(_syncViewed);
+    _controller.layout.removeListener(_reportContinuity);
+    widget.hostsController.removeListener(_reportContinuity);
     _controller.unreadChanges.removeListener(_handleUnreadChanged);
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
     _lifecycle?.dispose();
@@ -367,6 +430,7 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   void _handleControllerChanged() {
+    _reportContinuity();
     _syncWindowTitle();
     _trackScreen();
     _syncViewed();
@@ -381,6 +445,7 @@ class DesktopHomeState extends State<DesktopHome> {
 
   void _handleViewsChanged() {
     if (!mounted) return;
+    _reportContinuity();
     _syncWindowTitle();
     _trackScreen();
     _syncViewed();
@@ -389,6 +454,7 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   void _handleWorkspaceChanged() {
+    _reportContinuity();
     _syncWindowTitle();
     _trackScreen();
     _watchSessions();
@@ -1052,12 +1118,27 @@ class DesktopHomeState extends State<DesktopHome> {
         setVoice: theme.setVoice,
         nextUnread: openNextUnread,
         lock: widget.actions.lock,
-        extra: _projectPaletteEntries(),
+        extra: [..._projectPaletteEntries(), ..._continuityPaletteEntries()],
         closeFocused: switch ((host, host?.activeViewId)) {
           (final host?, final view?) => () => host.closeView(view),
           _ => null,
         },
       ),
+    );
+  }
+
+  /// "Continue from Phone: VTM · Chat view" and "Continue on…".
+  List<PaletteEntry> _continuityPaletteEntries() {
+    final continuity = _continuity;
+    final open = widget.actions.continueFrom;
+    if (continuity == null || open == null) return const [];
+    return continuityPaletteEntries(
+      continuity,
+      open: open,
+      showAll: () async {
+        final picked = await showContinuitySheet(context, continuity);
+        if (picked != null && mounted) await open(picked);
+      },
     );
   }
 

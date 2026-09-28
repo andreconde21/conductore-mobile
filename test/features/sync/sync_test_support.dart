@@ -1,6 +1,7 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/continuity/domain/continuity_sync_port.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/session_snapshot.dart';
@@ -81,6 +82,7 @@ class LocalDevice {
       palette: AppPalette.catppuccin,
     ),
     bool desktop = false,
+    ContinuitySyncPort? continuity,
   }) async {
     final hostsRepository = FakeHostsRepository()..persisted = List.of(hosts);
     final hostsController = HostsController(
@@ -113,6 +115,7 @@ class LocalDevice {
         connectPreferences: connect,
         recentDirectoriesStore: recentDirs,
         sessions: sessions,
+        continuity: continuity,
       ),
     );
   }

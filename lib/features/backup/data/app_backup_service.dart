@@ -90,7 +90,9 @@ class AppBackupService {
     final options = LocalSyncOptions(
       categories: {
         ...SyncCategory.values.where(
-          (category) => includeSecrets || category != SyncCategory.credentials,
+          (category) =>
+              (includeSecrets || category != SyncCategory.credentials) &&
+              !SyncCategory.notBackedUp.contains(category),
         ),
       },
       hubHostId: _syncHubHostId(),
@@ -164,7 +166,11 @@ class AppBackupService {
       values,
       values.keys.toSet(),
       LocalSyncOptions(
-        categories: const {...SyncCategory.values},
+        categories: {
+          ...SyncCategory.values.where(
+            (category) => !SyncCategory.notBackedUp.contains(category),
+          ),
+        },
         hubHostId: _syncHubHostId(),
         includeHardwareKeys: true,
       ),

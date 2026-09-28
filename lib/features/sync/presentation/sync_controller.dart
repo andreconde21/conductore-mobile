@@ -258,6 +258,21 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
+  /// Pushes a pending local change now instead of after [pushDelay]
+  /// (continuity, as the app leaves the screen or on its own schedule).
+  void flushNow() {
+    if (!enabled || _applying) return;
+    _changedSince ??= _now();
+    _debounce?.cancel();
+    _debounce = null;
+    unawaited(
+      _syncIfChanged().whenComplete(() async {
+        // Left the screen meanwhile: nothing keeps the hub busy.
+        if (!_foreground && _running == null) await _closeHub();
+      }),
+    );
+  }
+
   Future<void> _syncIfChanged() async {
     if (!enabled) return;
     if (await _stampEdits() || _running != null) {
@@ -340,6 +355,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   LocalSyncOptions _options(SyncConfig config) => LocalSyncOptions(
     categories: config.categories,
     hubHostId: config.hubHostId,
+    deviceId: config.deviceId,
   );
 
   SavedHost? _findHost(String id) =>
@@ -705,7 +721,15 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _logMerge(SyncMergeResult result) async {
-    final firstSync = result.conflicts
+    // Continuity changes every few seconds and may hold drafts: it stays
+    // out of the activity list (and its lost values out of storage).
+    bool logged(String key) =>
+        SyncCategory.ofKey(key) != SyncCategory.continuity;
+    final conflicts = [
+      for (final conflict in result.conflicts)
+        if (logged(conflict.key)) conflict,
+    ];
+    final firstSync = conflicts
         .where((c) => c.kind == SyncConflictKind.firstSync)
         .toList();
     if (firstSync.isNotEmpty) {
@@ -715,7 +739,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
         "hub's version (${_describeKeys(firstSync.map((c) => c.key))}).",
       );
     }
-    for (final conflict in result.conflicts) {
+    for (final conflict in conflicts) {
       if (conflict.kind != SyncConflictKind.concurrentEdit) continue;
       await _log(
         SyncActivityKind.conflict,
@@ -729,8 +753,8 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
         canRestore: !conflict.keptLocal,
       );
     }
-    final applied = result.toApply.length;
-    final edited = result.localEdits.length;
+    final applied = result.toApply.keys.where(logged).length;
+    final edited = result.localEdits.where(logged).length;
     if (applied > 0 || edited > 0) {
       await _log(
         SyncActivityKind.synced,
@@ -1270,6 +1294,7 @@ String describeSyncKey(String key) {
     SyncCategory.appearance => 'the setting "$rest"',
     SyncCategory.connections => 'connect preferences',
     SyncCategory.sessions => 'the session list',
+    SyncCategory.continuity => 'where you left off',
     null => key,
   };
 }
