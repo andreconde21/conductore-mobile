@@ -11,10 +11,12 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 
-/// Sends a message through Talkbawt to an agent on another machine (the
-/// Talkbawt client provides it); true when it went.
+/// Sends a message through Talkbawt from [from] to an agent on another
+/// machine (the Talkbawt client provides it); throws when it did not go.
 typedef TalkbawtAgentRelay =
-    Future<bool> Function({
+    Future<void> Function({
+      required SavedHost from,
+      required String fromLabel,
       required AgentMessageTarget target,
       required String text,
     });
@@ -137,7 +139,12 @@ class AgentMessenger {
       final crossing = crossesMachines(from, group.first);
       if (crossing && relayRoute() == AgentRelayRoute.talkbawt) {
         results.addAll(
-          await _viaTalkbawt(group, textFor(text, contextFrom: contextFrom)),
+          await _viaTalkbawt(
+            group,
+            textFor(text, contextFrom: contextFrom),
+            from: from!,
+            fromLabel: contextFrom ?? 'you via Conductore',
+          ),
         );
         continue;
       }
@@ -157,28 +164,44 @@ class AgentMessenger {
 
   Future<List<AgentSendResult>> _viaTalkbawt(
     List<AgentMessageTarget> group,
-    String text,
-  ) async {
+    String text, {
+    required SavedHost from,
+    required String fromLabel,
+  }) async {
     final relay = talkbawtRelay;
-    return [
-      for (final target in group)
-        if (relay == null)
+    final results = <AgentSendResult>[];
+    for (final target in group) {
+      if (relay == null) {
+        results.add(
           AgentSendResult(
             target: target.target,
             ok: false,
             error:
                 'The relay setting is Talkbawt, but this build has no '
                 'Talkbawt client. Choose the phone relay in Settings.',
-          )
-        else if (await relay(target: target, text: text))
-          AgentSendResult(target: target.target, ok: true)
-        else
+          ),
+        );
+        continue;
+      }
+      try {
+        await relay(
+          from: from,
+          fromLabel: fromLabel,
+          target: target,
+          text: text,
+        );
+        results.add(AgentSendResult(target: target.target, ok: true));
+      } catch (error) {
+        results.add(
           AgentSendResult(
             target: target.target,
             ok: false,
-            error: 'Not sent through Talkbawt.',
+            error: 'Not sent through Talkbawt: $error',
           ),
-    ];
+        );
+      }
+    }
+    return results;
   }
 
   Future<List<AgentSendResult>> _sendOn(

@@ -32,15 +32,17 @@ mkdir -p "$BIN_DIR"
 if [ "$MODE" = uninstall ]; then
   if [ -x "$BIN_DIR/conductore-hostd" ]; then "$BIN_DIR/conductore-hostd" uninstall || true; fi
   rm -f "$BIN_DIR/conductore-hostd" "$BIN_DIR/conductore-hook" "$BIN_DIR/conductore-statusline"
-  [ -d "$SHARE_DIR" ] && rm -rf "$SHARE_DIR/bin" "$SHARE_DIR/lib" && rmdir "$SHARE_DIR" 2>/dev/null || true
+  [ -d "$SHARE_DIR" ] && rm -rf "$SHARE_DIR/bin" "$SHARE_DIR/lib" "$SHARE_DIR/vendor" && rmdir "$SHARE_DIR" 2>/dev/null || true
   echo "removed"
   exit 0
 fi
 
 if [ "$MODE" = copy ]; then
   mkdir -p "$SHARE_DIR"
-  rm -rf "$SHARE_DIR/bin" "$SHARE_DIR/lib"
+  rm -rf "$SHARE_DIR/bin" "$SHARE_DIR/lib" "$SHARE_DIR/vendor"
   cp -R "$HERE/bin" "$HERE/lib" "$SHARE_DIR/"
+  # The bundled Talkbawt server (`talkbawt serve`); loaded only when started.
+  if [ -d "$HERE/vendor" ]; then cp -R "$HERE/vendor" "$SHARE_DIR/"; fi
   cp "$HERE/README.md" "$SHARE_DIR/" 2>/dev/null || true
   SRC="$SHARE_DIR"
 else

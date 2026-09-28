@@ -15,6 +15,8 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -246,6 +248,21 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     );
   }
 
+  /// "Hand off" (Talkbawt), when the app has it and the agent is live on
+  /// a companion machine.
+  VoidCallback? _handOffAction(DigestAgent agent) {
+    final host = _host(agent.hostId);
+    final live = _live(agent);
+    if (host == null || live == null) return null;
+    return handOffAction(
+      context,
+      TalkbawtScope.maybeOf(context),
+      widget.attention,
+      host,
+      live,
+    );
+  }
+
   Future<void> _tell(DigestAgent agent, {required bool answer}) async {
     final host = _host(agent.hostId);
     if (host == null) return;
@@ -363,6 +380,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
                       onChat: () => _open(agent, chat: true),
                       onTerminal: () => _open(agent, chat: false),
                       onReview: _reviewAction(agent),
+                      onHandOff: _handOffAction(agent),
                       onTell: (answer) =>
                           unawaited(_tell(agent, answer: answer)),
                       onDecide: (request, verdict) =>
@@ -632,6 +650,7 @@ class DigestAgentCard extends StatelessWidget {
     this.isDeciding,
     this.now,
     this.onReview,
+    this.onHandOff,
     super.key,
   });
 
@@ -639,6 +658,9 @@ class DigestAgentCard extends StatelessWidget {
 
   /// Opens Review of its last turn; null hides the button.
   final VoidCallback? onReview;
+
+  /// Hands the agent's work off through Talkbawt; null hides the button.
+  final VoidCallback? onHandOff;
 
   /// The monitor's record of it (its requests, with their full input);
   /// null when the monitor does not know it (ended, another machine).
@@ -838,6 +860,16 @@ class DigestAgentCard extends StatelessWidget {
                         icon: const Icon(Icons.rate_review_outlined, size: 18),
                         label: const Text('Review'),
                       ),
+                    if (onHandOff case final handOff?)
+                      TextButton.icon(
+                        key: ValueKey('digest-handoff-${agent.sessionId}'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: handOff,
+                        icon: const Icon(Icons.outbox_outlined, size: 18),
+                        label: const Text('Hand off'),
+                      ),
                     TextButton.icon(
                       key: ValueKey('digest-chat-${agent.sessionId}'),
                       style: TextButton.styleFrom(
@@ -872,6 +904,8 @@ class DigestAgentCard extends StatelessWidget {
       ('Terminal', Icons.terminal_rounded, onTerminal),
       if (onReview case final review?)
         ('Review', Icons.rate_review_outlined, review),
+      if (onHandOff case final handOff?)
+        ('Hand off…', Icons.outbox_outlined, handOff),
       if (agent.state != 'needs_permission')
         (
           question ? 'Answer…' : 'Tell it…',

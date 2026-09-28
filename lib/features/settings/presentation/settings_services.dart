@@ -4,6 +4,7 @@ import 'package:conduit/features/agents_digest/presentation/digest_controller.da
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_controller.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:flutter/widgets.dart';
 
@@ -24,6 +25,7 @@ class SettingsServices {
     this.onLockNow,
     this.hasSync = false,
     this.hasSessionViews = false,
+    this.talkbawt,
   });
 
   final ThemeController theme;
@@ -53,6 +55,9 @@ class SettingsServices {
   /// Whether a SessionViewScope is above the page.
   final bool hasSessionViews;
 
+  /// Talkbawt handoffs (Agents › Talkbawt).
+  final TalkbawtController? talkbawt;
+
   SettingsServices copyWith({
     bool? hasSync,
     bool? hasSessionViews,
@@ -68,6 +73,7 @@ class SettingsServices {
     onLockNow: onLockNow ?? this.onLockNow,
     hasSync: hasSync ?? this.hasSync,
     hasSessionViews: hasSessionViews ?? this.hasSessionViews,
+    talkbawt: talkbawt,
   );
 }
 

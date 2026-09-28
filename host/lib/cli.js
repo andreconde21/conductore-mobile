@@ -29,6 +29,7 @@ const riskMod = lazy('./risk')
 const reviewMod = lazy('./review')
 const agentsMod = lazy('./agents')
 const configMod = lazy('./config')
+const talkbawtCliMod = lazy('./talkbawt-cli')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -116,6 +117,10 @@ const USAGE = `usage: conductore-hostd <command>
   redo <sessionId> <turn> [--dry-run]
                                   put back what the last undo of that turn
                                   changed
+  talkbawt <command>              Talkbawt threads and handoffs: create,
+                                  read, post, watch, revoke, mine, deliver
+                                  to an agent, the bundled server (serve);
+                                  see \`talkbawt help\`
   guide [--timeout-ms 15000]      the voice guide: one action for the
                                   {utterance, context} JSON on stdin
                                   (claude -p, no tools)
@@ -1106,6 +1111,19 @@ function daemonCmd (args) {
   return null
 }
 
+// `talkbawt …` (lib/talkbawt-cli.js) with the agent plumbing it needs.
+function talkbawtCmd (args) {
+  return talkbawtCliMod().main(args, {
+    parseFlags,
+    readStdin,
+    findAgent,
+    inputAgent,
+    sendText: (agent, text) => paneMod().sendText(agent, text, { enter: true }),
+    readTranscript: (file, opts) => transcriptMod().readTranscript(file, opts),
+    lockFile: name => path.join(paths.homeDir(), name)
+  })
+}
+
 async function main (argv) {
   let [cmd, ...args] = argv
   gzipOut = GZIP_COMMANDS.has(cmd) && args.includes('--gzip')
@@ -1130,6 +1148,7 @@ async function main (argv) {
     case 'guide': return guideCmd(args)
     case 'digest': return digestCmd(args)
     case 'cswap-switch': return cswapSwitchCmd(args)
+    case 'talkbawt': return talkbawtCmd(args)
     case 'turns': case 'diff': case 'undo': case 'redo': return reviewCmd(cmd, args)
     case 'agents': return agentsCmd()
     case 'agent-send': return agentSendCmd(args)

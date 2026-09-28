@@ -63,6 +63,8 @@ class SecureJsonMapStore implements JsonMapStore {
 /// * `sessions`: the session-restore list.
 /// * `continuity:<device id>`: where each device is and its drafts (see
 ///   [ContinuitySyncPort]); this device writes only its own.
+/// * `secret:talkbawt`: Talkbawt creator keys and owned links (owner URLs,
+///   passphrases, signing keys), with the credentials.
 class AppLocalSyncStore implements LocalSyncStore {
   AppLocalSyncStore({
     required this.hosts,
@@ -75,7 +77,13 @@ class AppLocalSyncStore implements LocalSyncStore {
     this.ready,
     this.changes,
     this.continuity,
+    this.talkbawt,
   });
+
+  /// Talkbawt's store (creator keys, owned links); null leaves it out.
+  final JsonMapStore? talkbawt;
+
+  static const talkbawtKey = '${SyncKeys.secretPrefix}:talkbawt';
 
   final HostsController hosts;
   final ThemeController theme;
@@ -191,6 +199,19 @@ class AppLocalSyncStore implements LocalSyncStore {
           out[SyncKeys.recentDirs(hostId)] = value;
         }
       });
+    }
+
+    if (talkbawt case final store? when on.contains(SyncCategory.credentials)) {
+      final data = await store.readAll();
+      final threads = data['threads'];
+      if (data['creatorKeys'] is Map &&
+              (data['creatorKeys'] as Map).isNotEmpty ||
+          threads is List && threads.isNotEmpty) {
+        out[talkbawtKey] = {
+          'creatorKeys': data['creatorKeys'],
+          'threads': threads,
+        };
+      }
     }
 
     if (on.contains(SyncCategory.sessions)) {
@@ -336,6 +357,17 @@ class AppLocalSyncStore implements LocalSyncStore {
         for (final MapEntry(:key, :value) in values.entries)
           if (SyncKeys.isForeign(key, deviceId) && value != null) key: value,
       }, deviceId: deviceId);
+    }
+    if (talkbawt case final store?
+        when on.contains(SyncCategory.credentials) &&
+            changedKeys.contains(talkbawtKey) &&
+            values[talkbawtKey] is Map) {
+      await store.writeAll(
+        mergeTalkbawtRecords(
+          await store.readAll(),
+          Map<String, Object?>.from(values[talkbawtKey]! as Map),
+        ),
+      );
     }
     if (on.contains(SyncCategory.sessions) &&
         changedKeys.contains(SyncKeys.sessionsKey)) {
@@ -673,4 +705,36 @@ class AppLocalSyncStore implements LocalSyncStore {
     }
     if (recentDirectories == null) await recentDirectoriesStore.writeAll(all);
   }
+}
+
+/// This device's Talkbawt store with another device's record merged in:
+/// creator keys and links this device lacks are added; a link revoked or
+/// gone on either side stays that way. Nothing is deleted, and this
+/// device's own settings stay.
+Map<String, Object?> mergeTalkbawtRecords(
+  Map<String, Object?> local,
+  Map<String, Object?> incoming,
+) {
+  final keys = <String, Object?>{
+    if (incoming['creatorKeys'] case final Map<Object?, Object?> theirs)
+      for (final e in theirs.entries)
+        if (e.key is String) e.key! as String: e.value,
+    if (local['creatorKeys'] case final Map<Object?, Object?> ours)
+      for (final e in ours.entries)
+        if (e.key is String) e.key! as String: e.value,
+  };
+  String idOf(Map<Object?, Object?> t) => '${t['hostId']}/${t['id']}';
+  final threads = <String, Map<Object?, Object?>>{};
+  for (final source in [local['threads'], incoming['threads']]) {
+    if (source is! List) continue;
+    for (final t in source) {
+      if (t is! Map || t['id'] is! String) continue;
+      final existing = threads[idOf(t)];
+      if (existing == null ||
+          (existing['state'] == 'live' && t['state'] != 'live')) {
+        threads[idOf(t)] = t;
+      }
+    }
+  }
+  return {...local, 'creatorKeys': keys, 'threads': threads.values.toList()};
 }

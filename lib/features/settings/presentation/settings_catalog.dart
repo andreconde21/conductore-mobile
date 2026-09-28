@@ -118,6 +118,8 @@ bool _backup(SettingsServices s) => s.backupService != null;
 bool _machines(SettingsServices s) => s.hostsController != null;
 bool _usage(SettingsServices s) => s.agentAttention != null;
 bool _digest(SettingsServices s) => s.digest != null;
+bool _talkbawt(SettingsServices s) =>
+    s.talkbawt != null && s.agentAttention != null;
 bool _agentNotifications(SettingsServices s) =>
     s.hostsController != null &&
     s.agentAttention != null &&
@@ -389,6 +391,12 @@ const List<SettingsEntry> settingsCatalog = [
     'Quiet updates',
     keywords: ['notify', 'silent', 'sound', 'vibrate', 'verbose'],
     availableWhen: _agentNotifications,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Talkbawt',
+    keywords: ['handoff', 'hand off', 'link', 'share', 'thread', 'paired'],
+    availableWhen: _talkbawt,
   ),
   SettingsEntry(
     SettingsSection.agents,

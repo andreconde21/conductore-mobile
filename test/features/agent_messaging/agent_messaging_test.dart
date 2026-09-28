@@ -341,6 +341,55 @@ void main() {
     });
   });
 
+  group('relay route', () {
+    test('Talkbawt setting: another machine goes through the Talkbawt seam; '
+        'without a client it says so', () async {
+      final workspace = TerminalWorkspaceController(FreshTerminalRepository());
+      final attention = AgentAttentionController(
+        workspace: workspace,
+        runnerFactory: (_) => ScriptedAgentCommandRunner(const []),
+        provider: const HerdrAttentionProvider(),
+      );
+      addTearDown(attention.dispose);
+      addTearDown(workspace.dispose);
+      final relayed = <(String, String, String)>[];
+      final messenger = AgentMessenger(
+        attention: attention,
+        relayRoute: () => AgentRelayRoute.talkbawt,
+        talkbawtRelay:
+            ({
+              required from,
+              required fromLabel,
+              required target,
+              required text,
+            }) async {
+              relayed.add((from.id, target.target, text));
+            },
+      );
+      final to = AgentMessageTarget(
+        host: buildHost('lab'),
+        agent: _agent('s-9', 'infra'),
+      );
+      final results = await messenger.send(
+        to: [to],
+        text: 'done',
+        from: buildHost('vtm'),
+        contextFrom: 'reviewer on VTM',
+      );
+      expect(results.single.ok, isTrue);
+      expect(relayed.single.$1, 'vtm');
+      expect(relayed.single.$2, 'session/s-9');
+      expect(relayed.single.$3, frameAgentContext('reviewer on VTM', 'done'));
+      final bare = AgentMessenger(
+        attention: attention,
+        relayRoute: () => AgentRelayRoute.talkbawt,
+      );
+      AgentMessenger.talkbawt = null;
+      final none = await bare.send(to: [to], text: 'x', from: buildHost('vtm'));
+      expect(none.single.error, contains('no Talkbawt client'));
+    });
+  });
+
   group('companion preferences', () {
     test('defaults: sidebar on, worktrees next to the repo', () async {
       String? stored;

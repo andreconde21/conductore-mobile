@@ -1,0 +1,9 @@
+talkbawt, https://github.com/andreconde21/talkbawt
+Copyright (c) 2026 Mário André Ribeiro Conde
+
+The upstream repository carries no LICENSE file at the vendored commit
+(18b3ca24af95db79823c22f410a0b5ba22e11454), and its package.json names no
+license. These files are vendored into Conductore by the same author.
+
+Replace this file with the upstream license text as soon as the upstream
+repository adds one.

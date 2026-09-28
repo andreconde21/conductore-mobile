@@ -450,6 +450,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       usage: parseUsage(item['usage']),
       lastAutoApprovedAt: _timestamp(item['lastAutoApprovedAt']),
       stateSequence: _int(item['stateSeq']),
+      permissionMode: _string(item['permissionMode']),
     );
   }
 

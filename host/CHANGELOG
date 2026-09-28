@@ -10,6 +10,12 @@
 - feat: live tmux is opt-in: `config set tmux-live on` (off by default). The control client shows in the user's tmux (one more attached client, activity and last-attached times, client-attached hooks, bare `tmux attach` choosing another session), so while it is off the bridge runs none and publishes `srv:tmux` with `state: "off"`; the phone lists tmux itself as before. Herdr stays pushed.
 - feat: the statusline's session cost is kept as `usage.costUsd`.
 - perf: measured with the bridge on and idle, about 14 ms of daemon CPU a minute and 1 to 3 MB more RSS (see docs/herdr-live.md).
+- feat: `talkbawt <command>`, the Talkbawt client (CON-050): `create`, `meta`, `read`, `post`, `watch` (one held `POST /api/watch` per server for every owned thread), `revoke` (saves the access log first), `mine` (recovers owner links through the creator key header), `list`, `forget`, `config`. Links, signing keys and one creator key per server live in `~/.conductore/talkbawt.json` (0600); passphrases, keys and links come on stdin, never in argv; log lines are redacted. `https://` only (plain `http://` for localhost and tailnet addresses); default server `https://talkbawt.outsmartis.dev`.
+- feat: a local secret scan with the server's 13 patterns before every create and post (pattern and line, never the value).
+- feat: `talkbawt deliver <sessionId>`: writes what the phone showed to a fenced 0600 file (`~/.conductore/talkbawt/inbox/`) and types one fixed "untrusted data, summarise and wait" prompt. Refused for agents in `bypassPermissions`, `acceptEdits` or `auto` mode, and for agents with no reported mode unless the user confirmed it. `--paired-with` frames it for the phone's paired-machines mode.
+- feat: `talkbawt draft <sessionId>` asks an idle agent to write a handoff draft to a file (`draft-status` reads it); `--summary` is the fallback, Claude over the transcript tail with tools off. `talkbawt reply` returns an agent's last reply since a time.
+- feat: `talkbawt serve`: the bundled self-hosted Talkbawt server (vendored from andreconde21/talkbawt at 18b3ca2 in `vendor/talkbawt/`), off by default and loaded only when started; `--detach`, `--status`, `--stop`; database `~/.conductore/talkbawt.db`; `127.0.0.1`, `::1` or a tailnet address only. Needs Node 22.5+ (`node:sqlite`) and says so on older Node. `install.sh` and the app bundle now carry `vendor/`.
+- feat: `status` agents carry `permissionMode`, Claude Code's `permission_mode` from the latest hook event.
 
 ## 1.1.0 (2026-09-28)
 

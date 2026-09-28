@@ -30,6 +30,7 @@ import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:conduit/features/sync/domain/sync_category.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
@@ -383,6 +384,28 @@ class SettingsSectionBody extends StatelessWidget {
     final hosts = services.hostsController;
     final attention = services.agentAttention;
     return [
+      if (services.talkbawt case final talkbawt? when attention != null) ...[
+        SettingsCard(
+          child: ListTile(
+            key: const ValueKey('settings-talkbawt'),
+            leading: const Icon(Icons.outbox_outlined),
+            title: const Text('Talkbawt'),
+            subtitle: const Text(
+              'Hand work off to other people\'s agents through a link: '
+              'your links, opening one, paired machines, the server.',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => unawaited(
+              showTalkbawtHub(
+                context,
+                controller: talkbawt,
+                attention: attention,
+              ),
+            ),
+          ),
+        ),
+        _gap,
+      ],
       if (hosts != null)
         ListenableBuilder(
           listenable: hosts,
