@@ -8,6 +8,19 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 
+/// How a Herdr focus command went.
+enum HerdrFocusOutcome {
+  /// Herdr focused it.
+  focused,
+
+  /// Herdr has no such workspace (or tab, or pane) any more.
+  missing,
+
+  /// The command did not get through, or Herdr refused it for another
+  /// reason.
+  failed,
+}
+
 /// A neighbour direction for `herdr pane focus --direction`.
 enum HerdrDirection { left, right, up, down }
 
@@ -99,6 +112,35 @@ class HerdrCommands {
   /// `herdr agent focus <pane_id>`: switches workspace and tab as needed.
   String agentFocus(String paneId) =>
       _herdr('agent focus ${shellQuoteArgument(paneId)}');
+
+  /// `herdr pane layout --pane <pane_id>`: the pane's tab, with the pane
+  /// that tab has focused (read-only).
+  String paneLayout(String paneId) =>
+      _herdr('pane layout --pane ${shellQuoteArgument(paneId)}');
+
+  /// `herdr pane read <pane_id> --source visible --format ansi`: what the
+  /// pane shows, with its colours (read-only).
+  String paneReadVisible(String paneId) => _herdr(
+    'pane read ${shellQuoteArgument(paneId)} --source visible --format ansi',
+  );
+
+  /// `herdr pane send-text <pane_id> <text>`: types into that pane
+  /// whatever Herdr has focused.
+  String paneSendText(String paneId, String text) => _herdr(
+    'pane send-text ${shellQuoteArgument(paneId)} ${shellQuoteArgument(text)}',
+  );
+
+  /// `herdr pane send-keys <pane_id> <key>...` (`enter`, `esc`, `up`…).
+  String paneSendKeys(String paneId, List<String> keys) => _herdr(
+    'pane send-keys ${shellQuoteArgument(paneId)} '
+    '${keys.map(shellQuoteArgument).join(' ')}',
+  );
+
+  /// `herdr agent prompt <pane_id> <text>`: Herdr's own submit to an
+  /// agent (bracketed paste, then Enter).
+  String agentPrompt(String paneId, String text) => _herdr(
+    'agent prompt ${shellQuoteArgument(paneId)} ${shellQuoteArgument(text)}',
+  );
 
   String paneFocus(HerdrDirection direction) =>
       _herdr('pane focus --direction ${direction.name}');
@@ -234,6 +276,22 @@ class HerdrRemoteControl {
 
   Future<bool> focusWorkspace(String workspaceId) =>
       run(commands.workspaceFocus(workspaceId));
+
+  /// [focusWorkspace], telling a closed workspace apart from a failure.
+  Future<HerdrFocusOutcome> focusWorkspaceOutcome(String workspaceId) async {
+    final result = await _enqueue(commands.workspaceFocus(workspaceId));
+    if (result == null) {
+      return HerdrFocusOutcome.failed;
+    }
+    if (_succeeded(result)) {
+      return HerdrFocusOutcome.focused;
+    }
+    // Herdr 0.9.1: `{"error":{"code":"workspace_not_found",…}}`, on stderr
+    // from the CLI.
+    return '${result.stdout}${result.stderr}'.contains('not_found')
+        ? HerdrFocusOutcome.missing
+        : HerdrFocusOutcome.failed;
+  }
 
   Future<bool> focusTab(String tabId) => run(commands.tabFocus(tabId));
 

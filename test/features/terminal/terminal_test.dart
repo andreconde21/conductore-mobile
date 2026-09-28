@@ -683,21 +683,20 @@ void main() {
       await _openSnippetsMenu(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Host deploy'));
-      expect(controller.sentText, ['deploy host\r']);
+      // A submitting snippet presses Enter as its own write, a moment later.
+      expect(controller.sentText, ['deploy host']);
+      await tester.pump(TerminalSessionController.composedEnterDelay);
+      expect(controller.sentKeys, [TerminalKey.enter]);
 
       await _openSnippetsMenu(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Global ls'));
-      expect(controller.sentText, ['deploy host\r', 'ls -la']);
+      expect(controller.sentText, ['deploy host', 'ls -la']);
 
       await _openSnippetsMenu(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Password'));
-      expect(controller.sentText, [
-        'deploy host\r',
-        'ls -la',
-        'secret-password',
-      ]);
+      expect(controller.sentText, ['deploy host', 'ls -la', 'secret-password']);
     });
 
     testWidgets('tmux scroll key enters scrollback mode', (tester) async {

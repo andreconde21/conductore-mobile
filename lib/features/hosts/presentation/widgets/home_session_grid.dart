@@ -316,16 +316,33 @@ class HomeSessionTile extends StatelessWidget {
                                   style: TextStyle(color: muted, fontSize: 11),
                                 ),
                               )
-                            : TerminalSnapshotBuilder(
-                                terminal: session.terminal,
-                                builder: (context) => LiveTerminalPreview(
-                                  preview: StyledTerminalPreview.capture(
-                                    session.terminal,
-                                  ),
-                                  theme: terminalTheme,
-                                  fontFamily: fontFamily,
-                                  placeholder: placeholderFor(session.status),
-                                  placeholderColor: muted,
+                            : SessionPreviewBuilder(
+                                session: session,
+                                builder: (context, preview, shared) => Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: LiveTerminalPreview(
+                                        preview: preview,
+                                        theme: terminalTheme,
+                                        fontFamily: fontFamily,
+                                        placeholder: shared != null
+                                            ? SessionPreviewBuilder
+                                                  .sharedPlaceholder
+                                            : placeholderFor(session.status),
+                                        placeholderColor: muted,
+                                      ),
+                                    ),
+                                    if (shared != null)
+                                      Positioned(
+                                        top: 2,
+                                        right: 0,
+                                        child: SharedViewCaption(
+                                          shared: shared,
+                                          background: terminalTheme.background,
+                                          foreground: terminalTheme.foreground,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                       ),
@@ -989,10 +1006,10 @@ class HomeSessionRow extends StatelessWidget {
                 const SizedBox(height: 4),
                 Padding(
                   padding: const EdgeInsets.only(left: 17),
-                  child: TerminalSnapshotBuilder(
-                    terminal: session.terminal,
-                    builder: (context) {
-                      final tail = tailOf(session);
+                  child: SessionPreviewBuilder(
+                    session: session,
+                    builder: (context, _, shared) {
+                      final tail = shared?.tail ?? tailOf(session);
                       return Text(
                         placeholder ?? (tail.isEmpty ? ' ' : tail),
                         key: const ValueKey('home-row-tail'),

@@ -119,7 +119,7 @@ class QuickActionRunner {
     if (named != null) {
       workspace.activate(named);
       await _whenConnected(named);
-      named.sendText('$command\r');
+      await named.sendAppText(command, submit: true);
       return named;
     }
     final target = directory == null
@@ -136,7 +136,7 @@ class QuickActionRunner {
     // A terminal already open at that folder: type the command into it.
     if (before.contains(session)) {
       await _whenConnected(session);
-      session.sendText('$command\r');
+      await session.sendAppText(command, submit: true);
     }
     return session;
   }

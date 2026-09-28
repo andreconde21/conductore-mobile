@@ -22,6 +22,7 @@ void main() {
       workspace: workspace,
       runnerFactory: (_) => server.runner(),
       reattachRefocusDelay: Duration.zero,
+      mayMoveFocus: () => true,
     );
   });
 

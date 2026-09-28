@@ -504,11 +504,8 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       _focusTerminal();
       return;
     }
-    if (snippet.submit) {
-      _submitLine(snippet.text);
-    } else {
-      _sendText(snippet.text);
-    }
+    unawaited(_controller.sendAppText(snippet.text, submit: snippet.submit));
+    _focusTerminal();
   }
 
   /// Types [line] and presses Enter in a separate write shortly after, the

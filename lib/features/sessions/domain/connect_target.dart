@@ -155,6 +155,20 @@ class ConnectTarget {
         '; $herdr';
   }
 
+  /// [command] without the focus commands a Herdr attach starts with
+  /// (see [startupCommand]): just the attach. Attaching does not move
+  /// Herdr's shared focus (checked on Herdr 0.9.1); focusing does, for
+  /// every screen on that server. Other commands come back unchanged.
+  static String withoutHerdrFocus(String command) {
+    if (!command.contains(' focus ')) {
+      return command;
+    }
+    final attach = command.split('; ').last;
+    return RegExp(r'^herdr( --session .+)?$').hasMatch(attach)
+        ? attach
+        : command;
+  }
+
   /// The host a session should be opened with for this target.
   SavedHost apply(SavedHost host) {
     if (kind == ConnectTargetKind.shell) {

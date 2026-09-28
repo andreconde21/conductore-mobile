@@ -144,26 +144,46 @@ class _PromptMenuStripState extends State<PromptMenuStrip> {
     _send(menu, menu.keystrokesFor(option));
   }
 
+  /// Answers through [TerminalSessionController.sendAppText] and
+  /// [TerminalSessionController.sendAppKeys], in order: an answer typed
+  /// into another Herdr workspace would answer the wrong agent, and those
+  /// reach the session's own pane (or take its focus back first).
+  static Future<void> _deliver(
+    TerminalSessionController session,
+    List<PromptMenuKeystroke> keystrokes,
+  ) async {
+    final keys = <TerminalKey>[];
+    Future<void> flushKeys() async {
+      if (keys.isEmpty) return;
+      final batch = List.of(keys);
+      keys.clear();
+      await session.sendAppKeys(batch);
+    }
+
+    for (final keystroke in keystrokes) {
+      switch (keystroke) {
+        case PromptMenuText(:final text):
+          await flushKeys();
+          await session.sendAppText(text);
+        case PromptMenuKey.enter:
+          keys.add(TerminalKey.enter);
+        case PromptMenuKey.arrowUp:
+          keys.add(TerminalKey.arrowUp);
+        case PromptMenuKey.arrowDown:
+          keys.add(TerminalKey.arrowDown);
+        case PromptMenuKey.escape:
+          keys.add(TerminalKey.escape);
+      }
+    }
+    await flushKeys();
+  }
+
   void _escape(PromptMenu menu) {
     _send(menu, const [PromptMenuKey.escape]);
   }
 
   void _send(PromptMenu menu, List<PromptMenuKeystroke> keystrokes) {
-    final session = widget.session;
-    for (final keystroke in keystrokes) {
-      switch (keystroke) {
-        case PromptMenuText(:final text):
-          session.sendText(text);
-        case PromptMenuKey.enter:
-          session.sendKey(TerminalKey.enter);
-        case PromptMenuKey.arrowUp:
-          session.sendKey(TerminalKey.arrowUp);
-        case PromptMenuKey.arrowDown:
-          session.sendKey(TerminalKey.arrowDown);
-        case PromptMenuKey.escape:
-          session.sendKey(TerminalKey.escape);
-      }
-    }
+    unawaited(_deliver(widget.session, keystrokes));
     setState(() => _answered = menu);
     _graceTimer?.cancel();
     _graceTimer = Timer(PromptMenuStrip.answeredGrace, () {

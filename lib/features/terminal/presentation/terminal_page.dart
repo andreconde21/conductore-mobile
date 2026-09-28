@@ -98,6 +98,7 @@ import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_c
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_strip.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/session_focus_frame.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
@@ -1550,7 +1551,7 @@ class _TerminalPageState extends State<TerminalPage>
         },
       );
       if (path == null) return false;
-      if (mounted) session.paste(path);
+      if (mounted) unawaited(session.sendAppText(path, paste: true));
       return true;
     } catch (error) {
       if (mounted) {
@@ -1614,8 +1615,7 @@ class _TerminalPageState extends State<TerminalPage>
     unawaited(directories.record(hostId, pick.directory));
     switch (pick.action) {
       case RecentDirectoryAction.cd:
-        session.sendText(cdCommand(pick.directory));
-        _sendEnterSoon(session);
+        unawaited(session.sendAppText(cdCommand(pick.directory), submit: true));
       case RecentDirectoryAction.tmuxWindow:
         session.sendPrefix(host.tmuxPrefixKey);
         session.sendText(':');
@@ -2377,6 +2377,48 @@ class _TerminalPageState extends State<TerminalPage>
     );
   }
 
+  /// The focus banner's actions for a Herdr session while this device may
+  /// not move Herdr's focus on its own; null otherwise.
+  HerdrFocusActions? _herdrFocusActionsFor(TerminalSessionController session) {
+    final herdr = widget.connectFlow?.herdr;
+    if (herdr == null ||
+        herdr.mayMoveFocus ||
+        HerdrSessionFocus.herdrTargetOf(session) == null ||
+        herdr.controlFor(session) == null) {
+      return null;
+    }
+    void failed(String message) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    }
+
+    return HerdrFocusActions(
+      typeInComposer: (held) {
+        final hostId = session.host.id;
+        if (held.isNotEmpty) {
+          _composeDrafts[hostId] = '${_composeDrafts[hostId] ?? ''}$held';
+        }
+        widget.workspace.activate(session);
+        unawaited(_openPromptComposer(session));
+      },
+      takeFocusOnce: () async {
+        widget.workspace.activate(session);
+        if (!await herdr.takeFocusOnce(session)) {
+          failed('Herdr did not switch: the typed keys are still held.');
+        }
+        _focusNode.requestFocus();
+      },
+      useShownWorkspace: () async {
+        if (!await herdr.useShownWorkspace(session)) {
+          failed("Couldn't read what Herdr shows.");
+        }
+        _focusNode.requestFocus();
+      },
+    );
+  }
+
   /// One session's terminal (gestures, surface), as a tab's content or a
   /// pane of the desktop shell.
   Widget _sessionView(
@@ -2386,56 +2428,66 @@ class _TerminalPageState extends State<TerminalPage>
     AppPalette palette,
     Brightness brightness,
   ) {
-    return TerminalGestureLayer(
-      key: ValueKey(session.host.id),
-      target: _gestureTargetFor(session),
-      herdrControl: _herdrControlFor(session),
-      onHerdrWorkspaceFocused: (workspaceId) =>
-          widget.connectFlow?.herdr.noteWorkspace(session, workspaceId),
-      preferences: widget.themeController.terminalGestures,
+    return SessionFocusFrame(
+      key: ValueKey('focus-frame-${session.host.id}'),
       session: session,
-      fontSize: widget.themeController.terminalFontSize,
-      onFontSizeChanged: (fontSize) {
-        unawaited(widget.themeController.setTerminalFontSize(fontSize));
-      },
-      scrollMode: session == activeSession && _tmuxScrollMode,
-      onEnterScrollMode: () {
-        setState(() => _tmuxScrollMode = true);
-        _focusNode.requestFocus();
-      },
-      onExitScrollMode: () {
-        setState(() => _tmuxScrollMode = false);
-        _focusNode.requestFocus();
-      },
-      onOpenSessionGrid: _openSwitcher,
-      onOpenAgentPanel: _agentPanelOpener(),
-      child: TerminalSurface(
+      palette: palette,
+      brightness: brightness,
+      fontFamily: widget.themeController.terminalFont.fontFamily,
+      // Only a desktop split shows sessions that are not the active one.
+      showSharedView: widget.shell != null && session != activeSession,
+      herdrActions: _herdrFocusActionsFor(session),
+      child: TerminalGestureLayer(
+        key: ValueKey(session.host.id),
+        target: _gestureTargetFor(session),
+        herdrControl: _herdrControlFor(session),
+        onHerdrWorkspaceFocused: (workspaceId) =>
+            widget.connectFlow?.herdr.noteWorkspace(session, workspaceId),
+        preferences: widget.themeController.terminalGestures,
         session: session,
-        onLinkOpen: (url) => unawaited(_openInBrowser(url)),
-        autoConnect: widget.workspace.mayAutoConnect(session),
-        palette: palette,
-        brightness: brightness,
-        fontFamily: widget.themeController.terminalFont.fontFamily,
         fontSize: widget.themeController.terminalFontSize,
-        predictiveEchoEnabled: session.host.predictiveEchoEnabled,
-        terminalMouseInput: widget.themeController.terminalMouseInput,
-        focusNode: session == activeSession && activeFileTab == null
-            ? _focusNode
-            : null,
-        tmuxScrollMode: session == activeSession && _tmuxScrollMode,
-        onExitTmuxScrollMode: () {
+        onFontSizeChanged: (fontSize) {
+          unawaited(widget.themeController.setTerminalFontSize(fontSize));
+        },
+        scrollMode: session == activeSession && _tmuxScrollMode,
+        onEnterScrollMode: () {
+          setState(() => _tmuxScrollMode = true);
+          _focusNode.requestFocus();
+        },
+        onExitScrollMode: () {
           setState(() => _tmuxScrollMode = false);
           _focusNode.requestFocus();
         },
-        onPathTap: (path) => _handlePathTap(session, path),
-        onLinkTap: (url) => _handleLinkTap(session, url),
-        dragScrollsRemote:
-            widget.themeController.terminalGestures.dragScrollsRemote,
-        onEnterScrollMode: _dragScrollModeEntry(session),
-        onKeyEvent: (_, event) => _handleTerminalKey(session, event),
-        onLinkLongPress: (url, line) =>
-            _handleLinkLongPress(session, url, line),
-        onPasteImage: () => _pasteImageInto(session),
+        onOpenSessionGrid: _openSwitcher,
+        onOpenAgentPanel: _agentPanelOpener(),
+        child: TerminalSurface(
+          session: session,
+          onLinkOpen: (url) => unawaited(_openInBrowser(url)),
+          autoConnect: widget.workspace.mayAutoConnect(session),
+          palette: palette,
+          brightness: brightness,
+          fontFamily: widget.themeController.terminalFont.fontFamily,
+          fontSize: widget.themeController.terminalFontSize,
+          predictiveEchoEnabled: session.host.predictiveEchoEnabled,
+          terminalMouseInput: widget.themeController.terminalMouseInput,
+          focusNode: session == activeSession && activeFileTab == null
+              ? _focusNode
+              : null,
+          tmuxScrollMode: session == activeSession && _tmuxScrollMode,
+          onExitTmuxScrollMode: () {
+            setState(() => _tmuxScrollMode = false);
+            _focusNode.requestFocus();
+          },
+          onPathTap: (path) => _handlePathTap(session, path),
+          onLinkTap: (url) => _handleLinkTap(session, url),
+          dragScrollsRemote:
+              widget.themeController.terminalGestures.dragScrollsRemote,
+          onEnterScrollMode: _dragScrollModeEntry(session),
+          onKeyEvent: (_, event) => _handleTerminalKey(session, event),
+          onLinkLongPress: (url, line) =>
+              _handleLinkLongPress(session, url, line),
+          onPasteImage: () => _pasteImageInto(session),
+        ),
       ),
     );
   }
@@ -2828,12 +2880,11 @@ class _TerminalPageState extends State<TerminalPage>
                             // of submitting — so a wrapping compose line silently fails
                             // to send. Delivering Enter in its own read makes it an
                             // isolated keypress that submits regardless of line length.
-                            activeSession.sendText(line);
-                            Future.delayed(
-                              const Duration(milliseconds: 120),
-                              () {
-                                activeSession.sendKey(TerminalKey.enter);
-                              },
+                            // (sendAppText does exactly that; a Herdr session
+                            // whose focus this device may not move gets the
+                            // line by pane id instead.)
+                            unawaited(
+                              activeSession.sendAppText(line, submit: true),
                             );
                             setState(() {
                               // De-duplicate: drop any earlier identical entry so the

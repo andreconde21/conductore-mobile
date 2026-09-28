@@ -9,6 +9,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/mosh_server_cleanup.dart';
 import 'package:conduit/features/terminal/domain/network_connectivity.dart';
@@ -22,6 +23,7 @@ import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/terminal_string_sequence_filter.dart';
 import 'package:conduit/features/terminal/presentation/desktop_keyboard.dart';
+import 'package:conduit/features/terminal/presentation/session_input_hold.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/foundation.dart';
@@ -96,6 +98,13 @@ class TerminalSessionController extends ChangeNotifier {
   final _remoteClipboardWrites = StreamController<String>.broadcast();
   final _workingDirectoryReports = StreamController<String>.broadcast();
   String? _workingDirectory;
+  late final _inputHold = SessionInputHold(deliver: _deliverInput);
+
+  /// Set while remote output is being written: what the terminal sends
+  /// then is its answer to a query, not input.
+  bool _answeringRemote = false;
+  final _sharedView = ValueNotifier<SharedViewSnapshot?>(null);
+  final _focusElsewhere = ValueNotifier<String?>(null);
 
   static const _iosDuplicateEnterWindow = Duration(milliseconds: 80);
   static const _gracefulMoshCloseTimeout = Duration(milliseconds: 1500);
@@ -152,6 +161,119 @@ class TerminalSessionController extends ChangeNotifier {
   /// Each change of [workingDirectory].
   Stream<String> get workingDirectoryReports => _workingDirectoryReports.stream;
   bool get isConnected => _status == TerminalConnectionStatus.connected;
+
+  /// Whether typed input is being held (see [holdInput]), and why the last
+  /// held input was dropped; null when input flows.
+  ValueListenable<InputHoldState?> get inputHold => _inputHold.state;
+
+  /// Holds everything sent into this session (keys, pastes, composed
+  /// prompts) until [ready] completes: true sends it in order, false or
+  /// [timeout] drops it and says so on [inputHold]. Herdr sessions use it
+  /// while their server's shared focus is moved back to them.
+  void holdInput(
+    Future<bool> ready, {
+    String label = '',
+    Duration timeout = SessionInputHold.defaultTimeout,
+  }) => _inputHold.hold(ready, label: label, timeout: timeout);
+
+  /// Holds input on a [decision] instead (see [SessionInputHold.decide]):
+  /// the input waits, goes out, is dropped, or waits for the user
+  /// ([releaseHeldInput], [discardHeldInput], [takeHeldText]).
+  void decideInput(
+    Future<InputHoldDecision> decision, {
+    String label = '',
+    String Function()? blockedLabel,
+  }) => _inputHold.decide(decision, label: label, blockedLabel: blockedLabel);
+
+  /// Sends the held input after all (the user chose to).
+  void releaseHeldInput() => _inputHold.release();
+
+  /// Drops the held input (the user chose to).
+  void discardHeldInput() => _inputHold.discard();
+
+  /// The printable text held so far, for the composer; the rest is
+  /// dropped and input flows again.
+  String takeHeldText() => _inputHold.takeText();
+
+  /// Asked before typed input goes out while nothing holds it: a decision
+  /// to hold it for, or null to send it now. Set by whoever knows where
+  /// the input would land (Herdr's shared focus).
+  Future<InputHoldDecision>? Function(TerminalSessionController session)?
+  inputCheck;
+
+  /// Rewrites [startupCommand] at each connect (a Herdr attach without its
+  /// focus, when this device may not move Herdr's focus).
+  String Function(String command)? startupCommandFilter;
+
+  /// Delivers what the app writes into this session (composer, snippets,
+  /// quick actions, menu answers, image paths) to its own place without
+  /// the terminal, when set and able; see [sendAppText].
+  AppInputRouter? appInputRouter;
+
+  /// Types [text] the app wrote (not the user's keys) into this session,
+  /// and presses Enter after it with [submit]: through [appInputRouter]
+  /// when it can deliver it (Herdr, by pane id), else through the terminal
+  /// like typed input, Enter as its own write shortly after.
+  /// With [paste] the terminal path pastes it (bracketed when the program
+  /// asked for that) instead of typing it.
+  Future<void> sendAppText(
+    String text, {
+    bool submit = false,
+    bool paste = false,
+  }) async {
+    final router = appInputRouter;
+    if (router != null && await router.sendText(this, text, submit: submit)) {
+      return;
+    }
+    if (_disposed) return;
+    claimInput();
+    if (text.isNotEmpty) paste ? this.paste(text) : sendText(text);
+    if (submit) {
+      await Future<void>.delayed(composedEnterDelay);
+      if (!_disposed) sendKey(TerminalKey.enter);
+    }
+  }
+
+  /// Presses [keys] for the app (a menu answer), like [sendAppText].
+  Future<void> sendAppKeys(List<TerminalKey> keys) async {
+    final router = appInputRouter;
+    if (router != null && await router.sendKeys(this, keys)) {
+      return;
+    }
+    if (_disposed) return;
+    claimInput();
+    for (final key in keys) {
+      sendKey(key);
+    }
+  }
+
+  /// Called before the app itself types into this session (the composer,
+  /// a snippet, a quick action, an image path) so its Herdr focus can be
+  /// checked first; set by whoever keeps that focus.
+  void Function(TerminalSessionController session)? inputClaimer;
+
+  /// Makes sure what the app types next lands in this session's own place
+  /// (see [inputClaimer]). Cheap and safe to call before any write.
+  void claimInput() => inputClaimer?.call(this);
+
+  /// While set, this session's screen mirrors another session's Herdr
+  /// workspace (they share a Herdr server, whose focus is on the other),
+  /// and previews show this snapshot of its own instead.
+  ValueListenable<SharedViewSnapshot?> get sharedView => _sharedView;
+
+  set sharedViewSnapshot(SharedViewSnapshot? snapshot) {
+    if (!_disposed) _sharedView.value = snapshot;
+  }
+
+  /// What Herdr shows instead of this session's own workspace (the focused
+  /// workspace's name) while another screen has its shared focus and this
+  /// device may not move it; null while it shows this session's own.
+  ValueListenable<String?> get focusElsewhere => _focusElsewhere;
+
+  set focusElsewhereLabel(String? label) {
+    if (!_disposed) _focusElsewhere.value = label;
+  }
+
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
   Listenable get terminalPaintListenable => _terminalPaintNotifier;
@@ -386,6 +508,7 @@ class TerminalSessionController extends ChangeNotifier {
 
     final session = _session;
     _session = null;
+    _inputHold.reset();
     try {
       final leavesServer = await _closeRemoteMoshSession(session);
       await session?.close();
@@ -436,6 +559,7 @@ class TerminalSessionController extends ChangeNotifier {
   }
 
   void paste(String text) {
+    claimInput();
     terminal.paste(text);
     keyboard.clearModifiers();
   }
@@ -468,6 +592,13 @@ class TerminalSessionController extends ChangeNotifier {
   /// submitting; an isolated Enter keypress submits regardless.
   Future<void> sendComposed(String text, {required bool submit}) async {
     final sanitized = sanitizeComposedText(text);
+    final router = appInputRouter;
+    if (router != null &&
+        await router.sendText(this, sanitized, submit: submit)) {
+      return;
+    }
+    if (_disposed) return;
+    claimInput();
     if (terminal.bracketedPasteMode) {
       terminal.paste(sanitized);
     } else {
@@ -507,7 +638,10 @@ class TerminalSessionController extends ChangeNotifier {
       startupCommand != null || host.startTmuxOnConnect;
 
   void _runStartupCommandIfConfigured(SshTerminalSession session) {
-    final explicit = startupCommand;
+    final original = startupCommand;
+    final explicit = original == null
+        ? null
+        : startupCommandFilter?.call(original) ?? original;
     final command = explicit != null
         ? '$explicit${_enterSequence.value}'
         : _buildTmuxCommand();
@@ -746,7 +880,26 @@ class TerminalSessionController extends ChangeNotifier {
     if (_shouldSuppressDuplicateIosEnter(normalized)) {
       return;
     }
+    if (_answeringRemote) {
+      // The terminal answering the remote program (device attributes,
+      // cursor position, size): it goes back to that program (the Herdr
+      // client itself), never to a pane, so it is never held.
+      _deliverInput(normalized);
+      return;
+    }
+    if (_inputHold.offer(normalized)) {
+      return;
+    }
+    final decision = inputCheck?.call(this);
+    if (decision != null) {
+      decideInput(decision, blockedLabel: () => _focusElsewhere.value ?? '');
+      _inputHold.offer(normalized);
+      return;
+    }
+    _deliverInput(normalized);
+  }
 
+  void _deliverInput(String normalized) {
     final session = _session;
     if (session == null) {
       return;
@@ -802,7 +955,12 @@ class TerminalSessionController extends ChangeNotifier {
   }
 
   void _writeTerminalOutput(String data) {
-    terminal.write(data);
+    _answeringRemote = true;
+    try {
+      terminal.write(data);
+    } finally {
+      _answeringRemote = false;
+    }
     if (_predictiveEcho.hasPredictions) {
       _predictiveEcho.removeWhere(_isConfirmedPrediction);
       _notifyTerminalPaint();
@@ -1024,12 +1182,32 @@ class TerminalSessionController extends ChangeNotifier {
       unawaited(session.close());
     }
     keyboard.dispose();
+    _inputHold.dispose();
+    _sharedView.dispose();
+    _focusElsewhere.dispose();
     _terminalPaintNotifier.dispose();
     _terminalTitle.dispose();
     unawaited(_remoteClipboardWrites.close());
     unawaited(_workingDirectoryReports.close());
     super.dispose();
   }
+}
+
+/// Delivers app-written input to a session's own place without its
+/// terminal (Herdr: by pane id, so it lands in the session's workspace
+/// whatever the shared focus shows). Each call answers false when it
+/// cannot, and the session falls back to its terminal.
+abstract interface class AppInputRouter {
+  Future<bool> sendText(
+    TerminalSessionController session,
+    String text, {
+    required bool submit,
+  });
+
+  Future<bool> sendKeys(
+    TerminalSessionController session,
+    List<TerminalKey> keys,
+  );
 }
 
 /// What [TerminalSessionController] types into a Mosh session before

@@ -339,6 +339,12 @@ tmux.
   session or for all.
 - **Session restore**: open sessions come back after an app restart and
   reconnect by themselves ([docs/session-restore.md](docs/session-restore.md)).
+- **Several sessions on one Herdr server**: Herdr shares one focus between
+  all its screens, the laptop included. By default the app never moves it:
+  composer and snippet text goes to each session's own pane, typed keys
+  wait while Herdr shows another workspace, and tiles read their own
+  workspace. *Phone may move Herdr focus* lets the session in use take it
+  instead ([docs/herdr-shared-focus.md](docs/herdr-shared-focus.md)).
 - **Navigators** for Herdr and tmux: every pane with its agent and state, tap to
   switch, one-tap **Split right / Split down / New tab / New workspace** (tmux:
   new window), windows or tabs 1-9, zoom, kill pane and detach. Long-press the

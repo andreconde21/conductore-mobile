@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
+import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/material.dart';
 
@@ -311,5 +312,99 @@ class _TerminalSnapshotBuilderState extends State<TerminalSnapshotBuilder> {
   Widget build(BuildContext context) {
     _changed = false;
     return RepaintBoundary(child: Builder(builder: widget.builder));
+  }
+}
+
+/// Builds [session]'s preview: live from its terminal, or from its
+/// [SharedViewSnapshot] while its screen mirrors another session's Herdr
+/// workspace (see [TerminalSessionController.sharedView]). [builder] gets
+/// the snapshot too, null while the preview is live.
+class SessionPreviewBuilder extends StatelessWidget {
+  const SessionPreviewBuilder({
+    required this.session,
+    required this.builder,
+    super.key,
+  });
+
+  final TerminalSessionController session;
+  final Widget Function(
+    BuildContext context,
+    StyledTerminalPreview preview,
+    SharedViewSnapshot? shared,
+  )
+  builder;
+
+  /// What a preview says while it has no snapshot of its own workspace.
+  static const sharedPlaceholder =
+      'Shared Herdr view: open this session to show its workspace';
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<SharedViewSnapshot?>(
+      valueListenable: session.sharedView,
+      builder: (context, shared, _) {
+        if (shared != null) {
+          return RepaintBoundary(
+            key: const ValueKey('shared-view-preview'),
+            child: builder(context, shared.preview, shared),
+          );
+        }
+        return TerminalSnapshotBuilder(
+          terminal: session.terminal,
+          builder: (context) => builder(
+            context,
+            StyledTerminalPreview.capture(session.terminal),
+            null,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The small "Herdr · 05:54" caption on a preview that shows a
+/// [SharedViewSnapshot]: when its screen was last its own.
+class SharedViewCaption extends StatelessWidget {
+  const SharedViewCaption({
+    required this.shared,
+    required this.background,
+    required this.foreground,
+    super.key,
+  });
+
+  final SharedViewSnapshot shared;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = shared.preview.isEmpty
+        ? 'Herdr'
+        : 'Herdr · ${shared.timeLabel}';
+    return Tooltip(
+      message: shared.preview.isEmpty
+          ? 'This session shares its Herdr server with the one in use, '
+                'which shows another workspace. Open it to show its own.'
+          : 'Last seen at ${shared.timeLabel}. This session shares its '
+                'Herdr server with the one in use, which shows another '
+                'workspace. Open it to show its own.',
+      child: DecoratedBox(
+        key: const ValueKey('shared-view-caption'),
+        decoration: BoxDecoration(
+          color: background.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          child: Text(
+            text,
+            style: TextStyle(
+              color: foreground.withValues(alpha: 0.8),
+              fontSize: 10,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -391,16 +391,24 @@ class SessionTile extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(8, 8, 4, 4),
                   child: Stack(
                     children: [
-                      TerminalSnapshotBuilder(
-                        terminal: session.terminal,
-                        builder: (context) => _PreviewText(
-                          preview: TerminalPreview.capture(
-                            session.terminal,
-                            rows: previewRows,
-                            columns: previewColumns,
-                          ),
+                      SessionPreviewBuilder(
+                        session: session,
+                        builder: (context, styled, shared) => _PreviewText(
+                          preview: shared == null
+                              ? TerminalPreview.capture(
+                                  session.terminal,
+                                  rows: previewRows,
+                                  columns: previewColumns,
+                                )
+                              : TerminalPreview.fromStyled(
+                                  styled,
+                                  rows: previewRows,
+                                  columns: previewColumns,
+                                ),
                           color: palette.terminalForegroundFor(brightness),
-                          placeholder: _placeholderFor(session.status),
+                          placeholder: shared != null
+                              ? SessionPreviewBuilder.sharedPlaceholder
+                              : _placeholderFor(session.status),
                           placeholderColor: muted,
                         ),
                       ),

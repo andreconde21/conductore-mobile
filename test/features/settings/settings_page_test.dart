@@ -111,6 +111,27 @@ void main() {
   Finder sectionTile(SettingsSection section) =>
       find.byKey(ValueKey('settings-section-${section.name}'));
 
+  testWidgets('Terminal has "Phone may move Herdr focus", off by default', (
+    tester,
+  ) async {
+    phone(tester);
+    await pumpLauncher(tester, section: SettingsSection.terminal);
+    final title = find.text('Phone may move Herdr focus');
+    await tester.scrollUntilVisible(title, 200);
+    expect(
+      find.textContaining('Herdr shares one focus across all screens'),
+      findsOneWidget,
+    );
+    expect(theme.herdrMayMoveFocus, isFalse);
+    await tester.tap(title);
+    await tester.pumpAndSettle();
+    expect(theme.herdrMayMoveFocus, isTrue);
+    expect(
+      settingsCatalog.where((entry) => entry.title.contains('Herdr focus')),
+      hasLength(2),
+    );
+  });
+
   test('the catalog keeps every setting the Appearance sheet had', () {
     final titles = {for (final entry in settingsCatalog) entry.title};
     for (final title in [

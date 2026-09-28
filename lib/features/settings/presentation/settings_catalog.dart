@@ -93,6 +93,20 @@ class SettingsEntry {
 }
 
 bool _omarchy(SettingsServices s) => s.theme.omarchySync != null;
+bool _notDesktop(SettingsServices _) => !PlatformFeatures.isDesktop;
+const _herdrFocusKeywords = [
+  'herdr',
+  'focus',
+  'workspace',
+  'laptop',
+  'shared',
+  'this device',
+];
+
+/// The Herdr focus setting's title on this build.
+String get herdrMayMoveFocusTitle => PlatformFeatures.isDesktop
+    ? 'This device may move Herdr focus'
+    : 'Phone may move Herdr focus';
 bool _speech(SettingsServices _) =>
     PlatformFeatures.dictation || PlatformFeatures.textToSpeech;
 bool _tts(SettingsServices _) => PlatformFeatures.textToSpeech;
@@ -160,6 +174,18 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.terminal,
     'Enter sends',
     keywords: ['enter', 'return', 'crlf', 'newline', 'sequence'],
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Phone may move Herdr focus',
+    keywords: _herdrFocusKeywords,
+    availableWhen: _notDesktop,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'This device may move Herdr focus',
+    keywords: _herdrFocusKeywords,
+    availableWhen: _desktop,
   ),
   SettingsEntry(
     SettingsSection.terminal,
