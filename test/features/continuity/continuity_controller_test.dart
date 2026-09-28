@@ -144,7 +144,7 @@ void main() {
         );
         async.flushMicrotasks();
         expect(controller.offer, isNotNull);
-        link.sharing = false;
+        link.share(false);
         expect(controller.offer, isNull);
       },
       store: InMemoryContinuityStore(

@@ -6,6 +6,8 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/continuity/presentation/continuity_controller.dart';
+import 'package:conduit/features/continuity/presentation/continuity_scope.dart';
 import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
@@ -85,6 +87,9 @@ class ShellHarness {
   /// "Open Claude sessions in", provided above the page when set.
   SessionViewController? sessionViews;
 
+  /// Continuity between devices, provided above the page when set.
+  ContinuityController? continuity;
+
   Widget page({bool? shellMode, UsageSummaryBuilder? usage}) => MaterialApp(
     home: _withUsage(
       HostsPage(
@@ -122,9 +127,13 @@ class ShellHarness {
     final withUsage = usage == null
         ? page
         : UsageScope(controller: usage, child: page);
-    return views == null
+    final withViews = views == null
         ? withUsage
         : SessionViewScope(controller: views, child: withUsage);
+    final continuity = this.continuity;
+    return continuity == null
+        ? withViews
+        : ContinuityScope(controller: continuity, child: withViews);
   }
 }
 

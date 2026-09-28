@@ -1838,6 +1838,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final views = session.host.isLocal
         ? null
         : SessionViewScope.maybeOf(context);
+    final continuity = ContinuityScope.maybeOf(context);
     final action = await showAdaptiveModal<_SessionAction>(
       kind: AdaptiveModalKind.menu,
       context: context,
@@ -1873,8 +1874,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 subtitle: Text(sessionViewSummary(views, session.host.id)),
                 onTap: () => Navigator.of(context).pop(_SessionAction.openIn),
               ),
-            if (ContinuityScope.maybeOf(context) case final continuity?
-                when continuity.active)
+            if (continuity != null && continuity.active)
               ListTile(
                 key: const ValueKey('session-action-continue-on'),
                 leading: const Icon(Icons.devices_rounded),

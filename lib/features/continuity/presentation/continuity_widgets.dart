@@ -365,12 +365,14 @@ class ContinuitySettingsTiles extends StatelessWidget {
         final prefs = controller.preferences;
         void set(ContinuityPreferences next) =>
             unawaited(controller.setPreferences(next));
+        // Built from the preferences at the tap, not at the build.
         Widget tile(
           String key,
           String title,
           String subtitle,
           bool value,
-          ContinuityPreferences Function(bool on) next,
+          ContinuityPreferences Function(ContinuityPreferences now, bool on)
+          next,
         ) => CheckboxListTile(
           key: ValueKey('continuity-$key'),
           contentPadding: const EdgeInsets.only(left: 16),
@@ -378,7 +380,9 @@ class ContinuitySettingsTiles extends StatelessWidget {
           title: Text(title),
           subtitle: Text(subtitle),
           value: value,
-          onChanged: enabled ? (on) => set(next(on ?? false)) : null,
+          onChanged: enabled
+              ? (on) => set(next(controller.preferences, on ?? false))
+              : null,
         );
         return Column(
           children: [
@@ -388,7 +392,7 @@ class ContinuitySettingsTiles extends StatelessWidget {
               'Where you are (machine, workspace, terminal or Chat view) '
                   'and your recent places.',
               prefs.sessions,
-              (on) => prefs.copyWith(sessions: on),
+              (now, on) => now.copyWith(sessions: on),
             ),
             tile(
               'drafts',
@@ -396,14 +400,14 @@ class ContinuitySettingsTiles extends StatelessWidget {
               'Chat view prompts you have not sent. They travel only '
                   'inside the end-to-end encrypted sync data.',
               prefs.drafts,
-              (on) => prefs.copyWith(drafts: on),
+              (now, on) => now.copyWith(drafts: on),
             ),
             tile(
               'scroll',
               'Chat view position',
               'The message you were reading.',
               prefs.scroll,
-              (on) => prefs.copyWith(scroll: on),
+              (now, on) => now.copyWith(scroll: on),
             ),
           ],
         );

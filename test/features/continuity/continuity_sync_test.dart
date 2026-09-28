@@ -218,12 +218,12 @@ void main() {
     expect(old.categories, contains(SyncCategory.continuity));
 
     final turnedOff = SyncConfig.fromJson(
-      SyncConfig(
+      const SyncConfig(
         vaultId: 'v',
         hubHostId: 'hub',
         deviceId: 'd',
         deviceName: 'Phone',
-        categories: const {SyncCategory.machines},
+        categories: {SyncCategory.machines},
       ).toJson(),
     )!;
     expect(turnedOff.categories, {SyncCategory.machines});

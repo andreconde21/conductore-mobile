@@ -10,8 +10,8 @@ class FakeContinuityLink extends ChangeNotifier implements ContinuitySyncLink {
   FakeContinuityLink({
     this.deviceId = 'phone-id',
     this.deviceName = 'Phone',
-    bool sharing = true,
-  }) : _sharing = sharing;
+    this.sharing = true,
+  });
 
   @override
   String? deviceId;
@@ -19,13 +19,12 @@ class FakeContinuityLink extends ChangeNotifier implements ContinuitySyncLink {
   @override
   String deviceName;
 
-  bool _sharing;
-
   @override
-  bool get sharing => _sharing;
+  bool sharing;
 
-  set sharing(bool value) {
-    _sharing = value;
+  /// Turns the continuity category on or off, as Settings › Sync does.
+  void share(bool on) {
+    sharing = on;
     notifyListeners();
   }
 
