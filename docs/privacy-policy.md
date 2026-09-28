@@ -37,7 +37,9 @@ If you turn on device sync, the app stores one file encrypted on your
 device with your sync passphrase (Argon2id, XChaCha20-Poly1305) in
 `~/.conductore/sync` on a machine of yours that you pick, over SSH, plus a
 small unencrypted list of your device names and sync times. Passwords and
-SSH keys are included only if you turn that on. Adding a device adds an
+SSH keys are included only if you turn that on. "Continue where you left
+off" adds where each device is and your unsent Chat view drafts to that
+encrypted file; you can leave drafts out or turn it off. Adding a device adds an
 SSH key marked `conductore-device` to that machine's
 `~/.ssh/authorized_keys`, after you confirm.
 

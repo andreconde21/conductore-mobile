@@ -402,6 +402,12 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.syncBackup,
+    'Continue where you left off',
+    keywords: ['continuity', 'handoff', 'drafts', 'other device', 'resume'],
+    availableWhen: _sync,
+  ),
+  SettingsEntry(
+    SettingsSection.syncBackup,
     'Export backup',
     keywords: ['backup', 'export', 'save', 'file'],
     availableWhen: _backup,
