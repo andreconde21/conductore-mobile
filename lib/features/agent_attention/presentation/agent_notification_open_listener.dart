@@ -16,10 +16,15 @@ class AgentNotificationOpenListener extends StatefulWidget {
     required this.findHost,
     required this.onOpen,
     required this.child,
+    this.intercept,
     super.key,
   });
 
   final AgentOpenRequestSource source;
+
+  /// Takes a tap that is not an agent's (a Talkbawt reply opens its
+  /// preview); true when it handled it.
+  final bool Function(AgentOpenTarget target)? intercept;
 
   /// The saved host for a notification's host id; null when it was removed.
   final Future<SavedHost?> Function(String hostId) findHost;
@@ -61,6 +66,9 @@ class _AgentNotificationOpenListenerState
     unawaited(() async {
       final target = await widget.source.consume();
       if (!mounted || target == null) {
+        return;
+      }
+      if (widget.intercept?.call(target) ?? false) {
         return;
       }
       final host = await widget.findHost(target.hostId);

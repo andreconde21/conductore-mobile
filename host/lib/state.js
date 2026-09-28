@@ -6,7 +6,7 @@
 //   { version: 1, seq: N, agents: { [sessionId]: Agent } }
 //   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, process, state, lastEvent, lastToolName,
 //             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest],
-//             lastError? }
+//             lastError?, permissionMode? }
 //   lastError = { type, at }: the last turn ended on an API error (StopFailure),
 //   until the next prompt
 //   process = { pid, startTime } of Claude Code when the daemon could identify it
@@ -111,6 +111,10 @@ function applyContext (agent, event) {
   }
   if (event.herdr) agent.herdr = event.herdr
   if (event.process) agent.process = event.process
+  // Claude Code's current mode (default, plan, acceptEdits, auto,
+  // bypassPermissions…), carried by every hook event: Talkbawt refuses to
+  // type into an agent that acts without asking.
+  if (typeof event.permission_mode === 'string' && event.permission_mode) agent.permissionMode = event.permission_mode
   const name = pickName(event, agent.cwd)
   if (name) agent.name = name
 }
