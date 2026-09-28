@@ -10,6 +10,8 @@ import 'package:conduit/features/agent_attention/domain/agent_attention_provider
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
+import 'package:conduit/features/live/presentation/live_host_hub.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:flutter/foundation.dart';
@@ -333,18 +335,33 @@ AgentAttentionState? herdrStatusToState(String raw) {
 /// is closed whenever the board is hidden or switches machine. Hardware-key
 /// machines are listed only after [requestLoad]: every new connection asks
 /// for a key touch.
+///
+/// With a [liveFeed] whose companion pushes Herdr and tmux
+/// (`docs/herdr-live.md`), the board polls nothing: it draws the pushed
+/// model, and polls only when that machine's companion cannot push.
 class HomeBoardController extends ChangeNotifier {
   HomeBoardController({
     required AgentCommandRunnerFactory runnerFactory,
     AgentAttentionProvider provider = const HerdrAttentionProvider(),
     Duration pollInterval = const Duration(seconds: 5),
+    LiveHostFeed? Function(SavedHost host)? liveFeed,
   }) : _runnerFactory = runnerFactory,
        _provider = provider,
-       _pollInterval = pollInterval;
+       _pollInterval = pollInterval,
+       _liveFeed = liveFeed;
 
   final AgentCommandRunnerFactory _runnerFactory;
   final AgentAttentionProvider _provider;
   final Duration _pollInterval;
+  final LiveHostFeed? Function(SavedHost host)? _liveFeed;
+
+  /// The pushed feed this board reads while it is on screen, and its
+  /// release.
+  LiveHostFeed? _feed;
+  VoidCallback? _releaseFeed;
+
+  /// Whether the board draws the pushed model instead of polling.
+  bool get live => _feed?.support == LiveSupport.supported;
 
   static const _timeout = Duration(seconds: 10);
   static const _maxBackoffTicks = 4;
@@ -424,6 +441,7 @@ class HomeBoardController extends ChangeNotifier {
     }
     _generation += 1;
     _stopTimer();
+    _detachFeed();
     unawaited(_closeRunner());
     _host = host;
     _requested = false;
@@ -461,6 +479,7 @@ class HomeBoardController extends ChangeNotifier {
       _start();
     } else {
       _stopTimer();
+      _detachFeed();
       _generation += 1;
       unawaited(_closeRunner());
       if (_state.refreshing || _state.phase == HomeBoardPhase.loading) {
@@ -489,6 +508,8 @@ class HomeBoardController extends ChangeNotifier {
   /// machines that have not been requested yet.
   Future<void> refresh() async {
     if (_disposed || !_listable || _needsRequest) return;
+    // Pushed: what is on screen is current.
+    if (live) return;
     _failures = 0;
     _skipTicks = 0;
     _quietPolls = 0;
@@ -566,6 +587,7 @@ class HomeBoardController extends ChangeNotifier {
 
   void _start({bool force = false}) {
     if (!_visible || !_listable || _needsRequest) return;
+    if (_attachFeed()) return;
     if (!force && _nothingToPoll) return;
     if (_state.phase == HomeBoardPhase.awaitingRequest ||
         _state.phase == HomeBoardPhase.idle) {
@@ -574,6 +596,125 @@ class HomeBoardController extends ChangeNotifier {
     }
     _startTimer();
     unawaited(_fetch());
+  }
+
+  /// Reads the machine's pushed feed when its companion may push; false
+  /// when the board polls instead.
+  bool _attachFeed() {
+    final host = _host;
+    if (host == null) return false;
+    final feed = _feed ?? _liveFeed?.call(host);
+    if (feed == null || feed.support == LiveSupport.unsupported) {
+      return false;
+    }
+    if (_feed == null) {
+      _feed = feed;
+      feed.addListener(_onFeed);
+      _releaseFeed = feed.acquire();
+    }
+    _stopTimer();
+    if (_state.phase == HomeBoardPhase.awaitingRequest ||
+        _state.phase == HomeBoardPhase.idle) {
+      _state = _state.copyWith(phase: HomeBoardPhase.loading);
+      notifyListeners();
+    }
+    _onFeed();
+    return true;
+  }
+
+  void _detachFeed() {
+    _feed?.removeListener(_onFeed);
+    _releaseFeed?.call();
+    _feed = null;
+    _releaseFeed = null;
+  }
+
+  void _onFeed() {
+    final feed = _feed;
+    if (_disposed || feed == null) return;
+    switch (feed.support) {
+      case LiveSupport.unknown:
+        return;
+      case LiveSupport.unsupported:
+        // An older companion, or none: poll as before.
+        _detachFeed();
+        _start();
+      case LiveSupport.supported:
+        final next = stateFromLive(feed.model);
+        if (next.sameBoardAs(_state)) return;
+        _state = next;
+        _failures = 0;
+        notifyListeners();
+    }
+  }
+
+  /// The board the pushed [model] shows: the default Herdr server's
+  /// workspaces, tabs and agents, and the tmux sessions.
+  @visibleForTesting
+  static HomeBoardState stateFromLive(LiveHostModel model) {
+    final herdr = LiveHostModel.herdrServerId('');
+    final tmuxServer = model.entities['srv:${LiveHostModel.tmuxServerId}'];
+    final tmuxError = tmuxServer?['error'];
+    final (tmux, tmuxSessions) = switch (model.serverState(
+      LiveHostModel.tmuxServerId,
+    )) {
+      LiveServerState.up => (HomeTmuxStatus.available, model.tmuxSessions()),
+      LiveServerState.none
+          when tmuxError is String && tmuxError.contains('not installed') =>
+        (HomeTmuxStatus.notInstalled, const <TmuxSessionInfo>[]),
+      LiveServerState.none => (
+        HomeTmuxStatus.available,
+        const <TmuxSessionInfo>[],
+      ),
+      LiveServerState.down => (
+        HomeTmuxStatus.failed,
+        const <TmuxSessionInfo>[],
+      ),
+      LiveServerState.unknown => (
+        HomeTmuxStatus.unknown,
+        const <TmuxSessionInfo>[],
+      ),
+    };
+    final herdrError = model.entities['srv:$herdr']?['error'];
+    final now = DateTime.now();
+    switch (model.serverState(herdr)) {
+      case LiveServerState.up:
+        return HomeBoardState(
+          phase: HomeBoardPhase.ready,
+          workspaces: buildBoard(
+            model.workspaces(),
+            model.herdrTabs(),
+            model.herdrAgents(),
+          ),
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
+          updatedAt: now,
+        );
+      case LiveServerState.none
+          when herdrError is String && herdrError.contains('not installed'):
+        return HomeBoardState(
+          phase: HomeBoardPhase.notInstalled,
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
+          message: 'Herdr is not installed on this machine.',
+          updatedAt: now,
+        );
+      case LiveServerState.none || LiveServerState.down:
+        return HomeBoardState(
+          phase: HomeBoardPhase.notRunning,
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
+          message: 'Herdr is not running on this machine.',
+          updatedAt: now,
+        );
+      case LiveServerState.unknown:
+        return HomeBoardState(
+          phase: HomeBoardPhase.loading,
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
+          updatedAt: now,
+        );
+    }
   }
 
   void _startTimer() {
@@ -832,6 +973,7 @@ class HomeBoardController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _stopTimer();
+    _detachFeed();
     unawaited(_closeRunner());
     super.dispose();
   }
@@ -859,10 +1001,12 @@ class HomeBoards extends ChangeNotifier {
     required AgentCommandRunnerFactory runnerFactory,
     AgentAttentionProvider provider = const HerdrAttentionProvider(),
     Duration pollInterval = const Duration(seconds: 5),
+    LiveHostFeed? Function(SavedHost host)? liveFeed,
   }) : _create = (() => HomeBoardController(
          runnerFactory: runnerFactory,
          provider: provider,
          pollInterval: pollInterval,
+         liveFeed: liveFeed,
        ));
 
   final HomeBoardController Function() _create;

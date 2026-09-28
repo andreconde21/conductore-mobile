@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
+import 'package:conduit/features/live/presentation/live_host_hub.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
@@ -63,6 +65,9 @@ mixin MultiplexerPillActions<T extends StatefulWidget> on State<T> {
 
   /// Opens the command channel; null limits everything to keys.
   AgentCommandRunner Function(SavedHost host)? get multiplexerRunnerFactory;
+
+  /// The machine's pushed Herdr state, when its companion pushes it.
+  LiveHostFeed? Function(SavedHost host)? get multiplexerLiveFeed => null;
 
   /// Gives the terminal its focus back after a sheet or menu.
   void focusTerminalAfterMultiplexer();
@@ -143,10 +148,24 @@ mixin MultiplexerPillActions<T extends StatefulWidget> on State<T> {
                 if (!keymaps.has(baseHostId(host.id))) {
                   await keymaps.load(baseHostId(host.id), runner);
                 }
-                final listing = await HerdrNavigator.load(
-                  runner,
-                  session: herdrSession,
-                );
+                final feed = multiplexerLiveFeed?.call(host);
+                final server = LiveHostModel.herdrServerId(herdrSession);
+                // Pushed by the companion: no herdr command needed.
+                final listing =
+                    feed != null &&
+                        feed.support == LiveSupport.supported &&
+                        feed.model.serverState(server) == LiveServerState.up
+                    ? HerdrPanesAvailable(
+                        HerdrNavigator.buildEntries(
+                          feed.model.workspaces(
+                            server: server,
+                            session: herdrSession,
+                          ),
+                          feed.model.herdrTabs(server: server),
+                          feed.model.herdrAgents(server: server),
+                        ),
+                      )
+                    : await HerdrNavigator.load(runner, session: herdrSession);
                 if (listing is! HerdrListingFailed) {
                   cache[host.id] = listing;
                 }

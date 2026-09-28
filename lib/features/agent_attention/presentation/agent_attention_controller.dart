@@ -13,6 +13,7 @@ import 'package:conduit/features/agent_attention/domain/agent_notifications.dart
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -1337,8 +1338,12 @@ class AgentAttentionController extends ChangeNotifier {
         previous: notice,
         entered: isEntered,
         previousState: previous[agent.id]?.state,
-        // The companion reports a session that ended as finished.
-        ended: companion && agent.state == AgentAttentionState.finished,
+        // The companion reports a session that ended as finished; a
+        // Herdr-only agent's finished is a turn that ended.
+        ended:
+            companion &&
+            agent.state == AgentAttentionState.finished &&
+            !isHerdrOnlyAgent(agent),
         initial: initial,
         level: host.agentNotifyLevel,
         preferences: preferences,

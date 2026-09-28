@@ -33,6 +33,7 @@ import 'package:conduit/features/diff_view/presentation/diff_view_controller.dar
 import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/live_preview/data/preview_screenshot_sender.dart';
 import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
@@ -759,8 +760,24 @@ class _TerminalPageState extends State<TerminalPage>
       return null;
     }
     final herdr = backend.kind == MultiplexerTabsKind.herdr;
+    final feed = flow.live.feedFor(host);
+    final herdrServer = LiveHostModel.herdrServerId(
+      HerdrSessionFocus.herdrTargetOf(session)?.session ?? '',
+    );
     return MultiplexerTabsController(
       backend: backend,
+      live: feed == null
+          ? null
+          : MultiplexerLiveTabs(
+              feed: feed,
+              read: herdr
+                  ? (model) => model.herdrStripTabs(
+                      server: herdrServer,
+                      fallbackWorkspaceId:
+                          flow.herdr.workspaceOf(session) ?? '',
+                    )
+                  : (model) => model.tmuxWindows(tmuxSession!),
+            ),
       agentStateFor: (tab) => _agentStateOfTab(
         session,
         herdr ? tab.id : '$tmuxSession:${tab.index}',
@@ -2973,6 +2990,7 @@ class _TerminalPageState extends State<TerminalPage>
                             widget.themeController.setTerminalPillItems(items),
                           ),
                           runnerFactory: widget.connectFlow?.runnerFactory,
+                          liveFeed: widget.connectFlow?.live.feedFor,
                         ),
                     ],
                   ),

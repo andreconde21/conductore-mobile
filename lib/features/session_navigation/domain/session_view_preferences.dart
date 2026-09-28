@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:flutter/foundation.dart';
 
@@ -38,6 +39,8 @@ String sessionViewKey(String sessionHostId) {
 /// Whether [agent] is a Claude Code session (the companion also reports
 /// Codex, OpenCode and others, which have no Chat View).
 bool isClaudeAgent(AgentInfo agent) {
+  // Seen only by Herdr: no hooks, so no transcript for a chat view.
+  if (isHerdrOnlyAgent(agent)) return false;
   final kind = agent.kind.trim().toLowerCase();
   return kind.isEmpty || kind.startsWith('claude');
 }

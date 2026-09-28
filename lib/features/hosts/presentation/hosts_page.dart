@@ -273,6 +273,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       _ownedBoards = HomeBoards(
         runnerFactory: flow.runnerFactory,
         provider: widget.agentAttention.provider,
+        liveFeed: flow.live.feedFor,
       );
     }
     widget.hostsController.addListener(_syncBoards);

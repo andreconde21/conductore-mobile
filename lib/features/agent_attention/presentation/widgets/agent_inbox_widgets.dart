@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:flutter/material.dart';
 
 /// Which agent CLI a row belongs to, from the provider's free-form kind.
@@ -11,9 +12,15 @@ class AgentKindStyle {
   const AgentKindStyle._(this.label, this.monogram, this.color);
 
   factory AgentKindStyle.of(String kind) {
-    final normalized = kind.toLowerCase();
+    final normalized = kind.trim().toLowerCase();
+    // Herdr's agent kinds are exact names (`pi` must not match `copilot`).
     for (final (match, style) in _known) {
-      if (normalized.contains(match)) {
+      if (normalized == match) {
+        return style;
+      }
+    }
+    for (final (match, style) in _known) {
+      if (match.length > 3 && normalized.contains(match)) {
         return style;
       }
     }
@@ -39,6 +46,25 @@ class AgentKindStyle {
     ('cursor', AgentKindStyle._('Cursor', 'CU', Color(0xFF6D7B8D))),
     ('amp', AgentKindStyle._('Amp', 'AM', Color(0xFFE0548B))),
     ('goose', AgentKindStyle._('Goose', 'GO', Color(0xFF6A9A3C))),
+    // The rest of the kinds Herdr detects (0.9.1).
+    ('pi', AgentKindStyle._('Pi', 'PI', Color(0xFF8D6E63))),
+    ('devin', AgentKindStyle._('Devin', 'DV', Color(0xFF26A69A))),
+    ('agy', AgentKindStyle._('Antigravity', 'AG', Color(0xFF7E57C2))),
+    ('cline', AgentKindStyle._('Cline', 'CL', Color(0xFF42A5F5))),
+    ('omp', AgentKindStyle._('OMP', 'OM', Color(0xFF78909C))),
+    ('mastracode', AgentKindStyle._('MastraCode', 'MC', Color(0xFFEF6C00))),
+    ('copilot', AgentKindStyle._('Copilot CLI', 'CP', Color(0xFF6E40C9))),
+    ('kimi', AgentKindStyle._('Kimi', 'KM', Color(0xFF3949AB))),
+    ('kiro', AgentKindStyle._('Kiro', 'KR', Color(0xFF9C27B0))),
+    ('droid', AgentKindStyle._('Droid', 'DR', Color(0xFF00897B))),
+    ('grok', AgentKindStyle._('Grok', 'GK', Color(0xFF546E7A))),
+    ('hermes', AgentKindStyle._('Hermes', 'HM', Color(0xFFFFA000))),
+    ('kilo', AgentKindStyle._('Kilo Code', 'KL', Color(0xFFC0CA33))),
+    ('qodercli', AgentKindStyle._('Qoder', 'QD', Color(0xFF00ACC1))),
+    ('qwen', AgentKindStyle._('Qwen Code', 'QW', Color(0xFF5E35B1))),
+    ('letta', AgentKindStyle._('Letta', 'LT', Color(0xFF8BC34A))),
+    ('maki', AgentKindStyle._('Maki', 'MK', Color(0xFFE57373))),
+    ('muse', AgentKindStyle._('Muse', 'MU', Color(0xFFBA68C8))),
   ];
 }
 
@@ -303,6 +329,9 @@ class AgentInboxRow extends StatelessWidget {
     final meta = [
       if (showHost) entry.hostName,
       if (agent.name != project) agent.name,
+      // Status from Herdr's detection: no approvals, chat or usage.
+      if (isHerdrOnlyAgent(agent))
+        '${AgentKindStyle.of(agent.kind).label} via Herdr',
       if (changed != null) relativeAgentTime(changed),
     ].join(' · ');
     final message = agent.lastMessage?.trim();
