@@ -69,6 +69,17 @@ void main() {
     expect(again.multiplexerTabs, MultiplexerTabsMode.strip);
   });
 
+  test('"may move Herdr focus" is kept per device, off by default', () async {
+    final storage = InMemorySecureStorage();
+    final first = ThemeController(ThemePreferencesRepository(storage));
+    await first.load();
+    expect(first.herdrMayMoveFocus, isFalse);
+    await first.setHerdrMayMoveFocus(true);
+    final again = ThemeController(ThemePreferencesRepository(storage));
+    await again.load();
+    expect(again.herdrMayMoveFocus, isTrue);
+  });
+
   group('the strip', () {
     late FakeTmux tmux;
     late MultiplexerTabsController controller;

@@ -188,10 +188,9 @@ void main() {
     expect(session.title, 'Backend');
     expect(find.byKey(const ValueKey('home-session-a#herdr:w1')), findsOne);
     expect(session.status, TerminalConnectionStatus.connected);
-    expect(
-      typed(second.repository.connects['a#herdr:w1']!),
-      'herdr workspace focus w1 >/dev/null 2>&1; herdr\r',
-    );
+    // A plain attach: by default the app never moves Herdr's shared focus
+    // (the laptop's Herdr shows it too).
+    expect(typed(second.repository.connects['a#herdr:w1']!), 'herdr\r');
     await unmount(tester, second);
   });
 
