@@ -320,9 +320,9 @@ class TalkbawtController extends ChangeNotifier {
     AgentInfo agent,
     TalkbawtRead content, {
     bool confirmedUnknownMode = false,
-  }) {
+  }) async {
     checkAgentMode(agent, confirmedUnknownMode: confirmedUnknownMode);
-    return _with(
+    await _with(
       host,
       (c) => c.deliver(
         sessionId: agent.id,
