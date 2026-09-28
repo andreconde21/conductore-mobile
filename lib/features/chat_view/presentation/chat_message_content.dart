@@ -6,10 +6,18 @@ import 'package:conduit/features/chat_view/presentation/widgets/chat_markdown.da
 /// The text of one thread row for its actions (copy, share, send to
 /// another agent, quote): [text] as written, Markdown when [markdown].
 class ChatMessageContent {
-  const ChatMessageContent(this.text, {this.markdown = false});
+  const ChatMessageContent(
+    this.text, {
+    this.markdown = false,
+    this.fromAgent = false,
+  });
 
   final String text;
   final bool markdown;
+
+  /// An agent wrote it (a reply, a plan, a teammate's message): passed on
+  /// to another agent it arrives framed as context.
+  final bool fromAgent;
 
   /// [text] without Markdown ("Copy").
   String get plain => markdown ? markdownToPlainText(text) : text;
@@ -57,6 +65,10 @@ class ChatMessageContent {
     return ChatMessageContent(
       text,
       markdown: item is ChatAssistantText || item is ChatPlan,
+      fromAgent:
+          item is ChatAssistantText ||
+          item is ChatPlan ||
+          item is ChatAgentMessage,
     );
   }
 

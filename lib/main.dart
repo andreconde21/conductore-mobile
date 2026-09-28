@@ -45,6 +45,7 @@ import 'package:conduit/features/home_widget/presentation/home_launch_requests.d
 import 'package:conduit/features/hosts/data/secure_saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
+import 'package:conduit/features/live/presentation/companion_preferences.dart';
 import 'package:conduit/features/local_shell/data/local_terminal_repository.dart';
 import 'package:conduit/features/local_shell/local_shell_licenses.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
@@ -258,6 +259,12 @@ void main() {
   );
   // An agent's expanded notification ends with its dashboard line.
   agentAttention.notificationDetail = digest.cachedLineFor;
+  // Herdr sidebar tokens and the worktree location, per companion; read
+  // from storage only once a companion that takes them connects.
+  final companionPreferences = CompanionPreferences.instance =
+      CompanionPreferences.secure(secureStorage, attention: agentAttention);
+  agentAttention.onCompanionCapabilities = (host, capabilities) =>
+      unawaited(companionPreferences.hostConnected(host, capabilities));
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
   addTelemetryTerms(() => usage.summary.accountTerms);

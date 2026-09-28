@@ -16,6 +16,7 @@ class ChatMessageActionsScope extends InheritedWidget {
     required super.child,
     this.onQuote,
     this.onForward,
+    this.onMessageAgents,
     this.share = PlatformTextShare.share,
     super.key,
   });
@@ -25,6 +26,11 @@ class ChatMessageActionsScope extends InheritedWidget {
 
   /// Sends the text to another agent; null hides the action.
   final ValueChanged<String>? onForward;
+
+  /// "Message agents…": send to one or several agents, or ask one and wait
+  /// for its answer. `fromAgent`: the text is an agent's output, relayed as
+  /// context. Null hides the action.
+  final void Function(String text, {required bool fromAgent})? onMessageAgents;
 
   /// The system share sheet; false when there is none.
   final Future<bool> Function(String text) share;
@@ -43,6 +49,7 @@ enum ChatMessageAction {
   select,
   share,
   forward,
+  messageAgents,
   quote,
 }
 
@@ -127,6 +134,14 @@ class _ChatMessageActionsState extends State<ChatMessageActions> {
                     Icons.forward_to_inbox_outlined,
                     'Send to another agent…',
                   ),
+                if (scope?.onMessageAgents != null)
+                  item(
+                    ChatMessageAction.messageAgents,
+                    Icons.hub_outlined,
+                    content.fromAgent
+                        ? 'Relay to agents…'
+                        : 'Ask or send to agents…',
+                  ),
                 if (scope?.onQuote != null)
                   item(
                     ChatMessageAction.quote,
@@ -155,6 +170,8 @@ class _ChatMessageActionsState extends State<ChatMessageActions> {
         await _share(selection ?? content.plain, scope);
       case ChatMessageAction.forward:
         scope?.onForward?.call(text);
+      case ChatMessageAction.messageAgents:
+        scope?.onMessageAgents?.call(text, fromAgent: content.fromAgent);
       case ChatMessageAction.quote:
         scope?.onQuote?.call(text);
     }
