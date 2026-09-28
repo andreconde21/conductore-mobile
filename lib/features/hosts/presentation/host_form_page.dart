@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -15,9 +17,25 @@ import 'package:conduit/features/hosts/presentation/widgets/host_form_chrome.dar
 import 'package:conduit/features/hosts/presentation/widgets/host_form_sections.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
+
+/// Opens the machine form for [host] (a new machine when null) and returns
+/// the saved machine, or null when it was cancelled. Phones push it full
+/// screen as before; desktop shows it as a dialog over the shell.
+Future<SavedHost?> openHostForm(
+  BuildContext context, {
+  SavedHost? host,
+  ThemeController? themeController,
+}) {
+  return pushAdaptivePage<SavedHost>(
+    context,
+    desktopMaxWidth: 720,
+    builder: (_) => HostFormPage(host: host, themeController: themeController),
+  );
+}
 
 class HostFormPage extends StatefulWidget {
   const HostFormPage({
@@ -237,145 +255,208 @@ class _HostFormPageState extends State<HostFormPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final palette = widget.themeController?.palette;
-    final body = SafeArea(
-      bottom: shouldApplyBottomSafeArea(context),
-      child: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
-          children: [
-            HostFormHeader(
-              title: _isEditing ? 'Edit machine' : 'New machine',
-              subtitle: _isEditing
-                  ? 'Update connection details and credentials.'
-                  : 'Connection profile and credentials.',
-              onBack: () => Navigator.of(context).pop(),
-            ),
-            const SizedBox(height: 20),
-            HostConnectionSection(
-              nameController: _nameController,
-              hostController: _hostController,
-              portController: _portController,
-              usernameController: _usernameController,
-              requiredValidator: _required,
-              portValidator: _validatePort,
-            ),
-            const SizedBox(height: 14),
-            HostAuthenticationSection(
-              authMethod: _authMethod,
-              passwordController: _passwordController,
-              privateKeyController: _privateKeyController,
-              passphraseController: _passphraseController,
-              showPassword: _showPassword,
-              showPassphrase: _showPassphrase,
-              forwardAgent: _forwardAgent,
-              externalAuthOfferKey: _externalAuthOfferKey,
-              keyInspection: _keyInspection,
-              hardwareKeys: _hardwareKeys,
-              hardwareKeyInspections: _hardwareKeyInspections,
-              hardwareKeysError: _hardwareKeysError,
-              requiredValidator: _required,
-              keyMaterialValidator: _validateKeyMaterial,
-              onAuthMethodChanged: _changeAuthMethod,
-              onTogglePasswordVisibility: () =>
-                  setState(() => _showPassword = !_showPassword),
-              onTogglePassphraseVisibility: () =>
-                  setState(() => _showPassphrase = !_showPassphrase),
-              onPasteKey: _pasteKey,
-              onImportKeyFile: _importKeyFile,
-              onGenerateKey: _generateKey,
-              onViewPublicKey: _viewPublicKey,
-              onAddHardwareKey: _addHardwareKey,
-              onRenameHardwareKey: _renameHardwareKey,
-              onRemoveHardwareKey: _removeHardwareKey,
-              onViewHardwareKeyPublicKey: _viewHardwareKeyPublicKey,
-              onForwardAgentChanged: (value) =>
-                  setState(() => _forwardAgent = value),
-              onExternalAuthOfferKeyChanged: (value) =>
-                  setState(() => _externalAuthOfferKey = value),
-            ),
-            const SizedBox(height: 14),
-            HostAdvancedSection(
-              tags: _tags,
-              tagController: _tagController,
-              tagFocusNode: _tagFocusNode,
-              timeoutController: _timeoutController,
-              moshLocaleController: _moshLocaleController,
-              moshPortsController: _moshPortsController,
-              tmuxSessionNameController: _tmuxSessionNameController,
-              tmuxStartDirectoryController: _tmuxStartDirectoryController,
-              shareInboxDirectoryController: _shareInboxDirectoryController,
-              useMosh: _useMosh,
-              predictiveEchoEnabled: _predictiveEchoEnabled,
-              startTmuxOnConnect: _startTmuxOnConnect,
-              tmuxPrefixKey: _tmuxPrefixKey,
-              agentAttentionEnabled: _agentAttentionEnabled,
-              agentNotifyInput: _agentNotifyInput,
-              agentNotifyFinished: _agentNotifyFinished,
-              agentMonitor: _agentMonitor,
-              snippets: _snippets,
-              connectSnippetId: _connectSnippetId,
-              timeoutValidator: _validateTimeout,
-              moshPortsValidator: _validateMoshPorts,
-              onAddTag: _addTag,
-              onRemoveTag: _removeTag,
-              onUseMoshChanged: (value) => setState(() {
-                _useMosh = value;
-                if (value) {
-                  _predictiveEchoEnabled = false;
-                }
-              }),
-              onPredictiveEchoChanged: (value) =>
-                  setState(() => _predictiveEchoEnabled = value),
-              onStartTmuxOnConnectChanged: (value) =>
-                  setState(() => _startTmuxOnConnect = value),
-              onTmuxPrefixKeyChanged: (value) =>
-                  setState(() => _tmuxPrefixKey = value),
-              onAgentAttentionEnabledChanged: (value) =>
-                  setState(() => _agentAttentionEnabled = value),
-              onAgentNotifyInputChanged: (value) =>
-                  setState(() => _agentNotifyInput = value),
-              onAgentNotifyFinishedChanged: (value) =>
-                  setState(() => _agentNotifyFinished = value),
-              onAgentMonitorChanged: (value) =>
-                  setState(() => _agentMonitor = value),
-              companionSetup: CompanionSetupTile(
-                host: widget.host,
-                resolveHost: _validatedHost,
-              ),
-              onSnippetsChanged: (snippets) => setState(() {
-                _snippets = snippets;
-                if (!_snippets.any(
-                  (snippet) => snippet.id == _connectSnippetId,
-                )) {
-                  _connectSnippetId = '';
-                }
-              }),
-              onConnectSnippetChanged: (snippetId) =>
-                  setState(() => _connectSnippetId = snippetId),
-            ),
-            const SizedBox(height: 22),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _save,
-                icon: const Icon(Icons.check_rounded),
-                label: Text(_isEditing ? 'Save changes' : 'Add machine'),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: Text(
-                'Stored on-device only • never synced to the cloud',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
+    final desktop = useDesktopPages(context);
+    final list = ListView(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
+      children: [
+        HostFormHeader(
+          title: _isEditing ? 'Edit machine' : 'New machine',
+          subtitle: _isEditing
+              ? 'Update connection details and credentials.'
+              : 'Connection profile and credentials.',
+          onBack: () => Navigator.of(context).pop(),
         ),
-      ),
+        const SizedBox(height: 20),
+        HostConnectionSection(
+          nameController: _nameController,
+          hostController: _hostController,
+          portController: _portController,
+          usernameController: _usernameController,
+          requiredValidator: _required,
+          portValidator: _validatePort,
+        ),
+        const SizedBox(height: 14),
+        HostAuthenticationSection(
+          authMethod: _authMethod,
+          passwordController: _passwordController,
+          privateKeyController: _privateKeyController,
+          passphraseController: _passphraseController,
+          showPassword: _showPassword,
+          showPassphrase: _showPassphrase,
+          forwardAgent: _forwardAgent,
+          externalAuthOfferKey: _externalAuthOfferKey,
+          keyInspection: _keyInspection,
+          hardwareKeys: _hardwareKeys,
+          hardwareKeyInspections: _hardwareKeyInspections,
+          hardwareKeysError: _hardwareKeysError,
+          requiredValidator: _required,
+          keyMaterialValidator: _validateKeyMaterial,
+          onAuthMethodChanged: _changeAuthMethod,
+          onTogglePasswordVisibility: () =>
+              setState(() => _showPassword = !_showPassword),
+          onTogglePassphraseVisibility: () =>
+              setState(() => _showPassphrase = !_showPassphrase),
+          onPasteKey: _pasteKey,
+          onImportKeyFile: _importKeyFile,
+          onGenerateKey: _generateKey,
+          onViewPublicKey: _viewPublicKey,
+          onAddHardwareKey: _addHardwareKey,
+          onRenameHardwareKey: _renameHardwareKey,
+          onRemoveHardwareKey: _removeHardwareKey,
+          onViewHardwareKeyPublicKey: _viewHardwareKeyPublicKey,
+          onForwardAgentChanged: (value) =>
+              setState(() => _forwardAgent = value),
+          onExternalAuthOfferKeyChanged: (value) =>
+              setState(() => _externalAuthOfferKey = value),
+        ),
+        const SizedBox(height: 14),
+        HostAdvancedSection(
+          tags: _tags,
+          tagController: _tagController,
+          tagFocusNode: _tagFocusNode,
+          timeoutController: _timeoutController,
+          moshLocaleController: _moshLocaleController,
+          moshPortsController: _moshPortsController,
+          tmuxSessionNameController: _tmuxSessionNameController,
+          tmuxStartDirectoryController: _tmuxStartDirectoryController,
+          shareInboxDirectoryController: _shareInboxDirectoryController,
+          useMosh: _useMosh,
+          predictiveEchoEnabled: _predictiveEchoEnabled,
+          startTmuxOnConnect: _startTmuxOnConnect,
+          tmuxPrefixKey: _tmuxPrefixKey,
+          agentAttentionEnabled: _agentAttentionEnabled,
+          agentNotifyInput: _agentNotifyInput,
+          agentNotifyFinished: _agentNotifyFinished,
+          agentMonitor: _agentMonitor,
+          snippets: _snippets,
+          connectSnippetId: _connectSnippetId,
+          timeoutValidator: _validateTimeout,
+          moshPortsValidator: _validateMoshPorts,
+          onAddTag: _addTag,
+          onRemoveTag: _removeTag,
+          onUseMoshChanged: (value) => setState(() {
+            _useMosh = value;
+            if (value) {
+              _predictiveEchoEnabled = false;
+            }
+          }),
+          onPredictiveEchoChanged: (value) =>
+              setState(() => _predictiveEchoEnabled = value),
+          onStartTmuxOnConnectChanged: (value) =>
+              setState(() => _startTmuxOnConnect = value),
+          onTmuxPrefixKeyChanged: (value) =>
+              setState(() => _tmuxPrefixKey = value),
+          onAgentAttentionEnabledChanged: (value) =>
+              setState(() => _agentAttentionEnabled = value),
+          onAgentNotifyInputChanged: (value) =>
+              setState(() => _agentNotifyInput = value),
+          onAgentNotifyFinishedChanged: (value) =>
+              setState(() => _agentNotifyFinished = value),
+          onAgentMonitorChanged: (value) =>
+              setState(() => _agentMonitor = value),
+          companionSetup: CompanionSetupTile(
+            host: widget.host,
+            resolveHost: _validatedHost,
+          ),
+          onSnippetsChanged: (snippets) => setState(() {
+            _snippets = snippets;
+            if (!_snippets.any((snippet) => snippet.id == _connectSnippetId)) {
+              _connectSnippetId = '';
+            }
+          }),
+          onConnectSnippetChanged: (snippetId) =>
+              setState(() => _connectSnippetId = snippetId),
+        ),
+        const SizedBox(height: 22),
+        // Desktop pins Cancel / Save under the list instead.
+        if (!desktop) ...[
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _save,
+              icon: const Icon(Icons.check_rounded),
+              label: Text(_isEditing ? 'Save changes' : 'Add machine'),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        Center(
+          child: Text(
+            'Stored on-device only • never synced to the cloud',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
     );
+    final Widget body;
+    if (!desktop) {
+      body = SafeArea(
+        bottom: shouldApplyBottomSafeArea(context),
+        child: Form(key: _formKey, child: list),
+      );
+    } else {
+      // Desktop: a centred column no wider than a dialog, a right-aligned
+      // Cancel / Save bar, and Ctrl/Cmd+S or Ctrl/Cmd+Enter to save.
+      body = CallbackShortcuts(
+        bindings: {
+          for (final key in [
+            LogicalKeyboardKey.keyS,
+            LogicalKeyboardKey.enter,
+            LogicalKeyboardKey.numpadEnter,
+          ]) ...{
+            SingleActivator(key, control: true): _save,
+            SingleActivator(key, meta: true): _save,
+          },
+        },
+        child: SafeArea(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 720),
+                      child: list,
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+                  child: OverflowBar(
+                    alignment: MainAxisAlignment.end,
+                    spacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        child: const Text('Cancel'),
+                      ),
+                      Tooltip(
+                        message: PlatformFeatures.isDesktop
+                            ? (defaultTargetPlatform == TargetPlatform.macOS
+                                  ? 'Save (Cmd+S)'
+                                  : 'Save (Ctrl+S)')
+                            : '',
+                        child: FilledButton.icon(
+                          onPressed: _save,
+                          icon: const Icon(Icons.check_rounded),
+                          label: Text(
+                            _isEditing ? 'Save changes' : 'Add machine',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       body: palette == null
@@ -635,6 +716,11 @@ class _HostFormPageState extends State<HostFormPage> {
       text: username.isEmpty ? 'conductore' : '$username@conductore',
     );
     final passphraseController = TextEditingController();
+    // Enter in either field generates, like the button.
+    void submit(BuildContext context) => Navigator.of(context).pop((
+      comment: commentController.text,
+      passphrase: passphraseController.text,
+    ));
     return showDialog<({String comment, String passphrase})>(
       context: context,
       builder: (context) => AlertDialog(
@@ -657,11 +743,13 @@ class _HostFormPageState extends State<HostFormPage> {
                 helperMaxLines: 2,
               ),
               textInputAction: TextInputAction.next,
+              onSubmitted: (_) => submit(context),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: passphraseController,
               obscureText: true,
+              onSubmitted: (_) => submit(context),
               decoration: const InputDecoration(
                 labelText: 'Passphrase (optional)',
                 helperText: 'Encrypts the private key. Leave empty for none.',
@@ -677,10 +765,7 @@ class _HostFormPageState extends State<HostFormPage> {
             child: const Text('Cancel'),
           ),
           FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop((
-              comment: commentController.text,
-              passphrase: passphraseController.text,
-            )),
+            onPressed: () => submit(context),
             icon: const Icon(Icons.auto_awesome_rounded, size: 18),
             label: const Text('Generate'),
           ),

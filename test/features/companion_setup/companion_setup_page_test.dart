@@ -483,4 +483,77 @@ void main() {
       expect(find.byType(CompanionSetupPage), findsOneWidget);
     });
   });
+
+  group('desktop (A-070, A-071, A-072)', () {
+    final frame = find.byKey(const ValueKey('desktop-page-frame'));
+    final primary = find.widgetWithText(FilledButton, 'Install agent hooks');
+    final actions = find.byKey(const ValueKey('companion-install-actions'));
+
+    Future<void> open(WidgetTester tester) async {
+      runner.responses.addAll({
+        'exec node --version': ok('v22.1.0'),
+        'conductore-hostd version': notFound,
+      });
+      await tester.pumpWidget(
+        CompanionSetupScope(
+          controller: controller,
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showCompanionSetup(context, host),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'desktop: a dialog with a normal-sized button and dialog actions',
+      (tester) async {
+        await open(tester);
+        expect(frame, findsOneWidget);
+        expect(find.byType(CompanionSetupPage), findsOneWidget);
+        expect(tester.getSize(primary).width, lessThan(400));
+
+        await tester.tap(primary);
+        await tester.pumpAndSettle();
+        expect(actions, findsOneWidget);
+        // Cancel sits left of Install, both at their own size.
+        final cancel = find.widgetWithText(OutlinedButton, 'Cancel');
+        final install = find.byKey(const ValueKey('companion-install-confirm'));
+        expect(tester.getSize(install).width, lessThan(250));
+        expect(
+          tester.getTopRight(cancel).dx,
+          lessThan(tester.getTopLeft(install).dx),
+        );
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
+
+    testWidgets('phone: a full page with the full-width button and sheet', (
+      tester,
+    ) async {
+      galaxyM53(tester);
+      await open(tester);
+      expect(frame, findsNothing);
+      final width = tester.getSize(find.byType(CompanionSetupPage)).width;
+      expect(tester.getSize(primary).width, greaterThan(width - 40));
+
+      await tester.tap(primary);
+      await tester.pumpAndSettle();
+      expect(actions, findsNothing);
+      expect(
+        find.byKey(const ValueKey('companion-install-confirm')),
+        findsOneWidget,
+      );
+    });
+  });
 }

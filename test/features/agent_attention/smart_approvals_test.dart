@@ -373,10 +373,16 @@ void main() {
           _status([_highRm], []),
         ],
       }, notifier: notifier);
-      final (_, title, body, _, _) = notifier.permissionsShown.single;
-      expect(title, 'Claude needs permission: Bash · High risk');
-      expect(body, contains('rm -rf build'));
-      expect(body, contains('Deletes recursively (rm -rf): build'));
+      final notification = notifier.agents.values.single;
+      expect(notification.title, endsWith('needs you'));
+      expect(notification.text, 'Approve Bash: rm -rf build · High risk');
+      expect(notification.lines, [
+        'Approve Bash: rm -rf build · High risk',
+        '  Deletes recursively (rm -rf): build',
+      ]);
+      // High risk always asks: no Always button.
+      expect(notification.action?.requestId, 'req-high');
+      expect(notification.action?.allowAlways, isFalse);
     });
   });
 
@@ -580,6 +586,72 @@ void main() {
       await tester.runAsync(pumpEventQueue);
       await tester.pumpAndSettle();
       expect(runner.sent('rules remove').single, contains('r0000000001'));
+    });
+
+    Future<void> openRules(
+      WidgetTester tester,
+      AgentAttentionController controller,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showApprovalRules(
+                  context,
+                  controller: controller,
+                  host: host(),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.runAsync(pumpEventQueue);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'desktop: a dialog over the window, Add rule in the app bar',
+      (tester) async {
+        final (controller, _) = await start(tester, {
+          'status': [_status([], [])],
+          'approvals': [_approvals],
+        });
+        await openRules(tester, controller);
+        expect(
+          find.byKey(const ValueKey('desktop-page-frame')),
+          findsOneWidget,
+        );
+        expect(find.byType(FloatingActionButton), findsNothing);
+        final add = find.byKey(const ValueKey('rules-add'));
+        expect(
+          find.ancestor(of: add, matching: find.byType(AppBar)),
+          findsOneWidget,
+        );
+        await tester.tap(add);
+        await tester.pumpAndSettle();
+        expect(find.text('Add rule'), findsNWidgets(2));
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
+
+    testWidgets('phone: a full page with the floating Add rule', (
+      tester,
+    ) async {
+      final (controller, _) = await start(tester, {
+        'status': [_status([], [])],
+        'approvals': [_approvals],
+      });
+      await openRules(tester, controller);
+      expect(find.byKey(const ValueKey('desktop-page-frame')), findsNothing);
+      expect(find.byType(FloatingActionButton), findsOneWidget);
     });
 
     testWidgets('an invalid rule cannot be saved', (tester) async {

@@ -257,6 +257,19 @@ void main() {
     });
   });
 
+  testWidgets('phone: prompts are not wrapped for mouse selection', (
+    tester,
+  ) async {
+    await pumpPage(tester);
+    expect(
+      find.ancestor(
+        of: find.text('Please check'),
+        matching: find.byType(SelectionArea),
+      ),
+      findsNothing,
+    );
+  });
+
   group('desktop', () {
     final linux = TargetPlatformVariant.only(TargetPlatform.linux);
 
@@ -302,7 +315,7 @@ void main() {
       expect(find.byKey(const ValueKey('chat-action-quote')), findsOneWidget);
     }, variant: linux);
 
-    testWidgets('assistant replies are selectable with the mouse', (
+    testWidgets('replies and prompts are selectable with the mouse', (
       tester,
     ) async {
       await pumpPage(tester);
@@ -315,7 +328,7 @@ void main() {
           of: find.text('Please check'),
           matching: find.byType(SelectionArea),
         ),
-        findsNothing,
+        findsOneWidget,
       );
     }, variant: linux);
   });

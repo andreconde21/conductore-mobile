@@ -1,5 +1,7 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 enum EntryAction { open, download, rename, delete, copyPath }
 
@@ -8,6 +10,7 @@ class EntryTile extends StatelessWidget {
     required this.entry,
     required this.onTap,
     required this.onAction,
+    this.onContextMenu,
     super.key,
   });
 
@@ -15,15 +18,24 @@ class EntryTile extends StatelessWidget {
   final VoidCallback onTap;
   final ValueChanged<EntryAction> onAction;
 
+  /// Desktop right-click: opens the actions at the pointer (global
+  /// position).
+  final ValueChanged<Offset>? onContextMenu;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    return Material(
+    final desktop = PlatformFeatures.isDesktop;
+    final onContextMenu = this.onContextMenu;
+    final tile = Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
+        onSecondaryTapUp: desktop && onContextMenu != null
+            ? (details) => onContextMenu(details.globalPosition)
+            : null,
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 9, 4, 9),
           decoration: BoxDecoration(
@@ -66,6 +78,18 @@ class EntryTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (!desktop) return tile;
+    // Desktop: with the row focused (Tab or the arrow keys), Enter opens
+    // it, F2 renames and Delete deletes.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.f2): () =>
+            onAction(EntryAction.rename),
+        const SingleActivator(LogicalKeyboardKey.delete): () =>
+            onAction(EntryAction.delete),
+      },
+      child: tile,
     );
   }
 

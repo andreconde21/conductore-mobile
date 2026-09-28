@@ -6,11 +6,16 @@ class AgentPermissionAction {
     required this.hostId,
     required this.requestId,
     required this.verdict,
+    this.agentId = '',
   });
 
   final String notificationId;
   final String hostId;
   final String requestId;
+
+  /// The agent whose notification carried the button; empty for a tap
+  /// queued by an older build.
+  final String agentId;
 
   /// `allow`, `deny` or `always` as the platform stored it.
   final String verdict;
@@ -21,11 +26,13 @@ class AgentPermissionAction {
         other.notificationId == notificationId &&
         other.hostId == hostId &&
         other.requestId == requestId &&
+        other.agentId == agentId &&
         other.verdict == verdict;
   }
 
   @override
-  int get hashCode => Object.hash(notificationId, hostId, requestId, verdict);
+  int get hashCode =>
+      Object.hash(notificationId, hostId, requestId, agentId, verdict);
 }
 
 /// Where notification action taps arrive from.

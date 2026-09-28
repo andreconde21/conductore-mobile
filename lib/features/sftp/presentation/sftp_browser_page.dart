@@ -1,4 +1,6 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
@@ -22,8 +24,32 @@ import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+/// Opens the file browser for [host]: pushed full screen on phones, a
+/// large dialog over the shell on desktop (Esc closes it).
+Future<void> openSftpBrowser(
+  BuildContext context, {
+  required SavedHost host,
+  required SftpRepository repository,
+  required FileExport fileExport,
+  required ThemeController themeController,
+  required SftpBookmarksRepository bookmarksRepository,
+}) {
+  return pushAdaptivePage<void>(
+    context,
+    desktopMaxWidth: 1100,
+    builder: (_) => SftpBrowserPage(
+      host: host,
+      repository: repository,
+      fileExport: fileExport,
+      themeController: themeController,
+      bookmarksRepository: bookmarksRepository,
+    ),
+  );
+}
 
 class SftpBrowserPage extends StatefulWidget {
   const SftpBrowserPage({
@@ -49,6 +75,7 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
   late final SftpBrowserController _controller;
   late final SftpBookmarksController _bookmarks;
   final _searchController = TextEditingController();
+  final _searchFocus = FocusNode(debugLabel: 'sftp-search');
 
   @override
   void initState() {
@@ -78,6 +105,7 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
       _promptSecurityKeySelection,
     );
     _searchController.dispose();
+    _searchFocus.dispose();
     _controller.dispose();
     _bookmarks.dispose();
     super.dispose();
@@ -99,12 +127,74 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
     return showSecurityKeyPickerDialog(context, request);
   }
 
+  /// Desktop keys for the whole browser: Backspace goes to the parent
+  /// folder (unless a text field has the focus) and Ctrl/Cmd+F focuses the
+  /// search field.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final keyboard = HardwareKeyboard.instance;
+    final key = event.logicalKey;
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    if (key == LogicalKeyboardKey.keyF &&
+        (mac ? keyboard.isMetaPressed : keyboard.isControlPressed) &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed) {
+      _searchFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.backspace &&
+        !keyboard.isControlPressed &&
+        !keyboard.isMetaPressed &&
+        !keyboard.isAltPressed &&
+        !_textFieldFocused() &&
+        _controller.status == SftpBrowserStatus.ready &&
+        _controller.canGoUp &&
+        !_controller.busy) {
+      _goUp();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  static bool _textFieldFocused() {
+    final focused = FocusManager.instance.primaryFocus?.context;
+    return focused != null &&
+        (focused.widget is EditableText ||
+            focused.findAncestorWidgetOfExactType<EditableText>() != null);
+  }
+
+  Future<void> _goUp() async {
+    try {
+      await _controller.goUp();
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final page = _buildPage(context);
+    if (!PlatformFeatures.isDesktop) return page;
+    // Takes the focus when the browser opens, so the keys work before
+    // anything was clicked.
+    return Focus(
+      autofocus: true,
+      skipTraversal: true,
+      onKeyEvent: _handleKey,
+      child: page,
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
     final palette = widget.themeController.palette;
+    final desktop = PlatformFeatures.isDesktop;
     return ListenableBuilder(
       listenable: Listenable.merge([_controller, _bookmarks]),
       builder: (context, _) {
+        final canAdd =
+            _controller.status == SftpBrowserStatus.ready &&
+            !_controller.busy &&
+            _controller.transfer == null;
         return Scaffold(
           body: ConduitBackdrop(
             palette: palette,
@@ -138,6 +228,11 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
                         ? () => _bookmarks.toggle(_controller.path)
                         : null,
                     onOpenBookmark: _navigateToPath,
+                    // Desktop: New folder and Upload in the header, not
+                    // floating buttons.
+                    onNewFolder: desktop && canAdd ? _promptNewFolder : null,
+                    onUpload: desktop && canAdd ? _pickAndUpload : null,
+                    searchFocusNode: _searchFocus,
                   ),
                   Expanded(child: _buildBody(context)),
                   if (_controller.transfer != null)
@@ -146,10 +241,7 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
               ),
             ),
           ),
-          floatingActionButton:
-              _controller.status == SftpBrowserStatus.ready &&
-                  !_controller.busy &&
-                  _controller.transfer == null
+          floatingActionButton: !desktop && canAdd
               ? ActionsFab(
                   onNewFolder: _promptNewFolder,
                   onUpload: _pickAndUpload,
@@ -197,7 +289,13 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
           );
         }
         return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+          // Phones leave room for the floating buttons.
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            PlatformFeatures.isDesktop ? 16 : 120,
+          ),
           itemCount: entries.length,
           separatorBuilder: (_, _) => const SizedBox(height: 6),
           itemBuilder: (context, index) {
@@ -206,6 +304,8 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
               entry: entry,
               onTap: () => _onEntryTap(entry),
               onAction: (action) => _onEntryAction(action, entry),
+              onContextMenu: (position) =>
+                  _showEntrySheet(entry, anchorPosition: position),
             );
           },
         );
@@ -238,15 +338,16 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
       await _showEntrySheet(entry);
       return;
     }
-    final saved = await Navigator.of(context).push(
-      MaterialPageRoute<bool>(
-        builder: (_) => SftpFileViewerPage(
-          path: entry.path,
-          themeController: widget.themeController,
-          read: (onProgress) =>
-              _controller.readFile(entry.path, onProgress: onProgress),
-          write: (bytes) => _controller.writeFile(entry.path, bytes),
-        ),
+    // A dialog over the browser on desktop, full screen on phones.
+    final saved = await pushAdaptivePage<bool>(
+      context,
+      desktopMaxWidth: 1100,
+      builder: (_) => SftpFileViewerPage(
+        path: entry.path,
+        themeController: widget.themeController,
+        read: (onProgress) =>
+            _controller.readFile(entry.path, onProgress: onProgress),
+        write: (bytes) => _controller.writeFile(entry.path, bytes),
       ),
     );
     if (saved == true && mounted) {
@@ -271,10 +372,14 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
     }
   }
 
-  Future<void> _showEntrySheet(SftpEntry entry) async {
+  Future<void> _showEntrySheet(
+    SftpEntry entry, {
+    Offset? anchorPosition,
+  }) async {
     final action = await showAdaptiveModal<EntryAction>(
       kind: AdaptiveModalKind.menu,
       context: context,
+      anchorPosition: anchorPosition,
       showDragHandle: true,
       builder: (context) => SafeArea(
         bottom: shouldApplyBottomSafeArea(context),

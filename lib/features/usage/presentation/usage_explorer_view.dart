@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -92,6 +94,7 @@ class UsageExplorerView extends StatefulWidget {
   const UsageExplorerView({
     required this.usage,
     this.initialDay,
+    this.initialPreset,
     this.onUpdateCompanion,
     this.onClose,
     this.fileExport,
@@ -104,6 +107,9 @@ class UsageExplorerView extends StatefulWidget {
 
   /// A day to open in detail at once.
   final String? initialDay;
+
+  /// The range to start on (the command palette's "Usage: 7 days").
+  final UsageRangePreset? initialPreset;
 
   /// Opens the agent hooks screen for a machine whose companion is older.
   final void Function(String hostId)? onUpdateCompanion;
@@ -143,6 +149,10 @@ class _UsageExplorerViewState extends State<UsageExplorerView>
           widget.firstWeekday ??
           firstWeekdayFor(WidgetsBinding.instance.platformDispatcher.locale),
     )..start();
+    if (widget.initialPreset case final preset?
+        when preset != UsageRangePreset.custom) {
+      _explorer.setPreset(preset);
+    }
     if (widget.initialDay case final day?) {
       if (!_explorer.range.contains(day)) {
         _explorer.setPreset(UsageRangePreset.last30);
@@ -381,22 +391,22 @@ class _UsageExplorerViewState extends State<UsageExplorerView>
       return;
     }
     explorer.selectDay(day);
+    // A narrow pane on desktop (a split, a small window): the day opens as
+    // a dialog over the shell rather than a page covering it.
     unawaited(
-      Navigator.of(context)
-          .push(
-            MaterialPageRoute<void>(
-              builder: (context) => _UsageDayPage(
-                explorer: explorer,
-                usage: widget.usage,
-                onUpdateCompanion: widget.onUpdateCompanion,
-              ),
-            ),
-          )
-          .then((_) {
-            if (mounted) {
-              explorer.selectDay(null);
-            }
-          }),
+      pushAdaptivePage<void>(
+        context,
+        desktopMaxWidth: 720,
+        builder: (context) => _UsageDayPage(
+          explorer: explorer,
+          usage: widget.usage,
+          onUpdateCompanion: widget.onUpdateCompanion,
+        ),
+      ).then((_) {
+        if (mounted) {
+          explorer.selectDay(null);
+        }
+      }),
     );
   }
 
@@ -1379,7 +1389,7 @@ class _UsageDayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final page = Scaffold(
       key: const ValueKey('usage-day-page'),
       appBar: AppBar(title: const Text('Usage by day')),
       body: GestureDetector(
@@ -1407,6 +1417,18 @@ class _UsageDayPage extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (!PlatformFeatures.isDesktop) return page;
+    // Desktop: the arrow keys step the day like the swipe (Esc closes the
+    // page on its own).
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+            explorer.stepDay(-1),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            explorer.stepDay(1),
+      },
+      child: Focus(autofocus: true, child: page),
     );
   }
 }

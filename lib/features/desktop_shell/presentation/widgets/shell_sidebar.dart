@@ -8,6 +8,7 @@ import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_state_dot.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// What a dragged sidebar row carries.
 @immutable
@@ -241,38 +242,59 @@ class _ShellSidebarState extends State<ShellSidebar> {
             padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
             child: SizedBox(
               height: 32,
-              child: TextField(
-                key: const ValueKey('sidebar-filter'),
-                controller: _filter,
-                onChanged: (value) => _controller.filter = value,
-                style: const TextStyle(fontSize: 13),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Filter',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 17),
-                  prefixIconConstraints: const BoxConstraints(minWidth: 32),
-                  suffixIcon: _filter.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'Clear filter',
-                          iconSize: 15,
-                          padding: EdgeInsets.zero,
-                          onPressed: () {
-                            _filter.clear();
-                            _controller.filter = '';
-                          },
-                          icon: const Icon(Icons.close_rounded),
-                        ),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                  filled: true,
-                  fillColor: palette.canvas,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppTheme.radius),
-                    borderSide: BorderSide(color: palette.hairline),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppTheme.radius),
-                    borderSide: BorderSide(color: palette.hairline),
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.escape): () {
+                    _filter.clear();
+                    _controller.filter = '';
+                    FocusScope.of(context).unfocus();
+                  },
+                },
+                child: TextField(
+                  key: const ValueKey('sidebar-filter'),
+                  controller: _filter,
+                  onChanged: (value) => _controller.filter = value,
+                  // Enter opens the first match; Esc clears the filter.
+                  onSubmitted: (_) {
+                    final rows = _entries().whereType<_Row>();
+                    final first =
+                        rows
+                            .where(
+                              (row) => row.node.kind != SidebarNodeKind.machine,
+                            )
+                            .firstOrNull ??
+                        rows.firstOrNull;
+                    if (first != null) widget.onOpen(first.node);
+                  },
+                  style: const TextStyle(fontSize: 13),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Filter',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 17),
+                    prefixIconConstraints: const BoxConstraints(minWidth: 32),
+                    suffixIcon: _filter.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear filter',
+                            iconSize: 15,
+                            padding: EdgeInsets.zero,
+                            onPressed: () {
+                              _filter.clear();
+                              _controller.filter = '';
+                            },
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                    filled: true,
+                    fillColor: palette.canvas,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
+                      borderSide: BorderSide(color: palette.hairline),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
+                      borderSide: BorderSide(color: palette.hairline),
+                    ),
                   ),
                 ),
               ),
@@ -327,6 +349,7 @@ class _ShellSidebarState extends State<ShellSidebar> {
         children: [
           if (group != null)
             InkWell(
+              key: ValueKey('sidebar-group-toggle-${group.id}'),
               onTap: () => _controller.updatePrefs(
                 (prefs) => prefs.setExpanded(expandedKey!, !expanded),
               ),
@@ -334,6 +357,7 @@ class _ShellSidebarState extends State<ShellSidebar> {
                 expanded
                     ? Icons.expand_more_rounded
                     : Icons.chevron_right_rounded,
+                semanticLabel: expanded ? 'Collapse' : 'Expand',
                 size: 15,
                 color: palette.mutedForeground,
               ),
@@ -374,17 +398,20 @@ class _ShellSidebarState extends State<ShellSidebar> {
             ),
           if (group != null)
             Builder(
-              builder: (context) => InkWell(
-                key: ValueKey('sidebar-group-menu-${group.id}'),
-                borderRadius: BorderRadius.circular(4),
-                onTapUp: (details) =>
-                    widget.onGroupMenu(group, details.globalPosition),
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: Icon(
-                    Icons.more_horiz_rounded,
-                    size: 16,
-                    color: palette.mutedForeground,
+              builder: (context) => Tooltip(
+                message: 'Group actions',
+                child: InkWell(
+                  key: ValueKey('sidebar-group-menu-${group.id}'),
+                  borderRadius: BorderRadius.circular(4),
+                  onTapUp: (details) =>
+                      widget.onGroupMenu(group, details.globalPosition),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(
+                      Icons.more_horiz_rounded,
+                      size: 16,
+                      color: palette.mutedForeground,
+                    ),
                   ),
                 ),
               ),
@@ -487,8 +514,18 @@ class _ShellSidebarState extends State<ShellSidebar> {
         row.section == _HeaderKind.pinned ||
         (row.section == _HeaderKind.machines &&
             (node.kind == SidebarNodeKind.machine || node.isReorderableChild));
-    if (!draggable) return tile;
     final drag = SidebarDrag(node, pinned: row.section == _HeaderKind.pinned);
+    // Every row can be dragged onto a pane (or the Pinned header); only
+    // some reorder among their siblings.
+    if (!draggable) {
+      return Draggable<SidebarDrag>(
+        data: drag,
+        affinity: PlatformFeatures.isDesktop ? null : Axis.horizontal,
+        dragAnchorStrategy: pointerDragAnchorStrategy,
+        feedback: _RowFeedback(label: node.label),
+        child: tile,
+      );
+    }
     return DragTarget<SidebarDrag>(
       onWillAcceptWithDetails: (details) => _accepts(row, details.data),
       onAcceptWithDetails: (details) => _drop(row, details.data),
@@ -813,8 +850,12 @@ class CollapsedShellSidebar extends StatelessWidget {
     required this.onMachine,
     required this.onNeedsYou,
     this.footer,
+    this.onContextMenu,
     super.key,
   });
+
+  /// Right-click on a machine: the same menu as in the full sidebar.
+  final void Function(SidebarNode node, Offset position)? onContextMenu;
 
   final List<SidebarNode> tree;
   final int Function(SidebarNode node) unreadCount;
@@ -855,32 +896,40 @@ class CollapsedShellSidebar extends StatelessWidget {
                 for (final node in tree)
                   Tooltip(
                     message: node.label,
-                    child: InkWell(
-                      key: ValueKey('sidebar-collapsed-${node.key}'),
-                      onTap: () => onMachine(node),
-                      child: SizedBox(
-                        height: 44,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Icon(
-                              node.target.host.isThisComputer
-                                  ? Icons.computer_rounded
-                                  : Icons.dns_outlined,
-                              size: 20,
-                              color: palette.foreground,
-                            ),
-                            Positioned(
-                              right: 12,
-                              top: 8,
-                              child: ShellStateDot(dot: node.dot, size: 7),
-                            ),
-                            Positioned(
-                              right: 8,
-                              bottom: 6,
-                              child: ShellUnreadBadge(count: unreadCount(node)),
-                            ),
-                          ],
+                    child: GestureDetector(
+                      onSecondaryTapUp: onContextMenu == null
+                          ? null
+                          : (details) =>
+                                onContextMenu!(node, details.globalPosition),
+                      child: InkWell(
+                        key: ValueKey('sidebar-collapsed-${node.key}'),
+                        onTap: () => onMachine(node),
+                        child: SizedBox(
+                          height: 40,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Icon(
+                                node.target.host.isThisComputer
+                                    ? Icons.computer_rounded
+                                    : Icons.dns_outlined,
+                                size: 20,
+                                color: palette.foreground,
+                              ),
+                              Positioned(
+                                right: 12,
+                                top: 8,
+                                child: ShellStateDot(dot: node.dot, size: 7),
+                              ),
+                              Positioned(
+                                right: 8,
+                                bottom: 6,
+                                child: ShellUnreadBadge(
+                                  count: unreadCount(node),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),

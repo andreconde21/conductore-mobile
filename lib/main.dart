@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
@@ -17,6 +18,7 @@ import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/platform_agent_notifier.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
@@ -73,6 +75,7 @@ import 'package:conduit/features/terminal/data/secure_recent_directories_store.d
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
+import 'package:conduit/features/terminal/presentation/prompt_image_scope.dart';
 import 'package:conduit/features/terminal/presentation/recent_directories_controller.dart';
 import 'package:conduit/features/terminal/presentation/recent_directory_tracker.dart';
 import 'package:conduit/features/terminal/presentation/terminal_background_keepalive.dart';
@@ -183,6 +186,9 @@ void main() {
     provider: const HerdrAttentionProvider(),
     companionProvider: const ConductoreHostAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
+    notificationPreferences: const SecureAgentNotificationPreferencesStore(
+      secureStorage,
+    ),
     persistMonitoringEnabled: (savedHostId) async {
       final host = hostsController.findById(savedHostId);
       if (host != null && !host.agentAttentionEnabled) {
@@ -238,6 +244,8 @@ void main() {
           : WidgetsBinding.instance.platformDispatcher.locale.languageCode;
     },
   );
+  // An agent's expanded notification ends with its dashboard line.
+  agentAttention.notificationDetail = digest.cachedLineFor;
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
   addTelemetryTerms(() => usage.summary.accountTerms);
@@ -754,6 +762,17 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     );
   }
 
+  /// Prompt images (attach, paste) for Chat Views opened from anywhere.
+  Widget _wrapPromptImageScope(Widget app) => PromptImageScope(
+    attacherFor: (host, context) => sftpPromptImageAttacher(
+      repository: widget.sftpRepository,
+      host: host,
+      context: context,
+    ),
+    pasteImages: () => widget.themeController.pasteImagesAsFiles,
+    child: app,
+  );
+
   Widget _wrapShareTargetScope(Widget app) {
     final shareTarget = widget.shareTarget;
     if (shareTarget == null) {
@@ -836,14 +855,19 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
             // terminal page) can read the share-target controller. The lock
             // covers every route, so locking again after the app was away
             // hides a terminal or dialog left open.
-            return _wrapShareTargetScope(
-              AppLockGate(
-                controller: widget.lockController,
-                lockPage: (_) => LockPage(
-                  controller: widget.lockController,
-                  themeController: widget.themeController,
+            return _wrapPromptImageScope(
+              _wrapShareTargetScope(
+                DesktopEscapeToPop(
+                  navigatorKey: widget.navigatorKey,
+                  child: AppLockGate(
+                    controller: widget.lockController,
+                    lockPage: (_) => LockPage(
+                      controller: widget.lockController,
+                      themeController: widget.themeController,
+                    ),
+                    child: content,
+                  ),
                 ),
-                child: content,
               ),
             );
           },

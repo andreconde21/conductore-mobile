@@ -28,7 +28,9 @@ import java.util.concurrent.Executors
  *  - `sharedContentAvailable` -> null, a new payload was queued.
  *
  * Payload map: {text: String?, subject: String?, files: [{path, name, size,
- * mimeType}]}.
+ * mimeType}], unreadable: [display name]}. A stream that cannot be copied
+ * (the sender's grant was refused or revoked) is named in `unreadable`, so
+ * Dart can say so instead of the share vanishing.
  */
 class ShareTargetBridge(private val context: Context) {
     private val pending = mutableListOf<Map<String, Any?>>()
@@ -72,11 +74,21 @@ class ShareTargetBridge(private val context: Context) {
         }
         executor.execute {
             pruneStaleCopies()
-            val files = uris.mapNotNull { copyToCache(it, mimeType) }
+            val files = mutableListOf<Map<String, Any?>>()
+            val unreadable = mutableListOf<String>()
+            for (uri in uris) {
+                val copied = copyToCache(uri, mimeType)
+                if (copied != null) {
+                    files.add(copied)
+                } else {
+                    unreadable.add(sanitizeName(uri.lastPathSegment ?: "shared file"))
+                }
+            }
             val payload = mapOf(
                 "text" to text,
                 "subject" to subject,
                 "files" to files,
+                "unreadable" to unreadable,
             )
             mainHandler.post {
                 pending.add(payload)
@@ -113,13 +125,13 @@ class ShareTargetBridge(private val context: Context) {
                     displayName = cursor.getString(nameIndex)
                 }
             }
-        } catch (_: RuntimeException) {
+        } catch (_: Exception) {
             // Some providers refuse metadata queries; fall back to the path.
         }
         val name = sanitizeName(displayName ?: uri.lastPathSegment ?: "shared")
         val mimeType = try {
             resolver.getType(uri)
-        } catch (_: RuntimeException) {
+        } catch (_: Exception) {
             null
         } ?: intentMimeType
         val directory = File(File(context.cacheDir, CACHE_DIR), UUID.randomUUID().toString())

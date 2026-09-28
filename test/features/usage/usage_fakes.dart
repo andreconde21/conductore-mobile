@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
@@ -200,14 +201,16 @@ class FakeUsageNotifier implements AgentAttentionNotifier {
   }) async => shown.add((id: id, title: title, body: body));
 
   @override
-  Future<void> showPermissionRequest({
-    required String id,
-    required String title,
-    required String body,
+  Future<void> showAgents({
     required String hostId,
-    required String requestId,
-    AgentOpenTarget? open,
+    required List<AgentNotification> notifications,
   }) async {}
+
+  @override
+  Future<void> showAgent(AgentNotification notification) async {}
+
+  @override
+  Future<void> cancelAgent({required String key}) async {}
 
   @override
   Future<void> cancel({required String id}) async {}

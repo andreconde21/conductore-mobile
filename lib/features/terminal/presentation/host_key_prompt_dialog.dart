@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:flutter/material.dart';
 
@@ -84,7 +85,12 @@ class _HostKeyPromptDialogState extends State<_HostKeyPromptDialog> {
                 : null,
             child: const Text('Replace key'),
           ),
-          FilledButton(onPressed: reject, child: const Text('Keep old key')),
+          FilledButton(
+            // Enter keeps the old key on desktop: the safe answer.
+            autofocus: PlatformFeatures.isDesktop,
+            onPressed: reject,
+            child: const Text('Keep old key'),
+          ),
         ],
       );
     }
@@ -150,10 +156,20 @@ class _HostKeyPromptDialogState extends State<_HostKeyPromptDialog> {
                 onPressed: () => setState(() => _confirming = true),
                 child: const Text('Review replacement…'),
               ),
-              FilledButton(onPressed: reject, child: const Text('Reject')),
+              FilledButton(
+                autofocus: PlatformFeatures.isDesktop,
+                onPressed: reject,
+                child: const Text('Reject'),
+              ),
             ]
           : [
-              TextButton(onPressed: reject, child: const Text('Reject')),
+              TextButton(
+                // Enter rejects on desktop, never trusts: the prompt can
+                // pop up while the user is still typing in a terminal.
+                autofocus: PlatformFeatures.isDesktop,
+                onPressed: reject,
+                child: const Text('Reject'),
+              ),
               FilledButton(
                 onPressed: () =>
                     Navigator.of(context).pop(HostKeyDecision.trust),

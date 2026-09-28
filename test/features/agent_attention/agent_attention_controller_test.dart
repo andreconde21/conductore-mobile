@@ -66,7 +66,7 @@ void main() {
     await pumpEventQueue();
 
     expect(controller.statusFor('h')?.agents, hasLength(1));
-    expect(notifier.shown, isEmpty);
+    expect(notifier.alerts, isEmpty);
   });
 
   test('notifies exactly once per transition into needing input', () async {
@@ -81,18 +81,23 @@ void main() {
     await pumpEventQueue();
 
     await controller.pollNow('h');
-    expect(notifier.shown, hasLength(1));
-    expect(notifier.shown.single.$2, 'Agent needs input');
-    expect(notifier.shown.single.$3, 'builder on Host h');
+    expect(notifier.alerts, hasLength(1));
+    expect(notifier.alerts.single.title, 'builder · Host h is waiting for you');
+    expect(notifier.alerts.single.text, 'Waiting for your answer');
+    // No buttons: nothing to approve.
+    expect(notifier.alerts.single.action, isNull);
 
-    // Unchanged state on the next poll must not re-notify.
+    // Unchanged state on the next poll must not re-notify (or re-post).
+    final posts = notifier.agentPosts.length;
     await controller.pollNow('h');
-    expect(notifier.shown, hasLength(1));
+    expect(notifier.agentPosts, hasLength(posts));
 
-    // Leaving and re-entering the state notifies again.
+    // Leaving the state removes the notification; re-entering notifies
+    // again.
     await controller.pollNow('h');
+    expect(notifier.agents, isEmpty);
     await controller.pollNow('h');
-    expect(notifier.shown, hasLength(2));
+    expect(notifier.alerts, hasLength(2));
   });
 
   test('a notification opens the agent at its Herdr place', () async {
@@ -110,9 +115,8 @@ void main() {
     await pumpEventQueue();
 
     await controller.pollNow('h');
-    final id = notifier.shown.single.$1;
     expect(
-      notifier.openTargets[id],
+      notifier.alerts.single.open,
       isA<AgentOpenTarget>()
           .having((target) => target.hostId, 'hostId', 'h')
           .having((target) => target.workspaceId, 'workspaceId', 'w2')
@@ -130,7 +134,7 @@ void main() {
     await pumpEventQueue();
 
     await controller.pollNow('h');
-    expect(notifier.shown.single.$2, 'Agent finished');
+    expect(notifier.alerts.single.title, 'builder · Host h finished');
   });
 
   test('honors per-host notification toggles', () async {
@@ -147,7 +151,7 @@ void main() {
 
     await controller.pollNow('h');
     await controller.pollNow('h');
-    expect(notifier.shown, isEmpty);
+    expect(notifier.alerts, isEmpty);
   });
 
   test('handles agents disappearing between polls', () async {
@@ -161,11 +165,11 @@ void main() {
 
     await controller.pollNow('h');
     expect(controller.statusFor('h')?.agents, isEmpty);
-    expect(notifier.shown, isEmpty);
+    expect(notifier.alerts, isEmpty);
 
     // The agent coming back blocked is a fresh transition — notify once.
     await controller.pollNow('h');
-    expect(notifier.shown, hasLength(1));
+    expect(notifier.alerts, hasLength(1));
   });
 
   test('stops polling and reports when Herdr is unavailable', () async {
@@ -183,7 +187,7 @@ void main() {
       controller.statusFor('h')?.unavailableReason,
       contains('not installed'),
     );
-    expect(notifier.shown, isEmpty);
+    expect(notifier.alerts, isEmpty);
   });
 
   test('keeps known agents and reports transient errors', () async {
@@ -257,7 +261,7 @@ void main() {
     controller.setAppActive(true);
     await pumpEventQueue();
 
-    expect(notifier.shown, hasLength(1));
+    expect(notifier.alerts, hasLength(1));
   });
 
   test(
@@ -379,12 +383,12 @@ void main() {
       await pumpEventQueue();
 
       await controller.pollNow('h');
-      expect(notifier.shown, hasLength(1));
+      expect(notifier.alerts, hasLength(1));
       await controller.pollNow('h');
-      expect(notifier.shown, hasLength(1));
+      expect(notifier.alerts, hasLength(1));
       // Answered and blocked again within one interval: the sequence moved.
       await controller.pollNow('h');
-      expect(notifier.shown, hasLength(2));
+      expect(notifier.alerts, hasLength(2));
     },
   );
 }

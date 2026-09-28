@@ -29,9 +29,10 @@ class _QueueSource implements AgentPermissionActionSource {
 
 void main() {
   const tap = AgentPermissionAction(
-    notificationId: 'h:perm:req-1',
+    notificationId: 'agent:h:s-1',
     hostId: 'h',
     requestId: 'req-1',
+    agentId: 's-1',
     verdict: 'allow',
   );
 
@@ -101,7 +102,7 @@ void main() {
 
     expect(runner.commands.single, contains('decide req-1 allow'));
     expect(runner.closeCount, 1);
-    expect(notifier.cancelled, ['h:perm:req-1']);
+    expect(notifier.agentCancelled, ['agent:h:s-1']);
     expect(find.text('Allowed the permission request on Host h.'), findsOne);
   });
 
@@ -116,7 +117,7 @@ void main() {
     await tester.runAsync(pumpEventQueue);
     await tester.pump();
     expect(runner.commands.single, contains('decide req-1 allow'));
-    expect(notifier.cancelled, ['h:perm:req-1']);
+    expect(notifier.agentCancelled, ['agent:h:s-1']);
 
     // Unmounted (e.g. the app locked): the platform is told nobody listens.
     await tester.pumpWidget(const SizedBox());

@@ -235,6 +235,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('usage-day-page')), findsOneWidget);
+      // A full page, not the desktop dialog.
+      expect(find.byKey(const ValueKey('desktop-page-frame')), findsNothing);
       expect(text(tester, 'usage-day-title'), 'Thu 24 Sep');
       expect(
         runner.commands.last,
@@ -276,6 +278,38 @@ void main() {
       expect(find.byKey(const ValueKey('usage-day-page')), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
+
+    testWidgets(
+      'desktop, narrow pane: the day opens as a dialog, arrows step it',
+      (tester) async {
+        final u = usage();
+        await phone(tester, UsageExplorerPage(usage: u, now: now));
+        await tester.tap(
+          find.byKey(const ValueKey('usage-explorer-day-2026-09-24')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('desktop-page-frame')),
+          findsOneWidget,
+        );
+        expect(text(tester, 'usage-day-title'), 'Thu 24 Sep');
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+        await tester.pumpAndSettle();
+        expect(text(tester, 'usage-day-title'), 'Wed 23 Sep');
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await tester.pumpAndSettle();
+        expect(text(tester, 'usage-day-title'), 'Thu 24 Sep');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('usage-day-page')), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
 
     testWidgets('a row filters everything; the chip removes it', (
       tester,

@@ -5,8 +5,10 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
@@ -406,6 +408,47 @@ void main() {
     await tester.tap(find.text('Load sessions'));
     await tester.pumpAndSettle();
     expect(runner.commands, hasLength(3));
+    expect(find.text('root'), findsOneWidget);
+  });
+
+  testWidgets(
+    'desktop filters the rows and switches tabs with Ctrl+1/2/3',
+    (tester) async {
+      await pumpPicker(tester, [tmuxOutput, herdrOutput]);
+      expect(find.text('root'), findsOneWidget);
+      expect(find.text('build'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('connect-picker-filter')),
+        'bui',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('root'), findsNothing);
+      expect(find.text('build'), findsOneWidget);
+
+      final mac = defaultTargetPlatform == TargetPlatform.macOS;
+      final modifier = mac
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(modifier);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+      await tester.sendKeyUpEvent(modifier);
+      await tester.pumpAndSettle();
+      final tabs = tester.widget<SegmentedButton<ConnectPickerTab>>(
+        find.byKey(const ValueKey('connect-picker-tabs')),
+      );
+      expect(tabs.selected, {ConnectPickerTab.recent});
+    },
+    variant: const TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+  );
+
+  testWidgets('phones have no filter field', (tester) async {
+    await pumpPicker(tester, [tmuxOutput, herdrOutput]);
+    expect(find.byKey(const ValueKey('connect-picker-filter')), findsNothing);
     expect(find.text('root'), findsOneWidget);
   });
 }

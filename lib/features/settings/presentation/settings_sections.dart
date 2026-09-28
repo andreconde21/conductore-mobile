@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_notification_settings.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_settings.dart';
@@ -18,6 +20,7 @@ import 'package:conduit/features/home_widget/data/platform_agent_status_widget_c
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/quick_actions/presentation/personal_quick_actions_card.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/settings/presentation/privacy_settings.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
@@ -216,6 +219,8 @@ class SettingsSectionBody extends StatelessWidget {
         ),
       ),
     ),
+    _gap,
+    SettingsCard(child: PersonalQuickActionsCard(theme: theme)),
   ];
 
   List<Widget> _input(BuildContext context, ThemeController theme) => [
@@ -435,6 +440,18 @@ class SettingsSectionBody extends StatelessWidget {
                       '${level.label}: ${level.description}',
                   ].join('\n'),
                 ),
+                if (attention != null &&
+                    PlatformFeatures.agentNotifications) ...[
+                  const SizedBox(height: 10),
+                  const SettingsNote(
+                    'One notification per agent, updated in place with '
+                    'what it needs now. It alerts only when an agent newly '
+                    'needs you, and goes away once everything is answered. '
+                    'This device only.',
+                  ),
+                  const SizedBox(height: 6),
+                  AgentNotificationSettingsCard(controller: attention),
+                ],
               ],
             );
           },
@@ -597,12 +614,12 @@ class SettingsSectionBody extends StatelessWidget {
             title: const Text('Trusted host keys'),
             subtitle: const Text('Servers Conductore has connected to before.'),
             trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => TrustedKeysPage(
-                  verifier: verifier,
-                  themeController: services.theme,
-                ),
+            onTap: () => pushAdaptivePage<void>(
+              context,
+              desktopMaxWidth: 760,
+              builder: (_) => TrustedKeysPage(
+                verifier: verifier,
+                themeController: services.theme,
               ),
             ),
           ),

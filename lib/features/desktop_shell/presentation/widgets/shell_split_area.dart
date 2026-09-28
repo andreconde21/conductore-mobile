@@ -1,16 +1,22 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/shell_sidebar.dart'
+    show SidebarDrag;
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_state_dot.dart';
 import 'package:flutter/material.dart';
 
-/// What a dragged tab carries.
+/// What a dragged tab (or pane header) carries.
 @immutable
 class ShellViewDrag {
-  const ShellViewDrag(this.viewId, this.label);
+  const ShellViewDrag(this.viewId, this.label, {this.fromPane});
 
   final String viewId;
   final String label;
+
+  /// The pane whose header was dragged: dropped on another pane's middle,
+  /// the two swap.
+  final String? fromPane;
 }
 
 /// A pane header's title for a view.
@@ -40,6 +46,9 @@ class ShellSplitArea extends StatefulWidget {
     this.titleFor,
     this.focusedOverlay = const [],
     this.emptyPane,
+    this.onDropNode,
+    this.onSwap,
+    this.onFillPane,
     super.key,
   });
 
@@ -60,6 +69,17 @@ class ShellSplitArea extends StatefulWidget {
 
   /// Shown in a pane without a view.
   final Widget? emptyPane;
+
+  /// A sidebar row (session, agent, workspace, machine) dropped on a pane:
+  /// open it there, or at that edge.
+  final void Function(String paneId, ShellEdge edge, SidebarDrag drag)?
+  onDropNode;
+
+  /// A pane header dropped on another pane's middle: swap their views.
+  final void Function(String fromPane, String toPane)? onSwap;
+
+  /// The "Open…" button of an empty pane: pick something to show in it.
+  final ValueChanged<String>? onFillPane;
 
   /// Height of a pane's title row in a split.
   static const paneHeaderHeight = 26.0;
@@ -164,7 +184,14 @@ class _ShellSplitAreaState extends State<ShellSplitArea> {
     final focused = pane.id == widget.layout.focusedPane.id;
     final view = pane.view;
     final content = view == null || !widget.views.containsKey(view)
-        ? (widget.emptyPane ?? const SizedBox.expand())
+        ? (widget.emptyPane ??
+              _EmptyPane(
+                key: ValueKey('shell-empty-pane-${pane.id}'),
+                focused: focused && split,
+                onOpen: widget.onFillPane == null
+                    ? null
+                    : () => widget.onFillPane!(pane.id),
+              ))
         : KeyedSubtree(key: _keyFor(view), child: widget.views[view]!);
     final title = view == null ? null : widget.titleFor?.call(view);
     return Listener(
@@ -174,8 +201,12 @@ class _ShellSplitAreaState extends State<ShellSplitArea> {
         if (!focused) widget.onFocusPane(pane.id);
       },
       child: Builder(
-        builder: (paneContext) => DragTarget<ShellViewDrag>(
-          onWillAcceptWithDetails: (_) => true,
+        builder: (paneContext) => DragTarget<Object>(
+          onWillAcceptWithDetails: (details) {
+            final data = details.data;
+            if (data is ShellViewDrag) return data.fromPane != pane.id;
+            return data is SidebarDrag && widget.onDropNode != null;
+          },
           onMove: (details) {
             final box = paneContext.findRenderObject();
             if (box is! RenderBox) return;
@@ -186,7 +217,15 @@ class _ShellSplitAreaState extends State<ShellSplitArea> {
           onAcceptWithDetails: (details) {
             final edge = _hover.remove(pane.id) ?? ShellEdge.center;
             setState(() {});
-            widget.onDrop(pane.id, edge, details.data.viewId);
+            switch (details.data) {
+              case ShellViewDrag(:final fromPane?)
+                  when edge == ShellEdge.center && widget.onSwap != null:
+                widget.onSwap!(fromPane, pane.id);
+              case ShellViewDrag(:final viewId):
+                widget.onDrop(pane.id, edge, viewId);
+              case final SidebarDrag drag:
+                widget.onDropNode?.call(pane.id, edge, drag);
+            }
           },
           builder: (context, candidates, _) {
             final hover = candidates.isEmpty ? null : _hover[pane.id];
@@ -205,10 +244,15 @@ class _ShellSplitAreaState extends State<ShellSplitArea> {
               child: Column(
                 children: [
                   if (split)
-                    _PaneHeader(
-                      title: title,
-                      focused: focused,
-                      onClose: () => widget.onClosePane(pane.id),
+                    _draggableHeader(
+                      pane,
+                      _PaneHeader(
+                        key: ValueKey('shell-pane-header-${pane.id}'),
+                        title: title,
+                        focused: focused,
+                        onClose: () => widget.onClosePane(pane.id),
+                      ),
+                      title?.label,
                     ),
                   Expanded(
                     child: Stack(
@@ -239,6 +283,19 @@ class _ShellSplitAreaState extends State<ShellSplitArea> {
     );
   }
 
+  /// A pane's header, dragged onto another pane to swap them or onto an
+  /// edge to move the view there.
+  Widget _draggableHeader(ShellPane pane, Widget header, String? label) {
+    final view = pane.view;
+    if (view == null) return header;
+    return Draggable<ShellViewDrag>(
+      data: ShellViewDrag(view, label ?? '', fromPane: pane.id),
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: _HeaderFeedback(label: label ?? ''),
+      child: MouseRegion(cursor: SystemMouseCursors.grab, child: header),
+    );
+  }
+
   /// The drop zone under [global]: the nearest edge within a quarter of
   /// the pane, else the centre.
   static ShellEdge _edgeAt(RenderBox box, Offset global) {
@@ -265,6 +322,7 @@ class _PaneHeader extends StatelessWidget {
     required this.title,
     required this.focused,
     required this.onClose,
+    super.key,
   });
 
   final ShellPaneTitle? title;
@@ -399,6 +457,93 @@ class _DropHighlight extends StatelessWidget {
             color: palette.accent.withValues(alpha: 0.18),
             border: Border.all(color: palette.accent, width: 2),
             borderRadius: BorderRadius.circular(6),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderFeedback extends StatelessWidget {
+  const _HeaderFeedback({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: palette.panelElevated,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: palette.accent),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: palette.foreground,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// An empty pane of a layout preset: where to drop a session, or pick one.
+class _EmptyPane extends StatelessWidget {
+  const _EmptyPane({required this.focused, this.onOpen, super.key});
+
+  final bool focused;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final muted = palette.mutedForeground;
+    return ColoredBox(
+      color: palette.canvas,
+      child: Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.dashboard_customize_outlined,
+                  size: 28,
+                  color: muted,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Drag a session, agent or workspace here',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: muted, fontSize: 12.5),
+                ),
+                if (focused)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'or open one: it lands in this pane',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: muted, fontSize: 11.5),
+                    ),
+                  ),
+                if (onOpen != null) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: onOpen,
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: const Text('Open…'),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),

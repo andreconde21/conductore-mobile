@@ -10,7 +10,96 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* window;
+  GtkHeaderBar* header_bar;
+  FlMethodChannel* window_channel;
 };
+
+// Where the window's size and position are kept between runs.
+static gchar* window_state_path() {
+  return g_build_filename(g_get_user_config_dir(), "conductore",
+                          "window.ini", nullptr);
+}
+
+// Restores the size (and, on X11, the position) of the last run. Wayland
+// compositors place windows themselves.
+static void restore_window_state(GtkWindow* window) {
+  g_autofree gchar* path = window_state_path();
+  g_autoptr(GKeyFile) file = g_key_file_new();
+  if (!g_key_file_load_from_file(file, path, G_KEY_FILE_NONE, nullptr)) {
+    return;
+  }
+  g_autoptr(GError) error = nullptr;
+  gint width = g_key_file_get_integer(file, "window", "width", &error);
+  if (error == nullptr) {
+    gint height = g_key_file_get_integer(file, "window", "height", &error);
+    if (error == nullptr && width >= 900 && height >= 600) {
+      gtk_window_set_default_size(window, width, height);
+    }
+  }
+  g_clear_error(&error);
+  if (g_key_file_get_boolean(file, "window", "maximized", nullptr)) {
+    gtk_window_maximize(window);
+  }
+#ifdef GDK_WINDOWING_X11
+  if (GDK_IS_X11_SCREEN(gtk_window_get_screen(window)) &&
+      g_key_file_has_key(file, "window", "x", nullptr)) {
+    gint x = g_key_file_get_integer(file, "window", "x", nullptr);
+    gint y = g_key_file_get_integer(file, "window", "y", nullptr);
+    gtk_window_move(window, x, y);
+  }
+#endif
+}
+
+// Saves the window's size and position when it closes.
+static gboolean save_window_state(GtkWidget* widget, GdkEvent* event,
+                                  gpointer user_data) {
+  GtkWindow* window = GTK_WINDOW(widget);
+  g_autoptr(GKeyFile) file = g_key_file_new();
+  gboolean maximized = gtk_window_is_maximized(window);
+  g_key_file_set_boolean(file, "window", "maximized", maximized);
+  if (!maximized) {
+    gint width = 0, height = 0;
+    gtk_window_get_size(window, &width, &height);
+    g_key_file_set_integer(file, "window", "width", width);
+    g_key_file_set_integer(file, "window", "height", height);
+#ifdef GDK_WINDOWING_X11
+    if (GDK_IS_X11_SCREEN(gtk_window_get_screen(window))) {
+      gint x = 0, y = 0;
+      gtk_window_get_position(window, &x, &y);
+      g_key_file_set_integer(file, "window", "x", x);
+      g_key_file_set_integer(file, "window", "y", y);
+    }
+#endif
+  }
+  g_autofree gchar* path = window_state_path();
+  g_autofree gchar* dir = g_path_get_dirname(path);
+  g_mkdir_with_parents(dir, 0700);
+  g_key_file_save_to_file(file, path, nullptr);
+  return FALSE;  // Close as usual.
+}
+
+// conductore/window: setTitle(String), the focused session's name.
+static void window_method_call_cb(FlMethodChannel* channel,
+                                  FlMethodCall* method_call,
+                                  gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (g_strcmp0(fl_method_call_get_name(method_call), "setTitle") == 0) {
+    FlValue* args = fl_method_call_get_args(method_call);
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_STRING) {
+      const gchar* title = fl_value_get_string(args);
+      if (self->header_bar != nullptr) {
+        gtk_header_bar_set_title(self->header_bar, title);
+      }
+      gtk_window_set_title(self->window, title);
+    }
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+  fl_method_call_respond(method_call, response, nullptr);
+}
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
@@ -24,6 +113,7 @@ static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->window = window;
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -48,11 +138,14 @@ static void my_application_activate(GApplication* application) {
     gtk_header_bar_set_title(header_bar, "Conductore");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
-    gtk_window_set_title(window, "Conductore");
+    self->header_bar = header_bar;
   }
+  gtk_window_set_title(window, "Conductore");
 
   gtk_window_set_default_size(window, 1280, 800);
+  restore_window_state(window);
+  g_signal_connect(window, "delete-event", G_CALLBACK(save_window_state),
+                   nullptr);
   // Smallest usable window (the terminal plus the host list side by side).
   GdkGeometry min_size = {};
   min_size.min_width = 900;
@@ -88,6 +181,13 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->window_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "conductore/window", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->window_channel, window_method_call_cb, self, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -135,6 +235,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->window_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/features/live_preview/domain/preview_screenshot.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// What the annotate screen hands back: the image to send and a note.
 class PreviewAnnotateResult {
@@ -20,11 +24,13 @@ Future<PreviewAnnotateResult?> showPreviewAnnotatePage(
   BuildContext context,
   Uint8List png,
 ) {
-  return Navigator.of(context).push<PreviewAnnotateResult>(
-    MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => PreviewAnnotatePage(png: png),
-    ),
+  // Phones: full screen; desktop: a large dialog over the shell (Esc and
+  // a click outside cancel it).
+  return pushAdaptivePage<PreviewAnnotateResult>(
+    context,
+    fullscreenDialog: true,
+    desktopMaxWidth: 1100,
+    builder: (_) => PreviewAnnotatePage(png: png),
   );
 }
 
@@ -41,6 +47,7 @@ class PreviewAnnotatePage extends StatefulWidget {
 
 class _PreviewAnnotatePageState extends State<PreviewAnnotatePage> {
   final _note = TextEditingController();
+  final _noteFocus = FocusNode();
   final List<PreviewAnnotation> _shapes = [];
   PreviewAnnotationKind _tool = PreviewAnnotationKind.rectangle;
   PreviewAnnotation? _drawing;
@@ -67,6 +74,7 @@ class _PreviewAnnotatePageState extends State<PreviewAnnotatePage> {
   @override
   void dispose() {
     _note.dispose();
+    _noteFocus.dispose();
     _image?.dispose();
     super.dispose();
   }
@@ -94,8 +102,38 @@ class _PreviewAnnotatePageState extends State<PreviewAnnotatePage> {
     ).pop(PreviewAnnotateResult(png: png, note: _note.text.trim()));
   }
 
+  /// Desktop keys: Ctrl/Cmd+Enter sends, Ctrl/Cmd+Z undoes the last mark
+  /// (in the note field Ctrl+Z stays the field's own undo).
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final keys = HardwareKeyboard.instance;
+    final primary = defaultTargetPlatform == TargetPlatform.macOS
+        ? keys.isMetaPressed
+        : keys.isControlPressed;
+    if (!primary || keys.isAltPressed || keys.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      if (_image != null && !_sending) unawaited(_send());
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyZ && !_noteFocus.hasFocus) {
+      if (_shapes.isNotEmpty) _undo();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final page = _page(context);
+    if (!PlatformFeatures.isDesktop) return page;
+    return Focus(autofocus: true, onKeyEvent: _onKey, child: page);
+  }
+
+  Widget _page(BuildContext context) {
     final image = _image;
     return Scaffold(
       appBar: AppBar(
@@ -186,6 +224,11 @@ class _PreviewAnnotatePageState extends State<PreviewAnnotatePage> {
                     child: TextField(
                       key: const ValueKey('annotate-note'),
                       controller: _note,
+                      focusNode: _noteFocus,
+                      // Desktop: Enter in the note sends, like the button.
+                      onSubmitted: PlatformFeatures.isDesktop && image != null
+                          ? (_) => unawaited(_send())
+                          : null,
                       minLines: 1,
                       maxLines: 3,
                       textInputAction: TextInputAction.done,

@@ -293,4 +293,99 @@ void main() {
     expect(find.text('Send mouse taps'), findsNothing);
     expect(find.text('Import backup'), findsNothing);
   });
+
+  group('desktop (A-067, A-068)', () {
+    const desktops = TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    });
+
+    Future<void> openThemeSheet(WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () =>
+                  showThemeSheet(context: context, controller: controller),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    DraggableScrollableSheet sheet(WidgetTester tester) =>
+        tester.widget(find.byType(DraggableScrollableSheet));
+
+    testWidgets('desktop: the Appearance sheet fills its dialog', (
+      tester,
+    ) async {
+      await openThemeSheet(tester);
+      expect(sheet(tester).initialChildSize, 1.0);
+      expect(sheet(tester).minChildSize, 1.0);
+      expect(
+        find.byKey(const ValueKey('adaptive-modal-dialog')),
+        findsOneWidget,
+      );
+    }, variant: desktops);
+
+    testWidgets('phone: the Appearance sheet keeps its drag sizes', (
+      tester,
+    ) async {
+      await openThemeSheet(tester);
+      expect(sheet(tester).initialChildSize, 0.7);
+      expect(sheet(tester).minChildSize, 0.4);
+      expect(sheet(tester).maxChildSize, 0.92);
+    });
+
+    Future<int> addCustomKeyWithEnter(WidgetTester tester) async {
+      await openSection(tester, SettingsSection.input);
+      await reveal(
+        tester,
+        SettingsSection.input,
+        find.byKey(const ValueKey('key-rows-edit')),
+      );
+      final initialCount = controller.terminalKeyboardRows.first.items.length;
+      await tester.tap(find.byKey(const ValueKey('key-rows-edit')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Edit keys'));
+      await tester.pumpAndSettle();
+      final custom = find.widgetWithText(ActionChip, 'Custom');
+      await tester.ensureVisible(custom);
+      await tester.pumpAndSettle();
+      await tester.tap(custom);
+      await tester.pumpAndSettle();
+
+      final fields = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(fields.at(0), 'gs');
+      await tester.enterText(fields.at(1), 'git status');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      return initialCount;
+    }
+
+    testWidgets('desktop: Enter in the custom key dialog adds the key', (
+      tester,
+    ) async {
+      final initialCount = await addCustomKeyWithEnter(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Row 1 Keys (${initialCount + 1})'), findsOneWidget);
+    }, variant: desktops);
+
+    testWidgets('phone: Enter in the custom key dialog adds nothing', (
+      tester,
+    ) async {
+      final initialCount = await addCustomKeyWithEnter(tester);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Row 1 Keys ($initialCount)'), findsOneWidget);
+    });
+  });
 }

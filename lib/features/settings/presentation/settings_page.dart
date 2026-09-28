@@ -1,3 +1,5 @@
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
@@ -8,13 +10,15 @@ import 'package:conduit/features/settings/presentation/settings_sections.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Width from which Settings shows the section list and the open section
 /// side by side.
 const settingsTwoPaneMinWidth = 900.0;
 
-/// Opens Settings full screen, optionally at [section]. [services] default
-/// to the app-wide [SettingsScope]; without either nothing opens.
+/// Opens Settings, optionally at [section]: full screen on phones, a large
+/// dialog over the shell on desktop (see [pushAdaptivePage]). [services]
+/// default to the app-wide [SettingsScope]; without either nothing opens.
 Future<void> showSettings(
   BuildContext context, {
   SettingsServices? services,
@@ -27,10 +31,10 @@ Future<void> showSettings(
     hasSessionViews:
         base.hasSessionViews || SessionViewScope.maybeOf(context) != null,
   );
-  await Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => SettingsPage(services: resolved, initialSection: section),
-    ),
+  await pushAdaptivePage<void>(
+    context,
+    desktopMaxWidth: 1100,
+    builder: (_) => SettingsPage(services: resolved, initialSection: section),
   );
 }
 
@@ -50,6 +54,10 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final _search = TextEditingController();
+
+  /// The first result (or section) row, where Down in the search field
+  /// moves the focus on desktop.
+  final _firstRowFocus = FocusNode(debugLabel: 'settings-first-row');
   late SettingsSection _selected =
       widget.initialSection ?? SettingsSection.appearance;
   bool _pushedInitial = false;
@@ -64,6 +72,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     _search.dispose();
+    _firstRowFocus.dispose();
     super.dispose();
   }
 
@@ -81,11 +90,13 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => _selected = section);
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            SettingsSectionPage(section: section, services: widget.services),
-      ),
+    // A desktop window too narrow for two panes opens the section as a
+    // dialog over Settings; phones push it exactly as before.
+    pushAdaptivePage<void>(
+      context,
+      desktopMaxWidth: 760,
+      builder: (_) =>
+          SettingsSectionPage(section: section, services: widget.services),
     );
   }
 
@@ -114,6 +125,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   search: _search,
                   matches: _matches,
                   selected: wide ? _selected : null,
+                  firstRowFocus: _firstRowFocus,
                   onOpen: (section) => _open(section, wide: wide),
                 );
                 if (!wide) return list;
@@ -165,13 +177,28 @@ class _SectionList extends StatelessWidget {
     required this.search,
     required this.matches,
     required this.selected,
+    required this.firstRowFocus,
     required this.onOpen,
   });
 
   final TextEditingController search;
   final List<SettingsEntry> matches;
   final SettingsSection? selected;
+  final FocusNode firstRowFocus;
   final ValueChanged<SettingsSection> onOpen;
+
+  /// Desktop: Down in the search field moves to the first row, so the
+  /// arrows and Enter take it from there. Phones get [field] unchanged.
+  Widget _desktopSearchKeys(Widget field) {
+    if (!PlatformFeatures.isDesktop) return field;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowDown):
+            firstRowFocus.requestFocus,
+      },
+      child: field,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -200,21 +227,29 @@ class _SectionList extends StatelessWidget {
         const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: TextField(
-            key: const ValueKey('settings-search'),
-            controller: search,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: 'Search settings',
-              prefixIcon: const Icon(Icons.search_rounded),
-              isDense: true,
-              suffixIcon: searching
-                  ? IconButton(
-                      tooltip: 'Clear search',
-                      onPressed: search.clear,
-                      icon: const Icon(Icons.close_rounded),
-                    )
+          child: _desktopSearchKeys(
+            TextField(
+              key: const ValueKey('settings-search'),
+              controller: search,
+              textInputAction: TextInputAction.search,
+              // Desktop: Enter opens the first result.
+              onSubmitted: PlatformFeatures.isDesktop
+                  ? (_) {
+                      if (matches.isNotEmpty) onOpen(matches.first.section);
+                    }
                   : null,
+              decoration: InputDecoration(
+                hintText: 'Search settings',
+                prefixIcon: const Icon(Icons.search_rounded),
+                isDense: true,
+                suffixIcon: searching
+                    ? IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: search.clear,
+                        icon: const Icon(Icons.close_rounded),
+                      )
+                    : null,
+              ),
             ),
           ),
         ),
@@ -230,9 +265,10 @@ class _SectionList extends StatelessWidget {
                 ),
               ),
             ),
-          for (final entry in matches)
+          for (final (index, entry) in matches.indexed)
             ListTile(
               key: ValueKey('settings-result-${entry.title}'),
+              focusNode: index == 0 ? firstRowFocus : null,
               leading: Icon(entry.section.icon),
               title: Text(entry.title),
               subtitle: Text(entry.section.title),
@@ -242,6 +278,9 @@ class _SectionList extends StatelessWidget {
           for (final section in SettingsSection.values)
             ListTile(
               key: ValueKey('settings-section-${section.name}'),
+              focusNode: section == SettingsSection.values.first
+                  ? firstRowFocus
+                  : null,
               selected: section == selected,
               selectedTileColor: colorScheme.primary.withValues(alpha: 0.10),
               shape: const RoundedRectangleBorder(

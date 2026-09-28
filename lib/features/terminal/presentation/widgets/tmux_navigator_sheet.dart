@@ -103,6 +103,8 @@ Future<TmuxNavigatorPick?> showTmuxNavigatorSheet({
   return showAdaptiveModal<TmuxNavigatorPick>(
     kind: AdaptiveModalKind.sidePanel,
     context: context,
+    // The whole panel on desktop: nothing to drag there.
+    desktopFill: true,
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: palette.panelFor(brightness),
@@ -192,9 +194,9 @@ class _TmuxNavigatorSheetState extends State<TmuxNavigatorSheet> {
         : 0.0;
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.72,
-      minChildSize: 0.4,
-      maxChildSize: 0.94,
+      initialChildSize: adaptiveSheetFraction(context, 0.72),
+      minChildSize: adaptiveSheetFraction(context, 0.4),
+      maxChildSize: adaptiveSheetFraction(context, 0.94),
       builder: (context, scrollController) => ListView(
         key: const ValueKey('tmux-navigator'),
         controller: scrollController,

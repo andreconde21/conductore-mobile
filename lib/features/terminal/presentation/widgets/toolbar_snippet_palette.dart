@@ -2,6 +2,7 @@ import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Built-in quick prompts for driving Claude Code from the toolbar palette.
 enum ToolbarQuickPrompt {
@@ -102,6 +103,8 @@ class ToolbarSnippetPalette extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A command palette on desktop: a filter field and keyboard picking.
+    if (useDesktopModals(context)) return _DesktopSnippetPalette(this);
     final theme = Theme.of(context);
     final foreground = palette.foregroundFor(brightness);
     final muted = palette.mutedForegroundFor(brightness);
@@ -271,6 +274,234 @@ class _SnippetTile extends StatelessWidget {
               style: TextStyle(color: muted),
             ),
       onTap: onTap,
+    );
+  }
+}
+
+/// One row of the desktop palette.
+class _PaletteEntry {
+  const _PaletteEntry({
+    required this.label,
+    required this.icon,
+    required this.onSelect,
+    this.detail,
+    this.section,
+  });
+
+  final String label;
+  final String? detail;
+  final IconData icon;
+  final VoidCallback onSelect;
+
+  /// Shown above the first entry of a section.
+  final String? section;
+
+  bool matches(String query) =>
+      query.isEmpty ||
+      label.toLowerCase().contains(query) ||
+      (detail?.toLowerCase().contains(query) ?? false);
+}
+
+/// The desktop form of [ToolbarSnippetPalette]: every quick prompt and
+/// snippet as a row under an autofocused filter; Up and Down move the
+/// highlight, Enter runs it.
+class _DesktopSnippetPalette extends StatefulWidget {
+  const _DesktopSnippetPalette(this.palette);
+
+  final ToolbarSnippetPalette palette;
+
+  @override
+  State<_DesktopSnippetPalette> createState() => _DesktopSnippetPaletteState();
+}
+
+class _DesktopSnippetPaletteState extends State<_DesktopSnippetPalette> {
+  final _query = TextEditingController();
+  final _highlightedKey = GlobalKey();
+  int _highlighted = 0;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  List<_PaletteEntry> _entries() {
+    final p = widget.palette;
+    final hasPassword = p.hostPassword.isNotEmpty && p.onPassword != null;
+    String? preview(TerminalSnippet snippet) =>
+        snippet.hidden || snippet.text.isEmpty
+        ? null
+        : snippet.submit
+        ? '${snippet.text} + Enter'
+        : snippet.text;
+    final host = p.hostSnippets.where((snippet) => snippet.isValid).toList();
+    final global = p.globalSnippets
+        .where((snippet) => snippet.isValid)
+        .toList();
+    return [
+      if (p.onDictate case final onDictate?)
+        _PaletteEntry(
+          label: 'Dictate',
+          detail: 'Speak a line into the chat line',
+          icon: Icons.mic_none_rounded,
+          onSelect: onDictate,
+          section: 'Quick prompts',
+        ),
+      for (final (i, prompt) in ToolbarQuickPrompt.values.indexed)
+        _PaletteEntry(
+          label: prompt.label,
+          detail: prompt.description,
+          icon: Icons.bolt_rounded,
+          onSelect: () => p.onQuickPrompt(prompt),
+          section: i == 0 && p.onDictate == null ? 'Quick prompts' : null,
+        ),
+      for (final (i, snippet) in host.indexed)
+        _PaletteEntry(
+          label: snippet.label,
+          detail: preview(snippet),
+          icon: snippet.hidden
+              ? Icons.visibility_off_rounded
+              : Icons.code_rounded,
+          onSelect: () => p.onSnippet(snippet),
+          section: i == 0 ? 'Host' : null,
+        ),
+      for (final (i, snippet) in global.indexed)
+        _PaletteEntry(
+          label: snippet.label,
+          detail: preview(snippet),
+          icon: snippet.hidden
+              ? Icons.visibility_off_rounded
+              : Icons.code_rounded,
+          onSelect: () => p.onSnippet(snippet),
+          section: i == 0 ? 'Global' : null,
+        ),
+      if (hasPassword)
+        _PaletteEntry(
+          label: 'Password',
+          detail: 'Types the saved host password',
+          icon: Icons.visibility_off_rounded,
+          onSelect: () => p.onPassword!(p.hostPassword),
+          section: host.isEmpty && global.isEmpty ? 'Snippets' : null,
+        ),
+    ];
+  }
+
+  List<_PaletteEntry> _visible() {
+    final query = _query.text.trim().toLowerCase();
+    return [
+      for (final entry in _entries())
+        if (entry.matches(query)) entry,
+    ];
+  }
+
+  void _move(int delta) {
+    final count = _visible().length;
+    if (count == 0) return;
+    setState(() => _highlighted = (_highlighted + delta).clamp(0, count - 1));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = _highlightedKey.currentContext;
+      if (target != null && target.mounted) {
+        Scrollable.ensureVisible(target, alignment: 0.5);
+      }
+    });
+  }
+
+  void _run() {
+    final visible = _visible();
+    if (visible.isEmpty) return;
+    visible[_highlighted.clamp(0, visible.length - 1)].onSelect();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.palette;
+    final theme = Theme.of(context);
+    final foreground = p.palette.foregroundFor(p.brightness);
+    final muted = p.palette.mutedForegroundFor(p.brightness);
+    final visible = _visible();
+    final highlighted = visible.isEmpty
+        ? -1
+        : _highlighted.clamp(0, visible.length - 1);
+    final query = _query.text.trim();
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
+        const SingleActivator(LogicalKeyboardKey.enter): _run,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): _run,
+      },
+      child: Column(
+        key: const ValueKey('snippet-palette-desktop'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+            child: TextField(
+              key: const ValueKey('snippet-palette-filter'),
+              controller: _query,
+              autofocus: true,
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'Filter prompts and snippets',
+              ),
+              onChanged: (_) => setState(() => _highlighted = 0),
+            ),
+          ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+              children: [
+                if (visible.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      query.isEmpty
+                          ? 'No snippets saved. Add global snippets in '
+                                'Settings › Terminal, or per-machine snippets '
+                                'when editing a machine.'
+                          : 'Nothing matches "$query".',
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                  ),
+                for (final (i, entry) in visible.indexed) ...[
+                  if (entry.section != null && query.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 2),
+                      child: _SectionLabel(entry.section!, color: muted),
+                    ),
+                  ListTile(
+                    key: i == highlighted ? _highlightedKey : null,
+                    dense: true,
+                    selected: i == highlighted,
+                    selectedTileColor: p.palette.accent.withValues(alpha: 0.14),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(8)),
+                    ),
+                    leading: Icon(entry.icon, color: muted, size: 18),
+                    title: Text(
+                      entry.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: foreground),
+                    ),
+                    subtitle: entry.detail == null
+                        ? null
+                        : Text(
+                            entry.detail!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: muted),
+                          ),
+                    onTap: entry.onSelect,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

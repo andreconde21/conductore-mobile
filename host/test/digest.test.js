@@ -22,22 +22,22 @@ const root = tempDir('cnd-digest-')
 const binDir = path.join(root, 'bin')
 const home = path.join(root, 'home')
 const state = path.join(root, 'state')
-const calls = path.join(root, 'calls.json')
+const calls = path.join(root, 'calls')
 const pidsFile = path.join(root, 'pids.json')
 fs.mkdirSync(binDir)
 fs.mkdirSync(home)
 fs.mkdirSync(state, { mode: 0o700 })
 
 // FAKE_MODE: ok (one summary per agent id in the input), hang (ignores
-// SIGTERM, never answers), not-logged-in. Every call is appended to calls.json.
+// SIGTERM, never answers), not-logged-in. Every call is written to its own file under calls/.
 fs.writeFileSync(path.join(binDir, 'claude'), `#!${process.execPath}
 const fs = require('fs')
 const { spawn } = require('child_process')
 const stdin = fs.readFileSync(0, 'utf8')
-let all = []
-try { all = JSON.parse(fs.readFileSync(${JSON.stringify(calls)}, 'utf8')) } catch {}
-all.push({ args: process.argv.slice(2), stdin, thinking: process.env.MAX_THINKING_TOKENS, claudecode: process.env.CLAUDECODE || null })
-fs.writeFileSync(${JSON.stringify(calls)}, JSON.stringify(all))
+// One file per call: parallel calls must not race on a shared file.
+fs.mkdirSync(${JSON.stringify(calls)}, { recursive: true })
+fs.writeFileSync(${JSON.stringify(calls)} + '/' + Date.now() + '-' + process.pid + '.json',
+  JSON.stringify({ args: process.argv.slice(2), stdin, thinking: process.env.MAX_THINKING_TOKENS, claudecode: process.env.CLAUDECODE || null }))
 const mode = process.env.FAKE_MODE || 'ok'
 if (mode === 'hang') {
   const g = spawn('/bin/sleep', ['60'], { stdio: 'ignore' })
@@ -69,8 +69,14 @@ function cli (args, extraEnv = {}) {
   })
 }
 
-const readCalls = () => { try { return JSON.parse(fs.readFileSync(calls, 'utf8')) } catch { return [] } }
-const resetCalls = () => { try { fs.unlinkSync(calls) } catch {} }
+const readCalls = () => {
+  let names = []
+  try { names = fs.readdirSync(calls).filter(n => n.endsWith('.json')) } catch { return [] }
+  return names
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+    .map(n => JSON.parse(fs.readFileSync(path.join(calls, n), 'utf8')))
+}
+const resetCalls = () => { fs.rmSync(calls, { recursive: true, force: true }) }
 const promptOf = call => {
   const lines = call.stdin.split('\n')
   const i = lines.findIndex(l => /^<AGENTS-[0-9a-f]+>$/.test(l))

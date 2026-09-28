@@ -13,6 +13,7 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
@@ -399,4 +400,111 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
+
+  group('desktop pages (A-060, A-061, A-062)', () {
+    const desktops = TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    });
+    final frame = find.byKey(const ValueKey('desktop-page-frame'));
+
+    testWidgets(
+      'desktop: Settings and Trusted keys open as dialogs over the window',
+      (tester) async {
+        desktop(tester);
+        await pumpLauncher(tester);
+
+        expect(frame, findsOneWidget);
+        expect(find.byKey(const ValueKey('settings-two-pane')), findsOne);
+        // The launcher stays underneath, in sight.
+        expect(find.text('Open settings', skipOffstage: false), findsOne);
+
+        await tester.tap(sectionTile(SettingsSection.security));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('settings-trusted-keys')));
+        await tester.pumpAndSettle();
+        expect(frame, findsNWidgets(2));
+      },
+      variant: desktops,
+    );
+
+    testWidgets('desktop: a narrow window opens sections as dialogs too', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(800, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pumpLauncher(tester);
+
+      expect(find.byKey(const ValueKey('settings-two-pane')), findsNothing);
+      await tester.tap(sectionTile(SettingsSection.security));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settings-body-security')), findsOne);
+      expect(frame, findsNWidgets(2));
+    }, variant: desktops);
+
+    testWidgets('phone: Settings and its pages stay full-screen pages', (
+      tester,
+    ) async {
+      phone(tester);
+      await pumpLauncher(tester);
+      expect(frame, findsNothing);
+      expect(
+        ModalRoute.of(tester.element(sectionTile(SettingsSection.security))),
+        isA<MaterialPageRoute<void>>(),
+      );
+
+      await tester.tap(sectionTile(SettingsSection.security));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-trusted-keys')));
+      await tester.pumpAndSettle();
+      expect(frame, findsNothing);
+      expect(find.text('Trusted host keys'), findsWidgets);
+    });
+
+    testWidgets(
+      'desktop: Enter opens the first result, Down reaches the list',
+      (tester) async {
+        desktop(tester);
+        await pumpLauncher(tester);
+
+        final search = find.byKey(const ValueKey('settings-search'));
+        await tester.enterText(search, 'backup');
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        expect(
+          FocusManager.instance.primaryFocus?.debugLabel,
+          'settings-first-row',
+        );
+
+        await tester.tap(search);
+        await tester.enterText(search, 'pinch');
+        await tester.pumpAndSettle();
+        await tester.testTextInput.receiveAction(TextInputAction.search);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('settings-body-input')), findsOne);
+      },
+      variant: desktops,
+    );
+
+    testWidgets('phone: Enter in the search opens nothing', (tester) async {
+      phone(tester);
+      await pumpLauncher(tester);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('settings-search')),
+        'pinch',
+      );
+      await tester.pumpAndSettle();
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settings-body-input')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('settings-result-Pinch to zoom')),
+        findsOneWidget,
+      );
+    });
+  });
 }

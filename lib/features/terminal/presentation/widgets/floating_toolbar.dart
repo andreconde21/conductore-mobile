@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -682,8 +683,12 @@ class _PillButton extends StatelessWidget {
           )
         : palette.panelElevatedFor(brightness);
     final isIcon = icon != null || logo != null;
+    // A desktop reaches the long-press action with a right-click.
+    final desktop = PlatformFeatures.isDesktop;
     return Tooltip(
-      message: tooltip,
+      message: desktop
+          ? tooltip.replaceAll('Long-press', 'Right-click')
+          : tooltip,
       child: Material(
         color: background,
         borderRadius: BorderRadius.circular(AppTheme.radius),
@@ -699,6 +704,7 @@ class _PillButton extends StatelessWidget {
                   unawaited(HapticFeedback.mediumImpact());
                   onLongPress!();
                 },
+          onSecondaryTap: desktop ? onLongPress : null,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             height: _height,

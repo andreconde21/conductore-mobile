@@ -1,21 +1,25 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
 
-/// Opens one machine's approval rules (Settings › Agents › Approval rules).
+/// Opens one machine's approval rules (Settings › Agents › Approval rules):
+/// a full page on phones, a dialog over the window on desktop.
 Future<void> showApprovalRules(
   BuildContext context, {
   required AgentAttentionController controller,
   required SavedHost host,
 }) {
-  return Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => ApprovalRulesPage(controller: controller, host: host),
-    ),
+  return pushAdaptivePage<void>(
+    context,
+    desktopMaxWidth: 760,
+    builder: (_) => ApprovalRulesPage(controller: controller, host: host),
   );
 }
 
@@ -111,10 +115,22 @@ class _ApprovalRulesPageState extends State<ApprovalRulesPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Desktop: "Add rule" sits in the app bar instead of a floating button.
+    final desktop = useDesktopPages(context);
     return Scaffold(
       appBar: AppBar(
         title: Text('Approval rules · ${widget.host.name}'),
         actions: [
+          if (desktop && !_unsupported)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: TextButton.icon(
+                key: const ValueKey('rules-add'),
+                onPressed: _busy.contains('add') ? null : _edit,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add rule'),
+              ),
+            ),
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh_rounded),
@@ -122,7 +138,7 @@ class _ApprovalRulesPageState extends State<ApprovalRulesPage> {
           ),
         ],
       ),
-      floatingActionButton: _unsupported
+      floatingActionButton: _unsupported || desktop
           ? null
           : FloatingActionButton.extended(
               key: const ValueKey('rules-add'),
@@ -137,7 +153,7 @@ class _ApprovalRulesPageState extends State<ApprovalRulesPage> {
           final loading = _controller.isLoadingApprovals(widget.host.id);
           final rules = approvals?.rules ?? const <ApprovalRule>[];
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+            padding: EdgeInsets.fromLTRB(16, 8, 16, desktop ? 16 : 96),
             children: [
               Text(
                 'The companion on ${widget.host.name} allows matching '
@@ -249,7 +265,9 @@ Future<ApprovalRuleDraft?> showRuleEditorSheet(
   ApprovalRule? existing,
   List<String> repos = const [],
 }) {
-  return showModalBottomSheet<ApprovalRuleDraft>(
+  return showAdaptiveModal<ApprovalRuleDraft>(
+    kind: AdaptiveModalKind.dialog,
+    desktopMaxWidth: 560,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -321,10 +339,20 @@ class _RuleEditorState extends State<_RuleEditor> {
     final validRule = isValidApprovalRule(_rule.text);
     final scope = _scope;
     final session = existing?.scope.kind == ApprovalScopeKind.session;
+    final save = validRule && scope != null
+        ? () => Navigator.of(context).pop(
+            ApprovalRuleDraft(
+              rule: _rule.text.trim(),
+              scope: scope,
+              duration:
+                  _duration ?? _keep(existing) ?? const TrustDuration.forever(),
+            ),
+          )
+        : null;
     return Padding(
       padding: EdgeInsets.fromLTRB(
         20,
-        0,
+        approvalSheetTopPadding(context),
         20,
         16 + MediaQuery.viewInsetsOf(context).bottom,
       ),
@@ -342,6 +370,11 @@ class _RuleEditorState extends State<_RuleEditor> {
               key: const ValueKey('rule-editor-rule'),
               controller: _rule,
               style: const TextStyle(fontFamily: 'monospace'),
+              // Enter saves in the desktop dialog; phones keep the keyboard's
+              // plain Done.
+              onSubmitted: useDesktopModals(context)
+                  ? (_) => save?.call()
+                  : null,
               decoration: InputDecoration(
                 labelText: 'Rule',
                 border: const OutlineInputBorder(),
@@ -378,6 +411,11 @@ class _RuleEditorState extends State<_RuleEditor> {
                 TextField(
                   key: const ValueKey('rule-editor-path'),
                   controller: _path,
+                  // Enter saves in the desktop dialog; phones keep the keyboard's
+                  // plain Done.
+                  onSubmitted: useDesktopModals(context)
+                      ? (_) => save?.call()
+                      : null,
                   decoration: InputDecoration(
                     labelText: 'Repo path on the machine',
                     border: const OutlineInputBorder(),
@@ -420,21 +458,18 @@ class _RuleEditorState extends State<_RuleEditor> {
               ],
             ),
             const SizedBox(height: 20),
-            FilledButton(
-              key: const ValueKey('rule-editor-save'),
-              onPressed: validRule && scope != null
-                  ? () => Navigator.of(context).pop(
-                      ApprovalRuleDraft(
-                        rule: _rule.text.trim(),
-                        scope: scope,
-                        duration:
-                            _duration ??
-                            _keep(existing) ??
-                            const TrustDuration.forever(),
-                      ),
+            ApprovalSheetActions(
+              cancel: useDesktopModals(context)
+                  ? OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
                     )
                   : null,
-              child: const Text('Save'),
+              confirm: FilledButton(
+                key: const ValueKey('rule-editor-save'),
+                onPressed: save,
+                child: const Text('Save'),
+              ),
             ),
           ],
         ),

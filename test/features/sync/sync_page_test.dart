@@ -247,4 +247,70 @@ void main() {
     expect(bLocal.hosts.hosts.map((h) => h.id), contains('laptop'));
     expect(find.text('Hub: Workstation'), findsOneWidget);
   });
+
+  group('desktop forms (A-063, A-065)', () {
+    final frame = find.byKey(const ValueKey('desktop-page-frame'));
+    const mismatch = 'The passphrases do not match.';
+
+    Future<void> startSetUp(WidgetTester tester, SyncController sync) async {
+      await _open(tester, sync);
+      await tester.tap(find.byKey(const ValueKey('sync-set-up')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('sync-hub-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Workstation').last);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'desktop: Set up is a dialog and Enter moves the form along',
+      (tester) async {
+        final (sync, _) = await _controller(FakeHubServer(), hosts: [_hub]);
+        await startSetUp(tester, sync);
+        expect(frame, findsOneWidget);
+
+        // Enter on the device name checks the hub.
+        await tester.enterText(find.byType(TextField).first, 'Laptop');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await _until(
+          tester,
+          () => find
+              .byKey(const ValueKey('sync-passphrase'))
+              .evaluate()
+              .isNotEmpty,
+        );
+
+        await tester.enterText(
+          find.byKey(const ValueKey('sync-passphrase')),
+          'Correct-Horse-9',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('sync-passphrase-confirm')),
+          'Different-Horse-9',
+        );
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+        expect(find.text(mismatch), findsOneWidget);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+      }),
+    );
+
+    testWidgets('phone: Set up is a full page and Enter submits nothing', (
+      tester,
+    ) async {
+      final (sync, _) = await _controller(FakeHubServer(), hosts: [_hub]);
+      await startSetUp(tester, sync);
+      expect(frame, findsNothing);
+
+      await tester.enterText(find.byType(TextField).first, 'Laptop');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('sync-passphrase')), findsNothing);
+      expect(find.byKey(const ValueKey('sync-check-hub')), findsOneWidget);
+    });
+  });
 }

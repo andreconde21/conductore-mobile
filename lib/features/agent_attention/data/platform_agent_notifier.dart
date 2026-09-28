@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -8,8 +9,9 @@ import 'package:flutter/services.dart';
 /// keepalive service). Notification permission rides the existing
 /// POST_NOTIFICATIONS request flow in `main.dart`.
 ///
-/// On platforms without a native handler (currently iOS) every call is a
-/// no-op; the dashboard itself works everywhere.
+/// On platforms without a native handler (currently iOS: the app posts no
+/// local notifications there) every call is a no-op; the dashboard itself
+/// works everywhere.
 class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
   const PlatformAgentAttentionNotifier();
 
@@ -31,23 +33,25 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
   }
 
   @override
-  Future<void> showPermissionRequest({
-    required String id,
-    required String title,
-    required String body,
+  Future<void> showAgents({
     required String hostId,
-    required String requestId,
-    AgentOpenTarget? open,
+    required List<AgentNotification> notifications,
   }) {
-    return _invoke('showPermissionRequest', {
-      'id': id,
-      'title': title,
-      'body': body,
+    return _invoke('showAgents', {
       'hostId': hostId,
-      'requestId': requestId,
-      ...?open?.toArguments(),
+      'notifications': [
+        for (final notification in notifications) notification.toArguments(),
+      ],
     });
   }
+
+  @override
+  Future<void> showAgent(AgentNotification notification) =>
+      _invoke('showAgent', notification.toArguments());
+
+  @override
+  Future<void> cancelAgent({required String key}) =>
+      _invoke('cancelAgent', {'key': key});
 
   /// Routes native-to-Dart calls on [channel] to the permission action and
   /// open-agent listeners; the channel has one handler slot for both.
@@ -137,6 +141,7 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
             AgentPermissionAction(
               notificationId: item['notificationId'] as String? ?? '',
               hostId: item['hostId'] as String,
+              agentId: item['agentId'] as String? ?? '',
               requestId: item['requestId'] as String,
               verdict: item['verdict'] as String? ?? '',
             ),

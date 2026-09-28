@@ -23,6 +23,9 @@ class SftpHeader extends StatelessWidget {
     required this.isBookmarked,
     required this.onToggleBookmark,
     required this.onOpenBookmark,
+    this.onNewFolder,
+    this.onUpload,
+    this.searchFocusNode,
     super.key,
   });
 
@@ -47,6 +50,14 @@ class SftpHeader extends StatelessWidget {
   final VoidCallback? onToggleBookmark;
   final ValueChanged<String> onOpenBookmark;
 
+  /// Desktop puts New folder and Upload here instead of floating buttons;
+  /// null hides them.
+  final VoidCallback? onNewFolder;
+  final VoidCallback? onUpload;
+
+  /// Focus of the search field (Ctrl/Cmd+F on desktop).
+  final FocusNode? searchFocusNode;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -70,6 +81,7 @@ class SftpHeader extends StatelessWidget {
           Row(
             children: [
               IconButton(
+                tooltip: 'Back',
                 onPressed: onBack,
                 icon: const Icon(Icons.arrow_back_rounded),
               ),
@@ -124,6 +136,18 @@ class SftpHeader extends StatelessWidget {
                           ),
                       ],
               ),
+              if (onNewFolder != null)
+                IconButton(
+                  tooltip: 'New folder',
+                  icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+                  onPressed: onNewFolder,
+                ),
+              if (onUpload != null)
+                IconButton(
+                  tooltip: 'Upload files',
+                  icon: const Icon(Icons.upload_rounded, size: 20),
+                  onPressed: onUpload,
+                ),
               busyIndicator,
             ],
           ),
@@ -153,6 +177,7 @@ class SftpHeader extends StatelessWidget {
           const SizedBox(height: 12),
           _FileToolbar(
             controller: searchController,
+            focusNode: searchFocusNode,
             query: searchQuery,
             sortMode: sortMode,
             totalCount: totalCount,
@@ -172,6 +197,7 @@ class SftpHeader extends StatelessWidget {
 class _FileToolbar extends StatelessWidget {
   const _FileToolbar({
     required this.controller,
+    required this.focusNode,
     required this.query,
     required this.sortMode,
     required this.totalCount,
@@ -184,6 +210,7 @@ class _FileToolbar extends StatelessWidget {
   });
 
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final String query;
   final SftpSortMode sortMode;
   final int totalCount;
@@ -210,6 +237,7 @@ class _FileToolbar extends StatelessWidget {
             Expanded(
               child: TextField(
                 controller: controller,
+                focusNode: focusNode,
                 onChanged: onSearchChanged,
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(

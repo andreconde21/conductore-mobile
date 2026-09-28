@@ -2,6 +2,8 @@ import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/shell_sidebar.dart'
+    show SidebarDrag;
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -53,6 +55,12 @@ abstract interface class TerminalShellHost {
 
   /// The next view that opens goes into a new pane at [edge].
   void requestSplit(ShellEdge edge);
+
+  /// Shows open view [viewId] in pane [paneId], or at its [edge].
+  void placeView(String paneId, ShellEdge edge, String viewId);
+
+  /// Forgets a [requestSplit] no new view answered.
+  void cancelSplit();
 }
 
 /// How the terminal page runs inside the desktop shell: no route of its
@@ -67,7 +75,25 @@ class TerminalShellEmbedding {
     this.onViewsChanged,
     this.headerActions,
     this.onToggleAgents,
+    this.onOpenPalette,
+    this.onDropNode,
+    this.onFillPane,
+    this.keepKey,
   });
+
+  /// Keys the shell answers itself (a quick action's), kept from the
+  /// terminal.
+  final bool Function(KeyEvent event)? keepKey;
+
+  /// The switcher button and keys: the shell's command palette instead.
+  final VoidCallback? onOpenPalette;
+
+  /// A sidebar row dropped on a pane (see `ShellSplitArea.onDropNode`).
+  final void Function(String paneId, ShellEdge edge, SidebarDrag drag)?
+  onDropNode;
+
+  /// An empty pane's "Open…" button.
+  final ValueChanged<String>? onFillPane;
 
   /// Extra buttons for the terminal row (the right panel toggles).
   final List<Widget> Function()? headerActions;

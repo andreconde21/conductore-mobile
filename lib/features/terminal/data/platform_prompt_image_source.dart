@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/share_target/domain/shared_payload.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:flutter/services.dart';
@@ -64,6 +65,12 @@ class PlatformPromptImageSource implements PromptImageSource {
           return SharedFile.fromMap(raw);
         } on MissingPluginException {
           return null;
+        } on PlatformException catch (error) {
+          // There is an image, but it could not be read: not "no image".
+          throw AppFailure(
+            'Could not read the image on the clipboard. Copy it again.',
+            error.message,
+          );
         }
     }
   }

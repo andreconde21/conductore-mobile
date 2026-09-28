@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/desktop_window.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -11,12 +13,19 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
+import 'package:conduit/features/command_palette/domain/palette_entry.dart';
+import 'package:conduit/features/command_palette/presentation/command_palette.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/desktop_shell/domain/layout_presets.dart';
+import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/shell_palette.dart';
 import 'package:conduit/features/desktop_shell/presentation/terminal_shell_embedding.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/layout_picker.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_sidebar.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_dashboard.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_sidebar.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -25,6 +34,12 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action.dart';
+import 'package:conduit/features/quick_actions/domain/quick_action_plan.dart';
+import 'package:conduit/features/quick_actions/presentation/project_files_controller.dart';
+import 'package:conduit/features/quick_actions/presentation/quick_action_form.dart';
+import 'package:conduit/features/quick_actions/presentation/quick_action_runner.dart';
+import 'package:conduit/features/session_navigation/presentation/quick_switcher_actions.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/live_terminal_preview.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -32,6 +47,7 @@ import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
 import 'package:conduit/features/settings/presentation/privacy_notice.dart';
+import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -39,6 +55,9 @@ import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts
 import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+part 'shell_projects.dart';
 
 /// Whether a window of [size] gets the desktop shell: desktops always,
 /// and tablets at least 900 dp wide. Phones (in landscape too) and
@@ -67,7 +86,11 @@ class DesktopHomeActions {
     required this.noticeAction,
     required this.openChat,
     this.lock,
+    this.openSettingsAt,
   });
+
+  /// Settings at a section (the command palette); null opens Settings.
+  final Future<void> Function(SettingsSection section)? openSettingsAt;
 
   /// Opens what a sidebar row stands for (a workspace, tab, pane, tmux
   /// session or window, an open session).
@@ -144,12 +167,52 @@ class DesktopHomeState extends State<DesktopHome> {
       if (mounted) setState(() => _fullscreen = value);
     },
     onViewsChanged: _handleViewsChanged,
-    headerActions: () => [_previewToggle()],
+    headerActions: () => [
+      ..._quickActionButtons(),
+      _layoutPicker(),
+      _previewToggle(),
+    ],
+    keepKey: (event) => _quickActionForKey(event) != null,
     onToggleAgents: () =>
         widget.controller.toggleRightPanel(ShellRightPanel.agents),
+    onOpenPalette: () => unawaited(openPalette()),
+    onDropNode: (paneId, edge, drag) =>
+        unawaited(dropNode(paneId, edge, drag.node)),
+    onFillPane: (paneId) {
+      _focusPane(paneId);
+      unawaited(openPalette(initial: '#'));
+    },
   );
 
   List<SidebarNode> _tree = const [];
+  final _panelFocus = FocusNode(debugLabel: 'shell-right-panel');
+
+  /// The machine tree grouped by project (the Projects tab).
+  List<ProjectGroup> _projects = const [];
+
+  /// Each project's icon and `.code-workspace` quick actions.
+  late final ProjectFilesController _projectFiles = ProjectFilesController(
+    runnerFor: widget.agentAttention.runnerFor,
+    hostFor: widget.hostsController.findById,
+  )..addListener(_handleProjectFilesChanged);
+  late final QuickActionRunner _quickActions = QuickActionRunner(
+    workspace: widget.workspace,
+    attention: widget.agentAttention,
+  );
+
+  void _handleProjectFilesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// A quick action's keys, for the focused project.
+  bool _handleQuickActionKey(KeyEvent event) {
+    if (!mounted || !(_route?.isCurrent ?? true)) return false;
+    final match = _quickActionForKey(event);
+    if (match == null) return false;
+    unawaited(_runQuickAction(match.$1, match.$2));
+    return true;
+  }
+
   Set<String> _unreadKeys = const {};
   bool _fullscreen = false;
   bool _appResumed = true;
@@ -213,6 +276,9 @@ class DesktopHomeState extends State<DesktopHome> {
       },
     );
     _shortcuts.attach();
+    if (PlatformFeatures.isDesktop) {
+      HardwareKeyboard.instance.addHandler(_handleQuickActionKey);
+    }
     _watchSessions();
     _rebuildTree();
   }
@@ -236,6 +302,9 @@ class DesktopHomeState extends State<DesktopHome> {
   @override
   void dispose() {
     _shortcuts.detach();
+    HardwareKeyboard.instance.removeHandler(_handleQuickActionKey);
+    _projectFiles.dispose();
+    _panelFocus.dispose();
     widget.hostsController.removeListener(_rebuildTree);
     widget.workspace.removeListener(_handleWorkspaceChanged);
     widget.agentAttention.removeListener(_rebuildTree);
@@ -276,7 +345,29 @@ class DesktopHomeState extends State<DesktopHome> {
     Telemetry.instance.screen(screen);
   }
 
+  /// The window's title follows the focused view.
+  void _syncWindowTitle() {
+    if (!mounted) return;
+    String? label;
+    if (terminalVisible) {
+      final session = embedding.host?.focusedSession;
+      label = session?.title;
+      if (session != null) {
+        final machine = widget.hostsController
+            .findById(baseHostId(session.host.id))
+            ?.name;
+        if (machine != null && machine.isNotEmpty && label != machine) {
+          label = '$label · $machine';
+        }
+      }
+    } else if (_controller.showUsage) {
+      label = 'Usage';
+    }
+    unawaited(DesktopWindow.setTitle(desktopWindowTitle(label)));
+  }
+
   void _handleControllerChanged() {
+    _syncWindowTitle();
     _trackScreen();
     _syncViewed();
     _syncPreviewTimer();
@@ -290,6 +381,7 @@ class DesktopHomeState extends State<DesktopHome> {
 
   void _handleViewsChanged() {
     if (!mounted) return;
+    _syncWindowTitle();
     _trackScreen();
     _syncViewed();
     _syncPreviewTimer();
@@ -297,6 +389,7 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   void _handleWorkspaceChanged() {
+    _syncWindowTitle();
     _trackScreen();
     _watchSessions();
     _syncViewed();
@@ -330,6 +423,7 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   void _handleSessionChanged() {
+    _syncWindowTitle();
     for (final session in _paintListeners.keys) {
       final status = session.status;
       if (_status[session] == status) continue;
@@ -481,6 +575,7 @@ class DesktopHomeState extends State<DesktopHome> {
         ? null
         : (from: self.id, to: thisComputerHostId);
     _tree = SidebarTreeBuilder.build(_inputs(), _controller.prefs);
+    _projects = _buildProjects();
     _refreshListedWindows();
     _feedUnread();
     setState(() => _unreadKeys = _controller.unread.unreadKeys);
@@ -676,7 +771,21 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   bool _handleShortcut(DesktopShortcutMatch match) {
-    if (match.action == DesktopAction.nextUnread) return openNextUnread();
+    switch (match.action) {
+      case DesktopAction.nextUnread:
+        return openNextUnread();
+      case DesktopAction.commandPalette:
+        unawaited(openPalette(initial: '>'));
+        return true;
+      case DesktopAction.openSettings:
+        unawaited(widget.actions.openSettings());
+        return true;
+      case DesktopAction.toggleSidebar:
+        _controller.toggleSidebar();
+        return true;
+      default:
+        break;
+    }
     // With the terminal on screen, the terminal page answers the rest.
     if (terminalVisible) return false;
     final sessions = widget.workspace.sessions;
@@ -865,6 +974,208 @@ class DesktopHomeState extends State<DesktopHome> {
     }
   }
 
+  // The command palette.
+
+  bool _paletteOpen = false;
+
+  /// Opens the command palette (Ctrl+Shift+P with [initial] `>`, the
+  /// switcher keys and buttons without): every session, agent, workspace,
+  /// layout, setting and command, and runs the one picked.
+  Future<void> openPalette({String initial = ''}) async {
+    if (_paletteOpen || !mounted) return;
+    _paletteOpen = true;
+    final source = QuickSwitcherSource(
+      workspace: widget.workspace,
+      attention: widget.agentAttention,
+      connectFlow: widget.connectFlow,
+      homeBoards: widget.boards,
+    );
+    final recents = ValueNotifier<Map<String, List<ConnectTarget>>>(const {});
+    unawaited(
+      source.loadRecents().then((value) {
+        if (_paletteOpen) recents.value = value;
+      }),
+    );
+    PaletteEntry? picked;
+    try {
+      picked = await showCommandPalette(
+        context,
+        initialQuery: initial,
+        recents: _controller.paletteRecents,
+        changes: Listenable.merge([source.changes, recents, _controller]),
+        entries: () => paletteEntries(source, recents.value),
+      );
+    } finally {
+      _paletteOpen = false;
+      recents.dispose();
+    }
+    if (picked == null || !mounted) return;
+    _controller.notePaletteUse(picked.id);
+    await picked.run();
+  }
+
+  /// Everything the palette lists now.
+  @visibleForTesting
+  List<PaletteEntry> paletteEntries(
+    QuickSwitcherSource source, [
+    Map<String, List<ConnectTarget>> recents = const {},
+  ]) {
+    final theme = widget.themeController;
+    final host = embedding.host;
+    return buildShellPaletteEntries(
+      controller: _controller,
+      places: source.items(recents: recents),
+      selectedPalette: theme.selectedPalette,
+      voice: theme.voice,
+      hasUsage: UsageScope.maybeOf(context) != null,
+      hasViews: _hasViews,
+      actions: ShellPaletteActions(
+        newSession: widget.actions.newSession,
+        openSettings: (section) =>
+            section != null && widget.actions.openSettingsAt != null
+            ? widget.actions.openSettingsAt!(section)
+            : widget.actions.openSettings(),
+        addMachine: widget.actions.addMachine,
+        showShortcuts: () => showDesktopShortcutsSheet(context),
+        showHome: () => _controller.showHome = true,
+        openItem: (item) => openSwitcherItem(
+          context,
+          item,
+          source: source,
+          showTerminal: () => _controller.showHome = false,
+        ),
+        applyPreset: applyPreset,
+        restoreLayout: restoreLayout,
+        saveLayout: saveLayoutAs,
+        openUsage: (preset) => _controller.setShowUsage(true, preset: preset),
+        setPalette: theme.setPalette,
+        setVoice: theme.setVoice,
+        nextUnread: openNextUnread,
+        lock: widget.actions.lock,
+        extra: _projectPaletteEntries(),
+        closeFocused: switch ((host, host?.activeViewId)) {
+          (final host?, final view?) => () => host.closeView(view),
+          _ => null,
+        },
+      ),
+    );
+  }
+
+  // Layouts.
+
+  void _focusPane(String paneId) {
+    final host = embedding.host;
+    if (host == null) return;
+    _controller.editLayout(
+      host.viewIds.toSet(),
+      (layout) => layout.focus(paneId),
+    );
+  }
+
+  /// Lays the main area out as [preset]: the views on screen first (the
+  /// focused one in the first pane), then the most recent others; the
+  /// panes left over wait empty for a drop.
+  void applyPreset(ShellLayoutPreset preset) {
+    final host = embedding.host;
+    final views = host?.viewIds ?? const <String>[];
+    final current = _controller.layout.value.pruned(views.toSet());
+    final active = host?.activeViewId;
+    final next = preset.apply(viewsForPreset(current, [?active, ...views]));
+    _controller.replaceLayout(next);
+    if (views.isNotEmpty) _controller.showHome = false;
+  }
+
+  /// Brings a saved layout back, opening its sessions that are not open.
+  Future<void> restoreLayout(SavedShellLayout saved) async {
+    final host = embedding.host;
+    final open = (host?.viewIds ?? const <String>[]).toSet();
+    final flow = widget.connectFlow;
+    for (final view in saved.views) {
+      if (open.contains(view) || !view.startsWith('session:')) continue;
+      final hostId = view.substring('session:'.length);
+      final machine = widget.hostsController.findById(baseHostId(hostId));
+      final target = ConnectTarget.fromSessionHostId(hostId);
+      if (flow == null || machine == null || target == null) continue;
+      flow.open(machine, target);
+    }
+    final layout = saved.layout.asSlots();
+    _controller.replaceLayout(layout);
+    _controller.showHome = false;
+    // Sessions that just opened reveal themselves; the saved panes win.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _controller.replaceLayout(layout);
+    });
+  }
+
+  /// Asks for a name and saves the current layout under it.
+  Future<void> saveLayoutAs() async {
+    final name = await _askName(
+      context,
+      title: 'Save layout',
+      hint: 'Morning check, VTM work…',
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    _controller.saveLayout(name);
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(SnackBar(content: Text('Saved the layout "$name".')));
+  }
+
+  Widget _layoutPicker() {
+    final host = embedding.host;
+    final views = (host?.viewIds ?? const <String>[]).toSet();
+    return LayoutPickerButton(
+      current: ShellLayoutPreset.of(_controller.layout.value.pruned(views)),
+      saved: _controller.savedLayouts,
+      onPick: (pick) {
+        switch (pick) {
+          case LayoutPickPreset(:final preset):
+            applyPreset(preset);
+          case LayoutPickSaved(:final saved):
+            unawaited(restoreLayout(saved));
+          case LayoutPickSave():
+            unawaited(saveLayoutAs());
+          case LayoutPickDelete(:final saved):
+            _controller.deleteSavedLayout(saved.id);
+        }
+      },
+    );
+  }
+
+  /// A sidebar row dropped on pane [paneId]: shows it there (the middle)
+  /// or in a new pane at [edge]. A machine starts a new session there.
+  Future<void> dropNode(String paneId, ShellEdge edge, SidebarNode node) async {
+    final host = embedding.host;
+    if (host == null) return;
+    final existing = widget.workspace.sessions
+        .where((session) => keyForSession(session) == node.key)
+        .firstOrNull;
+    if (existing != null) {
+      _controller.showHome = false;
+      host.placeView(paneId, edge, sessionViewId(existing));
+      return;
+    }
+    final before = host.viewIds.toSet();
+    _focusPane(paneId);
+    if (edge != ShellEdge.center) host.requestSplit(edge);
+    _controller.showHome = false;
+    if (node.target is MachineTarget) {
+      await widget.actions.openTarget(node.target);
+    } else {
+      await open(node);
+    }
+    if (!mounted) return;
+    // It opened in a session that was already there (an agent of an open
+    // workspace): move that one instead.
+    final active = host.activeViewId;
+    if (active != null && before.contains(active)) {
+      host.cancelSplit();
+      host.placeView(paneId, edge, active);
+    } else if (!host.viewIds.any((view) => !before.contains(view))) {
+      host.cancelSplit();
+    }
+  }
+
   // Building.
 
   Widget _previewToggle() {
@@ -946,7 +1257,14 @@ class DesktopHomeState extends State<DesktopHome> {
                       ),
                       TickerMode(
                         enabled: !showTerminal && !controller.showUsage,
-                        child: _dashboard(context),
+                        // A sidebar row dropped on the dashboard opens.
+                        child: DragTarget<SidebarDrag>(
+                          onWillAcceptWithDetails: (details) =>
+                              details.data.node.kind != SidebarNodeKind.machine,
+                          onAcceptWithDetails: (details) =>
+                              unawaited(open(details.data.node)),
+                          builder: (context, _, _) => _dashboard(context),
+                        ),
                       ),
                       _usageMain(context),
                     ],
@@ -1007,7 +1325,10 @@ class DesktopHomeState extends State<DesktopHome> {
           ),
           IconButton(
             key: const ValueKey('sidebar-switcher'),
-            tooltip: 'Quick switcher ($quickSwitcherKeys)',
+            tooltip:
+                'Command palette '
+                '(${desktopShortcutKeys(DesktopAction.commandPalette)}, '
+                '$quickSwitcherKeys)',
             iconSize: 18,
             onPressed: () => unawaited(widget.actions.openSwitcher()),
             icon: const Icon(Icons.search_rounded),
@@ -1085,6 +1406,9 @@ class DesktopHomeState extends State<DesktopHome> {
   }
 
   Widget _sidebar() {
+    if (_controller.sidebarTab == ShellSidebarTab.projects) {
+      return _projectSidebar();
+    }
     return ShellSidebar(
       key: const ValueKey('shell-sidebar'),
       controller: _controller,
@@ -1097,7 +1421,13 @@ class DesktopHomeState extends State<DesktopHome> {
       onGroupMenu: (group, position) =>
           unawaited(showGroupMenu(group, position)),
       onExpand: _expand,
-      header: _sidebarHeader(),
+      header: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _sidebarHeader(),
+          SidebarTabs(controller: _controller),
+        ],
+      ),
       footer: _sidebarFooter(),
     );
   }
@@ -1118,6 +1448,8 @@ class DesktopHomeState extends State<DesktopHome> {
         if (needsYou.isNotEmpty) unawaited(open(needsYou.first));
       },
       footer: _sidebarFooter(compact: true),
+      onContextMenu: (node, position) =>
+          unawaited(showNodeMenu(node, position)),
     );
   }
 
@@ -1273,6 +1605,12 @@ class DesktopHomeState extends State<DesktopHome> {
                 palette: palette,
                 brightness: brightness,
                 onTap: () => unawaited(open(node)),
+                onLongPress: () => unawaited(
+                  showNodeMenu(
+                    node,
+                    AdaptiveModalPointer.recent ?? Offset.zero,
+                  ),
+                ),
               ),
               TmuxSessionTarget(:final session) => DormantTmuxTile(
                 key: ValueKey('dashboard-other-${node.key}'),
@@ -1280,6 +1618,12 @@ class DesktopHomeState extends State<DesktopHome> {
                 palette: palette,
                 brightness: brightness,
                 onTap: () => unawaited(open(node)),
+                onLongPress: () => unawaited(
+                  showNodeMenu(
+                    node,
+                    AdaptiveModalPointer.recent ?? Offset.zero,
+                  ),
+                ),
               ),
               _ => const SizedBox.shrink(),
             },
@@ -1440,9 +1784,13 @@ class DesktopHomeState extends State<DesktopHome> {
     return Material(
       color: AppPalette.of(context).canvas,
       child: UsageExplorerView(
-        key: ValueKey('shell-usage-explorer-${_controller.usageDay}'),
+        key: ValueKey(
+          'shell-usage-explorer-${_controller.usageDay}-'
+          '${_controller.usagePreset?.name}',
+        ),
         usage: usage,
         initialDay: _controller.usageDay,
+        initialPreset: _controller.usagePreset,
         onClose: () => _controller.setShowUsage(false),
         onUpdateCompanion: (hostId) {
           final host = usage.hostFor(hostId);
@@ -1462,68 +1810,89 @@ class DesktopHomeState extends State<DesktopHome> {
       ShellRightPanel.usage => 'Usage',
       ShellRightPanel.none => '',
     };
-    return Material(
-      key: ValueKey('shell-right-panel-${panel.name}'),
-      color: palette.panel,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            height: 40,
-            padding: const EdgeInsets.only(left: 14),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: palette.hairline)),
-            ),
-            child: Row(
+    // Esc in the panel closes it.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            _controller.rightPanel = ShellRightPanel.none,
+      },
+      child: Listener(
+        // A click in the panel gives it the keys (Esc), unless something
+        // inside takes them.
+        onPointerDown: (_) {
+          if (!_panelFocus.hasFocus) _panelFocus.requestFocus();
+        },
+        child: Focus(
+          focusNode: _panelFocus,
+          child: Material(
+            key: ValueKey('shell-right-panel-${panel.name}'),
+            color: palette.panel,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13.5,
-                    ),
+                Container(
+                  height: 40,
+                  padding: const EdgeInsets.only(left: 14),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: palette.hairline)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close the panel',
+                        iconSize: 18,
+                        onPressed: () =>
+                            _controller.rightPanel = ShellRightPanel.none,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Close the panel',
-                  iconSize: 18,
-                  onPressed: () =>
-                      _controller.rightPanel = ShellRightPanel.none,
-                  icon: const Icon(Icons.close_rounded),
+                Expanded(
+                  child: switch (panel) {
+                    ShellRightPanel.agents => AgentAttentionSheet(
+                      controller: widget.agentAttention,
+                      onOpenAgent: (host, agent) {
+                        final flow = widget.connectFlow;
+                        if (flow != null) {
+                          unawaited(flow.openAgent(host, agent));
+                        } else {
+                          unawaited(
+                            widget.agentAttention.focusAgent(host.id, agent),
+                          );
+                        }
+                        _controller.showHome = false;
+                      },
+                      onOpenChat: (host, agent) =>
+                          unawaited(widget.actions.openChat(host, agent)),
+                    ),
+                    ShellRightPanel.preview => _previewPanel(context),
+                    ShellRightPanel.usage => switch (UsageScope.maybeOf(
+                      context,
+                    )) {
+                      final usage? => ListView(
+                        key: const ValueKey('shell-usage-panel'),
+                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
+                        children: [UsageBreakdown(controller: usage)],
+                      ),
+                      null => const SizedBox.shrink(),
+                    },
+                    ShellRightPanel.none => const SizedBox.shrink(),
+                  },
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: switch (panel) {
-              ShellRightPanel.agents => AgentAttentionSheet(
-                controller: widget.agentAttention,
-                onOpenAgent: (host, agent) {
-                  final flow = widget.connectFlow;
-                  if (flow != null) {
-                    unawaited(flow.openAgent(host, agent));
-                  } else {
-                    unawaited(widget.agentAttention.focusAgent(host.id, agent));
-                  }
-                  _controller.showHome = false;
-                },
-                onOpenChat: (host, agent) =>
-                    unawaited(widget.actions.openChat(host, agent)),
-              ),
-              ShellRightPanel.preview => _previewPanel(context),
-              ShellRightPanel.usage => switch (UsageScope.maybeOf(context)) {
-                final usage? => ListView(
-                  key: const ValueKey('shell-usage-panel'),
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
-                  children: [UsageBreakdown(controller: usage)],
-                ),
-                null => const SizedBox.shrink(),
-              },
-              ShellRightPanel.none => const SizedBox.shrink(),
-            },
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1644,18 +2013,24 @@ Future<String?> _askName(
   BuildContext context, {
   required String title,
   String initial = '',
+  String hint = 'Clients, Infra…',
 }) => showDialog<String>(
   context: context,
-  builder: (context) => _NameDialog(title: title, initial: initial),
+  builder: (context) => _NameDialog(title: title, initial: initial, hint: hint),
 );
 
 /// Asks for a group's name; owns its text field's controller, which must
 /// outlive the dialog's closing animation.
 class _NameDialog extends StatefulWidget {
-  const _NameDialog({required this.title, required this.initial});
+  const _NameDialog({
+    required this.title,
+    required this.initial,
+    required this.hint,
+  });
 
   final String title;
   final String initial;
+  final String hint;
 
   @override
   State<_NameDialog> createState() => _NameDialogState();
@@ -1680,7 +2055,7 @@ class _NameDialogState extends State<_NameDialog> {
         key: const ValueKey('group-name-field'),
         controller: _text,
         autofocus: true,
-        decoration: const InputDecoration(hintText: 'Clients, Infra…'),
+        decoration: InputDecoration(hintText: widget.hint),
         onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
       ),
       actions: [

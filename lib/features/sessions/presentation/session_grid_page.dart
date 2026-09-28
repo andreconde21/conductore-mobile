@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
@@ -365,6 +366,9 @@ class SessionTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: onTap,
         onLongPress: onLongPress,
+        // Desktop: right-click opens the same actions (the menu anchors at
+        // the pointer).
+        onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
         child: Container(
           decoration: BoxDecoration(
             color: palette.panelFor(brightness),

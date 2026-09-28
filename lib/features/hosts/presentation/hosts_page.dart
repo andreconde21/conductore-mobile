@@ -55,6 +55,7 @@ import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
 import 'package:conduit/features/settings/presentation/privacy_notice.dart';
+import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_page.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
@@ -650,6 +651,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               noticeAction: _handleNoticeAction,
               openChat: _openChatForAgent,
               lock: widget.lockController.enabled ? _lock : null,
+              openSettingsAt: _openSettings,
             ),
           ),
         ),
@@ -779,6 +781,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   /// The quick switcher from home (the top bar's button, Ctrl+K): what is
   /// picked opens in the terminal (or Chat View, per session).
   Future<void> _openSwitcher({bool fromKeyboard = false}) async {
+    // The desktop shell's command palette lists the same and more.
+    if (_isShell) {
+      final home = _desktopHomeKey.currentState;
+      if (home != null) {
+        await home.openPalette();
+        return;
+      }
+    }
     if (_switcherOpen) return;
     _switcherOpen = true;
     final source = QuickSwitcherSource(
@@ -1387,8 +1397,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   /// The gear: the full-screen Settings page.
-  Future<void> _openSettings() => showSettings(
+  Future<void> _openSettings([SettingsSection? section]) => showSettings(
     context,
+    section: section,
     services: SettingsServices(
       theme: widget.themeController,
       backupService: widget.backupService,
@@ -1869,16 +1880,13 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   Future<void> _openFiles(SavedHost host) async {
     await widget.hostsController.markConnected(host);
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SftpBrowserPage(
-          host: host,
-          repository: widget.sftpRepository,
-          fileExport: widget.fileExport,
-          themeController: widget.themeController,
-          bookmarksRepository: widget.sftpBookmarksRepository,
-        ),
-      ),
+    await openSftpBrowser(
+      context,
+      host: host,
+      repository: widget.sftpRepository,
+      fileExport: widget.fileExport,
+      themeController: widget.themeController,
+      bookmarksRepository: widget.sftpBookmarksRepository,
     );
   }
 
@@ -1909,11 +1917,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openForm([SavedHost? host]) async {
-    final savedHost = await Navigator.of(context).push<SavedHost>(
-      MaterialPageRoute(
-        builder: (_) =>
-            HostFormPage(host: host, themeController: widget.themeController),
-      ),
+    final savedHost = await openHostForm(
+      context,
+      host: host,
+      themeController: widget.themeController,
     );
     if (savedHost != null) {
       await widget.hostsController.upsert(savedHost);

@@ -106,7 +106,7 @@ narrower than 900 dp, keep the phone layout.
 - **Tabs and splits.** The tabs across the top hold every open view:
   terminal sessions, Chat View, files, git diffs and live previews. Drag a
   tab onto the left, right, top or bottom edge of a pane to split it, or
-  onto its middle to show it there (up to four panes). Drag the dividers to
+  onto its middle to show it there (up to six panes). Drag the dividers to
   resize. A tab's right-click menu splits too. A split can mix views: a
   terminal next to the agent's Chat View, Claude next to its live
   preview. Alt+arrows move between panes. Ctrl+Shift+\ splits right and
@@ -117,6 +117,43 @@ narrower than 900 dp, keep the phone layout.
   of the tabs, the main area shows columns: *Needs you* cards (with
   Allow / Deny for approvals the companion relays), a usage slot, the
   open sessions as live previews, and the other workspaces per machine.
+- **Layouts, with the mouse.** The layout button in the toolbar (the
+  dashboard icon) lays the panes out as *Single*, *Two side by side*,
+  *Two stacked*, *One and two*, *2 × 2* or *3 × 2*: what is on screen
+  first, the focused view in the first pane, then the most recent others.
+  Panes left over stay empty and wait: drag a session, agent, workspace
+  or machine from the sidebar onto a pane (its middle shows it there, an
+  edge splits), or click *Open…* in it. Drag a pane's title onto another
+  pane to swap the two. *Save this layout…* keeps it under a name
+  ("Morning check", "VTM work"); picking it again, from the layout button
+  or the palette, reopens its sessions where they were. The panes of a
+  preset keep their shape when a session in one closes.
+- **Projects tab.** Next to *Machines* (unchanged), *Projects* groups
+  the workspaces, tmux sessions and open sessions of every machine by the
+  repo their agents work in (the companion reports it; a row without
+  agents is a project of its own name). Each project shows the repo's
+  favicon or app icon when one is found (`favicon.ico`, `public/favicon.*`,
+  `assets/icon.png`… read over the companion's connection), else a
+  monogram, and how many agents need you, work or are done. Its rows open,
+  drag and right-click like in the Machines tab; the project's own menu
+  (right-click or ⋯) holds its quick actions, *Add action…*, *Open all …
+  side by side* and *Reload*.
+- **Quick actions.** Per project, from the repo's `.code-workspace` file
+  (`commands`, Conductore Lite's format: `id`, `label`, `command`, `cwd`,
+  `terminalName`, plus optional `icon`, `keybinding`, `confirm`,
+  `onWorktreeCreate` and `kind`: `shell`, `prompt` or `url`) and your own
+  (Settings › Terminal › Quick actions, synced with the appearance
+  settings; for every project or one). The focused session's project
+  shows its first three as toolbar buttons and the rest under ⚡; the
+  palette lists them all, and their keys work while that project is
+  focused. A shell action runs in its named terminal (or one named after
+  it) or in a new terminal in the repo; a prompt goes to the project's
+  agent through the companion; a link opens the browser. *Add action…*
+  writes the repo file after asking (the old one is kept as `.bak`;
+  comments in it are not kept). `onWorktreeCreate` is read and kept, but
+  the app does not create worktrees yet, so it never fires. The
+  terminal's menu offers *Quick actions* on phones too, when the session's
+  project has some.
 - **Right panel.** The Agents button (the pulse icon) opens the agent
   inbox with approvals on the right; the globe opens the live preview of
   the focused session. Drag its edge to resize it.
@@ -133,7 +170,18 @@ narrower than 900 dp, keep the phone layout.
   sequences, including modifiers.
 - **Copy and paste.** Ctrl+Shift+C and Ctrl+Shift+V (or Shift+Insert) on
   Linux and Windows. Cmd+C, Cmd+V and Cmd+A on macOS.
-- **Quick switcher.** Ctrl+Shift+K (Cmd+K on macOS) opens it from the home
+- **Command palette.** Ctrl+Shift+P (Cmd+Shift+P) opens it on commands;
+  Ctrl+Shift+K (Cmd+K), the search button and the switcher button open it
+  on everything, sessions and agents first. One palette lists every
+  session, waiting agent, workspace, recent target and project, every
+  layout, each project's quick actions, Settings and each of its pages and
+  settings, the themes, the read-aloud and tool-activity toggles, the usage
+  ranges and the app's commands, with their keys. It searches fuzzily
+  (the typed phrase in a title wins), remembers what you ran, and narrows
+  with a prefix: `>` commands, `@` agents, `#` sessions, workspaces and
+  projects. Plain Ctrl+K stays with the shell (kill line), so it is not
+  used. Phones keep the quick switcher.
+- **Quick switcher (phones).** Ctrl+Shift+K (Cmd+K on macOS) opens it from the home
   screen and the terminal. The key never reaches the shell; plain Ctrl+K
   does.
 - **Mouse.** Drag to select, and use the wheel to scroll back. The phone
@@ -158,6 +206,9 @@ narrower than 900 dp, keep the phone layout.
   | Split right / down | Ctrl+Shift+\ / Ctrl+Shift+- | Cmd+D / Cmd+Shift+D |
   | Move between splits | Alt+arrows | Cmd+Option+arrows |
   | Next unread | Ctrl+Shift+U | Cmd+Shift+U |
+  | Command palette | Ctrl+Shift+P | Cmd+Shift+P |
+  | Settings | Ctrl+, | Cmd+, |
+  | Show or hide the sidebar | Ctrl+Shift+B | Cmd+B |
 
   None of these reach the shell. Two choices avoid clashes with shells and
   TUIs. Go to session uses Alt+digit, because Ctrl+2 to Ctrl+8 are control
@@ -286,6 +337,28 @@ Gating lives in `lib/core/platform_features.dart`. Every flag reads
   data-protection keychain, but existing items would not follow.
 - **Signing and notarisation** need an Apple Developer ID certificate. They
   are not set up. Until then, see the Gatekeeper steps above.
+
+## Desktop conventions
+
+- Esc closes a pushed page (Settings, a form) and the right panel;
+  dialogs close on Esc and confirm on Enter.
+- Full pages (Settings, Agent hooks, the machine form, the file browser,
+  Review, Sync) open as large dialogs over the shell
+  (`pushAdaptivePage`, `lib/core/presentation/adaptive_page.dart`);
+  phones push them full screen as before.
+- Right-click opens a row's actions everywhere: sidebar rows and groups,
+  the collapsed rail, tabs, dashboard tiles, agent cards, inbox rows,
+  files, multiplexer tabs and the terminal (Copy, Paste, Select all).
+- Hover is visible, clicks show no ripple and scrollbars are wide enough
+  to grab (desktop theme only).
+- The window title follows the focused session ("api · omarchy —
+  Conductore"). Linux keeps the window size (and, on X11, its position)
+  in `~/.config/conductore/window.ini`, Windows its placement under
+  `HKCU\Software\Outsmartis\Conductore`, macOS autosaves the frame.
+  On a tiling compositor (Hyprland) the compositor decides.
+- Not there yet: several windows (Flutter's multi-window API is still
+  experimental) and a tray or menu-bar icon (needs a plugin per
+  platform).
 
 ## Known limitations
 

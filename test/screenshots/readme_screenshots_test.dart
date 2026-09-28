@@ -16,8 +16,12 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/chat_view/presentation/chat_forward.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
@@ -38,6 +42,9 @@ import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.da
 import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/review/data/review_client.dart';
+import 'package:conduit/features/review/presentation/review_controller.dart';
+import 'package:conduit/features/review/presentation/review_page.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -57,10 +64,17 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
+import 'package:conduit/features/voice_guide/domain/guide_preferences.dart';
+import 'package:conduit/features/voice_guide/domain/guide_world.dart';
+import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
+import 'package:conduit/features/voice_guide/presentation/guide_controller.dart';
+import 'package:conduit/features/voice_guide/presentation/guide_overlay.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -75,6 +89,8 @@ import '../features/terminal/herdr/fake_herdr_runner.dart';
 import '../features/usage/usage_fakes.dart';
 import '../features/voice/fake_speech_recognizer.dart';
 import '../features/voice/fake_tts.dart';
+import '../features/voice_guide/guide_fixtures.dart'
+    show FakeApprovals, FakeMessenger, FakeNavigator;
 import '../support/test_doubles.dart';
 import 'demo_screens.dart';
 import 'screenshot_harness.dart';
@@ -378,13 +394,33 @@ Future<SyncController> demoSyncDevice(
   return sync;
 }
 
+/// A companion 1.0 `usage` reply: [reply] with the range end it covers.
+Map<String, Object?> companion1(
+  Map<String, Object?> reply, {
+  required String to,
+}) => {...reply, 'version': '1.0.0', 'to': to};
+
 Widget _withUsage(UsageController? usage, Widget page) =>
     usage == null ? page : UsageScope(controller: usage, child: page);
+
+/// [page] with the voice guide's home button and, while it runs, its card.
+Widget _withGuide(GuideController? guide, Widget page) => guide == null
+    ? page
+    : GuideScope(
+        controller: guide,
+        child: Stack(
+          children: [
+            page,
+            GuideOverlay(controller: guide),
+          ],
+        ),
+      );
 
 /// Usage on the workstation: the 5-hour limit at 62 %, the week at 31 %,
 /// today's tokens and cost. [detailed] adds the build box and a week of
 /// projects and models, for the breakdown.
-UsageController demoUsage({bool detailed = false}) {
+/// [accounts] adds two Claude accounts managed by cswap, work active.
+UsageController demoUsage({bool detailed = false, bool accounts = false}) {
   final now = DateTime.now();
   String day(int back) {
     final d = now.subtract(Duration(days: back));
@@ -408,70 +444,104 @@ UsageController demoUsage({bool detailed = false}) {
   ];
   final runner = FakeUsageRunner(
     () => FakeUsageRunner.ok(
-      usageReplyJson(
-        machine: 'workstation',
-        today: day(0),
-        from: day(6),
-        limits: limits,
-        rows: [
-          usageRow(day(0), output: 1840000, costUsd: 6.4),
-          usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
-          if (detailed) ...[
-            usageRow(
-              day(0),
-              project: 'todo-web',
-              model: 'claude-sonnet-5',
-              output: 610000,
-              costUsd: 1.2,
-            ),
-            usageRow(day(1), output: 1320000, costUsd: 4.6),
-            usageRow(day(2), output: 1510000, costUsd: 5.3),
-            usageRow(
-              day(2),
-              project: 'infra',
-              model: 'claude-haiku-4-5',
-              output: 380000,
-              costUsd: 0.4,
-            ),
-            usageRow(day(3), project: 'todo-web', output: 700000, costUsd: 2.5),
-            usageRow(day(4), output: 1100000, costUsd: 3.8),
-            usageRow(
-              day(5),
-              project: 'infra',
-              model: 'claude-sonnet-5',
-              output: 450000,
-              costUsd: 0.9,
-            ),
-            usageRow(day(6), output: 800000, costUsd: 2.8),
+      companion1(
+        usageReplyJson(
+          machine: 'workstation',
+          today: day(0),
+          from: day(6),
+          limits: limits,
+          accounts: accounts
+              ? [
+                  usageAccount(
+                    1,
+                    'work',
+                    active: true,
+                    fiveHour: 62,
+                    weekly: 31,
+                    fiveHourResets: now.add(
+                      const Duration(hours: 2, minutes: 14),
+                    ),
+                    weeklyResets: now.add(const Duration(days: 3)),
+                  ),
+                  usageAccount(
+                    2,
+                    'personal',
+                    fiveHour: 8,
+                    weekly: 12,
+                    fiveHourResets: now.add(const Duration(hours: 4)),
+                    weeklyResets: now.add(const Duration(days: 5)),
+                  ),
+                ]
+              : null,
+          rows: [
+            usageRow(day(0), output: 1840000, costUsd: 6.4),
+            usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
+            if (detailed) ...[
+              usageRow(
+                day(0),
+                project: 'todo-web',
+                model: 'claude-sonnet-5',
+                output: 610000,
+                costUsd: 1.2,
+              ),
+              usageRow(day(1), output: 1320000, costUsd: 4.6),
+              usageRow(day(2), output: 1510000, costUsd: 5.3),
+              usageRow(
+                day(2),
+                project: 'infra',
+                model: 'claude-haiku-4-5',
+                output: 380000,
+                costUsd: 0.4,
+              ),
+              usageRow(
+                day(3),
+                project: 'todo-web',
+                output: 700000,
+                costUsd: 2.5,
+              ),
+              usageRow(day(4), output: 1100000, costUsd: 3.8),
+              usageRow(
+                day(5),
+                project: 'infra',
+                model: 'claude-sonnet-5',
+                output: 450000,
+                costUsd: 0.9,
+              ),
+              usageRow(day(6), output: 800000, costUsd: 2.8),
+            ],
           ],
-        ],
+        ),
+        to: day(0),
       ),
     ),
   );
   final buildBoxRunner = FakeUsageRunner(
     () => FakeUsageRunner.ok(
-      usageReplyJson(
-        machine: 'build-box',
-        today: day(0),
-        from: day(6),
-        // The same Claude account as the workstation.
-        limits: limits,
-        rows: [
-          usageRow(
-            day(0),
-            project: 'ci',
-            model: 'claude-sonnet-5',
-            output: 420000,
-            costUsd: 0.8,
-          ),
-          usageRow(
-            day(3),
-            project: 'ci',
-            model: 'claude-sonnet-5',
-            output: 510000,
-            costUsd: 1.1,
-          ),
-        ],
+      companion1(
+        usageReplyJson(
+          machine: 'build-box',
+          today: day(0),
+          from: day(6),
+          // The same Claude account as the workstation.
+          limits: limits,
+          rows: [
+            usageRow(
+              day(0),
+              project: 'ci',
+              model: 'claude-sonnet-5',
+              output: 420000,
+              costUsd: 0.8,
+            ),
+            usageRow(
+              day(3),
+              project: 'ci',
+              model: 'claude-sonnet-5',
+              output: 510000,
+              costUsd: 1.1,
+            ),
+          ],
+        ),
+        to: day(0),
       ),
     ),
   );
@@ -519,6 +589,7 @@ void main() {
     void Function(TerminalWorkspaceController workspace)? onWorkspace,
     UsageController? usage,
     bool buildBoxUnreachable = false,
+    GuideController? guide,
   }) async {
     if (desktop) {
       useDesktopView(tester);
@@ -623,32 +694,35 @@ void main() {
     final verifier = NoopVerifier();
     await tester.pumpWidget(
       shotApp(
-        home: _withUsage(
-          usage,
-          HostsPage(
-            hostsController: hostsController,
-            lockController: AppLockController(AlwaysAuthenticates()),
-            terminalRepository: NoNetworkTerminalRepository(),
-            workspaceController: workspace,
-            localShellController: LocalShellController(),
-            themeController: theme,
-            hostKeyVerifier: verifier,
-            promptCoordinator: HostKeyPromptCoordinator(),
-            sftpRepository: NoNetworkSftpRepository(),
-            sftpBookmarksRepository: InMemorySftpBookmarks(),
-            agentAttention: agentAttention,
-            backupService: AppBackupService(
+        home: _withGuide(
+          guide,
+          _withUsage(
+            usage,
+            HostsPage(
               hostsController: hostsController,
+              lockController: AppLockController(AlwaysAuthenticates()),
+              terminalRepository: NoNetworkTerminalRepository(),
+              workspaceController: workspace,
+              localShellController: LocalShellController(),
               themeController: theme,
               hostKeyVerifier: verifier,
+              promptCoordinator: HostKeyPromptCoordinator(),
+              sftpRepository: NoNetworkSftpRepository(),
+              sftpBookmarksRepository: InMemorySftpBookmarks(),
+              agentAttention: agentAttention,
+              backupService: AppBackupService(
+                hostsController: hostsController,
+                themeController: theme,
+                hostKeyVerifier: verifier,
+              ),
+              fileExport: RecordingFileExport(),
+              homeBoards: boards,
+              homePreferences: InMemoryHomePreferencesRepository(),
+              connectFlow: homeFlow,
+              previewRefreshInterval: const Duration(days: 1),
+              desktopShell: shell,
+              shellMode: shellMode,
             ),
-            fileExport: RecordingFileExport(),
-            homeBoards: boards,
-            homePreferences: InMemoryHomePreferencesRepository(),
-            connectFlow: homeFlow,
-            previewRefreshInterval: const Duration(days: 1),
-            desktopShell: shell,
-            shellMode: shellMode,
           ),
         ),
         systemBars: !desktop,
@@ -1511,15 +1585,11 @@ void main() {
     await pumpHome(tester, usage: demoUsage(detailed: true));
     await tester.runAsync(pumpEventQueue);
     await pumpFrames(tester, 6);
+    // The bar opens the usage explorer (preview 17).
     await tester.tap(find.byType(UsageSummaryView));
     await tester.runAsync(pumpEventQueue);
     await pumpFrames(tester, 8);
-    // Up to the full sheet, the project list in view.
-    await tester.drag(
-      find.byKey(const ValueKey('usage-breakdown')),
-      const Offset(0, -500),
-    );
-    await pumpFrames(tester, 8);
+    expect(find.byKey(const ValueKey('usage-explorer-page')), findsOneWidget);
     await saveShot(tester, '26-usage-breakdown');
     await tearDownPage(tester);
   });
@@ -1678,4 +1748,1159 @@ void main() {
     await saveShot(tester, '29-cant-reach');
     await tearDownPage(tester);
   });
+
+  /// An attention controller watching the workstation's companion 0.8,
+  /// smart approvals on: [status] for `status`, [demoApprovals] for
+  /// `approvals`.
+  Future<AgentAttentionController> smartAttention(
+    WidgetTester tester, {
+    required String status,
+  }) async {
+    final workspace = TerminalWorkspaceController(DemoTerminalRepository());
+    addTearDown(workspace.dispose);
+    final runner = CompanionRunner({
+      'status': status,
+      'approvals': demoApprovals(),
+    });
+    final attention = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => runner,
+      provider: const ConductoreHostAttentionProvider(),
+      companionProvider: const ConductoreHostAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    attention.setAppForeground(false);
+    addTearDown(attention.dispose);
+    final session = workspace.open(
+      workstation.copyWith(agentMonitor: AgentMonitorKind.companion),
+    );
+    await tester.runAsync(session.connect);
+    await tester.runAsync(pumpEventQueue);
+    return attention;
+  }
+
+  /// Chat View on the workstation's todo-api session, with the mic and
+  /// Talk available.
+  Future<void> pumpChat(
+    WidgetTester tester,
+    List<Map<String, Object?>> thread, {
+    required String state,
+    List<Map<String, Object?>> pending = const [],
+    AgentAttentionController? attention,
+  }) async {
+    usePhoneView(tester);
+    final theme = await everforest();
+    final dictation = DictationController(
+      FakeSpeechRecognizer(),
+      language: () => 'en-US',
+    );
+    addTearDown(dictation.dispose);
+    final controller = ChatViewController(
+      runner: ScriptedAgentCommandRunner([
+        ok(
+          livePage(
+            thread,
+            state: state,
+            started: const Duration(minutes: 12),
+            pending: pending,
+          ),
+        ),
+      ]),
+      sessionId: 's-api',
+      decide: (_, _) async {},
+      pollInterval: const Duration(days: 1),
+    );
+    await tester.pumpWidget(
+      VoiceSettingsScope(
+        settings: theme,
+        child: shotApp(home: const Scaffold()),
+      ),
+    );
+    await pushPage(
+      tester,
+      ChatViewPage(
+        controller: controller,
+        hostName: 'workstation',
+        onOpenTerminal: () {},
+        textToSpeech: FakeTts(),
+        dictation: dictation,
+        attention: attention,
+        hostId: attention == null ? null : workstation.id,
+      ),
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+  }
+
+  testWidgets('30 approval risk', (tester) async {
+    final attention = await smartAttention(
+      tester,
+      status: smartStatus(pending: [lowRiskTest]),
+    );
+    await pumpChat(
+      tester,
+      [
+        stamped(
+          userLine('u1', 'Add a due date to todos and cover it with tests'),
+          const Duration(minutes: 12),
+        ),
+        assistantLine('a1', [
+          text(
+            "I'll add an optional **`dueDate`** to the todo schema, "
+            'validate it as an ISO date and sort overdue todos first. '
+            'The schema and the route are done; now the tests.',
+          ),
+          toolUse('t1', 'Bash', {
+            'command': 'npm test -- due-date',
+            'description': 'Run the due date tests',
+          }),
+        ]),
+      ],
+      state: 'needs_permission',
+      pending: [jsonDecode(lowRiskTest) as Map<String, Object?>],
+      attention: attention,
+    );
+    expect(find.text('Low risk'), findsOneWidget);
+    expect(find.text('Trust…'), findsOneWidget);
+    expect(find.text('Always'), findsOneWidget);
+    await saveShot(tester, '30-approval-risk');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('31 approval rules', (tester) async {
+    usePhoneView(tester);
+    final attention = await smartAttention(
+      tester,
+      status: smartStatus(pending: const []),
+    );
+    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    await pushPage(
+      tester,
+      ApprovalRulesPage(
+        controller: attention,
+        host: workstation.copyWith(agentMonitor: AgentMonitorKind.companion),
+      ),
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    expect(find.text('Bash(npm test *)'), findsOneWidget);
+    await saveShot(tester, '31-approval-rules');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('32 voice guide', (tester) async {
+    final mic = FakeSpeechRecognizer();
+    final tts = FakeTts();
+    final dictation = DictationController(mic, language: () => 'en-US');
+    final speaker = ReadAloudController(
+      tts: tts,
+      preferences: () => VoicePreferences.defaults,
+    );
+    const request = PendingPermissionRequest(
+      id: 'req-1',
+      toolName: 'Bash',
+      summary: 'npm test -- due-date',
+    );
+    const world = GuideWorld(
+      machines: [
+        GuideMachine(
+          hostId: 'workstation',
+          name: 'workstation',
+          monitored: true,
+        ),
+        GuideMachine(hostId: 'build-box', name: 'build-box', monitored: true),
+      ],
+      agents: [
+        GuideAgent(
+          hostId: 'workstation',
+          machineName: 'workstation',
+          info: AgentInfo(
+            id: 's-api',
+            name: 'claude',
+            project: 'todo-api',
+            state: AgentAttentionState.needsInput,
+            pendingRequests: [request],
+          ),
+        ),
+        GuideAgent(
+          hostId: 'workstation',
+          machineName: 'workstation',
+          info: AgentInfo(
+            id: 's-web',
+            name: 'claude',
+            project: 'todo-web',
+            state: AgentAttentionState.working,
+          ),
+        ),
+      ],
+    );
+    final guide = GuideController(
+      dictation: dictation,
+      speaker: speaker,
+      world: () => world,
+      approvals: FakeApprovals(),
+      navigator: FakeNavigator(GuideScreen.home),
+      messenger: FakeMessenger(),
+      preferences: () => GuidePreferences.defaults,
+      speechLanguage: () => 'en-US',
+      afterSpeechPause: Duration.zero,
+      thinkingNotice: const Duration(seconds: 30),
+    );
+    addTearDown(() {
+      guide.dispose();
+      speaker.dispose();
+      dictation.dispose();
+    });
+    await pumpHome(tester, guide: guide);
+    expect(find.byKey(const ValueKey('home-voice-guide')), findsOneWidget);
+    guide.start();
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    mic.say('approve');
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    await pumpFrames(tester);
+    expect(guide.phase, GuidePhase.speaking);
+    await saveShot(tester, '32-voice-guide');
+    guide.stop();
+    await tearDownPage(tester);
+  });
+
+  testWidgets('33 usage accounts', (tester) async {
+    await pumpHome(tester, usage: demoUsage(detailed: true, accounts: true));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 6);
+    await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    // The explorer: the accounts under the limit rings.
+    expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
+    await saveShot(tester, '33-usage-accounts');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('34 chat peer messages', (tester) async {
+    await pumpChat(tester, [
+      stamped(
+        userLine('u1', 'Add a due date to todos and cover it with tests'),
+        const Duration(minutes: 18),
+      ),
+      assistantLine('a1', [
+        text(
+          'Todos have an optional **`dueDate`**, validated as an ISO date. '
+          'I asked the web session to show it in the list.',
+        ),
+      ]),
+      stamped(
+        userLine(
+          'm1',
+          'Another Claude session sent a message:\n'
+              '<cross-session-message from="todo-web">\n'
+              'The list shows due dates now. Can the API also return '
+              '`overdue: true` so the UI does not compute it?\n'
+              '</cross-session-message>\n\n'
+              'This came from another Claude session — not typed by your '
+              'user, but very likely working on their behalf.',
+        ),
+        const Duration(minutes: 9),
+      ),
+      assistantLine('a2', [
+        toolUse('t1', 'Edit', {
+          'file_path': '/home/demo/todo-api/src/routes/todos.ts',
+          'old_string': '  return todo;',
+          'new_string': '  return { ...todo, overdue: isOverdue(todo) };',
+        }),
+      ]),
+      userLine('r1', [toolResult('t1', 'ok')]),
+      assistantLine('a3', [
+        text(
+          'Done: `GET /todos` returns `overdue` for each todo. I asked the '
+          'reviewer to check both changes.',
+        ),
+      ]),
+      stamped(
+        userLine(
+          'm2',
+          '<teammate-message teammate_id="reviewer" color="green">\n'
+              '{"type":"idle_notification","from":"reviewer",'
+              '"idleReason":"available",'
+              '"result":"Reviewed the due date changes: no issues.\\n'
+              'Both suites pass (24 and 31 tests)."}\n'
+              '</teammate-message>',
+        ),
+        const Duration(minutes: 2),
+      ),
+      assistantLine('a4', [
+        text(
+          'The reviewer found no issues and both test suites pass. '
+          'Ready to commit?',
+        ),
+      ]),
+    ], state: 'waiting_input');
+    expect(find.text('From session todo-web'), findsOneWidget);
+    expect(find.text('reviewer finished'), findsOneWidget);
+    await saveShot(tester, '34-chat-peer-messages');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('35 agents dashboard', (tester) async {
+    usePhoneView(tester);
+    final workspace = TerminalWorkspaceController(DemoTerminalRepository());
+    addTearDown(workspace.dispose);
+    final runner = CompanionRunner({
+      'status': dashboardStatus(),
+      'digest': jsonEncode(dashboardDigest()),
+    });
+    final attention = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => runner,
+      provider: const ConductoreHostAttentionProvider(),
+      companionProvider: const ConductoreHostAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    attention.setAppForeground(false);
+    addTearDown(attention.dispose);
+    final digest = DigestController(
+      source: AttentionDigestHostSource(attention: attention),
+      observeLifecycle: false,
+    );
+    addTearDown(digest.dispose);
+    final session = workspace.open(
+      workstation.copyWith(agentMonitor: AgentMonitorKind.companion),
+    );
+    await tester.runAsync(session.connect);
+    await tester.runAsync(pumpEventQueue);
+    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    await pushPage(
+      tester,
+      AgentsDashboardPage(
+        controller: digest,
+        attention: attention,
+        onOpenChat: (_, _) {},
+        onOpenTerminal: (_, _) {},
+      ),
+    );
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(pumpEventQueue);
+      await pumpFrames(tester);
+    }
+    expect(find.byKey(const ValueKey('digest-header')), findsOneWidget);
+    await saveShot(tester, '35-agents-dashboard');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('36 chat pending bubble', (tester) async {
+    usePhoneView(tester);
+    final theme = await everforest();
+    final dictation = DictationController(
+      FakeSpeechRecognizer(),
+      language: () => 'en-US',
+    );
+    addTearDown(dictation.dispose);
+    final runner = TranscriptRunner(
+      livePage(
+        [
+          stamped(
+            userLine('u1', 'Add a due date to todos and cover it with tests'),
+            const Duration(minutes: 4),
+          ),
+          assistantLine('a1', [
+            text(
+              "I'll add an optional **`dueDate`** to the todo schema, "
+              'validate it as an ISO date and sort overdue todos first.',
+            ),
+            toolUse('t1', 'Edit', {
+              'file_path': '/home/demo/todo-api/src/routes/todos.ts',
+              'old_string': '  done: z.boolean(),',
+              'new_string':
+                  '  dueDate: z.string().datetime().optional(),\n'
+                  '  done: z.boolean(),',
+            }),
+          ]),
+          userLine('r1', [toolResult('t1', 'ok')]),
+          assistantLine('a2', [
+            toolUse('t2', 'Bash', {
+              'command': 'npm test -- due-date',
+              'description': 'Run the due date tests',
+            }),
+          ]),
+        ],
+        state: 'working',
+        started: const Duration(minutes: 4),
+      ),
+    );
+    final controller = ChatViewController(
+      runner: runner,
+      sessionId: 's-api',
+      decide: (_, _) async {},
+      pollInterval: const Duration(days: 1),
+    );
+    await tester.pumpWidget(
+      VoiceSettingsScope(
+        settings: theme,
+        child: shotApp(home: const Scaffold()),
+      ),
+    );
+    await pushPage(
+      tester,
+      ChatViewPage(
+        controller: controller,
+        hostName: 'workstation',
+        onOpenTerminal: () {},
+        textToSpeech: FakeTts(),
+        dictation: dictation,
+      ),
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    await tester.enterText(
+      find.byType(TextField),
+      'Also return overdue: true for each todo',
+    );
+    await tester.tap(find.byTooltip('Send'));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await pumpFrames(tester);
+    expect(runner.sent, hasLength(1));
+    await saveShot(tester, '36-chat-pending-bubble');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('37 review cards', (tester) async {
+    usePhoneView(tester);
+    final review = ReviewController(
+      client: ConductoreReviewClient(ReviewRunner()),
+      sessionId: 's-api',
+      agentName: 'todo-api',
+      send: (_) async {},
+    );
+    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    await pushPage(tester, ReviewPage(controller: review));
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(pumpEventQueue);
+      await pumpFrames(tester);
+    }
+    expect(find.byKey(const ValueKey('review-card-0')), findsOneWidget);
+    await saveShot(tester, '37-review-cards');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('38 usage explorer day', (tester) async {
+    usePhoneView(tester);
+    final usage = demoExplorerUsage();
+    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    await pushPage(tester, UsageExplorerPage(usage: usage));
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(pumpEventQueue);
+      await pumpFrames(tester);
+    }
+    final day = find.byKey(
+      ValueKey('usage-explorer-day-${usageDay(DateTime.now(), 1)}'),
+    );
+    await tester.tap(day);
+    for (var i = 0; i < 4; i++) {
+      await tester.runAsync(pumpEventQueue);
+      await pumpFrames(tester);
+    }
+    expect(find.byKey(const ValueKey('usage-day-page')), findsOneWidget);
+    await saveShot(tester, '38-usage-explorer-day');
+    await tearDownPage(tester);
+  });
+
+  /// Chat View with a reply worth copying, and other sessions to send to.
+  Future<void> pumpActionsChat(WidgetTester tester) async {
+    usePhoneView(tester);
+    final theme = await everforest();
+    final dictation = DictationController(
+      FakeSpeechRecognizer(),
+      language: () => 'en-US',
+    );
+    addTearDown(dictation.dispose);
+    final controller = ChatViewController(
+      runner: ScriptedAgentCommandRunner([
+        ok(
+          livePage([
+            stamped(
+              userLine('u1', 'How should the API report overdue todos?'),
+              const Duration(minutes: 7),
+            ),
+            assistantLine('a1', [
+              text(
+                'Return an **`overdue`** flag with each todo, computed on '
+                'the server so every client agrees:\n\n'
+                '```ts\nconst overdue =\n  isPast(todo.dueDate) &&\n'
+                '  !todo.done;\n```\n\n'
+                'The web list can then sort and colour by it without its '
+                'own date logic.',
+              ),
+            ]),
+            stamped(
+              userLine(
+                'u2',
+                'Good. Does the overdue sort handle todos '
+                    'without a due date?',
+              ),
+              const Duration(minutes: 3),
+            ),
+            assistantLine('a2', [
+              text(
+                'Yes: todos without a due date are never **overdue**, so '
+                'they sort after the overdue ones and keep their order. '
+                'The overdue tests cover both cases.',
+              ),
+            ]),
+          ], state: 'waiting_input'),
+        ),
+      ]),
+      sessionId: 's-api',
+      decide: (_, _) async {},
+      pollInterval: const Duration(days: 1),
+    );
+    await tester.pumpWidget(
+      VoiceSettingsScope(
+        settings: theme,
+        child: shotApp(home: const Scaffold()),
+      ),
+    );
+    await pushPage(
+      tester,
+      ChatViewPage(
+        controller: controller,
+        hostName: 'workstation',
+        onOpenTerminal: () {},
+        textToSpeech: FakeTts(),
+        dictation: dictation,
+        forwardTargets: () => [
+          ChatForwardTarget(
+            host: workstation,
+            agent: const AgentInfo(
+              id: 's-web',
+              name: 'todo-web',
+              state: AgentAttentionState.working,
+            ),
+          ),
+        ],
+        onForward: (_, _) async {},
+        share: (_) async => true,
+      ),
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+  }
+
+  testWidgets('39 chat message menu', (tester) async {
+    await pumpActionsChat(tester);
+    await tester.longPress(
+      find.textContaining('Return an', findRichText: true).first,
+    );
+    await pumpFrames(tester, 8);
+    expect(find.byKey(const ValueKey('chat-action-forward')), findsOneWidget);
+    await saveShot(tester, '39-chat-message-menu');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('40 chat find', (tester) async {
+    await pumpActionsChat(tester);
+    await tester.tap(find.byKey(const ValueKey('chat-search')));
+    await pumpFrames(tester, 8);
+    await tester.enterText(
+      find.byKey(const ValueKey('chat-find-field')),
+      'overdue',
+    );
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '40-chat-find');
+    await tearDownPage(tester);
+  });
+}
+
+/// Answers the companion by subcommand (`status`, `approvals`, …).
+class CompanionRunner implements AgentCommandRunner {
+  CompanionRunner(this.replies);
+
+  final Map<String, String> replies;
+
+  @override
+  Future<AgentCommandResult> run(
+    String command, {
+    required Duration timeout,
+  }) async {
+    for (final MapEntry(:key, :value) in replies.entries) {
+      if (command.contains('conductore-hostd $key')) return ok(value);
+    }
+    return const AgentCommandResult(
+      stdout: '{"error":"unknown command"}',
+      stderr: '',
+      exitCode: 1,
+    );
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+/// `npm test -- due-date` as companion 0.8 reports it: low risk, with the
+/// rules it would suggest.
+const lowRiskTest =
+    '{"id":"req-1","toolName":"Bash","summary":"npm test -- due-date",'
+    '"toolInput":{"command":"npm test -- due-date",'
+    '"description":"Run the due date tests"},'
+    '"risk":{"level":"low","reason":"Runs tests: npm test -- due-date"},'
+    '"batchable":true,'
+    '"suggestedRules":["Bash(npm test -- due-date)","Bash(npm test *)"],'
+    '"repo":"/home/demo/todo-api"}';
+
+/// Companion 0.8 status on the workstation, smart approvals on.
+String smartStatus({required List<String> pending}) =>
+    '{"version":1,"seq":4,"source":"daemon",'
+    '"capabilities":["smart-approvals"],"agents":['
+    '${agentJson('s-api', 'todo-api', state: pending.isEmpty ? 'working' : 'needs_permission', minutes: 0, pending: pending.join(','))}'
+    ']}';
+
+/// The workstation's rules: a time-boxed trust, two standing rules and
+/// one that ends with its session.
+String demoApprovals() {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  Map<String, Object?> rule(
+    String id,
+    String rule,
+    Map<String, Object?> scope, {
+    int? expiresInMinutes,
+    String? endsWithSession,
+    required String source,
+    int hits = 0,
+  }) => {
+    'id': id,
+    'rule': rule,
+    'scope': scope,
+    'expiresAt': expiresInMinutes == null
+        ? null
+        : now + expiresInMinutes * 60000 + 30000,
+    'endsWithSession': endsWithSession,
+    'source': source,
+    'createdAt': now - 3600000,
+    'hits': hits,
+    'lastUsedAt': hits > 0 ? now - 120000 : null,
+  };
+  const api = {'kind': 'repo', 'path': '/home/demo/todo-api'};
+  return jsonEncode({
+    'now': now,
+    'rules': [
+      rule(
+        'r1',
+        'Bash(npm test *)',
+        api,
+        expiresInMinutes: 45,
+        source: 'trust',
+        hits: 6,
+      ),
+      rule(
+        'r2',
+        'Bash(git status *)',
+        const {'kind': 'any'},
+        source: 'always',
+        hits: 23,
+      ),
+      rule('r3', 'Read', api, source: 'cli', hits: 41),
+      rule(
+        'r4',
+        'Bash(npm run lint *)',
+        const {'kind': 'session', 'sessionId': 's-web', 'label': 'todo-web'},
+        endsWithSession: 's-web',
+        source: 'voice',
+        hits: 2,
+      ),
+    ],
+    'autoApproved': <Object>[],
+  });
+}
+
+/// A Claude session's transcript that stays at [pageJson], and accepts
+/// what the composer sends.
+class TranscriptRunner implements AgentCommandRunner {
+  TranscriptRunner(this.pageJson);
+
+  final String pageJson;
+  final List<String> sent = [];
+  var _read = false;
+
+  @override
+  Future<AgentCommandResult> run(
+    String command, {
+    required Duration timeout,
+  }) async {
+    if (command.contains(' transcript ')) {
+      // The thread once, then nothing new at the same offset.
+      final reply = _read
+          ? livePage(
+              const [],
+              state: 'working',
+              started: const Duration(minutes: 4),
+            )
+          : pageJson;
+      _read = true;
+      return ok(reply);
+    }
+    sent.add(command);
+    return ok('{"ok":true}');
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+String usageDay(DateTime now, int back) {
+  final d = now.subtract(Duration(days: back));
+  return '${d.year}-${'${d.month}'.padLeft(2, '0')}-'
+      '${'${d.day}'.padLeft(2, '0')}';
+}
+
+/// Companion 1.0 on the workstation for the explorer: two weeks of three
+/// projects, by hour and by session when asked.
+UsageController demoExplorerUsage() {
+  final now = DateTime.now();
+  final today = usageDay(now, 0);
+  const projects = [
+    ('todo-api', 'claude-opus-5', 1.0),
+    ('todo-web', 'claude-sonnet-5', 0.55),
+    ('infra', 'claude-haiku-4-5', 0.2),
+  ];
+  // Working hours, a lunch dip and an evening push.
+  const hours = {
+    9: 0.6,
+    10: 1.0,
+    11: 1.2,
+    12: 0.4,
+    14: 0.9,
+    15: 1.3,
+    16: 1.1,
+    17: 0.7,
+    21: 0.5,
+  };
+  List<Map<String, Object?>> rows({
+    required String from,
+    required String to,
+    required bool hourly,
+  }) => [
+    for (var back = 0; back < 20; back++)
+      if (usageDay(now, back).compareTo(from) >= 0 &&
+          usageDay(now, back).compareTo(to) <= 0)
+        for (final (project, model, share) in projects)
+          if (hourly)
+            for (final MapEntry(key: hour, value: weight) in hours.entries)
+              {
+                ...usageRow(
+                  usageDay(now, back),
+                  project: project,
+                  model: model,
+                  output: (90000 * share * weight * (1 + back % 3)).round(),
+                  costUsd: 0.32 * share * weight * (1 + back % 3),
+                ),
+                'hour': hour,
+              }
+          else
+            usageRow(
+              usageDay(now, back),
+              project: project,
+              model: model,
+              output: (720000 * share * (1 + back % 3)).round(),
+              costUsd: 2.6 * share * (1 + back % 3),
+            ),
+  ];
+  late final FakeUsageRunner runner;
+  runner = FakeUsageRunner(() {
+    final command = runner.commands.last;
+    String? flag(String name) =>
+        RegExp('--$name (\\S+)').firstMatch(command)?.group(1);
+    final day = flag('day');
+    final to = day ?? flag('to') ?? today;
+    final from = day ?? flag('from') ?? usageDay(now, 6);
+    final hourly = command.contains('--hourly');
+    final list = rows(from: from, to: to, hourly: hourly);
+    final json = usageReplyJson(
+      machine: 'workstation',
+      today: today,
+      from: from,
+      rows: list,
+      limits: [
+        {
+          'label': '5h',
+          'usedPct': 62,
+          'resetsAt': now
+              .add(const Duration(hours: 2, minutes: 14))
+              .millisecondsSinceEpoch,
+        },
+        {
+          'label': '7d',
+          'usedPct': 31,
+          'resetsAt': now.add(const Duration(days: 3)).millisecondsSinceEpoch,
+        },
+      ],
+    );
+    (json['claude']! as Map<String, Object?>)['bySession'] = [
+      if (command.contains('--sessions'))
+        for (final row in list)
+          {
+            ...row,
+            'session': row['project'] == 'todo-api' && row['hour'] == 21
+                ? 'hotfix'
+                : const {
+                    'todo-api': 'due dates',
+                    'todo-web': 'overdue badge',
+                    'infra': 'staging plan',
+                  }[row['project']],
+          },
+    ];
+    return FakeUsageRunner.ok({
+      ...json,
+      'version': '1.0.0',
+      'to': to,
+      'hourly': hourly,
+      'utcOffsetMin': now.timeZoneOffset.inMinutes,
+    });
+  });
+  final controller = UsageController(
+    source: FakeUsageSource([workstation], {'workstation': runner}),
+    preferences: MemoryUsagePreferencesStore(),
+    observeLifecycle: false,
+  );
+  addTearDown(controller.dispose);
+  return controller;
+}
+
+/// Companion status for the dashboard: an approval, a question, a stuck
+/// agent and a finished one.
+String dashboardStatus() =>
+    '{"version":1,"seq":6,"source":"daemon",'
+    '"capabilities":["smart-approvals","digest"],"agents":['
+    '${agentJson('s-api', 'todo-api', state: 'needs_permission', minutes: 1, pending: dashboardPush)},'
+    '${agentJson('s-web', 'todo-web', state: 'waiting_input', minutes: 4, message: 'Should the overdue badge be red or amber?')},'
+    '${agentJson('s-infra', 'infra', state: 'working', minutes: 2)},'
+    '${agentJson('s-docs', 'todo-docs', state: 'waiting_input', minutes: 25, message: 'README updated with the due date API.')}'
+    ']}';
+
+const dashboardPush =
+    '{"id":"req-push","toolName":"Bash","summary":"git push origin due-date",'
+    '"toolInput":{"command":"git push origin due-date"},'
+    '"risk":{"level":"medium","reason":"Pushes to a remote: git push origin '
+    'due-date"}}';
+
+/// `conductore-hostd digest --summaries` for [dashboardStatus].
+Map<String, Object?> dashboardDigest() {
+  final now = DateTime.now();
+  int ago(int minutes) =>
+      now.subtract(Duration(minutes: minutes)).millisecondsSinceEpoch;
+  Map<String, Object?> agent(
+    String id,
+    String name, {
+    required String state,
+    String? attention,
+    required int minutes,
+    String? headline,
+    String? summary,
+    List<Map<String, Object?>> pending = const [],
+    List<Map<String, Object?>> stuck = const [],
+    required Map<String, Object?> facts,
+  }) => {
+    'sessionId': id,
+    'name': name,
+    'machine': 'workstation',
+    'project': name,
+    'cwd': '/home/demo/$name',
+    'state': state,
+    'attention': attention,
+    'live': true,
+    'lastActivityAt': ago(minutes),
+    'headline': headline,
+    'pending': pending,
+    'facts': facts,
+    'stuck': stuck,
+    'summary': summary == null
+        ? null
+        : {'text': summary, 'at': ago(0), 'fresh': true},
+    'summaryPending': false,
+  };
+  Map<String, Object?> facts({
+    required int turns,
+    required List<String> files,
+    required int added,
+    required int removed,
+    int tests = 0,
+    int passed = 0,
+    int failed = 0,
+    int failedCommands = 0,
+    required int tokens,
+    required double cost,
+  }) => {
+    'turns': turns,
+    'files': files,
+    'filesEdited': files.length,
+    'linesAdded': added,
+    'linesRemoved': removed,
+    'lines': 'git',
+    'commands': tests + failedCommands + 2,
+    'failedCommands': failedCommands,
+    'testRuns': tests,
+    'testsPassed': passed,
+    'testsFailed': failed,
+    if (tests > 0)
+      'lastTest': {'ok': failed == 0, 'at': ago(3), 'command': 'npm test'},
+    'waitingPermissionMs': 0,
+    'waitingInputMs': 0,
+    'tokens': {'total': tokens, 'output': tokens ~/ 90},
+    'costUsd': cost,
+    'partial': false,
+  };
+  return {
+    'version': '1.0.0',
+    'schema': 1,
+    'machine': 'workstation',
+    'generatedAt': now.millisecondsSinceEpoch,
+    'since': ago(120),
+    'source': 'daemon',
+    'activity': true,
+    'counts': <String, Object?>{},
+    'agents': [
+      agent(
+        's-api',
+        'todo-api',
+        state: 'needs_permission',
+        attention: 'permission',
+        minutes: 1,
+        headline: 'Pushing the branch next.',
+        summary:
+            'Added due dates with validation and overdue sorting; all 24 '
+            'tests pass. Wants to push the branch.',
+        pending: [
+          {
+            'id': 'req-push',
+            'toolName': 'Bash',
+            'summary': 'git push origin due-date',
+          },
+        ],
+        facts: facts(
+          turns: 4,
+          files: ['src/routes/todos.ts', 'src/lib/sort.ts', 'test/due.ts'],
+          added: 126,
+          removed: 14,
+          tests: 3,
+          passed: 3,
+          tokens: 1840000,
+          cost: 6.4,
+        ),
+      ),
+      agent(
+        's-web',
+        'todo-web',
+        state: 'waiting_input',
+        attention: 'question',
+        minutes: 4,
+        headline: 'Should the overdue badge be red or amber?',
+        summary:
+            'Shows due dates in the list and a badge for overdue todos. '
+            'Asks which colour the badge should be.',
+        facts: facts(
+          turns: 2,
+          files: ['src/TodoList.tsx', 'src/Badge.tsx'],
+          added: 58,
+          removed: 6,
+          tokens: 610000,
+          cost: 1.2,
+        ),
+      ),
+      agent(
+        's-infra',
+        'infra',
+        state: 'working',
+        minutes: 2,
+        summary:
+            'Applying the staging plan; terraform apply keeps timing '
+            'out on the database.',
+        stuck: [
+          {
+            'rule': 'same-failure',
+            'reason': '`terraform apply` failed 3 times',
+          },
+        ],
+        facts: facts(
+          turns: 3,
+          files: ['staging/db.tf'],
+          added: 4,
+          removed: 2,
+          failedCommands: 3,
+          tokens: 380000,
+          cost: 0.4,
+        ),
+      ),
+      agent(
+        's-docs',
+        'todo-docs',
+        state: 'waiting_input',
+        minutes: 25,
+        summary:
+            'Documented the due date field and the overdue flag in '
+            'the README.',
+        facts: facts(
+          turns: 1,
+          files: ['README.md'],
+          added: 31,
+          removed: 3,
+          tokens: 210000,
+          cost: 0.3,
+        ),
+      ),
+    ],
+    'summaries': {
+      'enabled': true,
+      'pending': 0,
+      'done': 4,
+      'calls': 1,
+      'tokens': {'total': 6300},
+      'costUsd': 0.009,
+    },
+    'summaryUsageToday': {
+      'runs': 1,
+      'calls': 1,
+      'tokens': {'total': 6300},
+      'costUsd': 0.009,
+    },
+  };
+}
+
+/// Companion 1.0's `turns` and `diff` for turn 3 of todo-api.
+class ReviewRunner implements AgentCommandRunner {
+  static const _files = [
+    (
+      'src/routes/todos.ts',
+      'M',
+      5,
+      1,
+      '@@ -12,7 +12,11 @@ export const todoSchema = z.object({\n'
+          '   title: z.string().min(1),\n'
+          '-  done: z.boolean(),\n'
+          '+  dueDate: z.string().datetime().optional(),\n'
+          '+  done: z.boolean().default(false),\n'
+          ' });\n'
+          ' \n'
+          ' router.get("/todos", async (req, res) => {\n'
+          '-  res.json(await db.todos.all());\n'
+          '+  const todos = await db.todos.all();\n'
+          '+  const now = Date.now();\n'
+          '+  res.json(todos.map((t) => ({ ...t, overdue: isOverdue(t, now) })));\n'
+          ' });\n',
+    ),
+    (
+      'src/lib/sort.ts',
+      'M',
+      3,
+      1,
+      '@@ -1,6 +1,8 @@\n'
+          ' export function byDue(a: Todo, b: Todo) {\n'
+          '-  if (!a.dueDate) return -1;\n'
+          '+  if (!a.dueDate) return 1;\n'
+          '+  if (!b.dueDate) return -1;\n'
+          '+  return a.dueDate.localeCompare(b.dueDate);\n'
+          ' }\n',
+    ),
+    (
+      'test/due-date.test.ts',
+      'A',
+      4,
+      0,
+      '@@ -0,0 +1,4 @@\n'
+          '+test("overdue todos sort first", () => {\n'
+          '+  const sorted = [later, overdue].sort(byDue);\n'
+          '+  expect(sorted[0]).toBe(overdue);\n'
+          '+});\n',
+    ),
+  ];
+
+  @override
+  Future<AgentCommandResult> run(
+    String command, {
+    required Duration timeout,
+  }) async {
+    final now = DateTime.now();
+    final word = RegExp(r'hostd (turns|diff)').firstMatch(command)?[1];
+    final base = {
+      'sessionId': 's-api',
+      'turn': 3,
+      'prompt': 'Add a due date to todos and cover it with tests',
+      'repo': '/home/demo/todo-api',
+      'committed': false,
+      'late': false,
+      'others': <String>[],
+    };
+    return switch (word) {
+      'turns' => ok(
+        jsonEncode({
+          'sessionId': 's-api',
+          'snapshots': true,
+          'agent': {'state': 'waiting_input'},
+          'pending': 0,
+          'turns': [
+            {
+              ...base,
+              'startedAt': now
+                  .subtract(const Duration(minutes: 9))
+                  .millisecondsSinceEpoch,
+              'endedAt': now
+                  .subtract(const Duration(minutes: 2))
+                  .millisecondsSinceEpoch,
+              'running': false,
+              'files': [
+                for (final (path, status, added, removed, _) in _files)
+                  {
+                    'path': path,
+                    'status': status,
+                    'added': added,
+                    'removed': removed,
+                  },
+              ],
+              'filesTotal': _files.length,
+              'added': 12,
+              'removed': 2,
+              'before': {
+                'ref': 'refs/conductore/snapshots/s-api/3/before',
+                'commit': 'b' * 40,
+              },
+              'after': {
+                'ref': 'refs/conductore/snapshots/s-api/3/after',
+                'commit': 'a' * 40,
+              },
+              'undone': null,
+            },
+          ],
+        }),
+      ),
+      'diff' => ok(
+        jsonEncode({
+          ...base,
+          'live': false,
+          'truncated': false,
+          'files': [
+            for (final (path, status, added, removed, patch) in _files)
+              {
+                'path': path,
+                'status': status,
+                'added': added,
+                'removed': removed,
+                'binary': false,
+                'patch': patch,
+              },
+          ],
+        }),
+      ),
+      _ => const AgentCommandResult(
+        stdout: '{"error":"unknown command"}',
+        stderr: '',
+        exitCode: 1,
+      ),
+    };
+  }
+
+  @override
+  Future<void> close() async {}
 }

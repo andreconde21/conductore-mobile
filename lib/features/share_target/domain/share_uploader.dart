@@ -1,3 +1,4 @@
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/share_target/domain/shared_payload.dart';
 
@@ -26,4 +27,11 @@ abstract class ShareUploader {
     List<SharedFile> files, {
     void Function(ShareUploadProgress progress)? onProgress,
   });
+}
+
+/// A shared file whose phone-side copy is gone (the cache was cleared, or
+/// it was never readable), so retrying cannot help: it must be shared
+/// again.
+class ShareFileUnavailable extends AppFailure {
+  const ShareFileUnavailable(super.message);
 }
