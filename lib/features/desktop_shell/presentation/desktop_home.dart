@@ -275,6 +275,8 @@ class DesktopHomeState extends State<DesktopHome> {
     _controller.addListener(_handleControllerChanged);
     _controller.layout.addListener(_syncViewed);
     _controller.layout.addListener(_reportContinuity);
+    // The saved machine that is this desktop may be found after start.
+    widget.hostsController.addListener(_reportContinuity);
     _controller.unreadChanges.addListener(_handleUnreadChanged);
     widget.sessionRestore?.addListener(_handleRestoreChanged);
     _lifecycle = AppLifecycleListener(
@@ -371,6 +373,7 @@ class DesktopHomeState extends State<DesktopHome> {
     _controller.removeListener(_handleControllerChanged);
     _controller.layout.removeListener(_syncViewed);
     _controller.layout.removeListener(_reportContinuity);
+    widget.hostsController.removeListener(_reportContinuity);
     _controller.unreadChanges.removeListener(_handleUnreadChanged);
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
     _lifecycle?.dispose();
