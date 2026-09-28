@@ -49,6 +49,7 @@ import 'package:conduit/features/session_navigation/presentation/session_view_la
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
+import 'package:conduit/features/sessions/presentation/live_terminal_preview.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
@@ -245,6 +246,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   Set<String> _trustedEndpoints = const {};
   HomeBoards? _ownedBoards;
   Timer? _previewTimer;
+
+  /// Ticks while the page is on screen with sessions open: the pace of
+  /// the session previews (a [PreviewClock]).
+  final _previewTicks = ValueNotifier<int>(0);
   Timer? _refocusTimer;
 
   HomeBoards? get _boards => widget.homeBoards ?? _ownedBoards;
@@ -334,6 +339,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.promptCoordinator.removeListener(_handlePromptChanged);
     widget.promptCoordinator.rejectAll();
     _previewTimer?.cancel();
+    _previewTicks.dispose();
     _refocusTimer?.cancel();
     widget.homeBoards?.setVisible(false);
     _ownedBoards?.dispose();
@@ -400,9 +406,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       unawaited(_loadTrustedEndpoints());
       // The shell's dashboard redraws its own previews.
       if (_isShell) return;
+      // Each tile redraws its own preview on a tick, and only when its
+      // terminal printed something since (see TerminalSnapshotBuilder).
       _previewTimer ??= Timer.periodic(widget.previewRefreshInterval, (_) {
         if (mounted && widget.workspaceController.hasSessions) {
-          setState(() {});
+          _previewTicks.value += 1;
         }
       });
     } else {
@@ -518,56 +526,62 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     if (_isShell) return _buildShell(context);
     final palette = widget.themeController.palette;
     final boards = _boards;
-    return QuickSwitcherShortcut(
-      onInvoke: () => unawaited(_openSwitcher(fromKeyboard: true)),
-      child: Scaffold(
-        body: ConduitBackdrop(
-          palette: palette,
-          child: SafeArea(
-            bottom: shouldApplyBottomSafeArea(context),
-            child: RefreshIndicator(
-              color: Theme.of(context).colorScheme.primary,
-              onRefresh: _refreshAll,
-              child: ListenableBuilder(
-                listenable: Listenable.merge([
-                  widget.hostsController,
-                  widget.workspaceController,
-                  widget.themeController,
-                  widget.agentAttention,
-                  ?boards,
-                ]),
-                builder: (context, _) {
-                  return CustomScrollView(
-                    key: const ValueKey('home-scroll'),
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    slivers: centerSliversOnDesktop([
-                      SliverToBoxAdapter(
-                        child: HomeTopBar(
-                          onLock: _lock,
-                          onSettings: _openSettings,
-                          onSwitcher: () => unawaited(_openSwitcher()),
-                          onGuide: _guideButton(context),
-                          onAgents: DigestScope.maybeOf(context) == null
-                              ? null
-                              : _openAgentsDashboard,
-                          agentsBadge: widget.agentAttention.attentionCount,
-                          machine: _machineChip(),
-                        ),
-                      ),
-                      // Limit rings and today's tokens (companion usage).
-                      if (UsageScope.maybeOf(context) case final usage?)
+    return PreviewClock(
+      ticks: _previewTicks,
+      child: QuickSwitcherShortcut(
+        onInvoke: () => unawaited(_openSwitcher(fromKeyboard: true)),
+        child: Scaffold(
+          body: ConduitBackdrop(
+            palette: palette,
+            child: SafeArea(
+              bottom: shouldApplyBottomSafeArea(context),
+              child: RefreshIndicator(
+                color: Theme.of(context).colorScheme.primary,
+                onRefresh: _refreshAll,
+                child: ListenableBuilder(
+                  listenable: Listenable.merge([
+                    widget.hostsController,
+                    widget.workspaceController,
+                    widget.themeController,
+                    widget.agentAttention,
+                    ?boards,
+                  ]),
+                  builder: (context, _) {
+                    return CustomScrollView(
+                      key: const ValueKey('home-scroll'),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: centerSliversOnDesktop([
                         SliverToBoxAdapter(
-                          child: UsageHomeBar(controller: usage),
+                          child: HomeTopBar(
+                            onLock: _lock,
+                            onSettings: _openSettings,
+                            onSwitcher: () => unawaited(_openSwitcher()),
+                            onGuide: _guideButton(context),
+                            onAgents: DigestScope.maybeOf(context) == null
+                                ? null
+                                : _openAgentsDashboard,
+                            agentsBadge: widget.agentAttention.attentionCount,
+                            machine: _machineChip(),
+                          ),
                         ),
-                      // Once, after the update that added crash reports.
-                      const SliverToBoxAdapter(child: PrivacyNotice()),
-                      ..._buildMain(context),
-                      const SliverToBoxAdapter(
-                        child: SizedBox(key: ValueKey('home-end'), height: 24),
-                      ),
-                    ]),
-                  );
-                },
+                        // Limit rings and today's tokens (companion usage).
+                        if (UsageScope.maybeOf(context) case final usage?)
+                          SliverToBoxAdapter(
+                            child: UsageHomeBar(controller: usage),
+                          ),
+                        // Once, after the update that added crash reports.
+                        const SliverToBoxAdapter(child: PrivacyNotice()),
+                        ..._buildMain(context),
+                        const SliverToBoxAdapter(
+                          child: SizedBox(
+                            key: ValueKey('home-end'),
+                            height: 24,
+                          ),
+                        ),
+                      ]),
+                    );
+                  },
+                ),
               ),
             ),
           ),

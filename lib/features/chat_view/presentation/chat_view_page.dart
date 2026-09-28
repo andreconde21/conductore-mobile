@@ -175,6 +175,7 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   bool _showJump = false;
   Timer? _clock;
+  final _headerTick = ValueNotifier<int>(0);
   ReadAloudController? _readAloud;
 
   /// Made and disposed here when the opener passed no dictation.
@@ -259,13 +260,38 @@ class _ChatViewPageState extends State<ChatViewPage>
         )..addListener(_onTalkChanged);
       }
     }
-    // The elapsed time in the header.
+    // The elapsed time in the header, and a sent prompt's "not in the
+    // transcript yet" note. Only the header ticks; the thread rebuilds
+    // only while a sent prompt waits for its transcript entry.
     _clock = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      _headerTick.value += 1;
+      if (_chat.outgoing.any(
+        (o) => o.pending && o.state == ChatSendState.sent && !o.late,
+      )) {
+        setState(() {});
+      }
     });
   }
 
   bool _readAloudPrimed = false;
+
+  /// Whether a route covers this chat (or its desktop tab is hidden):
+  /// tickers are off below it.
+  bool _covered = false;
+
+  /// Polls only while the chat can be seen: a route on top (the terminal,
+  /// a sheet) or a hidden desktop tab pauses it, unless the chat is
+  /// reading aloud or in Talk, which the user hears rather than sees.
+  void _syncPolling() {
+    if (!mounted) return;
+    final resumed =
+        _lifecycle == null || _lifecycle == AppLifecycleState.resumed;
+    final listening =
+        (_readAloud?.enabled ?? false) || (_talk?.active ?? false);
+    if (!resumed) return;
+    _chat.setVisible(!_covered || listening);
+  }
 
   ShareTargetController? _shareTarget;
 
@@ -289,6 +315,11 @@ class _ChatViewPageState extends State<ChatViewPage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final covered = !TickerMode.valuesOf(context).enabled;
+    if (covered != _covered) {
+      _covered = covered;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncPolling());
+    }
     final shareTarget = ShareTargetScope.maybeOf(context);
     if (!identical(shareTarget, _shareTarget)) {
       _shareTarget?.removeDraftReceiver(_receiveSharedDraft);
@@ -548,7 +579,11 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (state == AppLifecycleState.resumed ||
         readAloud == null ||
         !(readAloud.enabled || talking)) {
-      _chat.setVisible(state == AppLifecycleState.resumed);
+      if (state == AppLifecycleState.resumed) {
+        _syncPolling();
+      } else {
+        _chat.setVisible(false);
+      }
       return;
     }
     // Read-aloud is on. Keep polling and reading while only the screen
@@ -600,6 +635,7 @@ class _ChatViewPageState extends State<ChatViewPage>
       ..dispose();
     _composerText.dispose();
     _clock?.cancel();
+    _headerTick.dispose();
     _scroll.dispose();
     _chat.setVisible(false);
     if (widget.ownsController) {
@@ -922,12 +958,6 @@ class _ChatViewPageState extends State<ChatViewPage>
         } else {
           _workingShownAt ??= DateTime.now();
         }
-        final elapsed = _elapsed(_chat.startedAt);
-        final subtitle = [
-          activity?.label ?? 'Connecting…',
-          if (elapsed.isNotEmpty) elapsed,
-          ?widget.hostName,
-        ].join(' · ');
         return Scaffold(
           appBar: AppBar(
             titleSpacing: 0,
@@ -938,20 +968,30 @@ class _ChatViewPageState extends State<ChatViewPage>
                 PulseWhile(
                   key: const ValueKey('chat-header-pulse'),
                   active: working != null,
-                  child: Text(
-                    subtitle,
-                    key: const ValueKey('chat-header-status'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: switch (activity) {
-                        ChatActivity.needsApproval ||
-                        ChatActivity.waiting => theme.colorScheme.error,
-                        ChatActivity.thinking ||
-                        ChatActivity.working => theme.colorScheme.primary,
-                        _ => theme.colorScheme.onSurfaceVariant,
-                      },
-                    ),
+                  child: ValueListenableBuilder(
+                    valueListenable: _headerTick,
+                    builder: (context, _, _) {
+                      final elapsed = _elapsed(_chat.startedAt);
+                      return Text(
+                        [
+                          activity?.label ?? 'Connecting…',
+                          if (elapsed.isNotEmpty) elapsed,
+                          ?widget.hostName,
+                        ].join(' · '),
+                        key: const ValueKey('chat-header-status'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: switch (activity) {
+                            ChatActivity.needsApproval ||
+                            ChatActivity.waiting => theme.colorScheme.error,
+                            ChatActivity.thinking ||
+                            ChatActivity.working => theme.colorScheme.primary,
+                            _ => theme.colorScheme.onSurfaceVariant,
+                          },
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
@@ -1168,39 +1208,50 @@ class _ChatViewPageState extends State<ChatViewPage>
         : freeze.working && (working ?? _lastWorking) != null;
     final shownWorking = working ?? _lastWorking;
     // Newest first: the list is reversed so it opens at the latest message
-    // and stays there as messages arrive.
-    final rows = <Widget>[
+    // and stays there as messages arrive. Rows are built lazily, only near
+    // the screen: a long transcript costs its visible rows per build, not
+    // thousands.
+    final rows = <_ThreadRow>[
       if (showWorkingRow && shownWorking != null)
-        // Frozen and finished: keep the row's space so nothing moves.
-        Visibility(
-          key: const ValueKey('chat-working-slot'),
-          visible: working != null,
-          maintainSize: true,
-          maintainAnimation: true,
-          maintainState: true,
-          child: ChatWorkingIndicator(
-            key: const ValueKey('chat-working-indicator'),
-            working: shownWorking,
-            since: shownWorking.since ?? _workingShownAt ?? DateTime.now(),
+        _ThreadRow(
+          const ValueKey('chat-working-slot'),
+          // Frozen and finished: keep the row's space so nothing moves.
+          () => Visibility(
+            key: const ValueKey('chat-working-slot'),
+            visible: working != null,
+            maintainSize: true,
+            maintainAnimation: true,
+            maintainState: true,
+            child: ChatWorkingIndicator(
+              key: const ValueKey('chat-working-indicator'),
+              working: shownWorking,
+              since: shownWorking.since ?? _workingShownAt ?? DateTime.now(),
+            ),
           ),
         ),
       for (final request in pending.reversed)
-        ChatApprovalCard(
-          key: ValueKey('approval-${request.id}'),
-          request: request,
-          busy:
-              _chat.isDeciding(request.id) ||
-              (widget.attention?.isDeciding(request.id) ?? false),
-          onDecide: (verdict) => _decide(request, verdict),
-          onTrust: _smartApprovals ? () => _trust(request) : null,
+        _ThreadRow(
+          ValueKey('approval-${request.id}'),
+          () => ChatApprovalCard(
+            key: ValueKey('approval-${request.id}'),
+            request: request,
+            busy:
+                _chat.isDeciding(request.id) ||
+                (widget.attention?.isDeciding(request.id) ?? false),
+            onDecide: (verdict) => _decide(request, verdict),
+            onTrust: _smartApprovals ? () => _trust(request) : null,
+          ),
         ),
       for (final o in outgoing.reversed)
-        decorateOutgoing(
-          o,
-          ChatOutgoingBubble(
-            item: o,
-            onRetry: () => unawaited(_retry(o)),
-            onEdit: o.answer ? null : () => _edit(o),
+        _ThreadRow(
+          ValueKey(o.id),
+          () => decorateOutgoing(
+            o,
+            ChatOutgoingBubble(
+              item: o,
+              onRetry: () => unawaited(_retry(o)),
+              onEdit: o.answer ? null : () => _edit(o),
+            ),
           ),
         ),
       for (final entry in ChatToolActivity.arrange(
@@ -1208,62 +1259,84 @@ class _ChatViewPageState extends State<ChatViewPage>
         _toolActivity,
       ).reversed)
         switch (entry) {
-          ChatItemEntry(:final item) => _row(
-            item,
-            isLast: identical(item, items.last),
-            waiting: waiting,
+          ChatItemEntry(:final item) => _ThreadRow(
+            ValueKey(('chat-row', item.id)),
+            () => _row(
+              item,
+              isLast: identical(item, items.last),
+              waiting: waiting,
+            ),
+            ids: [item.id],
           ),
-          final ChatToolGroup group => ChatToolGroupRow(
-            key: ValueKey(group.id),
-            group: group,
-            expanded: _openGroups.contains(group.id) || searchOpens(group),
-            onToggle: () => setState(() {
-              if (!_openGroups.remove(group.id)) _openGroups.add(group.id);
-            }),
-            children: [
-              for (final item in group.items)
-                _row(item, isLast: false, waiting: waiting),
-            ],
+          final ChatToolGroup group => _ThreadRow(
+            ValueKey(group.id),
+            () => ChatToolGroupRow(
+              key: ValueKey(group.id),
+              group: group,
+              expanded: _openGroups.contains(group.id) || searchOpens(group),
+              onToggle: () => setState(() {
+                if (!_openGroups.remove(group.id)) _openGroups.add(group.id);
+              }),
+              children: [
+                for (final item in group.items)
+                  _row(item, isLast: false, waiting: waiting),
+              ],
+            ),
+            ids: [for (final item in group.items) item.id],
           ),
         },
       if (_chat.hasOlder)
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Center(
-            child: _chat.loadingOlder
-                ? const CircularProgressIndicator()
-                : TextButton(
-                    onPressed: _chat.loadOlder,
-                    child: const Text('Load earlier messages'),
-                  ),
+        _ThreadRow(
+          const ValueKey('chat-load-older'),
+          () => Padding(
+            padding: const EdgeInsets.all(12),
+            child: Center(
+              child: _chat.loadingOlder
+                  ? const CircularProgressIndicator()
+                  : TextButton(
+                      onPressed: _chat.loadOlder,
+                      child: const Text('Load earlier messages'),
+                    ),
+            ),
           ),
         )
       else if (_chat.olderOnlyInTerminal)
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Center(
-            child: Text(
-              'Earlier messages are in the terminal.',
-              style: theme.textTheme.bodySmall,
+        _ThreadRow(
+          const ValueKey('chat-older-in-terminal'),
+          () => Padding(
+            padding: const EdgeInsets.all(12),
+            child: Center(
+              child: Text(
+                'Earlier messages are in the terminal.',
+                style: theme.textTheme.bodySmall,
+              ),
             ),
           ),
         )
       else if (items.isEmpty && pending.isEmpty && outgoing.isEmpty)
-        const _Centered(
-          icon: Icons.forum_outlined,
-          text: 'No messages yet. Send a prompt to start.',
+        _ThreadRow(
+          const ValueKey('chat-empty'),
+          () => const _Centered(
+            icon: Icons.forum_outlined,
+            text: 'No messages yet. Send a prompt to start.',
+          ),
         ),
     ];
-    noteRows(rows);
+    noteRows([for (final row in rows) row.ids]);
+    final rowIndex = {for (var i = 0; i < rows.length; i++) rows[i].key: i};
     return Stack(
       children: [
         wrapThread(
-          ListView(
+          ListView.builder(
             key: const ValueKey('chat-thread'),
             controller: _scroll,
             reverse: true,
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-            children: rows,
+            itemCount: rows.length,
+            itemBuilder: (context, index) => rows[index].build(),
+            // Rows keep their state (an open card, a selection) when new
+            // ones arrive below them and move them up the list.
+            findChildIndexCallback: (key) => rowIndex[key],
           ),
         ),
         if (held > 0)
@@ -1319,6 +1392,16 @@ class _ChatViewPageState extends State<ChatViewPage>
       ChatNotice() => ChatNoticeRow(key: key, item: item),
     });
   }
+}
+
+/// One row of the thread, built only when the list needs it: [key] is
+/// the built widget's key, [ids] the chat items it shows (for find).
+class _ThreadRow {
+  const _ThreadRow(this.key, this.build, {this.ids = const []});
+
+  final Key key;
+  final Widget Function() build;
+  final List<String> ids;
 }
 
 class _Centered extends StatelessWidget {

@@ -107,7 +107,7 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
 
   @override
   Future<List<HostKeyRecord>> loadTrustedKeys() async {
-    final raw = await _storage.read(key: _trustedKeysKey);
+    final raw = await _readRaw();
     if (raw == null || raw.isEmpty) {
       return [];
     }
@@ -149,7 +149,18 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
     await _save(records);
   }
 
+  /// The stored list, one read shared by callers that ask at the same time
+  /// (the home page and its boards all ask at launch). Each caller parses
+  /// its own copy.
+  Future<String?> _readRaw() =>
+      _reading ??= _storage.read(key: _trustedKeysKey).whenComplete(() {
+        _reading = null;
+      });
+  Future<String?>? _reading;
+
   Future<void> _save(List<HostKeyRecord> records) {
+    // A read started before this write must not answer later callers.
+    _reading = null;
     return _storage.write(
       key: _trustedKeysKey,
       value: jsonEncode(records.map((record) => record.toJson()).toList()),

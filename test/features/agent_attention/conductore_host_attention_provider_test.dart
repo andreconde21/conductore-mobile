@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -323,5 +326,66 @@ void main() {
       ),
       isNull,
     );
+  });
+
+  group('status etag and gzip', () {
+    String withEtag(String etag) => statusFixture.trim().replaceFirst(
+      '"seq":7,',
+      '"seq":7,"etag":"$etag",',
+    );
+
+    test(
+      'the next status sends the etag; "unchanged" keeps the agents',
+      () async {
+        final runner = ScriptedAgentCommandRunner([
+          ok(withEtag('e1.7')),
+          ok(
+            '{"version":1,"seq":7,"etag":"e1.7","unchanged":true,'
+            '"source":"daemon","capabilities":["digest"]}',
+          ),
+        ]);
+        final first = await provider.fetchAgents(runner);
+        expect(runner.commands.first, contains('status --gzip'));
+        final second = await provider.fetchAgents(runner);
+        expect(runner.commands.last, contains('status --etag e1.7 --gzip'));
+        expect(second.agents, first.agents);
+        expect(second.sequence, 7);
+        expect(second.capabilities, {'digest'});
+      },
+    );
+
+    test('a changed state answers in full and replaces the copy', () async {
+      final runner = ScriptedAgentCommandRunner([
+        ok(withEtag('e1.7')),
+        ok('{"version":1,"seq":8,"etag":"e1.8","agents":[]}'),
+      ]);
+      await provider.fetchAgents(runner);
+      final next = await provider.fetchAgents(runner);
+      expect(next.agents, isEmpty);
+      expect(next.sequence, 8);
+    });
+
+    test('"unchanged" without a copy asks again in full', () async {
+      final runner = ScriptedAgentCommandRunner([
+        ok('{"version":1,"seq":7,"unchanged":true}'),
+        ok(statusFixture),
+      ]);
+      final snapshot = await provider.fetchAgents(runner);
+      expect(snapshot.agents, hasLength(4));
+      expect(runner.commands, hasLength(2));
+      expect(runner.commands.last, isNot(contains('--etag')));
+    });
+
+    test('a gzipped status parses like a plain one', () async {
+      final packed = jsonEncode({
+        'encoding': 'gzip',
+        'data': base64.encode(gzip.encode(utf8.encode(statusFixture))),
+      });
+      final snapshot = await provider.fetchAgents(
+        ScriptedAgentCommandRunner([ok(packed)]),
+      );
+      expect(snapshot.agents, hasLength(4));
+      expect(snapshot.sequence, 7);
+    });
   });
 }

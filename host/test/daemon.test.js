@@ -319,39 +319,66 @@ test('events long-poll returns the batch since seq, waits for new changes, and t
   await hook(ev('s1', 'UserPromptSubmit'))
   await hook(ev('s1', 'PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/x' } }))
   const before = (await status()).seq
-  // Backlog: the buffered changes since a recent cursor are served at once.
+  // Backlog: the buffered changes since a recent cursor are served at once,
+  // only the newest per session (each carries the whole agent).
   const backlog = await cli('events', '--since', String(before - 2), '--timeout', '5')
-  assert.equal(backlog.lines.length, 2)
-  assert.ok(backlog.lines.every(l => l.type === 'change' || l.type === 'remove'))
-  assert.deepEqual(backlog.lines.map(l => l.seq), [before - 1, before])
+  assert.equal(backlog.lines.length, 1)
+  assert.equal(backlog.lines[0].type, 'change')
+  assert.equal(backlog.lines[0].seq, before)
+  assert.equal(backlog.lines[0].agent.lastToolName, 'Read')
+  await hook(ev('s9', 'SessionStart'))
+  await hook(ev('s1', 'PostToolUse', { tool_name: 'Read' }))
+  await hook(ev('s9', 'UserPromptSubmit'))
+  const mixed = await cli('events', '--since', String(before - 2), '--timeout', '5')
+  assert.deepEqual(mixed.lines.map(l => [l.sessionId, l.seq]), [['s1', before + 2], ['s9', before + 3]])
+  assert.equal(mixed.lines[1].agent.state, 'working')
+  const cursor = before + 3
 
   // A cursor older than the daemon's buffer (it restarted earlier in this run) gets a snapshot.
   const stale = await cli('events', '--since', '0', '--timeout', '1')
   assert.equal(stale.lines.length, 1)
   assert.equal(stale.lines[0].type, 'snapshot')
-  assert.equal(stale.lines[0].seq, before)
+  assert.equal(stale.lines[0].seq, cursor)
 
   // Nothing new: the poll parks, then a Stop wakes it with exactly that change.
-  const poll = cli('events', '--since', String(before), '--timeout', '10')
+  const poll = cli('events', '--since', String(cursor), '--timeout', '10')
   await sleep(300)
   await hook(ev('s1', 'Stop', { last_assistant_message: 'Finished.' }))
   const woke = await poll
   assert.equal(woke.lines.length, 1)
-  assert.equal(woke.lines[0].seq, before + 1)
+  assert.equal(woke.lines[0].seq, cursor + 1)
   assert.equal(woke.lines[0].reason, 'Stop')
   assert.equal(woke.lines[0].agent.state, 'waiting_input')
   assert.equal(woke.lines[0].agent.lastMessage, 'Finished.')
 
   // Timeout without changes.
   const t0 = Date.now()
-  const idle = await cli('events', '--since', String(before + 1), '--timeout', '1')
+  const idle = await cli('events', '--since', String(cursor + 1), '--timeout', '1')
   assert.ok(Date.now() - t0 >= 900)
-  assert.deepEqual(idle.lines, [{ type: 'timeout', seq: before + 1 }])
+  assert.deepEqual(idle.lines, [{ type: 'timeout', seq: cursor + 1 }])
 
   // A cursor ahead of the daemon gets a snapshot to resync.
   const ahead = await cli('events', '--since', '99999', '--timeout', '1')
   assert.equal(ahead.lines[0].type, 'snapshot')
   assert.ok(Array.isArray(ahead.lines[0].agents))
+})
+
+test('status --etag answers only a marker until something changes', async () => {
+  const full = await status()
+  assert.equal(full.source, 'daemon')
+  assert.match(full.etag, /\.\d+$/)
+  const same = await cli('status', '--etag', full.etag)
+  assert.deepEqual(same.json, { version: 1, seq: full.seq, etag: full.etag, unchanged: true, source: 'daemon', capabilities: full.capabilities })
+  // A stale or foreign etag gets the whole state.
+  const other = await cli('status', '--etag', 'x.1')
+  assert.equal(other.json.unchanged, undefined)
+  assert.deepEqual(other.json.agents, full.agents)
+  await hook(ev('s1', 'PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/y' } }))
+  const changed = await cli('status', '--etag', full.etag)
+  assert.equal(changed.json.unchanged, undefined)
+  assert.equal(changed.json.seq, full.seq + 1)
+  assert.notEqual(changed.json.etag, full.etag)
+  assert.ok(Array.isArray(changed.json.agents))
 })
 
 test('SessionEnd marks ended; stop persists a snapshot that status falls back to', async () => {
@@ -375,6 +402,18 @@ test('daemon restart resumes the seq counter from the snapshot', async () => {
   assert.equal(st.source, 'daemon')
   assert.equal(st.seq, before + 1)
   assert.ok(st.agents.some(a => a.sessionId === 's1' && a.state === 'ended'))
+})
+
+test('a restarted daemon never matches an etag from before, even at the same seq', async () => {
+  const before = await status()
+  await cli('stop')
+  await waitFor(async () => !fs.existsSync(env.CONDUCTORE_SOCKET))
+  await client.ensureDaemon()
+  const after = await cli('status', '--etag', before.etag)
+  assert.equal(after.json.source, 'daemon')
+  assert.equal(after.json.seq, before.seq)
+  assert.equal(after.json.unchanged, undefined)
+  assert.ok(Array.isArray(after.json.agents))
 })
 
 test('install and uninstall edit the settings file idempotently', async () => {

@@ -118,9 +118,11 @@ test('long pending prompts plus 1,500 subagent events do not exhaust a 16 MB hea
   const stale = await cli('events', '--since', String(st0.seq), '--timeout', '0')
   assert.equal(stale.length, 1)
   assert.equal(stale[0].type, 'snapshot')
-  // A recent one is still served from it.
+  // A recent one is still served from it: the newest change of each session.
   const recent = await cli('events', '--since', String(after.seq - 5), '--timeout', '0')
-  assert.deepEqual(recent.map(l => l.seq), [1, 2, 3, 4, 5].map(i => after.seq - 5 + i))
+  assert.ok(recent.length >= 1 && recent.every(l => l.type === 'change' && l.seq > after.seq - 5))
+  assert.equal(recent[recent.length - 1].seq, after.seq)
+  assert.equal(new Set(recent.map(l => l.sessionId)).size, recent.length)
   for (const h of hooks) h.kill('SIGKILL')
 })
 

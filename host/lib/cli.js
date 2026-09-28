@@ -30,7 +30,9 @@ const reviewMod = lazy('./review')
 
 const USAGE = `usage: conductore-hostd <command>
 
-  status                          agents and pending permission requests
+  status [--etag <etag>]          agents and pending permission requests;
+                                  with the etag of an earlier reply, only
+                                  {unchanged: true} when nothing changed
   events --since <seq> [--timeout 55]
                                   long-poll: one JSON line per change
   decide <requestId> allow|deny|always [--message "..."]
@@ -101,11 +103,27 @@ const USAGE = `usage: conductore-hostd <command>
   statusline [--chain '<cmd>']    legacy Node statusLine command (install
                                   now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
+
+  --gzip (status, transcript, usage, digest, turns, diff): a reply over 4 KB
+  prints as {"encoding":"gzip","data":"<base64 of the gzipped JSON>"}
   doctor | stop | version
 `
 
+// `--gzip` (status, transcript, usage, digest, turns, diff): a reply above
+// GZIP_MIN_CHARS goes out as {"encoding":"gzip","data":"<base64>"}, the
+// base64 of the gzipped JSON document. Errors always stay plain.
+const GZIP_COMMANDS = new Set(['status', 'transcript', 'usage', 'digest', 'turns', 'diff'])
+const GZIP_MIN_CHARS = 4096
+let gzipOut = false
+
 function out (obj) {
-  process.stdout.write(JSON.stringify(obj) + '\n')
+  const json = JSON.stringify(obj)
+  if (gzipOut && json.length > GZIP_MIN_CHARS) {
+    const data = require('zlib').gzipSync(json).toString('base64')
+    process.stdout.write(JSON.stringify({ encoding: 'gzip', data }) + '\n')
+    return 0
+  }
+  process.stdout.write(json + '\n')
   return 0
 }
 
@@ -141,9 +159,12 @@ function readSnapshotFile () {
   return { ...state.snapshot(st), seq: st.seq, source: 'snapshot', writtenAt: snap.writtenAt || null }
 }
 
-async function status () {
+async function status (args) {
+  const { flags } = parseFlags(args)
+  const req = { op: 'status' }
+  if (typeof flags.etag === 'string') req.etag = flags.etag
   try {
-    const [res] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+    const [res] = await client.request(req, { timeoutMs: 5000 })
     if (res && !res.error) return out(res)
   } catch {}
   // Events are waiting in the spool (the daemon is starting, or exited
@@ -151,7 +172,7 @@ async function status () {
   if (spoolMod().isSpooled(paths.spoolDir())) {
     try {
       await client.ensureDaemon()
-      const [res] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+      const [res] = await client.request(req, { timeoutMs: 5000 })
       if (res && !res.error) return out(res)
     } catch {}
   }
@@ -971,10 +992,12 @@ function daemonCmd (args) {
 }
 
 async function main (argv) {
-  const [cmd, ...args] = argv
+  let [cmd, ...args] = argv
+  gzipOut = GZIP_COMMANDS.has(cmd) && args.includes('--gzip')
+  if (gzipOut) args = args.filter(a => a !== '--gzip')
   switch (cmd) {
     case 'daemon': return daemonCmd(args)
-    case 'status': return status()
+    case 'status': return status(args)
     case 'events': return events(args)
     case 'decide': return decide(args)
     case 'approve-low': return approveLow(args)

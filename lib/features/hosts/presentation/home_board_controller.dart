@@ -239,6 +239,45 @@ class HomeBoardState {
   /// Whether tmux sessions can be listed here (tmux answered).
   bool get hasTmux => tmux == HomeTmuxStatus.available;
 
+  /// Whether [other] shows the same board: everything but [updatedAt] and
+  /// [refreshing], which nothing draws. A poll that lists what is already
+  /// on screen changes nothing for listeners.
+  bool sameBoardAs(HomeBoardState other) {
+    if (other.phase != phase ||
+        other.tmux != tmux ||
+        other.message != message ||
+        !listEquals(other.tmuxSessions, tmuxSessions) ||
+        other.workspaces.length != workspaces.length ||
+        !_sameProblem(other.problem, problem)) {
+      return false;
+    }
+    for (var i = 0; i < workspaces.length; i++) {
+      final a = workspaces[i];
+      final b = other.workspaces[i];
+      if (a.workspace != b.workspace ||
+          !listEquals(a.workspace.tabs, b.workspace.tabs) ||
+          a.panes.length != b.panes.length) {
+        return false;
+      }
+      for (var p = 0; p < a.panes.length; p++) {
+        if (a.panes[p].agent != b.panes[p].agent ||
+            a.panes[p].tabLabel != b.panes[p].tabLabel) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  static bool _sameProblem(ConnectionProblem? a, ConnectionProblem? b) =>
+      identical(a, b) ||
+      (a != null &&
+          b != null &&
+          a.kind == b.kind &&
+          a.title == b.title &&
+          a.message == b.message &&
+          a.detail == b.detail);
+
   HomeBoardState copyWith({
     HomeBoardPhase? phase,
     List<HomeBoardWorkspace>? workspaces,
@@ -331,6 +370,14 @@ class HomeBoardController extends ChangeNotifier {
   int _generation = 0;
   int _failures = 0;
   int _skipTicks = 0;
+
+  /// Polls in a row that found the board as it was. The longer a machine
+  /// stays quiet, the more ticks are skipped: 5 s, then 10, 15 and at most
+  /// 20 s between listings (a change, a refresh or coming back to the
+  /// page returns to 5 s).
+  int _quietPolls = 0;
+  static const _quietPollsPerStep = 3;
+  static const _maxQuietSkip = 3;
   HomeBoardState _state = const HomeBoardState();
 
   SavedHost? get host => _host;
@@ -383,6 +430,7 @@ class HomeBoardController extends ChangeNotifier {
     _connectedBefore = connectedBefore;
     _failures = 0;
     _skipTicks = 0;
+    _quietPolls = 0;
     _state = HomeBoardState(phase: _initialPhase());
     notifyListeners();
     _start();
@@ -408,6 +456,8 @@ class HomeBoardController extends ChangeNotifier {
     if (_disposed || visible == _visible) return;
     _visible = visible;
     if (visible) {
+      _quietPolls = 0;
+      _skipTicks = 0;
       _start();
     } else {
       _stopTimer();
@@ -431,6 +481,7 @@ class HomeBoardController extends ChangeNotifier {
     _requested = true;
     _failures = 0;
     _skipTicks = 0;
+    _quietPolls = 0;
     _start(force: true);
   }
 
@@ -440,6 +491,7 @@ class HomeBoardController extends ChangeNotifier {
     if (_disposed || !_listable || _needsRequest) return;
     _failures = 0;
     _skipTicks = 0;
+    _quietPolls = 0;
     if (_timer == null && _visible) {
       _startTimer();
     }
@@ -568,9 +620,10 @@ class HomeBoardController extends ChangeNotifier {
     }
     final generation = _generation;
     _fetchingGeneration = generation;
+    final before = _state;
     if (_state.phase != HomeBoardPhase.loading && !_state.refreshing) {
+      // Nothing draws the flag: no rebuild for it.
       _state = _state.copyWith(refreshing: true);
-      notifyListeners();
     }
     try {
       final runner = _runner ??= _runnerFactory(host);
@@ -578,7 +631,8 @@ class HomeBoardController extends ChangeNotifier {
       if (_disposed || generation != _generation) return;
       _state = next;
       _failures = 0;
-      _skipTicks = 0;
+      _quietPolls = next.sameBoardAs(before) ? _quietPolls + 1 : 0;
+      _skipTicks = (_quietPolls ~/ _quietPollsPerStep).clamp(0, _maxQuietSkip);
       if (_nothingToPoll) {
         // No point polling a machine without tmux or Herdr; pull-to-refresh
         // or switching machines tries again.
@@ -613,7 +667,13 @@ class HomeBoardController extends ChangeNotifier {
       // A refresh while the board is hidden (the quick switcher, a sync
       // pull) must not leave its channel open in the background.
       if (!_disposed && !_visible) unawaited(_closeRunner());
-      if (!_disposed && generation == _generation) notifyListeners();
+      // A poll that lists what is on screen (most of them) rebuilds
+      // nothing.
+      if (!_disposed &&
+          generation == _generation &&
+          !_state.sameBoardAs(before)) {
+        notifyListeners();
+      }
     }
   }
 

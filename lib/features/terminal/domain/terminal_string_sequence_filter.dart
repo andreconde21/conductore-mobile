@@ -26,38 +26,69 @@ class TerminalStringSequenceFilter {
   }
 
   String process(String chunk) {
-    final out = StringBuffer();
-    for (final code in chunk.codeUnits) {
-      if (_state == _FilterState.stripping ||
-          _state == _FilterState.strippingSawEsc) {
-        _stripped += 1;
-        if (_stripped > maxStrippedLength) {
-          _state = _FilterState.normal;
+    // Most output has no string sequence at all: pass the text through
+    // whole, and copy plain runs in one piece, instead of one character
+    // at a time.
+    if (_state == _FilterState.normal) {
+      final first = chunk.indexOf(_escString);
+      if (first == -1) return chunk;
+      return _process(chunk, first, StringBuffer(chunk.substring(0, first)));
+    }
+    return _process(chunk, 0, StringBuffer());
+  }
+
+  static const _escString = '\x1b';
+
+  String _process(String chunk, int start, StringBuffer out) {
+    final length = chunk.length;
+    var i = start;
+    while (i < length) {
+      if (_state == _FilterState.normal) {
+        final next = chunk.indexOf(_escString, i);
+        if (next == -1) {
+          out.write(chunk.substring(i));
+          break;
         }
+        if (next > i) out.write(chunk.substring(i, next));
+        _state = _FilterState.sawEsc;
+        i = next + 1;
+        continue;
       }
-      switch (_state) {
-        case _FilterState.normal:
-          _normal(code, out);
-        case _FilterState.sawEsc:
-          _sawEsc(code, out);
-        case _FilterState.stripping:
-          if (code == _esc) {
-            _state = _FilterState.strippingSawEsc;
-          } else if (code == _st8bit || code == _can || code == _sub) {
-            _state = _FilterState.normal;
-          }
-        case _FilterState.strippingSawEsc:
-          if (code == _stFinal) {
-            _state = _FilterState.normal;
-          } else if (code == _esc) {
-            _state = _FilterState.stripping;
-          } else {
-            // The string was cut short; this ESC starts a new sequence.
-            _sawEsc(code, out);
-          }
-      }
+      _step(chunk.codeUnitAt(i), out);
+      i += 1;
     }
     return out.toString();
+  }
+
+  void _step(int code, StringBuffer out) {
+    if (_state == _FilterState.stripping ||
+        _state == _FilterState.strippingSawEsc) {
+      _stripped += 1;
+      if (_stripped > maxStrippedLength) {
+        _state = _FilterState.normal;
+      }
+    }
+    switch (_state) {
+      case _FilterState.normal:
+        _normal(code, out);
+      case _FilterState.sawEsc:
+        _sawEsc(code, out);
+      case _FilterState.stripping:
+        if (code == _esc) {
+          _state = _FilterState.strippingSawEsc;
+        } else if (code == _st8bit || code == _can || code == _sub) {
+          _state = _FilterState.normal;
+        }
+      case _FilterState.strippingSawEsc:
+        if (code == _stFinal) {
+          _state = _FilterState.normal;
+        } else if (code == _esc) {
+          _state = _FilterState.stripping;
+        } else {
+          // The string was cut short; this ESC starts a new sequence.
+          _sawEsc(code, out);
+        }
+    }
   }
 
   void _normal(int code, StringBuffer out) {

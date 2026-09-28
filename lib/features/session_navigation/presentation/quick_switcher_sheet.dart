@@ -121,6 +121,7 @@ class _QuickSwitcherSheetState extends State<QuickSwitcherSheet> {
   late bool _keyboard = widget.autofocusSearch;
   bool _done = false;
   List<SwitcherItem> _visible = const [];
+  final _previewTicks = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -131,8 +132,10 @@ class _QuickSwitcherSheetState extends State<QuickSwitcherSheet> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(widget.source.homeBoards?.refresh());
     });
+    // Previews redraw on a tick, each only after its terminal printed
+    // (see TerminalSnapshotBuilder); the sheet itself does not rebuild.
     _refresh = Timer.periodic(widget.previewRefreshInterval, (_) {
-      if (mounted) setState(() {});
+      if (mounted) _previewTicks.value += 1;
     });
   }
 
@@ -144,6 +147,7 @@ class _QuickSwitcherSheetState extends State<QuickSwitcherSheet> {
   @override
   void dispose() {
     _refresh?.cancel();
+    _previewTicks.dispose();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -194,130 +198,135 @@ class _QuickSwitcherSheetState extends State<QuickSwitcherSheet> {
       shouldApplyBottomSafeArea(context) ? media.viewPadding.bottom : 0.0,
       media.viewInsets.bottom,
     );
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
-        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
-        const SingleActivator(LogicalKeyboardKey.enter): _openHighlighted,
-        const SingleActivator(LogicalKeyboardKey.numpadEnter): _openHighlighted,
-      },
-      child: Focus(
-        autofocus: !widget.autofocusSearch,
-        child: SizedBox(
-          key: const ValueKey('quick-switcher'),
-          height: media.size.height,
-          child: Padding(
-            padding: EdgeInsets.only(bottom: bottom),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 10, 6, 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Switch to',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
+    return PreviewClock(
+      ticks: _previewTicks,
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
+          const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
+          const SingleActivator(LogicalKeyboardKey.enter): _openHighlighted,
+          const SingleActivator(LogicalKeyboardKey.numpadEnter):
+              _openHighlighted,
+        },
+        child: Focus(
+          autofocus: !widget.autofocusSearch,
+          child: SizedBox(
+            key: const ValueKey('quick-switcher'),
+            height: media.size.height,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: bottom),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 10, 6, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Switch to',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
-                      ),
-                      if (widget.canShowGrid)
+                        if (widget.canShowGrid)
+                          IconButton(
+                            tooltip: 'Session grid',
+                            icon: const Icon(Icons.grid_view_rounded),
+                            onPressed: () =>
+                                _choose(const QuickSwitcherShowGrid()),
+                          ),
+                        if (widget.canCreate)
+                          IconButton(
+                            tooltip: 'New session',
+                            icon: const Icon(Icons.add_rounded),
+                            onPressed: () =>
+                                _choose(const QuickSwitcherNewSession()),
+                          ),
                         IconButton(
-                          tooltip: 'Session grid',
-                          icon: const Icon(Icons.grid_view_rounded),
-                          onPressed: () =>
-                              _choose(const QuickSwitcherShowGrid()),
+                          tooltip: 'Close',
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () => Navigator.of(context).pop(),
                         ),
-                      if (widget.canCreate)
-                        IconButton(
-                          tooltip: 'New session',
-                          icon: const Icon(Icons.add_rounded),
-                          onPressed: () =>
-                              _choose(const QuickSwitcherNewSession()),
-                        ),
-                      IconButton(
-                        tooltip: 'Close',
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-                  child: TextField(
-                    key: const ValueKey('quick-switcher-search'),
-                    controller: _search,
-                    focusNode: _searchFocus,
-                    autofocus: widget.autofocusSearch,
-                    textInputAction: TextInputAction.go,
-                    onChanged: (_) => setState(() => _highlight = 0),
-                    onSubmitted: (_) => _openHighlighted(),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      hintText: 'Workspace, pane, machine, project…',
-                      border: OutlineInputBorder(
-                        borderRadius: AppTheme.borderRadius,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+                    child: TextField(
+                      key: const ValueKey('quick-switcher-search'),
+                      controller: _search,
+                      focusNode: _searchFocus,
+                      autofocus: widget.autofocusSearch,
+                      textInputAction: TextInputAction.go,
+                      onChanged: (_) => setState(() => _highlight = 0),
+                      onSubmitted: (_) => _openHighlighted(),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        hintText: 'Workspace, pane, machine, project…',
+                        border: OutlineInputBorder(
+                          borderRadius: AppTheme.borderRadius,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: ListenableBuilder(
-                    listenable: widget.source.changes,
-                    builder: (context, _) {
-                      final sections = filterSwitcher(
-                        widget.source.items(recents: _recents),
-                        _search.text,
-                      );
-                      _visible = [
-                        for (final section in sections) ...section.items,
-                      ];
-                      if (_visible.isEmpty) {
-                        return Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text(
-                              _search.text.trim().isEmpty
-                                  ? 'Nothing open yet.'
-                                  : 'Nothing matches "${_search.text.trim()}".',
-                              style: TextStyle(color: muted),
-                            ),
-                          ),
+                  Expanded(
+                    child: ListenableBuilder(
+                      listenable: widget.source.changes,
+                      builder: (context, _) {
+                        final sections = filterSwitcher(
+                          widget.source.items(recents: _recents),
+                          _search.text,
                         );
-                      }
-                      final highlight = _highlight.clamp(
-                        0,
-                        _visible.length - 1,
-                      );
-                      var index = 0;
-                      return ListView(
-                        key: const ValueKey('quick-switcher-list'),
-                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
-                        children: [
-                          for (final section in sections) ...[
-                            _SectionHeader(
-                              key: ValueKey(
-                                'switcher-section-${section.section.name}',
+                        _visible = [
+                          for (final section in sections) ...section.items,
+                        ];
+                        if (_visible.isEmpty) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                _search.text.trim().isEmpty
+                                    ? 'Nothing open yet.'
+                                    : 'Nothing matches "${_search.text.trim()}".',
+                                style: TextStyle(color: muted),
                               ),
-                              label: section.section.label,
-                              count: section.items.length,
                             ),
-                            for (final item in section.items)
-                              _row(
-                                item,
-                                highlighted: _keyboard && index++ == highlight,
-                                fontFamily: widget.fontFamily,
+                          );
+                        }
+                        final highlight = _highlight.clamp(
+                          0,
+                          _visible.length - 1,
+                        );
+                        var index = 0;
+                        return ListView(
+                          key: const ValueKey('quick-switcher-list'),
+                          padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
+                          children: [
+                            for (final section in sections) ...[
+                              _SectionHeader(
+                                key: ValueKey(
+                                  'switcher-section-${section.section.name}',
+                                ),
+                                label: section.section.label,
+                                count: section.items.length,
                               ),
+                              for (final item in section.items)
+                                _row(
+                                  item,
+                                  highlighted:
+                                      _keyboard && index++ == highlight,
+                                  fontFamily: widget.fontFamily,
+                                ),
+                            ],
                           ],
-                        ],
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -580,16 +589,19 @@ class _Thumbnail extends StatelessWidget {
         border: Border.all(color: palette.hairlineFor(brightness)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: LiveTerminalPreview(
-        preview: StyledTerminalPreview.capture(session.terminal),
-        theme: theme,
-        fontFamily: fontFamily,
-        placeholder: switch (session.status) {
-          TerminalConnectionStatus.connected => '',
-          TerminalConnectionStatus.connecting => '…',
-          _ => '—',
-        },
-        placeholderColor: palette.mutedForegroundFor(brightness),
+      child: TerminalSnapshotBuilder(
+        terminal: session.terminal,
+        builder: (context) => LiveTerminalPreview(
+          preview: StyledTerminalPreview.capture(session.terminal),
+          theme: theme,
+          fontFamily: fontFamily,
+          placeholder: switch (session.status) {
+            TerminalConnectionStatus.connected => '',
+            TerminalConnectionStatus.connecting => '…',
+            _ => '—',
+          },
+          placeholderColor: palette.mutedForegroundFor(brightness),
+        ),
       ),
     );
   }

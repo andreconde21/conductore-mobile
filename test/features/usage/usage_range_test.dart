@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:conduit/features/usage/data/usage_preferences.dart';
@@ -316,10 +317,10 @@ void main() {
     });
 
     test('the command: a range, one day with hours, and the fallback', () {
-      expect(companionUsageArguments(), 'usage --days 7');
+      expect(companionUsageArguments(), 'usage --days 7 --gzip');
       expect(
         companionUsageArguments(days: 31, from: '2026-09-12', to: '2026-09-25'),
-        'usage --days 31 --from 2026-09-12 --to 2026-09-25',
+        'usage --days 31 --from 2026-09-12 --to 2026-09-25 --gzip',
       );
       expect(
         companionUsageArguments(
@@ -329,8 +330,21 @@ void main() {
           hourly: true,
           sessions: true,
         ),
-        'usage --days 31 --day 2026-09-24 --hourly --sessions',
+        'usage --days 31 --day 2026-09-24 --hourly --sessions --gzip',
       );
+    });
+
+    test('a gzipped reply parses like a plain one', () {
+      final plain = jsonEncode(usageReplyJson(rows: [usageRow('2026-09-25')]));
+      final packed = jsonEncode({
+        'encoding': 'gzip',
+        'data': base64.encode(gzip.encode(utf8.encode(plain))),
+      });
+      final a = parseUsageReport(plain)!;
+      final b = parseUsageReport(packed)!;
+      expect(b.today, a.today);
+      expect(b.machine, a.machine);
+      expect(b.from, a.from);
     });
 
     test('replies with hours, sessions and accounts parse; older ones too', () {

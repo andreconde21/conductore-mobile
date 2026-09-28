@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/features/agent_attention/data/companion_reply.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
@@ -102,14 +103,62 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     }
   }
 
+  /// The last full `status` each connection got, with its etag: the next
+  /// poll sends the etag, and while nothing changed the companion answers
+  /// with a marker of about 140 bytes instead of every agent (15 KB for
+  /// 20 agents), the usual case for the 15 s background poll.
+  static final _statusCopies =
+      Expando<({String etag, AgentAttentionSnapshot snapshot})>();
+
   @override
   Future<AgentAttentionSnapshot> fetchAgents(AgentCommandRunner runner) async {
+    final copy = _statusCopies[runner];
     final result = await runner.run(
-      remoteCommand('status'),
+      remoteCommand(
+        [
+          'status',
+          if (copy != null) '--etag ${shellQuoteArgument(copy.etag)}',
+          // Last: an older companion would read a word after it as its
+          // value.
+          companionGzipFlag,
+        ].join(' '),
+      ),
       timeout: _commandTimeout,
     );
     _checkResult(result);
-    return parseSnapshot(result.stdout);
+    final text = unpackCompanionReply(result.stdout).trim();
+    final Object? reply;
+    try {
+      reply = jsonDecode(text);
+    } catch (_) {
+      throw const AppFailure(
+        'The Conductore companion returned output that is not JSON.',
+      );
+    }
+    if (reply is Map && reply['unchanged'] == true) {
+      if (copy == null) {
+        // Not ours to reuse: ask again in full.
+        _statusCopies[runner] = null;
+        return fetchAgents(runner);
+      }
+      final capabilities = reply['capabilities'];
+      return AgentAttentionSnapshot(
+        agents: copy.snapshot.agents,
+        sequence: _int(reply['seq']) ?? copy.snapshot.sequence,
+        capabilities: capabilities is List
+            ? {
+                for (final c in capabilities)
+                  if (c is String) c,
+              }
+            : copy.snapshot.capabilities,
+      );
+    }
+    final snapshot = parseSnapshot(text);
+    final etag = reply is Map ? reply['etag'] : null;
+    _statusCopies[runner] = etag is String && etag.isNotEmpty
+        ? (etag: etag, snapshot: snapshot)
+        : null;
+    return snapshot;
   }
 
   @override
@@ -196,7 +245,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
 
   /// Parses one `status` document.
   static AgentAttentionSnapshot parseSnapshot(String raw) {
-    final trimmed = raw.trim();
+    final trimmed = unpackCompanionReply(raw).trim();
     if (trimmed.isEmpty) {
       throw const AppFailure('The Conductore companion returned no output.');
     }

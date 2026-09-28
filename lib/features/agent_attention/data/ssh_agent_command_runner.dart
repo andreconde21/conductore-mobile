@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
+import 'package:conduit/features/agent_attention/data/shared_command_runners.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
@@ -22,7 +23,8 @@ import 'package:dartssh2/dartssh2.dart';
 /// Commands are POSIX shell scripts, as for the local runner; each is sent
 /// through [posixShellCommand] so the account's login shell (fish, csh)
 /// never parses them, or any path or name quoted into them.
-class SshAgentCommandRunner implements StdinAgentCommandRunner {
+class SshAgentCommandRunner
+    implements StdinAgentCommandRunner, ReconnectingCommandRunner {
   SshAgentCommandRunner(this._hostKeyVerifier, this._host);
 
   final HostKeyVerifier _hostKeyVerifier;
@@ -168,6 +170,9 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
       }
     }
   }
+
+  @override
+  Future<void> dropConnection() => _dropClient();
 
   @override
   Future<void> close() async {

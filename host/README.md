@@ -165,7 +165,15 @@ Events carrying `agent_id` (subagents) never move the parent to a waiting state.
 Every command prints one JSON document on stdout and exits 0, or prints
 `{"error":"..."}` and exits 1. `events` prints one JSON object per line.
 
-### `conductore-hostd status`
+`--gzip` (on `status`, `transcript`, `usage`, `digest`, `turns` and `diff`,
+anywhere after the command): a reply over 4 KB prints as
+`{"encoding":"gzip","data":"<base64>"}`, the base64 of the gzipped JSON
+document; smaller replies and errors print as usual. A 64 KB `usage` reply
+becomes 17 KB, a 52 KB first `transcript` page 18 KB. Older companions ignore
+the flag (put it last for them: `transcript` would otherwise read the next
+word as its value) and answer plain JSON, so check for `encoding`.
+
+### `conductore-hostd status [--etag <etag>]`
 
 ```json
 {
@@ -238,6 +246,11 @@ Every command prints one JSON document on stdout and exits 0, or prints
 * `source` is `daemon`, `snapshot` (daemon down, read from `state.json`, with
   `writtenAt`) or `none` (never ran). Timestamps are Unix milliseconds.
 * Agents are sorted by `updatedAt`, newest first.
+* `etag` (daemon only) names this exact state. `status --etag <etag>` answers
+  `{"version":1,"seq":42,"etag":"…","unchanged":true,"source":"daemon","capabilities":[…]}`
+  (no `agents`) when the state is still the one that etag named; keep your
+  copy. A restarted daemon never matches an older etag. Older
+  companions ignore the flag and always answer in full.
 
 ### `conductore-hostd events --since <seq> [--timeout 55]`
 
@@ -253,6 +266,8 @@ than `seq` already exist, it prints them and exits at once. Lines:
 ```
 
 * `change` carries the complete agent; replace the phone's copy by `sessionId`.
+  A backlog holds only the newest change of each session (older ones are
+  superseded), in `seq` order; the last line's `seq` is the new cursor.
 * `timeout`: nothing happened within `--timeout` seconds (default 55, max 600).
   Poll again from the printed `seq`.
 * `snapshot`: the cursor is not covered by the daemon's buffer (it restarted

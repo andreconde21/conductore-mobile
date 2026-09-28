@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -310,5 +311,41 @@ void main() {
     ]);
     expect(find.textContaining('not installed'), findsOneWidget);
     expect(find.byKey(const ValueKey('chat-set-up-companion')), findsNothing);
+  });
+
+  testWidgets('a route on top pauses the polls; they resume on return', (
+    tester,
+  ) async {
+    final runner = ScriptedAgentCommandRunner([
+      ok(page([userLine('u1', 'hi')], offset: 50)),
+      ok(page([], offset: 50)),
+    ]);
+    final controller = ChatViewController(
+      runner: runner,
+      sessionId: 's-1',
+      pollInterval: const Duration(seconds: 1),
+    );
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        home: ChatViewPage(controller: controller, onOpenTerminal: () {}),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    unawaited(
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final covered = runner.commands.length;
+    await tester.pump(const Duration(seconds: 10));
+    expect(runner.commands.length, covered);
+    navigator.currentState!.pop();
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2));
+    expect(runner.commands.length, greaterThan(covered));
+    await tester.pumpWidget(const SizedBox());
   });
 }

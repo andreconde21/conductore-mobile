@@ -241,6 +241,9 @@ class Daemon {
     this.pruneTimer = null
     this.probeTimer = null
     this.stopping = false
+    // With seq, names one exact state: a restarted daemon (whose seq may
+    // repeat after reloading state.json) never matches an older etag.
+    this.epoch = `${process.pid.toString(36)}${Date.now().toString(36)}`
   }
 
   start () {
@@ -545,7 +548,7 @@ class Daemon {
       if (ch.type === 'remove' || ch.reason === 'SessionEnd' || ch.reason === 'expired') pruneRelevant = true
       this.activity.onChange(ch)
       const line = JSON.stringify(ch)
-      this.changes.push({ seq: ch.seq, line })
+      this.changes.push({ seq: ch.seq, sessionId: ch.sessionId, line })
       this.changeChars += line.length
       debug('change', `${ch.type} ${ch.sessionId} ${ch.reason} -> ${ch.agent ? ch.agent.state : 'removed'} seq ${ch.seq}`)
     }
@@ -651,7 +654,7 @@ class Daemon {
         await this.drain()
         this.expireAgents()
         this.commit(state.prune(this.state))
-        this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES }); c.end(); return
+        this.replyStatus(req, c); c.end(); return
       case 'digest':
         // Everything `digest` needs in one answer: the agents and their activity.
         await this.drain()
@@ -710,6 +713,17 @@ class Daemon {
     this.reply(c, { ok: true, requestId, decision: verdict.decision, sessionId: found.agent.sessionId, ...(verdict.note ? { note: verdict.note } : {}) }); c.end()
   }
 
+  // `status`; with the etag of the phone's last copy, only a marker when
+  // nothing changed since (an idle machine's poll stays a few bytes).
+  replyStatus (req, c) {
+    const etag = `${this.epoch}.${this.state.seq}`
+    if (typeof req.etag === 'string' && req.etag === etag) {
+      this.reply(c, { version: this.state.version, seq: this.state.seq, etag, unchanged: true, source: 'daemon', capabilities: CAPABILITIES })
+      return
+    }
+    this.reply(c, { ...state.snapshot(this.state), etag, source: 'daemon', capabilities: CAPABILITIES })
+  }
+
   handleEvents (req, c) {
     const since = req.since !== undefined && req.since !== null && Number.isFinite(Number(req.since)) ? Number(req.since) : this.state.seq
     let timeout = Number(req.timeout)
@@ -730,10 +744,21 @@ class Daemon {
     c.on('close', () => { this.pollers.delete(poller); clearTimeout(poller.timer) })
   }
 
-  // Writes all buffered changes after poller.since and closes; true if it did.
+  // Writes the buffered changes after poller.since and closes; true if it
+  // did. Each change carries the whole agent, so only the last one per
+  // session is sent (in seq order): a phone back after a few minutes gets
+  // one line per busy agent, not one per tool call.
   servePoller (poller) {
-    const batch = this.changes.filter(ch => ch.seq > poller.since)
+    const seen = new Set()
+    const batch = []
+    for (let i = this.changes.length - 1; i >= 0 && this.changes[i].seq > poller.since; i--) {
+      const ch = this.changes[i]
+      if (seen.has(ch.sessionId)) continue
+      seen.add(ch.sessionId)
+      batch.push(ch)
+    }
     if (!batch.length) return false
+    batch.reverse()
     this.pollers.delete(poller)
     clearTimeout(poller.timer)
     if (!poller.socket.destroyed) poller.socket.write(batch.map(ch => ch.line).join('\n') + '\n')

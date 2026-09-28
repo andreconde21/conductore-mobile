@@ -606,44 +606,54 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
             onPointerMove: _handlePointerMove,
             onPointerUp: _handlePointerEnd,
             onPointerCancel: _handlePointerEnd,
-            child: ListenableBuilder(
-              listenable: widget.session.terminalPaintListenable,
-              builder: (context, _) {
-                final overlays = widget.session.overlays;
-                return TerminalView(
-                  widget.session.terminal,
-                  key: _viewKey,
-                  shortcuts: widget.onPasteImage == null
-                      ? desktopTerminalShortcuts()
-                      : _imageAwareShortcuts(),
-                  controller: _terminalController,
-                  onTapUp: _handleTapUp,
-                  onSecondaryTapUp: PlatformFeatures.isDesktop
-                      ? (details, offset) =>
-                            unawaited(_handleSecondaryTapUp(details, offset))
-                      : null,
-                  mouseCursor: _hoveringLink
-                      ? SystemMouseCursors.click
-                      : SystemMouseCursors.text,
-                  focusNode: widget.focusNode,
-                  onKeyEvent: widget.onKeyEvent,
-                  autofocus: widget.focusNode != null,
-                  deleteDetection: true,
-                  keyboardType: TextInputType.visiblePassword,
-                  theme: widget.palette.terminalThemeFor(widget.brightness),
-                  overlays: overlays,
-                  textStyle: TerminalStyle(
-                    fontFamily: widget.fontFamily,
-                    fontSize: widget.fontSize,
-                  ),
-                  padding: const EdgeInsets.fromLTRB(0, 6, 0, 4),
-                  cursorType: overlays.isEmpty
-                      ? TerminalCursorType.block
-                      : TerminalCursorType.verticalBar,
-                  alwaysShowCursor: true,
-                  simulateScroll: !widget.tmuxScrollMode,
-                );
-              },
+            // Output lays the terminal out again and repaints it every
+            // frame while a program prints. Tight constraints make it a
+            // relayout boundary and the RepaintBoundary a paint one, so
+            // that work stops at the terminal instead of reaching the
+            // chrome around it (toolbars, tabs, the shell's other panes).
+            child: RepaintBoundary(
+              child: SizedBox.expand(
+                child: ListenableBuilder(
+                  listenable: widget.session.terminalPaintListenable,
+                  builder: (context, _) {
+                    final overlays = widget.session.overlays;
+                    return TerminalView(
+                      widget.session.terminal,
+                      key: _viewKey,
+                      shortcuts: widget.onPasteImage == null
+                          ? desktopTerminalShortcuts()
+                          : _imageAwareShortcuts(),
+                      controller: _terminalController,
+                      onTapUp: _handleTapUp,
+                      onSecondaryTapUp: PlatformFeatures.isDesktop
+                          ? (details, offset) => unawaited(
+                              _handleSecondaryTapUp(details, offset),
+                            )
+                          : null,
+                      mouseCursor: _hoveringLink
+                          ? SystemMouseCursors.click
+                          : SystemMouseCursors.text,
+                      focusNode: widget.focusNode,
+                      onKeyEvent: widget.onKeyEvent,
+                      autofocus: widget.focusNode != null,
+                      deleteDetection: true,
+                      keyboardType: TextInputType.visiblePassword,
+                      theme: widget.palette.terminalThemeFor(widget.brightness),
+                      overlays: overlays,
+                      textStyle: TerminalStyle(
+                        fontFamily: widget.fontFamily,
+                        fontSize: widget.fontSize,
+                      ),
+                      padding: const EdgeInsets.fromLTRB(0, 6, 0, 4),
+                      cursorType: overlays.isEmpty
+                          ? TerminalCursorType.block
+                          : TerminalCursorType.verticalBar,
+                      alwaysShowCursor: true,
+                      simulateScroll: !widget.tmuxScrollMode,
+                    );
+                  },
+                ),
+              ),
             ),
           ),
           if (widget.dragScrollsRemote)

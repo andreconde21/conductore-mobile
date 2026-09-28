@@ -228,3 +228,88 @@ class _PreviewColors {
     }, growable: false);
   }
 }
+
+/// The refresh pace of the live previews below it: each tick lets a
+/// [TerminalSnapshotBuilder] whose terminal printed something since its
+/// last capture capture again. The page ticks it while it is on screen.
+class PreviewClock extends InheritedWidget {
+  const PreviewClock({required this.ticks, required super.child, super.key});
+
+  final Listenable ticks;
+
+  static Listenable? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<PreviewClock>()?.ticks;
+
+  @override
+  bool updateShouldNotify(PreviewClock oldWidget) => ticks != oldWidget.ticks;
+}
+
+/// Builds a snapshot of [terminal] (a preview) in its own repaint layer,
+/// and builds it again on a [PreviewClock] tick only when the terminal
+/// changed: an idle session costs nothing between ticks, and a busy one
+/// redraws alone instead of with its page. Without a clock it builds
+/// with its parent, as a plain builder.
+class TerminalSnapshotBuilder extends StatefulWidget {
+  const TerminalSnapshotBuilder({
+    required this.terminal,
+    required this.builder,
+    super.key,
+  });
+
+  final Terminal terminal;
+  final WidgetBuilder builder;
+
+  @override
+  State<TerminalSnapshotBuilder> createState() =>
+      _TerminalSnapshotBuilderState();
+}
+
+class _TerminalSnapshotBuilderState extends State<TerminalSnapshotBuilder> {
+  Listenable? _clock;
+  bool _changed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.terminal.addListener(_onOutput);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final clock = PreviewClock.maybeOf(context);
+    if (clock == _clock) return;
+    _clock?.removeListener(_onTick);
+    _clock = clock?..addListener(_onTick);
+  }
+
+  @override
+  void didUpdateWidget(TerminalSnapshotBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.terminal != widget.terminal) {
+      oldWidget.terminal.removeListener(_onOutput);
+      widget.terminal.addListener(_onOutput);
+      _changed = false;
+    }
+  }
+
+  void _onOutput() => _changed = true;
+
+  void _onTick() {
+    if (!_changed || !mounted) return;
+    setState(() => _changed = false);
+  }
+
+  @override
+  void dispose() {
+    widget.terminal.removeListener(_onOutput);
+    _clock?.removeListener(_onTick);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _changed = false;
+    return RepaintBoundary(child: Builder(builder: widget.builder));
+  }
+}

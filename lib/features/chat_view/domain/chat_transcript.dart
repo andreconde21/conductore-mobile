@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:conduit/features/agent_attention/data/companion_reply.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:flutter/foundation.dart';
 
 /// One content block of a transcript message, as `conductore-hostd
 /// transcript` reports it (already capped on the host).
@@ -144,6 +146,32 @@ class ChatAgentStatus {
   final DateTime? updatedAt;
   final DateTime? endedAt;
   final List<PendingPermissionRequest> pending;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ChatAgentStatus &&
+      other.state == state &&
+      other.name == name &&
+      other.lastMessage == lastMessage &&
+      other.lastEvent == lastEvent &&
+      other.lastToolName == lastToolName &&
+      other.startedAt == startedAt &&
+      other.updatedAt == updatedAt &&
+      other.endedAt == endedAt &&
+      listEquals(other.pending, pending);
+
+  @override
+  int get hashCode => Object.hash(
+    state,
+    name,
+    lastMessage,
+    lastEvent,
+    lastToolName,
+    startedAt,
+    updatedAt,
+    endedAt,
+    Object.hashAll(pending),
+  );
 }
 
 /// One `transcript` reply.
@@ -179,7 +207,7 @@ class TranscriptParser {
   const TranscriptParser._();
 
   static TranscriptPage parsePage(String raw) {
-    final decoded = jsonDecode(raw.trim());
+    final decoded = jsonDecode(unpackCompanionReply(raw).trim());
     if (decoded is! Map) {
       throw const FormatException('transcript output is not an object');
     }
