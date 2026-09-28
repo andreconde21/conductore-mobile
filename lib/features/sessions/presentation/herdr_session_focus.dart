@@ -74,7 +74,7 @@ class HerdrSessionFocus implements AppInputRouter {
     bool watchLifecycle = false,
     bool Function()? mayMoveFocus,
     this.focusCheckFreshness = const Duration(seconds: 3),
-    Duration? refreshInterval,
+    this.refreshInterval,
     DateTime Function()? clock,
   }) : _workspace = workspace,
        _mayMoveFocus = mayMoveFocus ?? _never,
@@ -91,10 +91,12 @@ class HerdrSessionFocus implements AppInputRouter {
         onHide: () => _foreground = false,
       );
     }
-    if (refreshInterval != null) {
-      _refreshTimer = Timer.periodic(refreshInterval, (_) => _refreshAll());
-    }
   }
+
+  /// How often the previews of Herdr sessions the shared focus is not on
+  /// are read again (while this device may not move it); null never. The
+  /// timer runs only while a Herdr session is open.
+  final Duration? refreshInterval;
 
   static bool _never() => false;
 
@@ -257,6 +259,7 @@ class HerdrSessionFocus implements AppInputRouter {
     _verifiedAt.removeWhere((session, _) => !sessions.contains(session));
     _ownScreens.removeWhere((session, _) => !sessions.contains(session));
     _preferredPanes.removeWhere((session, _) => !sessions.contains(session));
+    _syncRefreshTimer(sessions);
     for (final session in sessions) {
       if (!_statuses.containsKey(session) && herdrTargetOf(session) != null) {
         session
@@ -717,6 +720,20 @@ class HerdrSessionFocus implements AppInputRouter {
               label: _labelOf(session),
             );
       unawaited(_readPreview(session));
+    }
+  }
+
+  void _syncRefreshTimer(List<TerminalSessionController> sessions) {
+    final interval = refreshInterval;
+    final wanted =
+        interval != null &&
+        !_disposed &&
+        sessions.any((session) => herdrTargetOf(session) != null);
+    if (!wanted) {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
+    } else {
+      _refreshTimer ??= Timer.periodic(interval, (_) => _refreshAll());
     }
   }
 

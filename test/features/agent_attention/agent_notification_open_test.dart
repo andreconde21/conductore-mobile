@@ -90,8 +90,11 @@ void main() {
     late TerminalWorkspaceController workspace;
     late SessionConnectFlow flow;
     final host = buildHost('h');
+    // "Phone may move Herdr focus"; off for the one test that says so.
+    var mayMove = true;
 
     setUp(() {
+      mayMove = true;
       server = FakeHerdrServer();
       workspace = TerminalWorkspaceController(NoNetworkTerminalRepository());
       flow = SessionConnectFlow(
@@ -101,6 +104,7 @@ void main() {
         workspace: workspace,
         runnerFactory: (_) => server.runner(),
         preferences: InMemoryConnectPreferencesRepository(),
+        mayMoveHerdrFocus: () => mayMove,
       );
     });
 
@@ -135,6 +139,33 @@ void main() {
       expect(workspace.activeSession, herdrTab);
       expect(server.focusedPane, 'w3:p2');
       expect(requests, 1);
+    });
+
+    test('with the focus setting off it opens the tab without moving '
+        'Herdr\'s focus', () async {
+      mayMove = false;
+      final herdrTab = workspace.open(
+        const ConnectTarget.herdr(workspaceId: 'w1').apply(host),
+      );
+      workspace.open(host);
+
+      final shown = await flow.openAgent(
+        host,
+        const AgentInfo(
+          id: 'w3:p2',
+          name: '',
+          state: AgentAttentionState.unknown,
+          workspace: 'w3',
+          tab: 'w3:t1',
+          pane: 'w3:p2',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(shown, herdrTab);
+      expect(workspace.activeSession, herdrTab);
+      expect(flow.herdr.workspaceOf(herdrTab), 'w3');
+      expect(server.herdrArgs.where((args) => args.contains('focus')), isEmpty);
     });
 
     test('without a Herdr location it activates the host\'s tab', () async {
