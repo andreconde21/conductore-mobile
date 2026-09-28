@@ -815,47 +815,28 @@ class ChatApprovalCard extends StatelessWidget {
             RiskLine(risk: risk),
           ],
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: busy
-                      ? null
-                      : () => onDecide(PermissionVerdict.deny),
-                  child: Text(label(PermissionVerdict.deny)),
+          ApprovalButtons(
+            deny: ApprovalAction(
+              label(PermissionVerdict.deny),
+              busy ? null : () => onDecide(PermissionVerdict.deny),
+            ),
+            secondary: [
+              if (onTrust != null)
+                ApprovalAction(
+                  'Trust…',
+                  busy ? null : onTrust,
+                  key: ValueKey('chat-trust-${request.id}'),
                 ),
-              ),
-              if (onTrust != null) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonal(
-                    key: ValueKey('chat-trust-${request.id}'),
-                    onPressed: busy ? null : onTrust,
-                    child: const Text('Trust…'),
-                  ),
+              if (!(high && this.onTrust != null))
+                ApprovalAction(
+                  label(PermissionVerdict.always),
+                  busy ? null : () => onDecide(PermissionVerdict.always),
                 ),
-              ],
-              if (!(high && this.onTrust != null)) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonal(
-                    onPressed: busy
-                        ? null
-                        : () => onDecide(PermissionVerdict.always),
-                    child: Text(label(PermissionVerdict.always)),
-                  ),
-                ),
-              ],
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton(
-                  onPressed: busy
-                      ? null
-                      : () => onDecide(PermissionVerdict.allow),
-                  child: Text(label(PermissionVerdict.allow)),
-                ),
-              ),
             ],
+            allow: ApprovalAction(
+              label(PermissionVerdict.allow),
+              busy ? null : () => onDecide(PermissionVerdict.allow),
+            ),
           ),
           if (busy)
             const Padding(

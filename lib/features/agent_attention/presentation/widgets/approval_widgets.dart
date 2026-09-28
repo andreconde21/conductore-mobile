@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
@@ -421,3 +423,134 @@ class BatchApprovalRow extends StatelessWidget {
     );
   }
 }
+
+/// One answer on an approval card.
+class ApprovalAction {
+  const ApprovalAction(this.label, this.onPressed, {this.key});
+
+  final String label;
+  final VoidCallback? onPressed;
+  final Key? key;
+}
+
+/// The answers of an approval card: Deny (outlined) and Allow (filled),
+/// with [secondary] answers (Trust…, Always; tonal) between them. All in
+/// one row of equal buttons when every label fits on one line; otherwise
+/// the secondary answers get a row of their own above Deny and Allow, and
+/// a row whose labels still don't fit stacks its buttons full width, so
+/// a label never breaks mid-word (narrow phones, large text).
+class ApprovalButtons extends StatelessWidget {
+  const ApprovalButtons({
+    required this.deny,
+    required this.allow,
+    this.secondary = const [],
+    super.key,
+  });
+
+  final ApprovalAction deny;
+  final ApprovalAction allow;
+  final List<ApprovalAction> secondary;
+
+  static const double _gap = 8;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    final styles = [
+      theme.filledButtonTheme.style,
+      theme.outlinedButtonTheme.style,
+    ];
+    final textStyle =
+        styles.first?.textStyle?.resolve(const {}) ??
+        theme.textTheme.labelLarge;
+    // The widest horizontal padding of the button styles, plus the
+    // outline and a little rounding slack.
+    final padding =
+        styles
+            .map((s) => s?.padding?.resolve(const {})?.horizontal ?? 48.0)
+            .reduce(math.max) +
+        6;
+    double needed(ApprovalAction action) {
+      final painter = TextPainter(
+        text: TextSpan(text: action.label, style: textStyle),
+        textDirection: direction,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      final width = painter.width;
+      painter.dispose();
+      return width + padding;
+    }
+
+    Widget button(ApprovalAction action, _AnswerKind kind) {
+      final child = Text(
+        action.label,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+      );
+      return switch (kind) {
+        _AnswerKind.deny => OutlinedButton(
+          key: action.key,
+          onPressed: action.onPressed,
+          child: child,
+        ),
+        _AnswerKind.secondary => FilledButton.tonal(
+          key: action.key,
+          onPressed: action.onPressed,
+          child: child,
+        ),
+        _AnswerKind.allow => FilledButton(
+          key: action.key,
+          onPressed: action.onPressed,
+          child: child,
+        ),
+      };
+    }
+
+    final all = [
+      (deny, _AnswerKind.deny),
+      for (final action in secondary) (action, _AnswerKind.secondary),
+      (allow, _AnswerKind.allow),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        bool fits(List<(ApprovalAction, _AnswerKind)> row) =>
+            row.map((e) => needed(e.$1)).reduce(math.max) * row.length +
+                _gap * (row.length - 1) <=
+            constraints.maxWidth;
+        Widget line(List<(ApprovalAction, _AnswerKind)> row) => fits(row)
+            ? Row(
+                children: [
+                  for (final (i, (action, kind)) in row.indexed) ...[
+                    if (i > 0) const SizedBox(width: _gap),
+                    Expanded(child: button(action, kind)),
+                  ],
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final (i, (action, kind)) in row.indexed) ...[
+                    if (i > 0) const SizedBox(height: _gap),
+                    button(action, kind),
+                  ],
+                ],
+              );
+        if (secondary.isEmpty || fits(all)) return line(all);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            line(all.sublist(1, all.length - 1)),
+            const SizedBox(height: _gap),
+            line([all.first, all.last]),
+          ],
+        );
+      },
+    );
+  }
+}
+
+enum _AnswerKind { deny, secondary, allow }

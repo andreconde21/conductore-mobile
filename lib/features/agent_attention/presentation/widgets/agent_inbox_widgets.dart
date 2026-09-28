@@ -504,12 +504,17 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
                 ),
             ],
           ),
-          SelectableText(
-            request.summary,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontFamily: 'monospace',
+          // Collapsed: at most three lines, ellipsised. (SelectableText
+          // with maxLines alone is always maxLines tall.)
+          SelectionArea(
+            child: Text(
+              request.summary,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontFamily: 'monospace',
+              ),
+              maxLines: _expanded ? null : 3,
+              overflow: _expanded ? null : TextOverflow.ellipsis,
             ),
-            maxLines: _expanded ? null : 3,
           ),
           if (request.risk case final risk?) ...[
             const SizedBox(height: 6),
@@ -535,48 +540,35 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
             ),
           ],
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: widget.busy
-                      ? null
-                      : () => widget.onDecide(PermissionVerdict.deny),
-                  child: Text(PermissionVerdict.deny.label),
+          ApprovalButtons(
+            deny: ApprovalAction(
+              PermissionVerdict.deny.label,
+              widget.busy
+                  ? null
+                  : () => widget.onDecide(PermissionVerdict.deny),
+            ),
+            secondary: [
+              if (onTrust != null)
+                ApprovalAction(
+                  'Trust…',
+                  widget.busy ? null : onTrust,
+                  key: ValueKey('trust-${request.id}'),
                 ),
-              ),
-              if (onTrust != null) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonal(
-                    key: ValueKey('trust-${request.id}'),
-                    onPressed: widget.busy ? null : onTrust,
-                    child: const Text('Trust…'),
-                  ),
-                ),
-              ],
               // High risk always asks: no rule, from here or Claude Code.
-              if (!(high && widget.onTrust != null)) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonal(
-                    onPressed: widget.busy
-                        ? null
-                        : () => widget.onDecide(PermissionVerdict.always),
-                    child: Text(PermissionVerdict.always.label),
-                  ),
-                ),
-              ],
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton(
-                  onPressed: widget.busy
+              if (!(high && widget.onTrust != null))
+                ApprovalAction(
+                  PermissionVerdict.always.label,
+                  widget.busy
                       ? null
-                      : () => widget.onDecide(PermissionVerdict.allow),
-                  child: Text(PermissionVerdict.allow.label),
+                      : () => widget.onDecide(PermissionVerdict.always),
                 ),
-              ),
             ],
+            allow: ApprovalAction(
+              PermissionVerdict.allow.label,
+              widget.busy
+                  ? null
+                  : () => widget.onDecide(PermissionVerdict.allow),
+            ),
           ),
           if (widget.busy)
             const Padding(
