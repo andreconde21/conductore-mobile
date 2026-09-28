@@ -46,6 +46,20 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000, 60000]
 // Without events.subscribe (an older Herdr): the snapshot on a timer.
 const SNAPSHOT_MODE_MS = 10 * 1000
 
+// Whether a herdr binary is on PATH or in the usual user-local places
+// (the phone tells "not installed" from "not running" by it). No spawn.
+let installedCache = null
+function herdrInstalled () {
+  if (installedCache && Date.now() - installedCache.at < 5 * 60 * 1000) return installedCache.value
+  const fs = require('fs')
+  const path = require('path')
+  const home = require('os').homedir()
+  const dirs = [...String(process.env.PATH || '').split(':'), path.join(home, '.local', 'bin'), path.join(home, '.local', 'share', 'mise', 'shims'), path.join(home, '.cargo', 'bin'), '/usr/local/bin', '/opt/homebrew/bin']
+  const value = dirs.filter(Boolean).some(d => { try { fs.accessSync(path.join(d, 'herdr'), fs.constants.X_OK); return true } catch { return false } })
+  installedCache = { at: Date.now(), value }
+  return value
+}
+
 const str = v => (typeof v === 'string' ? v : null)
 const int = v => (Number.isInteger(v) ? v : null)
 
@@ -334,7 +348,10 @@ class HerdrWatch {
     // workspaces go too (Herdr's own client dims them; the phone shows the
     // "not running" state instead).
     this.store.replaceServer(this.server.id, new Map())
-    this.setServerState(state, err && err.code !== 'ENOENT' ? String(err.message || err.code).slice(0, 200) : null)
+    const why = state === 'none'
+      ? (herdrInstalled() ? null : 'herdr is not installed')
+      : String((err && (err.message || err.code)) || '').slice(0, 200) || null
+    this.setServerState(state, why)
     const ms = BACKOFF_MS[Math.min(this.failures, BACKOFF_MS.length - 1)]
     this.failures += 1
     clearTimeout(this.timers.retry)

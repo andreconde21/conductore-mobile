@@ -81,6 +81,12 @@ class LiveHostFeed extends ChangeNotifier {
 
   /// Starts (or keeps) the feed; the returned callback lets go.
   VoidCallback acquire() {
+    // Asked again after everyone let go (the page came back): a companion
+    // installed or updated meanwhile gets its chance.
+    if (_holders == 0 && _support == LiveSupport.unsupported && !_running) {
+      _support = LiveSupport.unknown;
+      _sequence = null;
+    }
     _holders += 1;
     if (!_running && _support != LiveSupport.unsupported) {
       unawaited(_loop());
@@ -127,6 +133,11 @@ class LiveHostFeed extends ChangeNotifier {
           return;
         } catch (_) {
           if (_disposed || generation != _generation) return;
+          if (_support == LiveSupport.unknown) {
+            // Nothing pushed yet: callers poll rather than wait.
+            _setSupport(LiveSupport.unsupported);
+            return;
+          }
           failures += 1;
           // A broken connection reconnects on the next command.
           final runner = _runner;

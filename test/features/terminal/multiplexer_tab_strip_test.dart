@@ -455,7 +455,10 @@ void main() {
         runner: tmux,
       );
       expect(strip, findsNothing);
-      expect(tmux.commands.first, TmuxWindowCommands.list('work'));
+      // This fake machine has no companion that pushes: after one
+      // `status --live`, the strip lists tmux itself.
+      expect(tmux.commands.first, contains('conductore-hostd status --live'));
+      expect(tmux.commands[1], TmuxWindowCommands.list('work'));
       expect(inline, findsOneWidget);
       expect(
         find.descendant(of: inline, matching: find.text('claude')),
