@@ -42,6 +42,7 @@ class ThemeController extends ChangeNotifier {
   bool _pasteImagesAsFiles = true;
   bool _restoreSessionsOnLaunch = true;
   MultiplexerTabsMode _multiplexerTabs = MultiplexerTabsMode.compact;
+  bool _herdrMayMoveFocus = false;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
@@ -106,6 +107,10 @@ class ThemeController extends ChangeNotifier {
 
   /// How a phone or tablet shows the multiplexer's tabs.
   MultiplexerTabsMode get multiplexerTabs => _multiplexerTabs;
+
+  /// Whether this device may move Herdr's shared focus on its own (see
+  /// `HerdrSessionFocus`). Off by default; never synced.
+  bool get herdrMayMoveFocus => _herdrMayMoveFocus;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
@@ -138,6 +143,7 @@ class ThemeController extends ChangeNotifier {
     _pasteImagesAsFiles = preferences.pasteImagesAsFiles;
     _restoreSessionsOnLaunch = preferences.restoreSessionsOnLaunch;
     _multiplexerTabs = preferences.multiplexerTabs;
+    _herdrMayMoveFocus = preferences.herdrMayMoveFocus;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
     _voice = preferences.voice;
@@ -378,6 +384,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setHerdrMayMoveFocus(bool enabled) async {
+    if (_herdrMayMoveFocus == enabled) {
+      return;
+    }
+    _herdrMayMoveFocus = enabled;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setMultiplexerTabs(MultiplexerTabsMode value) async {
     if (_multiplexerTabs == value) {
       return;
@@ -457,6 +472,7 @@ class ThemeController extends ChangeNotifier {
         pasteImagesAsFiles: _pasteImagesAsFiles,
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,
         multiplexerTabs: _multiplexerTabs,
+        herdrMayMoveFocus: _herdrMayMoveFocus,
         omarchySyncHostId: _omarchySyncHostId,
         omarchySyncedTheme: _omarchySyncedTheme,
       ),

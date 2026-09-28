@@ -113,6 +113,35 @@ class HerdrCommands {
   String agentFocus(String paneId) =>
       _herdr('agent focus ${shellQuoteArgument(paneId)}');
 
+  /// `herdr pane layout --pane <pane_id>`: the pane's tab, with the pane
+  /// that tab has focused (read-only).
+  String paneLayout(String paneId) =>
+      _herdr('pane layout --pane ${shellQuoteArgument(paneId)}');
+
+  /// `herdr pane read <pane_id> --source visible --format ansi`: what the
+  /// pane shows, with its colours (read-only).
+  String paneReadVisible(String paneId) => _herdr(
+    'pane read ${shellQuoteArgument(paneId)} --source visible --format ansi',
+  );
+
+  /// `herdr pane send-text <pane_id> <text>`: types into that pane
+  /// whatever Herdr has focused.
+  String paneSendText(String paneId, String text) => _herdr(
+    'pane send-text ${shellQuoteArgument(paneId)} ${shellQuoteArgument(text)}',
+  );
+
+  /// `herdr pane send-keys <pane_id> <key>...` (`enter`, `esc`, `up`…).
+  String paneSendKeys(String paneId, List<String> keys) => _herdr(
+    'pane send-keys ${shellQuoteArgument(paneId)} '
+    '${keys.map(shellQuoteArgument).join(' ')}',
+  );
+
+  /// `herdr agent prompt <pane_id> <text>`: Herdr's own submit to an
+  /// agent (bracketed paste, then Enter).
+  String agentPrompt(String paneId, String text) => _herdr(
+    'agent prompt ${shellQuoteArgument(paneId)} ${shellQuoteArgument(text)}',
+  );
+
   String paneFocus(HerdrDirection direction) =>
       _herdr('pane focus --direction ${direction.name}');
 

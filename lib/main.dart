@@ -207,8 +207,12 @@ void main() {
     runnerFactory: hostChannels.runner,
     preferences: const SecureConnectPreferencesRepository(secureStorage),
     recentDirectories: recentDirectories,
-    // The app coming back re-focuses the Herdr workspace in use.
+    // The app coming back re-focuses the Herdr workspace in use (or, when
+    // this device may not move Herdr's focus, checks where it is).
     watchLifecycle: true,
+    mayMoveHerdrFocus: () => themeController.herdrMayMoveFocus,
+    // Previews of Herdr sessions the shared focus is not on.
+    herdrRefreshInterval: const Duration(seconds: 15),
   );
   // Collects recent directories (OSC 7, tmux on detach, companion agents)
   // for the app's whole lifetime, like the widget pusher below.

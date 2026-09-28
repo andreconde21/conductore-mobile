@@ -194,6 +194,18 @@ class SettingsSectionBody extends StatelessWidget {
     _gap,
     // Brings its own bottom gap (and nothing without a SessionViewScope).
     const SessionViewSettingsTile(),
+    SettingsSwitchCard(
+      switchKey: const ValueKey('herdr-may-move-focus'),
+      icon: Icons.center_focus_strong_rounded,
+      title: herdrMayMoveFocusTitle,
+      subtitle:
+          'Herdr shares one focus across all screens, including your '
+          'laptop. Off: this device never moves it; typing is sent to the '
+          'right pane instead.',
+      value: theme.herdrMayMoveFocus,
+      onChanged: theme.setHerdrMayMoveFocus,
+    ),
+    _gap,
     SettingsSegmentCard<MultiplexerTabsMode>(
       key: const ValueKey('multiplexer-tabs-setting'),
       icon: Icons.tab_rounded,

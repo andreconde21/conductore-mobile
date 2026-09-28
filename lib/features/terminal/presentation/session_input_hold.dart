@@ -18,6 +18,29 @@ class InputHoldSwitching extends InputHoldState {
   const InputHoldSwitching(super.label);
 }
 
+/// The multiplexer shows another place ([label]: another screen moved its
+/// shared focus there), and this device may not move it back on its own:
+/// input waits for the user to decide (see [SessionInputHold.release],
+/// [SessionInputHold.discard] and [SessionInputHold.takeText]).
+class InputHoldBlocked extends InputHoldState {
+  const InputHoldBlocked(super.label, {required this.queued});
+
+  /// Characters waiting.
+  final int queued;
+}
+
+/// What becomes of held input.
+enum InputHoldDecision {
+  /// It can go out now.
+  send,
+
+  /// It must not: drop it and say so.
+  drop,
+
+  /// Keep it until the user decides.
+  block,
+}
+
 /// The switch was not confirmed: [dropped] characters were thrown away
 /// rather than typed into whatever the multiplexer shows instead.
 class InputHoldFailed extends InputHoldState {
@@ -57,7 +80,8 @@ class SessionInputHold {
   ValueListenable<InputHoldState?> get state => _state;
 
   /// Whether input is being held right now.
-  bool get holding => _state.value is InputHoldSwitching;
+  bool get holding =>
+      _state.value is InputHoldSwitching || _state.value is InputHoldBlocked;
 
   /// Everything held so far, oldest first.
   @visibleForTesting
@@ -70,17 +94,34 @@ class SessionInputHold {
     Future<bool> ready, {
     String label = '',
     Duration timeout = defaultTimeout,
+  }) => decide(
+    ready.then((ok) => ok ? InputHoldDecision.send : InputHoldDecision.drop),
+    label: label,
+    timeout: timeout,
+  );
+
+  /// Holds input until [decision] completes. [blockedLabel] names what
+  /// the multiplexer shows instead, for [InputHoldDecision.block]; it is
+  /// read when the decision arrives. [timeout] drops the input.
+  void decide(
+    Future<InputHoldDecision> decision, {
+    String label = '',
+    String Function()? blockedLabel,
+    Duration timeout = defaultTimeout,
   }) {
     if (_disposed) return;
     final generation = ++_generation;
     _noticeTimer?.cancel();
     _timeout?.cancel();
     _state.value = InputHoldSwitching(label);
-    _timeout = Timer(timeout, () => _settle(generation, ok: false));
+    _timeout = Timer(
+      timeout,
+      () => _settle(generation, InputHoldDecision.drop),
+    );
     unawaited(
-      ready.then(
-        (ok) => _settle(generation, ok: ok),
-        onError: (Object _) => _settle(generation, ok: false),
+      decision.then(
+        (value) => _settle(generation, value, blockedLabel?.call() ?? ''),
+        onError: (Object _) => _settle(generation, InputHoldDecision.drop),
       ),
     );
   }
@@ -89,7 +130,46 @@ class SessionInputHold {
   bool offer(String data) {
     if (!holding) return false;
     _queued.add(data);
+    final state = _state.value;
+    if (state is InputHoldBlocked) {
+      _state.value = InputHoldBlocked(state.label, queued: _queuedLength);
+    }
     return true;
+  }
+
+  int get _queuedLength =>
+      _queued.fold<int>(0, (sum, data) => sum + data.length);
+
+  /// Sends what is held (the user chose to), and lets input flow again.
+  void release() => _finish(send: true);
+
+  /// Drops what is held without a notice (the user chose to).
+  void discard() => _finish(send: false);
+
+  /// Hands over the printable text held so far (for the composer) and
+  /// drops the rest; input flows again.
+  String takeText() {
+    final text = _queued
+        .join()
+        .replaceAll(RegExp(r'\x1b\[[0-9;?]*[ -/]*[@-~]'), '')
+        .replaceAll(RegExp(r'[\x00-\x08\x0b-\x1f\x7f]'), '');
+    _finish(send: false);
+    return text;
+  }
+
+  void _finish({required bool send}) {
+    if (_disposed) return;
+    _generation += 1;
+    _timeout?.cancel();
+    _noticeTimer?.cancel();
+    final queued = List.of(_queued);
+    _queued.clear();
+    _state.value = null;
+    if (send) {
+      for (final data in queued) {
+        deliver(data);
+      }
+    }
   }
 
   /// Drops the queue without a notice (the connection went away).
@@ -100,10 +180,21 @@ class SessionInputHold {
     if (!_disposed) _state.value = null;
   }
 
-  void _settle(int generation, {required bool ok}) {
+  void _settle(
+    int generation,
+    InputHoldDecision decision, [
+    String blockedLabel = '',
+  ]) {
     if (_disposed || generation != _generation) return;
-    _generation += 1;
     _timeout?.cancel();
+    if (decision == InputHoldDecision.block) {
+      // Waits for the user's choice (or a newer hold); no timeout.
+      _generation += 1;
+      _state.value = InputHoldBlocked(blockedLabel, queued: _queuedLength);
+      return;
+    }
+    final ok = decision == InputHoldDecision.send;
+    _generation += 1;
     final label = _state.value?.label ?? '';
     final queued = List.of(_queued);
     _queued.clear();
@@ -115,6 +206,7 @@ class SessionInputHold {
       return;
     }
     final dropped = queued.fold<int>(0, (sum, data) => sum + data.length);
+    // Nothing typed yet: nothing lost, and nothing to say.
     if (dropped == 0) {
       _state.value = null;
       return;

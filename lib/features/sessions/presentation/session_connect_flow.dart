@@ -32,10 +32,14 @@ class SessionConnectFlow {
     required this.preferences,
     this.recentDirectories,
     bool watchLifecycle = false,
+    bool Function()? mayMoveHerdrFocus,
+    Duration? herdrRefreshInterval,
   }) : herdr = HerdrSessionFocus(
          workspace: workspace,
          runnerFactory: runnerFactory,
          watchLifecycle: watchLifecycle,
+         mayMoveFocus: mayMoveHerdrFocus,
+         refreshInterval: herdrRefreshInterval,
        ),
        tmux = TmuxSessionFocus(
          workspace: workspace,

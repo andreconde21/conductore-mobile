@@ -1551,7 +1551,7 @@ class _TerminalPageState extends State<TerminalPage>
         },
       );
       if (path == null) return false;
-      if (mounted) session.paste(path);
+      if (mounted) unawaited(session.sendAppText(path, paste: true));
       return true;
     } catch (error) {
       if (mounted) {
@@ -1615,10 +1615,7 @@ class _TerminalPageState extends State<TerminalPage>
     unawaited(directories.record(hostId, pick.directory));
     switch (pick.action) {
       case RecentDirectoryAction.cd:
-        session
-          ..claimInput()
-          ..sendText(cdCommand(pick.directory));
-        _sendEnterSoon(session);
+        unawaited(session.sendAppText(cdCommand(pick.directory), submit: true));
       case RecentDirectoryAction.tmuxWindow:
         session.sendPrefix(host.tmuxPrefixKey);
         session.sendText(':');
@@ -2380,6 +2377,48 @@ class _TerminalPageState extends State<TerminalPage>
     );
   }
 
+  /// The focus banner's actions for a Herdr session while this device may
+  /// not move Herdr's focus on its own; null otherwise.
+  HerdrFocusActions? _herdrFocusActionsFor(TerminalSessionController session) {
+    final herdr = widget.connectFlow?.herdr;
+    if (herdr == null ||
+        herdr.mayMoveFocus ||
+        HerdrSessionFocus.herdrTargetOf(session) == null ||
+        herdr.controlFor(session) == null) {
+      return null;
+    }
+    void failed(String message) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    }
+
+    return HerdrFocusActions(
+      typeInComposer: (held) {
+        final hostId = session.host.id;
+        if (held.isNotEmpty) {
+          _composeDrafts[hostId] = '${_composeDrafts[hostId] ?? ''}$held';
+        }
+        widget.workspace.activate(session);
+        unawaited(_openPromptComposer(session));
+      },
+      takeFocusOnce: () async {
+        widget.workspace.activate(session);
+        if (!await herdr.takeFocusOnce(session)) {
+          failed('Herdr did not switch: the typed keys are still held.');
+        }
+        _focusNode.requestFocus();
+      },
+      useShownWorkspace: () async {
+        if (!await herdr.useShownWorkspace(session)) {
+          failed("Couldn't read what Herdr shows.");
+        }
+        _focusNode.requestFocus();
+      },
+    );
+  }
+
   /// One session's terminal (gestures, surface), as a tab's content or a
   /// pane of the desktop shell.
   Widget _sessionView(
@@ -2397,6 +2436,7 @@ class _TerminalPageState extends State<TerminalPage>
       fontFamily: widget.themeController.terminalFont.fontFamily,
       // Only a desktop split shows sessions that are not the active one.
       showSharedView: widget.shell != null && session != activeSession,
+      herdrActions: _herdrFocusActionsFor(session),
       child: TerminalGestureLayer(
         key: ValueKey(session.host.id),
         target: _gestureTargetFor(session),
@@ -2840,14 +2880,11 @@ class _TerminalPageState extends State<TerminalPage>
                             // of submitting — so a wrapping compose line silently fails
                             // to send. Delivering Enter in its own read makes it an
                             // isolated keypress that submits regardless of line length.
-                            activeSession
-                              ..claimInput()
-                              ..sendText(line);
-                            Future.delayed(
-                              const Duration(milliseconds: 120),
-                              () {
-                                activeSession.sendKey(TerminalKey.enter);
-                              },
+                            // (sendAppText does exactly that; a Herdr session
+                            // whose focus this device may not move gets the
+                            // line by pane id instead.)
+                            unawaited(
+                              activeSession.sendAppText(line, submit: true),
                             );
                             setState(() {
                               // De-duplicate: drop any earlier identical entry so the

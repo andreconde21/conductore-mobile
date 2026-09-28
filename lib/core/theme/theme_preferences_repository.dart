@@ -36,6 +36,7 @@ class ThemePreferences {
     this.pasteImagesAsFiles = true,
     this.restoreSessionsOnLaunch = true,
     this.multiplexerTabs = MultiplexerTabsMode.compact,
+    this.herdrMayMoveFocus = false,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
   });
@@ -99,6 +100,11 @@ class ThemePreferences {
   /// How a phone or tablet shows the multiplexer's tabs.
   final MultiplexerTabsMode multiplexerTabs;
 
+  /// Whether this device may move a Herdr server's focus (which every
+  /// screen attached to it shares, the laptop included) on its own. Off by
+  /// default, and kept per device: it is never synced.
+  final bool herdrMayMoveFocus;
+
   /// The saved machine whose Omarchy theme the app follows; null when the
   /// app uses [palette].
   final String? omarchySyncHostId;
@@ -148,6 +154,7 @@ class ThemePreferencesRepository {
   static const _restoreSessionsOnLaunchKey =
       'conductore.restore_sessions_on_launch.v1';
   static const _multiplexerTabsKey = 'conductore.multiplexer_tabs_phone.v1';
+  static const _herdrMayMoveFocusKey = 'conductore.herdr_may_move_focus.v1';
 
   static const _loadKeys = [
     _themeModeKey,
@@ -177,6 +184,7 @@ class ThemePreferencesRepository {
     _restoreSessionsOnLaunchKey,
     _multiplexerTabsKey,
     _pasteImagesAsFilesKey,
+    _herdrMayMoveFocusKey,
   ];
 
   final FlutterSecureStorage _storage;
@@ -222,6 +230,7 @@ class ThemePreferencesRepository {
     final rawRemoteClipboardEnabled = await read(_remoteClipboardEnabledKey);
     final rawRestoreSessionsOnLaunch = await read(_restoreSessionsOnLaunchKey);
     final rawMultiplexerTabs = await read(_multiplexerTabsKey);
+    final rawHerdrMayMoveFocus = await read(_herdrMayMoveFocusKey);
     final rawPasteImagesAsFiles = await read(_pasteImagesAsFilesKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
@@ -274,6 +283,7 @@ class ThemePreferencesRepository {
         (value) => value.name == rawMultiplexerTabs,
         orElse: () => MultiplexerTabsMode.compact,
       ),
+      herdrMayMoveFocus: rawHerdrMayMoveFocus == 'true',
       pasteImagesAsFiles:
           rawPasteImagesAsFiles == null || rawPasteImagesAsFiles == 'true',
       omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
@@ -403,6 +413,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _multiplexerTabsKey,
       value: preferences.multiplexerTabs.name,
+    );
+    await _storage.write(
+      key: _herdrMayMoveFocusKey,
+      value: preferences.herdrMayMoveFocus.toString(),
     );
     await _storage.write(
       key: _pasteImagesAsFilesKey,

@@ -430,13 +430,10 @@ class TerminalKeyboardBar extends StatelessWidget {
   }
 
   void _sendSnippet(TerminalSnippet snippet) {
-    final text = snippet.submit ? '${snippet.text}\r' : snippet.text;
-    if (text.isNotEmpty) {
-      controller.claimInput();
-      _sendText(text);
-    } else {
-      _focusTerminal();
+    if (snippet.text.isNotEmpty) {
+      unawaited(controller.sendAppText(snippet.text, submit: snippet.submit));
     }
+    _focusTerminal();
   }
 
   void _triggerTmuxAction(_TmuxAction action) {
