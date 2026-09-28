@@ -156,3 +156,39 @@ and windows, so they are not used.
 
 The first `status --live` waits up to a second for every server's first
 state, so it carries the entities (2.9 KB for the setup above).
+
+## The app
+
+- `LiveHostFeed` (`lib/features/live/`), one per machine in
+  `SessionConnectFlow.live`: `status --live` once, then `events --live --only
+  live` long-polls while a home board, a tab strip or the navigator holds it.
+  Released by all, it closes its connection. When the first `status --live`
+  has no `live` block (an older companion) or fails (no companion), it is
+  unsupported and those callers poll exactly as before; it asks again the next
+  time a page takes it.
+- Home board: draws the default Herdr server and the tmux sessions from the
+  model; `notRunning` and `notInstalled` come from the server entities.
+- Tab strip: tmux windows or the Herdr tabs of the session's workspace from
+  the model; actions still run through the tab backend.
+- Herdr navigator: lists from the model, with no `herdr` command.
+- Agent monitor: sends `--herdr-agents`; agents only Herdr sees show in the
+  dashboard with their kind and "via Herdr", notify when blocked or done
+  (not as an ended session), focus through `herdr agent focus`, and never open
+  a chat view.
+- Chat view: "Ask or send to agents…" and, on an agent's own output, "Relay to
+  agents…" open the message sheet (one or several agents, the exact text,
+  Ask and wait with a timeout, Relay the answer). Another machine goes through
+  the phone relay (default) or `AgentMessenger.talkbawt`, wired by the
+  Talkbawt client with `AgentMessenger.routeSetting`.
+- Settings › Agents › Herdr and worktrees: the sidebar tokens (on) and the
+  worktree location (next to the repo), pushed with `config set` to each
+  companion that reports `config`.
+
+Commands per minute (test/perf/network_benchmark_test.dart, fake machines,
+one steady minute):
+
+| Scene | Polling (older companion) | Pushed |
+|---|---|---|
+| Home on screen, monitored machine | 13 (tmux 3, Herdr lists 9, long-poll 1) | 2 (agent long-poll, live long-poll) |
+| Home on screen, another shown machine | 12 | 1 |
+| Terminal page in front | 43 (tab strip 30, port watcher 12, long-poll 1) | 14 (port watcher 12, two long-polls) |
