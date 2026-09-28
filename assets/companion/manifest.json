@@ -1,8 +1,8 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "archive": "companion.tar.gz",
   "files": {
-    "README.md": "99695007ef69462e7c77933b5e9f4f82f971d7858fa001f5c4c10c7ce0d4163e",
+    "README.md": "4a3af46ab1b9676c14af65c932f1d03d097c3220d0e127cd2e0e71b0521c4538",
     "bin/conductore-hook": "3ad6e8202037325cd9008db2608ea580483085669ecc44daf09e43357f5b044b",
     "bin/conductore-hostd": "ce811efd5a8cad5ee09df0adbc5b14d4613ca88d7815ffebe4e0ef72117c36f5",
     "bin/conductore-statusline": "99c2e9c9640fe4c44ddd44f04bcd4f0024c4924940de5c89c2b14266ccbdbdca",
@@ -10,16 +10,16 @@
     "lib/activity.js": "0b720739145814afde5b3f01096fd8dabd5a0c1750daf282a15dab5dc85574a2",
     "lib/approval-ops.js": "1c04bc0dc0ec3b62b0732dfd86bf31a7185d9d91025c238eace19f3748edf5e3",
     "lib/approvals.js": "7cfcfe0768e6852f6aa5c0dcd17c4c69231189954471590c5a87d3b2a9ab814f",
-    "lib/cli.js": "f18afbee5dd2c714c48ed547f42860cb6e1353243a49c8dd46f514e8e2503cc9",
+    "lib/cli.js": "f5680e06c9a4ec55c9a0326b83ebafcf9ae9c5b98ba104926fa626fabd0229b8",
     "lib/client.js": "c8b7cde77679284f0aafe9db46f9947ad531dda2c7fe3f9fd68cfffc9194806d",
     "lib/context.js": "b26ea99190c39c99d9eeb06bfcd4c3cbe2b671c76f4db4253b38393c15c51a3a",
     "lib/cswap.js": "12979c36b3588753c6613526c179508bad0d592d0aa352a747bbb34a3f7b0344",
-    "lib/daemon.js": "ef0946c43d17318f34035e87f2b10ea660c2efb95059d174a837473c84937c29",
+    "lib/daemon.js": "57fb13e0ebba3748b9ce6c4b2aed94afc586f3b8c511a7bc7549814b49bcbae1",
     "lib/digest.js": "9cd82cad0e3e05d0ff0d247800ace23773f46d68591d0beba5bb6cd4e6cc2435",
     "lib/guide.js": "a5395ad348b0b3f677bb2a2f78faeee6a1c8707aa94f96f090c1007004e825ca",
     "lib/log.js": "9ba8a3a5b87df77433e285da1ff9d279fa3be9e50fa62a6bd83437ae1d999fd1",
     "lib/pane.js": "8b80b3f7ec6d1edcc4db3615b98927363b1b7a4c421c0e3fafd2b5af0140b498",
-    "lib/paths.js": "211e20c4e3db7e58ca65b34da1a3e0a086299e184be456a4a8a31b032ea256c5",
+    "lib/paths.js": "ce389e3dc36c540d6cda082af6c1fde4c70360baab31050595bacedf21fc86d2",
     "lib/permission.js": "725acd9b6adffe598b8acb246a30cb86ef187a79e9d4edada6e65565a75d9b0a",
     "lib/ports.js": "e6e1cec8d5b2deb5e68f5642f268e2d1e5d83fb0985e8b34c508344174f9a2b2",
     "lib/pricing.js": "360b9f70bdbde122e3322f204d1a4a2368956c31ef908de37ecbe0bf727cb10b",
@@ -37,6 +37,6 @@
     "lib/transcript.js": "2c149d492eb30efc6b3ee2bd6845a3d9259cf0be02eb747192a67ea0069a528c",
     "lib/turns.js": "5bf69c07cdd574b7ef3f9d97c12224ceca02cb5bdd3c996a645e29e153e2aac9",
     "lib/usage.js": "4a3edab87dc23f680b2333d58ae52e0d2a1e743090947d236f2c8aec3ca3e938",
-    "package.json": "cd98a291a3e66c35e468baba73bf298aa8fd54cdc2eb101ffbfeef00b753570a"
+    "package.json": "325ae3c310ffcdf203f6f2dd8184f4e51ae216e2bef295f68e0ddc42dc721823"
   }
 }
