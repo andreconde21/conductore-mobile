@@ -70,6 +70,10 @@ class ShareTargetController extends ChangeNotifier {
   /// Bumped when an upload is cancelled, so its late result is ignored.
   int _attempt = 0;
 
+  /// Takes a share before the upload flow sees it (a shared Talkbawt link
+  /// opens its preview instead); true when it took it.
+  bool Function(SharedPayload payload)? intercept;
+
   SharedPayload? get pending => _pending;
   ShareTargetPhase get phase => _phase;
   String? get error => _error;
@@ -103,6 +107,7 @@ class ShareTargetController extends ChangeNotifier {
       if (payload.unreadable.isNotEmpty) _failUnreadable(payload.unreadable);
       return;
     }
+    if (intercept?.call(payload) ?? false) return;
     final current = _pending;
     if (current != null && _phase != ShareTargetPhase.uploading) {
       _pending = SharedPayload(

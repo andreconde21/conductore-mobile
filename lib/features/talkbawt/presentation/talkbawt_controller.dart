@@ -84,6 +84,10 @@ class TalkbawtController extends ChangeNotifier {
   TalkbawtSettings get settings => _settings;
   bool get loaded => _loaded;
 
+  /// Bumped on every write to the store (not on every change on screen):
+  /// what device sync listens to.
+  final ValueNotifier<int> saves = ValueNotifier(0);
+
   /// Newest first.
   List<TalkbawtOwnedThread> get threads => _threads;
   int get unread => _threads.fold(0, (sum, t) => sum + t.unread);
@@ -128,11 +132,31 @@ class TalkbawtController extends ChangeNotifier {
       'creatorKeys': _creatorKeys,
       'threads': [for (final t in _threads) t.toJson()],
     });
+    if (!_disposed) saves.value += 1;
     _changed();
   }
 
   void _changed() {
     if (!_disposed) notifyListeners();
+  }
+
+  // --- shared links -------------------------------------------------------------
+
+  String? _sharedLink;
+
+  /// A link shared into the app, waiting for the unlocked app to open it.
+  String? get pendingSharedLink => _sharedLink;
+
+  void receiveSharedLink(String url) {
+    _sharedLink = url;
+    _changed();
+  }
+
+  /// Takes the waiting shared link (once).
+  String? takeSharedLink() {
+    final link = _sharedLink;
+    _sharedLink = null;
+    return link;
   }
 
   // --- settings ---------------------------------------------------------------
@@ -795,6 +819,7 @@ class TalkbawtController extends ChangeNotifier {
     _disposed = true;
     _pairedTimer?.cancel();
     _watchGeneration += 1;
+    saves.dispose();
     super.dispose();
   }
 }

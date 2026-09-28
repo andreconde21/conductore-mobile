@@ -29,6 +29,8 @@ import 'package:conduit/features/share_target/domain/share_inbox.dart';
 import 'package:conduit/features/share_target/domain/shared_payload.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
 import 'package:conduit/features/terminal/data/keyboard_image_file.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
@@ -369,6 +371,22 @@ class _ChatViewPageState extends State<ChatViewPage>
     return host != null &&
         _reviewAgent != null &&
         reviewAvailable(widget.attention!, host);
+  }
+
+  /// "Hand off…" (Talkbawt) for this agent, when the app has Talkbawt and
+  /// the agent is known on a companion machine.
+  VoidCallback? _handOffAction() {
+    final attention = widget.attention;
+    final host = _reviewHost;
+    final agent = _reviewAgent;
+    if (attention == null || host == null || agent == null) return null;
+    return handOffAction(
+      context,
+      TalkbawtScope.maybeOf(context),
+      attention,
+      host,
+      agent,
+    );
   }
 
   bool _reviewOpen = false;
@@ -1030,6 +1048,7 @@ class _ChatViewPageState extends State<ChatViewPage>
                     _setVoice((v) => v.copyWith(readAloudLength: length)),
                 onToolActivity: (mode) =>
                     _setVoice((v) => v.copyWith(toolActivity: mode)),
+                onHandOff: _handOffAction(),
               ),
               // Narrow phones: the icon alone keeps room for the title.
               if (MediaQuery.sizeOf(context).width < 400)
@@ -1506,14 +1525,18 @@ class _ReadAloudToggle extends StatelessWidget {
 }
 
 /// The header menu: quick switches for the read-aloud length and Tool
-/// activity (the same settings as Settings › Chat & Voice).
+/// activity (the same settings as Settings › Chat & Voice), and "Hand
+/// off…" (Talkbawt) when this machine's companion can.
 class _ChatMenu extends StatelessWidget {
   const _ChatMenu({
     required this.readAloudLength,
     required this.toolActivity,
     required this.onReadAloudLength,
     required this.onToolActivity,
+    this.onHandOff,
   });
+
+  final VoidCallback? onHandOff;
 
   /// Null hides the read-aloud choices (no speech on this device).
   final ReadAloudLength? readAloudLength;
@@ -1530,9 +1553,22 @@ class _ChatMenu extends StatelessWidget {
       onSelected: (value) => switch (value) {
         final ReadAloudLength length => onReadAloudLength(length),
         final ToolActivity mode => onToolActivity(mode),
+        'handoff' => onHandOff?.call(),
         _ => null,
       },
       itemBuilder: (context) => [
+        if (onHandOff != null) ...[
+          const PopupMenuItem<Object>(
+            key: ValueKey('chat-menu-handoff'),
+            value: 'handoff',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.outbox_outlined),
+              title: Text('Hand off…'),
+            ),
+          ),
+          const PopupMenuDivider(),
+        ],
         if (length != null) ...[
           const PopupMenuItem<Object>(
             enabled: false,

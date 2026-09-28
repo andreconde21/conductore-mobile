@@ -12,6 +12,11 @@ import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_find_bar.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_message_actions.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_search_highlight.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/talkbawt/domain/talkbawt_settings.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_controller.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -319,6 +324,30 @@ mixin ChatThreadExtras on State<ChatViewPage> {
       host: widget.hostName,
     );
     final attention = widget.attention;
+    // Another machine with the relay setting on Talkbawt: through a
+    // short-lived handoff instead of the phone.
+    final talkbawt = TalkbawtScope.maybeOf(context);
+    final here = widget.hostId;
+    if (talkbawt != null &&
+        attention != null &&
+        here != null &&
+        talkbawt.settings.relay == TalkbawtRelayMode.talkbawt &&
+        baseHostId(target.host.id) != baseHostId(here)) {
+      final from = attention.monitoredHosts
+          .where((h) => h.id == here)
+          .firstOrNull;
+      if (from != null) {
+        await relayThroughTalkbawt(
+          context,
+          controller: talkbawt,
+          from: from,
+          fromLabel: '${widget.controller.name} on ${from.name}',
+          target: TalkbawtRelayTarget(host: target.host, agent: target.agent),
+          text: prompt,
+        );
+        return;
+      }
+    }
     final forward =
         widget.onForward ??
         (attention == null

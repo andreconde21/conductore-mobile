@@ -18,6 +18,7 @@ import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/platform_agent_notifier.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
@@ -66,6 +67,11 @@ import 'package:conduit/features/sync/data/sync_state_store.dart';
 import 'package:conduit/features/sync/domain/local_data_changes.dart';
 import 'package:conduit/features/sync/presentation/sync_controller.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
+import 'package:conduit/features/talkbawt/data/conductore_talkbawt_client.dart';
+import 'package:conduit/features/talkbawt/presentation/paired_mode_page.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_controller.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
+import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
 import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
@@ -259,12 +265,49 @@ void main() {
     themeChanges: themeController,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();
+  // Talkbawt (CON-050): handoffs and threads between agents through a
+  // machine's companion, the only Talkbawt client. Owned links live in
+  // secure storage and sync only with the credentials, end-to-end
+  // encrypted. Reply notifications open the preview, nothing else.
+  final talkbawt = TalkbawtController(
+    store: const SecureJsonMapStore(
+      secureStorage,
+      TalkbawtController.storageKey,
+    ),
+    clients: (host) {
+      final (runner, :owned) = agentAttention.runnerFor(host);
+      return (
+        client: ConductoreTalkbawtClient(runner),
+        release: () async {
+          if (owned) await runner.close();
+        },
+      );
+    },
+    findHost: hostsController.findById,
+    notify: (notice) => const PlatformAgentAttentionNotifier().show(
+      id: 'talkbawt-${notice.threadId}',
+      title: notice.title,
+      body: notice.body,
+      open: AgentOpenTarget(
+        hostId: talkbawtNotificationPrefix,
+        agentId: notice.threadId,
+      ),
+    ),
+  );
+  unawaited(talkbawt.load());
   const fileExport = FilePickerFileExport();
   final shareTarget = ShareTargetController(
     source: PlatformShareTargetSource(),
     workspace: workspaceController,
     uploader: SftpShareUploader(sftpRepository),
   );
+  // A shared Talkbawt link opens its preview, not the upload flow.
+  shareTarget.intercept = (payload) {
+    final link = talkbawtLinkIn(payload);
+    if (link == null) return false;
+    talkbawt.receiveSharedLink(link.url);
+    return true;
+  };
 
   // Agent hooks screen: companion status per machine, shared by every
   // entry point through the scope around the whole app.
@@ -351,7 +394,19 @@ void main() {
     ),
     ready: themeLoaded,
     changes: localDataChanges,
+    talkbawt: const SecureJsonMapStore(
+      secureStorage,
+      TalkbawtController.storageKey,
+    ),
   );
+  // A sync pull or backup import may bring Talkbawt links from another
+  // device.
+  localDataChanges.addListener(() {
+    final keys = localDataChanges.lastKeys;
+    if (keys.isEmpty || keys.contains(AppLocalSyncStore.talkbawtKey)) {
+      unawaited(talkbawt.reload());
+    }
+  });
   // Settings › Sync: this device's data, end-to-end encrypted, through
   // one saved machine (the hub) over the same SSH/SFTP stack.
   final syncController = SyncController(
@@ -370,6 +425,7 @@ void main() {
       themeController,
       recentDirectories,
       sessionRestore,
+      talkbawt.saves,
     ],
     platform: defaultTargetPlatform.name,
     defaultDeviceName: defaultSyncDeviceName(),
@@ -472,6 +528,7 @@ void main() {
     agentAttention: agentAttention,
     digest: digest,
     appLock: PlatformFeatures.appLock ? lockController : null,
+    talkbawt: talkbawt,
     onLockNow: () async {
       // Locking closes every session; unlocking brings them back.
       await sessionRestore.holdForLock();
@@ -496,29 +553,33 @@ void main() {
                 controller: usage,
                 child: DigestScope(
                   controller: digest,
-                  child: ConduitApp(
-                    themeController: themeController,
-                    lockController: lockController,
-                    hostsController: hostsController,
-                    terminalRepository: terminalRepository,
-                    workspaceController: workspaceController,
-                    localShellController: localShellController,
-                    hostKeyVerifier: hostKeyVerifier,
-                    promptCoordinator: promptCoordinator,
-                    sftpRepository: sftpRepository,
-                    sftpBookmarksRepository: sftpBookmarksRepository,
-                    agentAttention: agentAttention,
-                    backupService: backupService,
-                    fileExport: fileExport,
-                    connectFlow: connectFlow,
-                    shareTarget: shareTarget,
-                    sessionRestore: sessionRestore,
-                    localDataChanges: localDataChanges,
-                    hostChannels: hostChannels,
-                    navigatorKey: navigatorKey,
-                    voice: voice,
-                    guide: guide,
-                    guideWake: guide == null ? null : GuideWakeChannel(),
+                  child: TalkbawtScope(
+                    controller: talkbawt,
+                    child: ConduitApp(
+                      themeController: themeController,
+                      lockController: lockController,
+                      hostsController: hostsController,
+                      terminalRepository: terminalRepository,
+                      workspaceController: workspaceController,
+                      localShellController: localShellController,
+                      hostKeyVerifier: hostKeyVerifier,
+                      promptCoordinator: promptCoordinator,
+                      sftpRepository: sftpRepository,
+                      sftpBookmarksRepository: sftpBookmarksRepository,
+                      agentAttention: agentAttention,
+                      backupService: backupService,
+                      fileExport: fileExport,
+                      connectFlow: connectFlow,
+                      shareTarget: shareTarget,
+                      sessionRestore: sessionRestore,
+                      localDataChanges: localDataChanges,
+                      hostChannels: hostChannels,
+                      navigatorKey: navigatorKey,
+                      voice: voice,
+                      guide: guide,
+                      guideWake: guide == null ? null : GuideWakeChannel(),
+                      talkbawt: talkbawt,
+                    ),
                   ),
                 ),
               ),
@@ -554,6 +615,7 @@ class ConduitApp extends StatefulWidget {
     this.voice,
     this.guide,
     this.guideWake,
+    this.talkbawt,
     super.key,
   });
 
@@ -595,6 +657,10 @@ class ConduitApp extends StatefulWidget {
 
   /// The headset-button wake for [guide].
   final GuideWakeChannel? guideWake;
+
+  /// Talkbawt handoffs: shared links, reply notifications, owned-thread
+  /// watching while the app is in front, and the paired-mode banner.
+  final TalkbawtController? talkbawt;
 
   @override
   State<ConduitApp> createState() => _ConduitAppState();
@@ -675,6 +741,10 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     // The companion long-poll only runs while the app is on screen; in the
     // background the periodic poll (and its notifications) is enough.
     widget.agentAttention.setAppForeground(
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    );
+    // Owned Talkbawt threads are watched for replies only while in front.
+    widget.talkbawt?.setForeground(
       state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
     );
   }
@@ -788,8 +858,24 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     if (flow == null) {
       return home;
     }
+    final talkbawt = widget.talkbawt;
     return AgentNotificationOpenListener(
       source: PlatformAgentOpenRequests.instance,
+      // A Talkbawt reply opens its preview, never an agent.
+      intercept: talkbawt == null
+          ? null
+          : (target) {
+              if (!target.hostId.startsWith(talkbawtNotificationPrefix)) {
+                return false;
+              }
+              final navigator = widget.navigatorKey?.currentState;
+              if (navigator != null) {
+                unawaited(
+                  openTalkbawtNotification(navigator, talkbawt, target.agentId),
+                );
+              }
+              return true;
+            },
       findHost: (hostId) async {
         await widget.hostsController.selfMachineKnown();
         return widget.hostsController.findById(hostId);
@@ -797,6 +883,17 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       onOpen: (host, agent) async {
         await flow.openAgent(host, agent, preferredView: true);
       },
+      child: home,
+    );
+  }
+
+  /// Shared Talkbawt links open their preview once the app is unlocked.
+  Widget _wrapTalkbawtLinks(Widget home) {
+    final talkbawt = widget.talkbawt;
+    if (talkbawt == null) return home;
+    return TalkbawtLinkListener(
+      controller: talkbawt,
+      attention: widget.agentAttention,
       child: home,
     );
   }
@@ -848,6 +945,20 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   ),
                   if (widget.guide case final guide?)
                     GuideOverlay(controller: guide),
+                  // Paired machines: shown above every screen while on.
+                  if (widget.talkbawt case final talkbawt?)
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: PairedModeBanner(
+                            controller: talkbawt,
+                            compact: true,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             );
@@ -919,7 +1030,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                       await widget.hostsController.selfMachineKnown();
                       return widget.hostsController.findById(hostId);
                     },
-                    child: _wrapNotificationOpen(home),
+                    child: _wrapNotificationOpen(_wrapTalkbawtLinks(home)),
                   ),
                 ),
               );
