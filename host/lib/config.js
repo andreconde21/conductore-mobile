@@ -6,6 +6,11 @@
 //
 //   herdr-sidebar      on | off (default on): publish pending approvals and
 //                      today's cost as Herdr sidebar tokens
+//   tmux-live          off (default) | on: push tmux through a control
+//                      client; it shows in the user's tmux (an extra
+//                      attached client, activity bumps, client-attached
+//                      hooks), so it is opt-in and the phone polls tmux
+//                      while it is off
 //   worktree-location  next-to-repo (default) | herdr | a path template
 //                      with <repo> and <branch> (e.g. ~/wt/<repo>/<branch>);
 //                      where a later task start (CON-037) puts worktrees
@@ -16,6 +21,7 @@ const paths = require('./paths')
 
 const KEYS = {
   'herdr-sidebar': { default: 'on', valid: v => v === 'on' || v === 'off' },
+  'tmux-live': { default: 'off', valid: v => v === 'on' || v === 'off' },
   'worktree-location': {
     default: 'next-to-repo',
     valid: v => v === 'next-to-repo' || v === 'herdr' || (v.includes('<branch>') && v.length <= 400 && !/[\n\r\0]/.test(v))

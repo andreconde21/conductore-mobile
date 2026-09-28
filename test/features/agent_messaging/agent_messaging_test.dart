@@ -350,6 +350,13 @@ void main() {
       );
       await prefs.ensureLoaded();
       expect(prefs.herdrSidebar, isTrue);
+      // Live tmux adds a client to the user's tmux: opt-in.
+      expect(prefs.liveTmux, isFalse);
+      await prefs.setLiveTmux(true);
+      expect(
+        prefs.commandsFor(['tmux-live']).single,
+        contains('config set tmux-live on'),
+      );
       expect(
         prefs.worktreeLocation.describe(repo: 'api', branch: 'fix'),
         '../api-wt/fix',
@@ -366,6 +373,7 @@ void main() {
       );
       await again.ensureLoaded();
       expect(again.herdrSidebar, isFalse);
+      expect(again.liveTmux, isTrue);
       expect(again.worktreeLocation, const WorktreeLocation.herdr());
       // A template must name the branch.
       await again.setWorktreeLocation(const WorktreeLocation.custom('~/wt'));

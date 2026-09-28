@@ -92,7 +92,10 @@ class LiveBridge {
   // { agent: sessionId, record: agent|null } for Herdr-only agents.
   // companionAgents(): the daemon's agents (for matching). extraSockets():
   // Herdr sockets hooks reported.
-  constructor ({ onChange, companionAgents = () => [], extraSockets = () => [], now = Date.now, makeHerdr, makeTmux } = {}) {
+  // tmuxEnabled(): the `tmux-live` setting (off by default: the control
+  // client shows in the user's tmux, see docs/herdr-live.md).
+  constructor ({ onChange, companionAgents = () => [], extraSockets = () => [], now = Date.now, makeHerdr, makeTmux, tmuxEnabled = () => false } = {}) {
+    this.tmuxEnabled = tmuxEnabled
     this.onChangeCb = onChange || (() => {})
     this.companionAgents = companionAgents
     this.extraSockets = extraSockets
@@ -126,10 +129,23 @@ class LiveBridge {
     this.running = true
     log('live', 'bridge started')
     this.discover()
-    if (!this.tmux) {
-      this.tmux = this.makeTmux(this.store)
-      this.tmux.start()
+    this.syncTmux()
+  }
+
+  // Runs the tmux control client only while `tmux-live` is on; off, the
+  // server entity says so (`state: "off"`) and the phone polls tmux.
+  syncTmux () {
+    if (!this.running) return
+    if (this.tmuxEnabled()) {
+      if (!this.tmux) {
+        this.store.remove('srv:tmux')
+        this.tmux = this.makeTmux(this.store)
+        this.tmux.start()
+      }
+      return
     }
+    if (this.tmux) { this.tmux.stop(); this.tmux = null }
+    this.store.set('srv:tmux', { kind: 'server', id: 'tmux', type: 'tmux', default: true, session: '', state: 'off', mode: 'poll', version: null, protocol: null, error: null })
   }
 
   // Resolves once every watched server reported its state (up, down or

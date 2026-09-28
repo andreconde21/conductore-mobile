@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 
 /// Canned `herdr` output for the home board tests.
@@ -193,7 +195,29 @@ abstract final class LiveFixtures {
       '"active":true,"panes":2,"activity":1790229500,'
       '"activityFlag":false,"bellFlag":false}}';
 
-  /// `status --live`.
+  /// `status --live` of a companion with `tmux-live` off (the default):
+  /// Herdr pushed, tmux left to the phone.
+  static String get statusTmuxOff {
+    final doc = jsonDecode(status) as Map<String, Object?>;
+    final live = doc['live']! as Map<String, Object?>;
+    final entities = (live['entities']! as Map<String, Object?>)
+      ..removeWhere(
+        (key, _) => key.startsWith('tses:') || key.startsWith('twin:'),
+      )
+      ..['srv:tmux'] = {
+        'kind': 'server',
+        'id': 'tmux',
+        'type': 'tmux',
+        'default': true,
+        'session': '',
+        'state': 'off',
+        'mode': 'poll',
+      };
+    live['entities'] = entities;
+    return jsonEncode(doc);
+  }
+
+  /// `status --live` with `tmux-live` on.
   static const status =
       '{"version":1,"seq":7,"agents":[],"source":"daemon",'
       '"capabilities":["live"],"live":{"running":true,"entities":$entities}}';

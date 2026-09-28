@@ -22,7 +22,12 @@ sessions), and the phone relays between machines.
 | `events` | `--herdr-agents` | change lines for Herdr-only agents are delivered too |
 | `events` | `--only live` | agent change lines are left out (a live-only feed is not woken by them) |
 
-Any of these flags starts the live bridge. It stops again 15 minutes after the
+Any of these flags starts the live bridge. Herdr is always pushed (it has no
+side effects on the user's Herdr). tmux is pushed only with
+`config set tmux-live on` (off by default, see "tmux control mode" below): off,
+the bridge publishes `srv:tmux` with `state: "off"` and runs no control client,
+and the phone lists tmux itself as before (the board with its quiet backoff,
+the tab strip on its timer). It stops again 15 minutes after the
 last request that carried one, so a machine nobody looks at costs nothing.
 
 ### Live lines
@@ -53,6 +58,7 @@ Server ids: `herdr` (the default Herdr session), `herdr@<name>` (a named
 session), `herdr#<8 hex>` (another socket a hook reported), `tmux` (the
 default tmux server). `state`: `none` = the tool is not installed or no
 server exists, `down` = it was up and went away (or its socket refuses).
+`off` = not pushed by choice (tmux with `tmux-live` off): the phone polls it.
 `attached` of a tmux session never counts the companion's own control client.
 Times are epoch seconds (tmux) as tmux reports them.
 
@@ -122,10 +128,15 @@ branch (feat/talkbawt-client, host/lib/state.js), not duplicated here.
 
 `conductore-hostd config [get [<key>] | set <key> <value>]`, stored in
 `~/.conductore/config.json` (0600). Keys: `herdr-sidebar` (`on`/`off`),
+`tmux-live` (`off`/`on`, default off),
 `worktree-location` (`next-to-repo`, `herdr`, or a path template with
 `<repo>` and `<branch>`).
 
 ## tmux control mode: what it does to the user's tmux
+
+Because of the effects below, live tmux is opt-in (André, 2026-09-28: laptop
+use must never be disturbed): the companion's `tmux-live` setting, set from the
+app's "Live tmux updates (adds a hidden tmux client)", is off by default.
 
 Checked on tmux 3.4 on an isolated server inside a container (never against
 a real one). The companion's client is
@@ -180,7 +191,9 @@ state, so it carries the entities (2.9 KB for the setup above).
   Ask and wait with a timeout, Relay the answer). Another machine goes through
   the phone relay (default) or `AgentMessenger.talkbawt`, wired by the
   Talkbawt client with `AgentMessenger.routeSetting`.
-- Settings › Agents › Herdr and worktrees: the sidebar tokens (on) and the
+- Settings › Agents › Herdr and worktrees: "Live tmux updates (adds a hidden
+  tmux client)" (off),
+  the sidebar tokens (on) and the
   worktree location (next to the repo), pushed with `config set` to each
   companion that reports `config`.
 
@@ -192,3 +205,8 @@ one steady minute):
 | Home on screen, monitored machine | 13 (tmux 3, Herdr lists 9, long-poll 1) | 2 (agent long-poll, live long-poll) |
 | Home on screen, another shown machine | 12 | 1 |
 | Terminal page in front | 43 (tab strip 30, port watcher 12, long-poll 1) | 14 (port watcher 12, two long-polls) |
+
+The "Pushed" column is with live tmux on. With it off (the default), Herdr is
+still pushed and tmux is listed as before: home on screen is 5 commands a
+minute on the monitored machine (tmux 3, two long-polls) and 4 on another
+shown machine; the terminal page on a tmux session stays at 43.

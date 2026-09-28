@@ -52,6 +52,10 @@ enum LiveServerState {
   /// Not installed, or no server exists.
   none,
 
+  /// Not pushed by choice (tmux: the `tmux-live` setting is off): callers
+  /// poll that server themselves.
+  off,
+
   /// The companion could not tell.
   unknown,
 }
@@ -105,6 +109,7 @@ class LiveHostModel {
         'up' => LiveServerState.up,
         'down' => LiveServerState.down,
         'none' => LiveServerState.none,
+        'off' => LiveServerState.off,
         _ => LiveServerState.unknown,
       };
 

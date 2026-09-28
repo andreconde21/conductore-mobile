@@ -70,6 +70,18 @@ class _CompanionPreferencesCardsState extends State<CompanionPreferencesCards> {
               onChanged: (on) => unawaited(preferences.setHerdrSidebar(on)),
             ),
             const SizedBox(height: 10),
+            SettingsSwitchCard(
+              switchKey: const ValueKey('tmux-live-switch'),
+              icon: Icons.bolt_outlined,
+              title: 'Live tmux updates (adds a hidden tmux client)',
+              subtitle:
+                  'Off: the phone lists tmux itself. On: tmux changes arrive '
+                  'at once, but tmux ls shows one more attached client and '
+                  'that session\'s activity time and attach hooks move.',
+              value: preferences.liveTmux,
+              onChanged: (on) => unawaited(preferences.setLiveTmux(on)),
+            ),
+            const SizedBox(height: 10),
             SettingsSegmentCard<WorktreeLocationKind>(
               key: const ValueKey('worktree-location-setting'),
               icon: Icons.account_tree_outlined,

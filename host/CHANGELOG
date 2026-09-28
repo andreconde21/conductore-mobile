@@ -6,7 +6,8 @@
 - feat: `--herdr-agents` on `status` and `events` (capability `herdr-agents`): agents only Herdr detects, of any of its kinds, as agent records with `source: "herdr"` and states `working`, `blocked`, `idle`, `done`, `unknown`. New ones show after 5 s, a turn shorter than 5 s never shows as working (so it does not notify "finished"), and a pane the hooks report (same Claude session or same pane) is left out.
 - feat: agent messages (capability `agent-messaging`): `agents`, `agent-send --to <target>... [--wait] [--timeout] [--context-from <label>] [--dry-run]`, `agent-wait`, `agent-read`. Herdr targets go through Herdr's `agent.prompt` (it refuses a blocked agent), tracked sessions through their Herdr pane after checking it still holds them, else through the prompt relay. Timeouts are never retried.
 - feat: Herdr sidebar tokens (capability `herdr-sidebar`): `conductore_pending`, `conductore_cost`, `conductore_today` on the panes of tracked agents, throttled to one report per pane every 10 s and only on change; `config set herdr-sidebar off` clears them.
-- feat: `config [get|set]` (capability `config`): `herdr-sidebar`, `worktree-location` in `~/.conductore/config.json`.
+- feat: `config [get|set]` (capability `config`): `herdr-sidebar`, `tmux-live`, `worktree-location` in `~/.conductore/config.json`.
+- feat: live tmux is opt-in: `config set tmux-live on` (off by default). The control client shows in the user's tmux (one more attached client, activity and last-attached times, client-attached hooks, bare `tmux attach` choosing another session), so while it is off the bridge runs none and publishes `srv:tmux` with `state: "off"`; the phone lists tmux itself as before. Herdr stays pushed.
 - feat: the statusline's session cost is kept as `usage.costUsd`.
 - perf: measured with the bridge on and idle, about 14 ms of daemon CPU a minute and 1 to 3 MB more RSS (see docs/herdr-live.md).
 

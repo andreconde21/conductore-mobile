@@ -79,8 +79,9 @@ class WorktreeLocation {
 }
 
 /// This device's choices the companions act on: Conductore in Herdr's
-/// sidebar (on by default), and the worktree location (next to the repo by
-/// default). A change goes to every monitored machine whose companion takes
+/// sidebar (on by default), live tmux updates (off by default: the control
+/// client shows in the user's tmux), and the worktree location (next to
+/// the repo by default). A change goes to every monitored machine whose companion takes
 /// `config`; a machine that connects later gets them once, when they are
 /// not the defaults. Read lazily (never at app start).
 class CompanionPreferences extends ChangeNotifier {
@@ -111,11 +112,16 @@ class CompanionPreferences extends ChangeNotifier {
   final AgentAttentionController? attention;
 
   bool _herdrSidebar = true;
+  bool _liveTmux = false;
   WorktreeLocation _worktree = const WorktreeLocation.nextToRepo();
   Future<void>? _loading;
   bool _loaded = false;
 
   bool get herdrSidebar => _herdrSidebar;
+
+  /// Whether the companion pushes tmux through a hidden control client
+  /// (`tmux-live`). Off, the phone lists tmux itself, as before.
+  bool get liveTmux => _liveTmux;
   WorktreeLocation get worktreeLocation => _worktree;
   bool get loaded => _loaded;
 
@@ -127,6 +133,7 @@ class CompanionPreferences extends ChangeNotifier {
       final decoded = raw == null ? null : jsonDecode(raw);
       if (decoded is Map) {
         _herdrSidebar = decoded['herdrSidebar'] != false;
+        _liveTmux = decoded['liveTmux'] == true;
         _worktree = WorktreeLocation.parse(decoded['worktreeLocation']);
       }
     } catch (_) {
@@ -141,6 +148,13 @@ class CompanionPreferences extends ChangeNotifier {
     if (_herdrSidebar == on) return;
     _herdrSidebar = on;
     await _changed(['herdr-sidebar']);
+  }
+
+  Future<void> setLiveTmux(bool on) async {
+    await ensureLoaded();
+    if (_liveTmux == on) return;
+    _liveTmux = on;
+    await _changed(['tmux-live']);
   }
 
   Future<void> setWorktreeLocation(WorktreeLocation location) async {
@@ -159,6 +173,7 @@ class CompanionPreferences extends ChangeNotifier {
     await save(
       jsonEncode({
         'herdrSidebar': _herdrSidebar,
+        'liveTmux': _liveTmux,
         'worktreeLocation': _worktree.wire,
       }),
     );
@@ -178,6 +193,7 @@ class CompanionPreferences extends ChangeNotifier {
     await ensureLoaded();
     final keys = [
       if (!_herdrSidebar) 'herdr-sidebar',
+      if (_liveTmux) 'tmux-live',
       if (_worktree.kind != WorktreeLocationKind.nextToRepo)
         'worktree-location',
     ];
@@ -190,6 +206,7 @@ class CompanionPreferences extends ChangeNotifier {
       ConductoreHostAttentionProvider.remoteCommand(
         'config set $key ${shellQuoteArgument(switch (key) {
           'herdr-sidebar' => _herdrSidebar ? 'on' : 'off',
+          'tmux-live' => _liveTmux ? 'on' : 'off',
           _ => _worktree.wire,
         })}',
       ),

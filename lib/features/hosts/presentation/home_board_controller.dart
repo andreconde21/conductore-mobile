@@ -363,6 +363,15 @@ class HomeBoardController extends ChangeNotifier {
   /// Whether the board draws the pushed model instead of polling.
   bool get live => _feed?.support == LiveSupport.supported;
 
+  /// tmux as this board lists it itself while the companion pushes Herdr
+  /// but not tmux (`tmux-live` off, the default): the usual listing, with
+  /// the quiet backoff, at the board's own pace.
+  Timer? _tmuxTimer;
+  int _tmuxSkip = 0;
+  int _tmuxQuiet = 0;
+  bool _tmuxFetching = false;
+  (HomeTmuxStatus, List<TmuxSessionInfo>)? _polledTmux;
+
   static const _timeout = Duration(seconds: 10);
   static const _maxBackoffTicks = 4;
 
@@ -623,6 +632,7 @@ class HomeBoardController extends ChangeNotifier {
   }
 
   void _detachFeed() {
+    _stopTmuxPoll();
     _feed?.removeListener(_onFeed);
     _releaseFeed?.call();
     _feed = null;
@@ -640,41 +650,134 @@ class HomeBoardController extends ChangeNotifier {
         _detachFeed();
         _start();
       case LiveSupport.supported:
-        final next = stateFromLive(feed.model);
-        if (next.sameBoardAs(_state)) return;
-        _state = next;
-        _failures = 0;
-        notifyListeners();
+        final tmuxPushed =
+            feed.model.serverState(LiveHostModel.tmuxServerId) !=
+            LiveServerState.off;
+        if (tmuxPushed) {
+          _stopTmuxPoll();
+        } else {
+          _startTmuxPoll();
+        }
+        _publishLive();
     }
   }
 
+  void _publishLive() {
+    final feed = _feed;
+    if (_disposed || feed == null) return;
+    final next = stateFromLive(feed.model, tmux: _polledTmux);
+    if (next.sameBoardAs(_state)) return;
+    _state = next;
+    _failures = 0;
+    notifyListeners();
+  }
+
+  void _startTmuxPoll() {
+    if (_tmuxTimer != null) return;
+    _tmuxQuiet = 0;
+    _tmuxSkip = 0;
+    _tmuxTimer = Timer.periodic(_pollInterval, (_) {
+      if (_tmuxSkip > 0) {
+        _tmuxSkip -= 1;
+        return;
+      }
+      unawaited(_pollTmux());
+    });
+    unawaited(_pollTmux());
+  }
+
+  void _stopTmuxPoll() {
+    _tmuxTimer?.cancel();
+    _tmuxTimer = null;
+    _polledTmux = null;
+  }
+
+  Future<void> _pollTmux() async {
+    final host = _host;
+    if (_disposed || _tmuxFetching || host == null || !_visible) return;
+    _tmuxFetching = true;
+    try {
+      final runner = _runner ??= _runnerFactory(host);
+      final result = await runner.run(
+        RemoteSessionListing.tmuxListCommand,
+        timeout: _timeout,
+      );
+      if (_disposed || _tmuxTimer == null) return;
+      final polled = _interpretTmux(result);
+      final previous = _polledTmux;
+      final same =
+          previous != null &&
+          previous.$1 == polled.$1 &&
+          listEquals(previous.$2, polled.$2);
+      _tmuxQuiet = same ? _tmuxQuiet + 1 : 0;
+      _tmuxSkip = (_tmuxQuiet ~/ _quietPollsPerStep).clamp(0, _maxQuietSkip);
+      _polledTmux = polled;
+      _publishLive();
+    } catch (_) {
+      // The next ticks try again; Herdr stays pushed meanwhile.
+      _tmuxSkip = _maxBackoffTicks;
+      unawaited(_closeRunner());
+    } finally {
+      _tmuxFetching = false;
+    }
+  }
+
+  static (HomeTmuxStatus, List<TmuxSessionInfo>) _interpretTmux(
+    AgentCommandResult result,
+  ) => switch (RemoteSessionListing.interpretTmux(result)) {
+    RemoteListingAvailable<TmuxSessionInfo>(:final items) => (
+      HomeTmuxStatus.available,
+      items,
+    ),
+    RemoteListingNotInstalled<TmuxSessionInfo>() => (
+      HomeTmuxStatus.notInstalled,
+      const <TmuxSessionInfo>[],
+    ),
+    RemoteListingNotRunning<TmuxSessionInfo>() => (
+      HomeTmuxStatus.available,
+      const <TmuxSessionInfo>[],
+    ),
+    RemoteListingFailed<TmuxSessionInfo>() => (
+      HomeTmuxStatus.failed,
+      const <TmuxSessionInfo>[],
+    ),
+  };
+
   /// The board the pushed [model] shows: the default Herdr server's
-  /// workspaces, tabs and agents, and the tmux sessions.
+  /// workspaces, tabs and agents, and the tmux sessions ([tmux]: what the
+  /// board listed itself while tmux is not pushed).
   @visibleForTesting
-  static HomeBoardState stateFromLive(LiveHostModel model) {
+  static HomeBoardState stateFromLive(
+    LiveHostModel model, {
+    (HomeTmuxStatus, List<TmuxSessionInfo>)? tmux,
+  }) {
     final herdr = LiveHostModel.herdrServerId('');
     final tmuxServer = model.entities['srv:${LiveHostModel.tmuxServerId}'];
     final tmuxError = tmuxServer?['error'];
-    final (tmux, tmuxSessions) = switch (model.serverState(
-      LiveHostModel.tmuxServerId,
-    )) {
-      LiveServerState.up => (HomeTmuxStatus.available, model.tmuxSessions()),
-      LiveServerState.none
-          when tmuxError is String && tmuxError.contains('not installed') =>
-        (HomeTmuxStatus.notInstalled, const <TmuxSessionInfo>[]),
-      LiveServerState.none => (
-        HomeTmuxStatus.available,
-        const <TmuxSessionInfo>[],
-      ),
-      LiveServerState.down => (
-        HomeTmuxStatus.failed,
-        const <TmuxSessionInfo>[],
-      ),
-      LiveServerState.unknown => (
-        HomeTmuxStatus.unknown,
-        const <TmuxSessionInfo>[],
-      ),
-    };
+    final (tmuxStatus, tmuxSessions) =
+        tmux ??
+        switch (model.serverState(LiveHostModel.tmuxServerId)) {
+          LiveServerState.up => (
+            HomeTmuxStatus.available,
+            model.tmuxSessions(),
+          ),
+          LiveServerState.none
+              when tmuxError is String && tmuxError.contains('not installed') =>
+            (HomeTmuxStatus.notInstalled, const <TmuxSessionInfo>[]),
+          LiveServerState.none => (
+            HomeTmuxStatus.available,
+            const <TmuxSessionInfo>[],
+          ),
+          LiveServerState.down => (
+            HomeTmuxStatus.failed,
+            const <TmuxSessionInfo>[],
+          ),
+          // Not pushed (tmux-live off): the board lists it itself.
+          LiveServerState.unknown || LiveServerState.off => (
+            HomeTmuxStatus.unknown,
+            const <TmuxSessionInfo>[],
+          ),
+        };
     final herdrError = model.entities['srv:$herdr']?['error'];
     final now = DateTime.now();
     switch (model.serverState(herdr)) {
@@ -686,7 +789,7 @@ class HomeBoardController extends ChangeNotifier {
             model.herdrTabs(),
             model.herdrAgents(),
           ),
-          tmux: tmux,
+          tmux: tmuxStatus,
           tmuxSessions: tmuxSessions,
           updatedAt: now,
         );
@@ -694,7 +797,7 @@ class HomeBoardController extends ChangeNotifier {
           when herdrError is String && herdrError.contains('not installed'):
         return HomeBoardState(
           phase: HomeBoardPhase.notInstalled,
-          tmux: tmux,
+          tmux: tmuxStatus,
           tmuxSessions: tmuxSessions,
           message: 'Herdr is not installed on this machine.',
           updatedAt: now,
@@ -702,15 +805,15 @@ class HomeBoardController extends ChangeNotifier {
       case LiveServerState.none || LiveServerState.down:
         return HomeBoardState(
           phase: HomeBoardPhase.notRunning,
-          tmux: tmux,
+          tmux: tmuxStatus,
           tmuxSessions: tmuxSessions,
           message: 'Herdr is not running on this machine.',
           updatedAt: now,
         );
-      case LiveServerState.unknown:
+      case LiveServerState.unknown || LiveServerState.off:
         return HomeBoardState(
           phase: HomeBoardPhase.loading,
-          tmux: tmux,
+          tmux: tmuxStatus,
           tmuxSessions: tmuxSessions,
           updatedAt: now,
         );

@@ -52,7 +52,8 @@ const USAGE = `usage: conductore-hostd <command>
   agent-read <target> [--lines 80]
                                   the agent's latest answer, else its screen
   config [get [<key>] | set <key> <value>]
-                                  herdr-sidebar on|off, worktree-location
+                                  herdr-sidebar on|off, tmux-live off|on,
+                                  worktree-location
   decide <requestId> allow|deny|always [--message "..."]
   approve-low [--ids <id,id,...>] [--session <sessionId>]
                                   allow every waiting low-risk request (only

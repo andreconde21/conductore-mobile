@@ -1032,8 +1032,10 @@ findings and the measured cost). In short:
   as ordinary agent records with `source: "herdr"`.
 - The bridge starts with the first such request and stops 15 minutes after the
   last one. It subscribes to each Herdr server's socket (`events.subscribe`,
-  read-only connections) and runs one tmux control client
-  (`-f read-only,ignore-size,no-output`) that is only ever sent list commands.
+  read-only connections). Only with `config set tmux-live on` (off by
+  default: the client shows in the user's tmux) it also runs one tmux control
+  client (`-f read-only,ignore-size,no-output`) that is only ever sent list
+  commands.
 - `agents`, `agent-send`, `agent-wait`, `agent-read`: messages between agents
   on this machine. A blocked target is refused; a timeout is reported as "may
   have arrived" and never retried; `--context-from` frames relayed text as

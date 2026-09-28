@@ -176,10 +176,21 @@ class MultiplexerTabsKeys {
 /// them: the feed, and this session's tabs in its model (null while the
 /// model does not know the session).
 class MultiplexerLiveTabs {
-  const MultiplexerLiveTabs({required this.feed, required this.read});
+  const MultiplexerLiveTabs({
+    required this.feed,
+    required this.read,
+    this.server,
+  });
 
   final LiveHostFeed feed;
   final List<MultiplexerTab>? Function(LiveHostModel model) read;
+
+  /// The live server these tabs come from; when the companion does not
+  /// push it (tmux with `tmux-live` off), the strip polls instead.
+  final String? server;
+
+  bool covers(LiveHostModel model) =>
+      server == null || model.serverState(server!) != LiveServerState.off;
 }
 
 /// The live tab list of one multiplexer session, for the tab strip.
@@ -321,8 +332,9 @@ class MultiplexerTabsController extends ChangeNotifier {
     switch (live.feed.support) {
       case LiveSupport.unknown:
         return;
+      case LiveSupport.supported when !live.covers(live.feed.model):
       case LiveSupport.unsupported:
-        // No push here: poll as before.
+        // No push here (or not for this multiplexer): poll as before.
         _detachFeed();
         if (_visible) {
           _timer?.cancel();

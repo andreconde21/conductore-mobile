@@ -71,7 +71,8 @@ test('status --live brings Herdr as entities, and events deliver changes only to
     return s.live && s.live.entities['pane:herdr:w1:p1'] ? s : null
   })
   assert.equal(st.live.entities['srv:herdr'].state, 'up')
-  assert.equal(st.live.entities['srv:tmux'].state, 'none')
+  // tmux-live is off by default: no control client, the phone polls tmux.
+  assert.equal(st.live.entities['srv:tmux'].state, 'off')
   assert.equal(st.live.entities['ws:herdr:w1'].label, 'alpha')
   const [now] = (await cli('status', '--live')).lines
   const since = now.seq
@@ -107,6 +108,21 @@ test('a Herdr-only agent appears with --herdr-agents, and hides once its hooks r
     return s.agents.some(a => a.sessionId === 'herdr/w1:p1') ? null : s
   })
   assert.ok(gone.agents.some(a => a.sessionId === 'claude-7'))
+})
+
+test('tmux-live on starts the tmux watch (no server here: none); off again stops it', async () => {
+  await cli('config', 'set', 'tmux-live', 'on')
+  const on = await until(async () => {
+    const [s] = (await cli('status', '--live')).lines
+    return s.live.entities['srv:tmux'] && s.live.entities['srv:tmux'].state === 'none' ? s : null
+  })
+  assert.ok(on)
+  await cli('config', 'set', 'tmux-live', 'off')
+  const off = await until(async () => {
+    const [s] = (await cli('status', '--live')).lines
+    return s.live.entities['srv:tmux'].state === 'off' ? s : null
+  })
+  assert.ok(off)
 })
 
 test('the bridge only ever read from Herdr', () => {

@@ -101,15 +101,31 @@ test('a pane that closes removes its agent', () => {
   assert.deepEqual(agents().at(-1), { agent: 'herdr/w1:p1', record: null })
 })
 
-test('the bridge starts on demand and stops when nobody asked for a while', () => {
+test('the bridge starts on demand and stops when nobody asked for a while; tmux only when opted in', () => {
   const started = []
-  const b = new LiveBridge({ makeHerdr: s => ({ start () { started.push(s.id) }, stop () {} }), makeTmux: () => ({ start () { started.push('tmux') }, stop () {} }) })
+  const stopped = []
+  let tmuxOn = false
+  const b = new LiveBridge({
+    makeHerdr: s => ({ start () { started.push(s.id) }, stop () {} }),
+    makeTmux: () => ({ start () { started.push('tmux') }, stop () { stopped.push('tmux') } }),
+    tmuxEnabled: () => tmuxOn
+  })
   process.env.CONDUCTORE_HERDR_SOCKETS = '/nonexistent/h.sock'
   try {
     assert.equal(b.running, false)
     b.touch()
     assert.equal(b.running, true)
+    // Off by default: no control client, and the phone is told to poll.
+    assert.deepEqual(started, ['herdr'])
+    assert.equal(b.store.get('srv:tmux').state, 'off')
+    tmuxOn = true
+    b.syncTmux()
     assert.deepEqual(started, ['herdr', 'tmux'])
+    assert.equal(b.store.get('srv:tmux'), null)
+    tmuxOn = false
+    b.syncTmux()
+    assert.deepEqual(stopped, ['tmux'])
+    assert.equal(b.store.get('srv:tmux').state, 'off')
     b.stop()
     assert.equal(b.running, false)
   } finally {

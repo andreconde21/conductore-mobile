@@ -251,6 +251,7 @@ class Daemon {
     this.live = new LiveBridge({
       onChange: r => this.onLive(r),
       companionAgents: () => Object.values(this.state.agents),
+      tmuxEnabled: () => config.get('tmux-live') === 'on',
       extraSockets: () => [...new Set(Object.values(this.state.agents).map(a => a.herdr && a.herdr.socket).filter(Boolean))]
     })
     this.sidebar = new Sidebar({
@@ -748,6 +749,7 @@ class Daemon {
       case 'config':
         this.reply(c, { ok: true, config: config.reload() }); c.end()
         this.sidebar.update(this.state.agents, { force: true })
+        this.live.syncTmux()
         return
       case 'stop':
         this.reply(c, { ok: true }); c.end()

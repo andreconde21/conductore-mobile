@@ -81,7 +81,12 @@ class NetworkLog {
 
 /// One fake SSH connection: answers the companion, Herdr and tmux.
 class FakeConnection implements StdinAgentCommandRunner {
-  FakeConnection(this.host, this.log, {this.live = false}) {
+  FakeConnection(
+    this.host,
+    this.log, {
+    this.live = false,
+    this.tmuxLive = false,
+  }) {
     log.open(host);
   }
 
@@ -91,6 +96,9 @@ class FakeConnection implements StdinAgentCommandRunner {
   /// A companion that pushes Herdr and tmux (`--live`); else one that
   /// ignores the flag, like 1.1.0.
   final bool live;
+
+  /// With `tmux-live` on (off by default): tmux pushed too.
+  final bool tmuxLive;
   bool _closed = false;
 
   @override
@@ -104,7 +112,7 @@ class FakeConnection implements StdinAgentCommandRunner {
     if (command.contains('conductore-hostd version')) {
       out = '{"version":"1.0.0"}';
     } else if (live && command.contains('status --live')) {
-      out = LiveFixtures.status;
+      out = tmuxLive ? LiveFixtures.status : LiveFixtures.statusTmuxOff;
     } else if (command.contains('conductore-hostd status')) {
       out =
           '{"version":1,"seq":1,"agents":[{"sessionId":"s-1","name":"api",'
@@ -151,7 +159,7 @@ class FakeConnection implements StdinAgentCommandRunner {
 enum Scene { home, background, chat, terminal }
 
 void main() {
-  void measure(Scene scene, {bool live = false}) {
+  void measure(Scene scene, {bool live = false, bool tmuxLive = false}) {
     fakeAsync((async) {
       final log = NetworkLog();
       // The app's side channels, over fake SSH connections.
@@ -160,7 +168,8 @@ void main() {
         localRunner: () => throw StateError('no local machine here'),
         sshFiles: NoNetworkSftpRepository(),
         localFiles: NoNetworkSftpRepository(),
-        sshRunner: (host) => FakeConnection(host.id, log, live: live),
+        sshRunner: (host) =>
+            FakeConnection(host.id, log, live: live, tmuxLive: tmuxLive),
       );
       final open = channels.runner;
 
@@ -228,6 +237,7 @@ void main() {
           live: MultiplexerLiveTabs(
             feed: feed,
             read: (model) => model.tmuxWindows('main'),
+            server: 'tmux',
           ),
         )..setVisible(true);
         preview = PreviewReadyController(
@@ -242,7 +252,8 @@ void main() {
 
       final monitored = machines.first.id;
       final other = machines[1].id;
-      perfReport('network.${scene.name}${live ? '.live' : ''}', {
+      final variant = live ? (tmuxLive ? '.live' : '.live-tmux-off') : '';
+      perfReport('network.${scene.name}$variant', {
         'connections_opened_to_settle': openedToSettle,
         'monitored_connections': log.peakLive[monitored] ?? 0,
         'monitored_opened_per_min': log.opened[monitored] ?? 0,
@@ -258,19 +269,20 @@ void main() {
       // monitor, board, tab strip and preview watcher each had one).
       expect(log.peakLive[monitored] ?? 0, lessThanOrEqualTo(1));
       if (live) {
-        // Pushed: nothing lists Herdr or tmux on a timer any more.
+        // Pushed: nothing lists Herdr on a timer any more, nor tmux when
+        // the machine pushes it too.
         for (final kind in [
-          'tmux',
           'herdr-workspaces',
           'herdr-tabs',
           'herdr-agents',
+          if (tmuxLive) 'tmux',
         ]) {
           expect(log.commands[monitored]?[kind] ?? 0, 0, reason: kind);
           expect(log.commands[other]?[kind] ?? 0, 0, reason: kind);
         }
         if (scene == Scene.home) {
-          expect(log.total(other), lessThanOrEqualTo(2));
-          expect(log.total(monitored), lessThanOrEqualTo(6));
+          expect(log.total(other), lessThanOrEqualTo(tmuxLive ? 2 : 6));
+          expect(log.total(monitored), lessThanOrEqualTo(tmuxLive ? 6 : 10));
         }
       }
       chat?.dispose();
@@ -291,9 +303,19 @@ void main() {
   test('chat view open', () => measure(Scene.chat));
   test('terminal page in front', () => measure(Scene.terminal));
   // A companion that pushes Herdr and tmux (CON-050).
+  // Herdr pushed, tmux polled (`tmux-live` off, the default).
   test('home on screen, pushed', () => measure(Scene.home, live: true));
   test(
     'terminal page in front, pushed',
     () => measure(Scene.terminal, live: true),
+  );
+  // tmux pushed too (`tmux-live` on).
+  test(
+    'home on screen, pushed with live tmux',
+    () => measure(Scene.home, live: true, tmuxLive: true),
+  );
+  test(
+    'terminal page in front, pushed with live tmux',
+    () => measure(Scene.terminal, live: true, tmuxLive: true),
   );
 }

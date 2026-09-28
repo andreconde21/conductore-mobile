@@ -112,6 +112,18 @@ void main() {
       expect(model.tmuxWindows('nope'), isNull);
     });
 
+    test('a tmux server not pushed by choice reads as off', () {
+      final off = LiveHostModel.fromEntities(
+        ((jsonDecode(LiveFixtures.statusTmuxOff)
+                    as Map<String, Object?>)['live']!
+                as Map<String, Object?>)['entities']!
+            as Map,
+      );
+      expect(off.serverState('tmux'), LiveServerState.off);
+      expect(off.tmuxSessions(), isEmpty);
+      expect(off.serverState('herdr'), LiveServerState.up);
+    });
+
     test('changes apply in order; null removes', () {
       final next = model.apply([
         const LiveChange(sequence: 8, key: 'pane:herdr:w2:p1', entity: null),
@@ -250,6 +262,35 @@ void main() {
       });
     });
 
+    test('tmux-live off (the default): Herdr pushed, tmux listed by the board, '
+        'backing off while quiet', () {
+      fakeAsync((async) {
+        final companion = _TmuxOffCompanion();
+        final hub = LiveHostHub(runnerFactory: (_) => companion);
+        final board = HomeBoardController(
+          runnerFactory: (_) => companion,
+          liveFeed: hub.feedFor,
+        )..selectHost(buildHost('m'), connectedBefore: true);
+        board.setVisible(true);
+        async.elapse(const Duration(seconds: 1));
+        expect(board.live, isTrue);
+        expect(board.state.phase, HomeBoardPhase.ready);
+        expect(board.state.workspaces, hasLength(2));
+        expect(board.state.tmuxSessions.map((s) => s.name), ['main', 'build']);
+        int tmuxPolls() =>
+            companion.commands.where((c) => c.contains('tmux list')).length;
+        async.elapse(const Duration(minutes: 2));
+        final settled = tmuxPolls();
+        async.elapse(const Duration(minutes: 1));
+        // 12 a minute at 5 s, 3 once quiet (20 s).
+        final perMinute = tmuxPolls() - settled;
+        expect(perMinute, lessThanOrEqualTo(4));
+        expect(companion.commands.where((c) => c.contains('herdr ')), isEmpty);
+        board.dispose();
+        hub.dispose();
+      });
+    });
+
     test('an older companion: the board polls as before', () {
       fakeAsync((async) {
         final runner = HerdrFakeRunner(tmuxSessions: TmuxFixtures.sessions);
@@ -273,6 +314,29 @@ void main() {
   });
 
   group('tab strip', () {
+    test('tmux not pushed (tmux-live off): the strip polls tmux itself', () {
+      fakeAsync((async) {
+        final companion = LiveCompanion(status: LiveFixtures.statusTmuxOff);
+        final feed = LiveHostFeed(
+          host: buildHost('m'),
+          runnerFactory: () => companion,
+        );
+        final backend = _CountingBackend();
+        final tabs = MultiplexerTabsController(
+          backend: backend,
+          live: MultiplexerLiveTabs(
+            feed: feed,
+            read: (model) => model.tmuxWindows('main'),
+            server: LiveHostModel.tmuxServerId,
+          ),
+        )..setVisible(true);
+        async.elapse(const Duration(seconds: 10));
+        expect(backend.lists, greaterThanOrEqualTo(4));
+        tabs.dispose();
+        feed.dispose();
+      });
+    });
+
     test('pushed windows replace the 2 s poll', () {
       fakeAsync((async) {
         final companion = LiveCompanion();
@@ -349,4 +413,25 @@ class _CountingBackend implements MultiplexerTabsBackend {
 
   @override
   Future<void> dispose() async {}
+}
+
+/// A companion with `tmux-live` off that answers the board's own tmux
+/// listing like tmux would.
+class _TmuxOffCompanion extends LiveCompanion {
+  _TmuxOffCompanion() : super(status: LiveFixtures.statusTmuxOff);
+
+  @override
+  Future<AgentCommandResult> run(String command, {required Duration timeout}) {
+    if (command.contains('tmux list-sessions')) {
+      commands.add(command);
+      return Future.value(
+        const AgentCommandResult(
+          stdout: TmuxFixtures.sessions,
+          stderr: '',
+          exitCode: 0,
+        ),
+      );
+    }
+    return super.run(command, timeout: timeout);
+  }
 }

@@ -777,6 +777,8 @@ class _TerminalPageState extends State<TerminalPage>
                           flow.herdr.workspaceOf(session) ?? '',
                     )
                   : (model) => model.tmuxWindows(tmuxSession!),
+              // tmux is pushed only with `tmux-live` on (off by default).
+              server: herdr ? null : LiveHostModel.tmuxServerId,
             ),
       agentStateFor: (tab) => _agentStateOfTab(
         session,
