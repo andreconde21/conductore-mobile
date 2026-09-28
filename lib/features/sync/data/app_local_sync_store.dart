@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/continuity/domain/continuity_sync_port.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
@@ -60,6 +61,8 @@ class SecureJsonMapStore implements JsonMapStore {
 /// * `setting:<name>`: one [AppSettingsCodec] entry.
 /// * `connect:<hostId>`, `recentDirs:<hostId>`: connect-picker memory.
 /// * `sessions`: the session-restore list.
+/// * `continuity:<device id>`: where each device is and its drafts (see
+///   [ContinuitySyncPort]); this device writes only its own.
 class AppLocalSyncStore implements LocalSyncStore {
   AppLocalSyncStore({
     required this.hosts,
@@ -71,6 +74,7 @@ class AppLocalSyncStore implements LocalSyncStore {
     this.recentDirectories,
     this.ready,
     this.changes,
+    this.continuity,
   });
 
   final HostsController hosts;
@@ -91,6 +95,9 @@ class AppLocalSyncStore implements LocalSyncStore {
   /// Told after every [apply] that wrote something, so live pages reload
   /// what they cached (imports and sync pulls).
   final LocalDataChanges? changes;
+
+  /// Where each device is; null leaves continuity out.
+  final ContinuitySyncPort? continuity;
 
   static const _hostSecretFields = ['password', 'privateKey', 'passphrase'];
   static const _hubLoginFields = ['authMethod', 'externalAuthOfferKey'];
@@ -190,6 +197,15 @@ class AppLocalSyncStore implements LocalSyncStore {
       final snapshot = await sessions.load();
       if (!snapshot.isEmpty) out[SyncKeys.sessionsKey] = snapshot.toJson();
     }
+
+    final continuity = this.continuity;
+    final deviceId = options.deviceId;
+    if (on.contains(SyncCategory.continuity) &&
+        continuity != null &&
+        deviceId != null) {
+      final record = await continuity.ownRecord(deviceId);
+      if (record != null) out[SyncKeys.continuity(deviceId)] = record;
+    }
     return out;
   }
 
@@ -249,7 +265,13 @@ class AppLocalSyncStore implements LocalSyncStore {
     try {
       await _apply(values, changedKeys, options, replace: replace);
     } finally {
-      if (changedKeys.isNotEmpty) changes?.announce(changedKeys);
+      // Continuity has its own listeners: another device moving must not
+      // make every page reload its saved data.
+      final announced = {
+        for (final key in changedKeys)
+          if (SyncCategory.ofKey(key) != SyncCategory.continuity) key,
+      };
+      if (announced.isNotEmpty) changes?.announce(announced);
     }
   }
 
@@ -302,6 +324,18 @@ class AppLocalSyncStore implements LocalSyncStore {
     }
     if (on.contains(SyncCategory.connections)) {
       await _applyConnections(values, changedKeys);
+    }
+    final continuity = this.continuity;
+    final deviceId = options.deviceId;
+    if (on.contains(SyncCategory.continuity) &&
+        continuity != null &&
+        deviceId != null &&
+        changed((key) => key.startsWith('${SyncKeys.continuityPrefix}:'))) {
+      // Every device's record comes along, so continuity sees them all.
+      await continuity.receive({
+        for (final MapEntry(:key, :value) in values.entries)
+          if (SyncKeys.isForeign(key, deviceId) && value != null) key: value,
+      }, deviceId: deviceId);
     }
     if (on.contains(SyncCategory.sessions) &&
         changedKeys.contains(SyncKeys.sessionsKey)) {

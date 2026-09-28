@@ -127,6 +127,11 @@ class SyncMergeResult {
 /// Records of disabled or unknown categories pass through untouched, so a
 /// device never drops what it does not show.
 ///
+/// Another device's record of a per-device category
+/// ([SyncKeys.isForeign]) is only read here: never a local edit or
+/// delete, whatever [local] holds, and applied when the hub's copy is not
+/// the one this device last synced.
+///
 /// Local edits are stamped [editTime] (when the app first noticed a
 /// change since the last sync; defaults to [now]), so an edit made offline
 /// keeps its age against edits other devices made meanwhile.
@@ -188,8 +193,14 @@ SyncMergeResult mergeSync({
   // Edits made while the key's category was off: the clock it was synced
   // as before.
   final pausedEdits = <String, SyncClock>{};
+  bool foreign(String key) => SyncKeys.isForeign(key, deviceId);
+
   for (final key in {...base.keys, ...local.keys}) {
     final baseEntry = base[key];
+    if (foreign(key)) {
+      if (baseEntry != null) localRecords[key] = baseEntry.record;
+      continue;
+    }
     if (!isEnabled(key)) {
       if (baseEntry != null) localRecords[key] = baseEntry.record;
       continue;
@@ -300,6 +311,18 @@ SyncMergeResult mergeSync({
   for (final key in {...merged.keys, ...local.keys}) {
     if (!isEnabled(key)) continue;
     final record = merged[key];
+    if (foreign(key)) {
+      final synced = base[key]?.record;
+      final same = record == null || record.deleted
+          ? synced == null || synced.deleted
+          : synced != null &&
+                synced.clock == record.clock &&
+                synced.hash == record.hash;
+      if (!same) {
+        toApply[key] = record == null || record.deleted ? null : record.value;
+      }
+      continue;
+    }
     final localValue = local[key];
     if (record == null || record.deleted) {
       if (localValue != null) toApply[key] = null;

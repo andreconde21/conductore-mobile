@@ -8,6 +8,7 @@ class LocalSyncOptions {
     required this.categories,
     this.hubHostId,
     this.includeHardwareKeys = false,
+    this.deviceId,
   });
 
   final Set<SyncCategory> categories;
@@ -19,6 +20,11 @@ class LocalSyncOptions {
   /// Hardware-key stubs go into file backups with credentials, never into
   /// sync.
   final bool includeHardwareKeys;
+
+  /// This device's sync id: per-device records (see
+  /// `SyncCategory.perDevice`) are written under it. Null outside sync
+  /// (backups), which leaves them out.
+  final String? deviceId;
 }
 
 /// This device's data as sync records (key to JSON value), and the way

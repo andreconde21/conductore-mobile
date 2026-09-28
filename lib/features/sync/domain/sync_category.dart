@@ -23,7 +23,13 @@ enum SyncCategory {
   connections,
 
   /// The open-session list the app restores on launch.
-  sessions;
+  sessions,
+
+  /// Where each device is (session, view, Chat View position), its recent
+  /// places and its unsent Chat View drafts, so another device can offer
+  /// to continue there. One record per device, written only by that
+  /// device (see [SyncKeys.continuity]).
+  continuity;
 
   String get label => switch (this) {
     SyncCategory.machines => 'Saved machines',
@@ -32,6 +38,7 @@ enum SyncCategory {
     SyncCategory.appearance => 'Appearance and terminal settings',
     SyncCategory.connections => 'Connect preferences and recents',
     SyncCategory.sessions => 'Session list',
+    SyncCategory.continuity => 'Continue where you left off',
   };
 
   String get description => switch (this) {
@@ -47,6 +54,9 @@ enum SyncCategory {
     SyncCategory.connections =>
       'Remembered connect choices, recent sessions and directories.',
     SyncCategory.sessions => 'The sessions reopened when the app starts.',
+    SyncCategory.continuity =>
+      'Where you are on each device and your unsent Chat View drafts, so '
+          'another device offers to open the same place.',
   };
 
   /// Categories a new sync setup turns on: everything except credentials.
@@ -56,7 +66,21 @@ enum SyncCategory {
     SyncCategory.appearance,
     SyncCategory.connections,
     SyncCategory.sessions,
+    SyncCategory.continuity,
   };
+
+  /// Categories added after sync shipped that a setup made before them
+  /// turns on too (see `SyncConfig.fromJson`).
+  static const addedOn = {SyncCategory.continuity};
+
+  /// Categories whose records are one per device (`<prefix>:<device id>`):
+  /// each device writes its own and only reads the others' (see
+  /// [SyncKeys.isForeign]).
+  static const perDevice = {SyncCategory.continuity};
+
+  /// Categories never written to backup files: they describe a moment,
+  /// not settings to bring back.
+  static const notBackedUp = {SyncCategory.continuity};
 
   static SyncCategory? parse(Object? raw) =>
       SyncCategory.values.where((c) => c.name == raw).firstOrNull;
@@ -75,6 +99,7 @@ enum SyncCategory {
       SyncKeys.connectPrefix ||
       SyncKeys.recentDirsPrefix => SyncCategory.connections,
       SyncKeys.sessionsKey => SyncCategory.sessions,
+      SyncKeys.continuityPrefix => SyncCategory.continuity,
       _ => null,
     };
   }
@@ -91,6 +116,7 @@ abstract final class SyncKeys {
   static const connectPrefix = 'connect';
   static const recentDirsPrefix = 'recentDirs';
   static const sessionsKey = 'sessions';
+  static const continuityPrefix = 'continuity';
 
   static String host(String id) => '$hostPrefix:$id';
   static String hostSecret(String id) => '$secretPrefix:host:$id';
@@ -103,6 +129,17 @@ abstract final class SyncKeys {
   static String setting(String name) => '$settingPrefix:$name';
   static String connect(String hostId) => '$connectPrefix:$hostId';
   static String recentDirs(String hostId) => '$recentDirsPrefix:$hostId';
+  static String continuity(String deviceId) => '$continuityPrefix:$deviceId';
+
+  /// Whether [key] is another device's record of a per-device category:
+  /// this device reads it and passes it on, never edits or deletes it.
+  static bool isForeign(String key, String deviceId) {
+    final category = SyncCategory.ofKey(key);
+    if (category == null || !SyncCategory.perDevice.contains(category)) {
+      return false;
+    }
+    return key != '${key.split(':').first}:$deviceId';
+  }
 
   /// The part after the first `prefix:`.
   static String idOf(String key, String prefix) =>
