@@ -16,13 +16,21 @@
 // alias, else a masked email: a***@d***.com), active, disabled and the
 // limit windows. Never an email, an organisation or a token; the cache
 // holds the same masked rows.
+//
+// `cswap list` shows only the accounts cswap manages. When none of them is
+// the live Claude login (a `/login` to an account never `cswap add`ed),
+// `cswap status --json` names that login and it is added as one more row:
+// `slot: null`, `managed: false`, active, no windows (CON-057). For an
+// unmanaged login cswap answers from ~/.claude.json alone, no network.
+// A new `cswap add` or `remove` rewrites cswap's sequence.json, which
+// drops the cache at once rather than after the TTL.
 
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawn } = require('child_process')
 
-const CACHE_VERSION = 1
+const CACHE_VERSION = 2
 const TTL_MS = 60 * 1000
 const STALE_MAX_MS = 15 * 60 * 1000
 const LIST_TIMEOUT_MS = 3000
@@ -134,6 +142,42 @@ function parseList (obj, now = Date.now()) {
   return { activeSlot, accounts }
 }
 
+// `cswap status --json` -> the unmanaged live login as a row, or null
+// (none, managed, or anything else).
+function unmanagedRow (obj) {
+  const a = obj && typeof obj === 'object' ? obj.active : null
+  if (!a || typeof a !== 'object' || a.managed !== false) return null
+  const label = maskEmail(a.email)
+  if (!label) return null
+  return { slot: null, alias: null, label, active: true, disabled: false, managed: false, status: null, limits: {} }
+}
+
+// cswap's account store (Linux: $XDG_DATA_HOME/claude-swap, else
+// ~/.local/share/claude-swap; macOS: ~/.claude-swap-backup).
+function sequenceFile (env = process.env) {
+  const home = env.HOME || os.homedir()
+  const xdg = env.XDG_DATA_HOME
+  const dirs = [
+    xdg && path.isAbsolute(xdg) ? path.join(xdg, 'claude-swap') : path.join(home, '.local', 'share', 'claude-swap'),
+    path.join(home, '.claude-swap-backup')
+  ]
+  for (const d of dirs) {
+    const f = path.join(d, 'sequence.json')
+    if (fs.existsSync(f)) return f
+  }
+  return null
+}
+
+// When cswap's account list last changed (0 when unknown).
+function listMtime (env) {
+  try {
+    const f = sequenceFile(env)
+    return f ? fs.statSync(f).mtimeMs : 0
+  } catch {
+    return 0
+  }
+}
+
 // Runs cswap in its own process group. Resolves { code, stdout, timedOut,
 // spawnError }; stderr is dropped (it may name accounts).
 function run (bin, args, { timeoutMs, env = process.env }) {
@@ -207,7 +251,7 @@ function forget (file) {
 }
 
 // opts: { env, now, cacheFile, bin (tests; null = absent), timeoutMs,
-//         ttlMs, runner (tests) }
+//         ttlMs, runner (tests), listMtime (tests: sequence.json's mtime) }
 // Resolves null without cswap, else
 // { present: true, activeSlot, accounts, fetchedAt, stale?, error? }.
 async function accounts (opts = {}) {
@@ -217,22 +261,29 @@ async function accounts (opts = {}) {
   const now = opts.now || Date.now()
   const ttl = opts.ttlMs ?? TTL_MS
   const cached = readCache(opts.cacheFile)
+  const mtime = opts.listMtime !== undefined ? opts.listMtime : listMtime(env)
   const usable = cached && cached.bin === bin && cached.at <= now ? cached : null
   const lastGood = usable && usable.data && usable.goodAt && now - usable.goodAt < STALE_MAX_MS ? usable : null
   const answer = (data, fetchedAt, extra) => ({ present: true, activeSlot: data.activeSlot, accounts: data.accounts, fetchedAt, ...extra })
-  if (usable && now - usable.at < ttl) {
+  if (usable && now - usable.at < ttl && (usable.mtime || 0) === mtime) {
     if (!usable.failed) return answer(usable.data, usable.goodAt)
     if (lastGood) return answer(lastGood.data, lastGood.goodAt, { stale: true })
     return { present: true, activeSlot: null, accounts: [], fetchedAt: null, error: 'unavailable' }
   }
   const r = await (opts.runner || run)(bin, ['list', '--json'], { timeoutMs: opts.timeoutMs || LIST_TIMEOUT_MS, env })
   const data = !r.spawnError && !r.timedOut && r.code === 0 ? parseList(parseJson(r.stdout), now) : null
+  if (data && data.activeSlot == null && !data.accounts.some(a => a.active)) {
+    // No managed account is live: maybe an unmanaged login is.
+    const s = await (opts.runner || run)(bin, ['status', '--json'], { timeoutMs: opts.timeoutMs || LIST_TIMEOUT_MS, env })
+    const row = !s.spawnError && !s.timedOut && s.code === 0 ? unmanagedRow(parseJson(s.stdout)) : null
+    if (row) data.accounts.push(row)
+  }
   if (data) {
-    writeCache(opts.cacheFile, { bin, at: now, goodAt: now, data })
+    writeCache(opts.cacheFile, { bin, at: now, mtime, goodAt: now, data })
     return answer(data, now)
   }
   // Remember the failure for a TTL, keeping the last good rows.
-  writeCache(opts.cacheFile, { bin, at: now, failed: true, goodAt: lastGood ? lastGood.goodAt : null, data: lastGood ? lastGood.data : null })
+  writeCache(opts.cacheFile, { bin, at: now, mtime, failed: true, goodAt: lastGood ? lastGood.goodAt : null, data: lastGood ? lastGood.data : null })
   const error = r.timedOut ? 'timeout' : 'unavailable'
   if (lastGood) return answer(lastGood.data, lastGood.goodAt, { stale: true, error })
   return { present: true, activeSlot: null, accounts: [], fetchedAt: null, error }
@@ -260,7 +311,7 @@ async function switchAccount (opts = {}) {
   // masked email.
   let aliases = new Map()
   const listed = await accounts({ ...opts, bin, ttlMs: 0 })
-  if (listed) aliases = new Map(listed.accounts.map(a => [a.slot, a.label]))
+  if (listed) aliases = new Map(listed.accounts.filter(a => a.slot != null).map(a => [a.slot, a.label]))
   const ref = x => x && typeof x === 'object'
     ? { slot: Number.isInteger(x.number) ? x.number : null, label: aliases.get(x.number) || maskEmail(x.email) }
     : null
@@ -274,4 +325,4 @@ async function switchAccount (opts = {}) {
   }
 }
 
-module.exports = { findCswap, maskEmail, maskEmails, parseList, parseJson, accounts, switchAccount, run, TTL_MS, STALE_MAX_MS }
+module.exports = { findCswap, maskEmail, maskEmails, parseList, parseJson, unmanagedRow, sequenceFile, accounts, switchAccount, run, TTL_MS, STALE_MAX_MS }

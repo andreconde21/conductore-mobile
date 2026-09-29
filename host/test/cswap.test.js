@@ -21,22 +21,31 @@ function tmpDir () {
   return tempDir('conductore-cswap-')
 }
 
-// A fake cswap: prints [stdout] for `list`, [switchOut] for `switch`,
-// after [sleep] seconds; logs its arguments.
-function fakeCswap (dir, { stdout = FIXTURE, switchOut = '', sleep = 0 } = {}) {
+// A fake cswap: prints [stdout] for `list`, [statusOut] for `status`,
+// [switchOut] for `switch`, after [sleep] seconds; logs its arguments.
+function fakeCswap (dir, { stdout = FIXTURE, statusOut = '', switchOut = '', sleep = 0 } = {}) {
   const bin = path.join(dir, 'cswap')
   fs.writeFileSync(path.join(dir, 'list.out'), stdout)
+  fs.writeFileSync(path.join(dir, 'status.out'), statusOut)
   fs.writeFileSync(path.join(dir, 'switch.out'), switchOut)
   fs.writeFileSync(bin, `#!/bin/sh
 echo "$*" >> "${dir}/calls"
 ${sleep ? `sleep ${sleep}` : ''}
 case "$1" in
   list) cat "${dir}/list.out" ;;
+  status) cat "${dir}/status.out" ;;
   switch) cat "${dir}/switch.out" ;;
 esac
 `, { mode: 0o755 })
   return bin
 }
+
+// André's setup on development-central (CON-057): two managed accounts,
+// neither live, and the live login a third account cswap does not manage.
+function noneActive (accounts = JSON.parse(FIXTURE).accounts.slice(0, 2)) {
+  return JSON.stringify({ schemaVersion: 1, activeAccountNumber: null, accounts: accounts.map(a => ({ ...a, active: false })) })
+}
+const UNMANAGED = JSON.stringify({ schemaVersion: 1, active: { email: 'dave@example.com', managed: false } })
 
 const calls = dir => { try { return fs.readFileSync(path.join(dir, 'calls'), 'utf8').trim().split('\n') } catch { return [] } }
 
@@ -219,6 +228,57 @@ test('switchAccount: errors are masked; no cswap is an error', async () => {
   assert.equal((await cswap.switchAccount({ bin: null, slot: 1 })).error, 'cswap-missing')
 })
 
+test('accounts: an unmanaged live login is a third, active row without a slot', async () => {
+  const dir = tmpDir()
+  const bin = fakeCswap(dir, { stdout: noneActive(), statusOut: UNMANAGED })
+  const r = await cswap.accounts({ bin, cacheFile: path.join(dir, 'c.json'), listMtime: 1 })
+  assert.deepEqual(calls(dir), ['list --json', 'status --json'])
+  assert.equal(r.accounts.length, 3)
+  assert.deepEqual(r.accounts.map(a => [a.slot, a.label, a.active]), [[1, 'work', false], [2, 'home', false], [null, 'd***@e***.com', true]])
+  assert.deepEqual(r.accounts[2], { slot: null, alias: null, label: 'd***@e***.com', active: true, disabled: false, managed: false, status: null, limits: {} })
+  assert.ok(!JSON.stringify(r).includes('dave'))
+  assert.ok(!fs.readFileSync(path.join(dir, 'c.json'), 'utf8').includes('dave'))
+})
+
+test('accounts: status is asked only when no managed account is live', async () => {
+  const dir = tmpDir()
+  const bin = fakeCswap(dir, { statusOut: UNMANAGED })
+  const r = await cswap.accounts({ bin, cacheFile: path.join(dir, 'c.json'), listMtime: 1 })
+  assert.deepEqual(calls(dir), ['list --json'])
+  assert.equal(r.accounts.length, 3)
+  // A managed live login (or no login, or a broken status) adds nothing.
+  for (const statusOut of [JSON.stringify({ schemaVersion: 1, active: { number: 1, email: 'alice@example.com', managed: true } }), JSON.stringify({ schemaVersion: 1, active: null }), 'Traceback']) {
+    const d = tmpDir()
+    const b = fakeCswap(d, { stdout: noneActive(), statusOut })
+    const x = await cswap.accounts({ bin: b, cacheFile: path.join(d, 'c.json'), listMtime: 1 })
+    assert.deepEqual(x.accounts.map(a => a.slot), [1, 2], statusOut)
+  }
+})
+
+test('accounts: an account added while the companion runs shows at once', async () => {
+  const dir = tmpDir()
+  const data = path.join(dir, 'data')
+  fs.mkdirSync(path.join(data, 'claude-swap'), { recursive: true })
+  const seq = path.join(data, 'claude-swap', 'sequence.json')
+  fs.writeFileSync(seq, '{}')
+  fs.utimesSync(seq, new Date(NOW - 60000), new Date(NOW - 60000))
+  const env = { PATH: process.env.PATH, HOME: dir, XDG_DATA_HOME: data }
+  assert.equal(cswap.sequenceFile(env), seq)
+  const two = JSON.parse(FIXTURE).accounts.slice(0, 2)
+  const bin = fakeCswap(dir, { stdout: JSON.stringify({ ...JSON.parse(FIXTURE), accounts: two }) })
+  const cacheFile = path.join(dir, 'c.json')
+  assert.equal((await cswap.accounts({ bin, env, cacheFile, now: NOW })).accounts.length, 2)
+  // `cswap add` of a third: the list and sequence.json change.
+  fakeCswap(dir)
+  fs.utimesSync(seq, new Date(NOW), new Date(NOW))
+  const r = await cswap.accounts({ bin, env, cacheFile, now: NOW + 1000 })
+  assert.equal(r.accounts.length, 3)
+  assert.equal(calls(dir).filter(c => c === 'list --json').length, 2)
+  // Unchanged since: the cache answers.
+  await cswap.accounts({ bin, env, cacheFile, now: NOW + 2000 })
+  assert.equal(calls(dir).filter(c => c === 'list --json').length, 2)
+})
+
 function hostd (args, env) {
   return new Promise(resolve => {
     execFile(process.execPath, [HOSTD, ...args], { env: { ...process.env, ...env } }, (err, stdout) =>
@@ -238,6 +298,19 @@ test('CLI: usage carries claude.accounts and claude.cswap with a cswap', async (
   assert.equal(r.json.claude.cswap.activeSlot, 1)
   assert.deepEqual(r.json.claude.accounts.map(a => a.slot), [1, 2, 3])
   assert.ok(fs.existsSync(path.join(dir, 'chome', 'cswap-cache.json')))
+  assert.ok(!JSON.stringify(r.json).includes('@example'))
+})
+
+test('CLI: usage lists the unmanaged live login as a third account', async () => {
+  const dir = tmpDir()
+  const home = path.join(dir, 'home')
+  fs.mkdirSync(home)
+  const bin = fakeCswap(dir, { stdout: noneActive(), statusOut: UNMANAGED })
+  const env = { HOME: home, XDG_DATA_HOME: path.join(dir, 'xdg'), CONDUCTORE_HOME: path.join(dir, 'chome'), CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', CONDUCTORE_CSWAP: bin }
+  const r = await hostd(['usage', '--days', '1'], env)
+  assert.equal(r.code, 0)
+  assert.equal(r.json.claude.cswap.activeSlot, null)
+  assert.deepEqual(r.json.claude.accounts.map(a => [a.slot, a.label, a.active]), [[1, 'work', false], [2, 'home', false], [null, 'd***@e***.com', true]])
   assert.ok(!JSON.stringify(r.json).includes('@example'))
 })
 
