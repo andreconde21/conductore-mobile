@@ -10,7 +10,7 @@ import 'package:flutter/foundation.dart';
 
 /// [hosts] without the session hosts that were saved as machines: a
 /// copy of another saved machine with that machine's id and name plus a
-/// session's (`<id>#herdr:w1`, "<name>: <workspace>") and the same
+/// session's (`<id>#herdr:w1`, `<name>: <workspace>`) and the same
 /// address, port and user. Earlier builds saved one when a Herdr workspace
 /// was opened from an agent (CON-056). Anything else stays, even a close
 /// copy the user made.
