@@ -887,6 +887,14 @@ class TerminalSessionController extends ChangeNotifier {
       _deliverInput(normalized);
       return;
     }
+    if (isMouseReport(normalized)) {
+      // A tap or a scroll on the screen the user sees, which is whatever
+      // the multiplexer shows: not typed input, so it is never held (nor
+      // counted as waiting). Dropped while input is held: the screen is
+      // about to change, or shows another place than the session's own.
+      if (!_inputHold.holding) _deliverInput(normalized);
+      return;
+    }
     if (_inputHold.offer(normalized)) {
       return;
     }
@@ -898,6 +906,15 @@ class TerminalSessionController extends ChangeNotifier {
     }
     _deliverInput(normalized);
   }
+
+  static final _mouseReports = RegExp(
+    r'^(?:\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[\d+;\d+;\d+M|\x1b\[M[\s\S]{3})+$',
+  );
+
+  /// Whether [data] is only mouse reports (SGR, urxvt or legacy
+  /// encodings): wheel notches of a drag, or the terminal's own clicks.
+  @visibleForTesting
+  static bool isMouseReport(String data) => _mouseReports.hasMatch(data);
 
   void _deliverInput(String normalized) {
     final session = _session;
