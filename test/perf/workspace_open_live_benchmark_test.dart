@@ -117,7 +117,8 @@ void main() {
         final workspace = TerminalWorkspaceController(
           RoutingTerminalRepository(
             ssh: DartSshTerminalRepository(verifier),
-            mosh: MoshTerminalRepository(verifier),
+            // As the app wires it: the side connection starts mosh-server.
+            mosh: MoshTerminalRepository(verifier, cleanupRunner: shared.lease),
             local: NoNetworkTerminalRepository(),
           ),
         );
@@ -152,8 +153,14 @@ void main() {
               .toList()
               .map((line) => line.toString())
               .join('\n');
-          if (!terminal.isUsingAltBuffer && text.contains('herdr')) {
-            mark('herdr command text on screen');
+          if (!terminal.isUsingAltBuffer &&
+              terminal.mouseMode == MouseMode.none &&
+              text.contains('herdr')) {
+            mark(
+              session.startupCover.value
+                  ? 'herdr command text in the buffer (covered)'
+                  : 'herdr command text VISIBLE',
+            );
           }
           if (terminal.isUsingAltBuffer ||
               terminal.mouseMode != MouseMode.none) {

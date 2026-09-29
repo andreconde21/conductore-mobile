@@ -73,6 +73,20 @@ void main() {
     expect(opened, hasLength(3));
   });
 
+  test('a session on a machine shares the machine\'s connection', () async {
+    // CON-058: a Herdr workspace opened from the home board ran its focus
+    // and its Mosh start on a second SSH connection of its own.
+    final (pool, opened) = makePool();
+    final board = pool.lease(buildHost('a'));
+    final session = pool.lease(
+      buildHost('a').copyWith(id: 'a#herdr:w2', name: 'Host a: api'),
+    );
+    await board.run('status', timeout: timeout);
+    await session.run('herdr workspace list', timeout: timeout);
+    expect(opened, hasLength(1));
+    expect(opened.single.commands, ['status', 'herdr workspace list']);
+  });
+
   test('a closed runner fails alone; the connection lingers after the '
       'last one, then closes', () {
     fakeAsync((async) {

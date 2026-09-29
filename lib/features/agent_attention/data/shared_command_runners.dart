@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 
 /// A runner whose connection can be dropped on purpose; the next command
 /// reconnects (a network change leaves idle SSH sockets half dead).
@@ -88,13 +89,16 @@ class SharedCommandRunners {
     }
   }
 
-  /// What makes two saved records the same connection: the record and
-  /// how it signs in, not its name, tags or agent settings.
+  /// What makes two saved records the same connection: the machine and
+  /// how it signs in, not its name, tags or agent settings. A session's
+  /// host (`<machine id>#herdr:w1`, which Herdr's focus and the terminal's
+  /// Mosh start run on) is its machine: a workspace opened from the home
+  /// board rides on the connection the board already has.
   static String _keyOf(SavedHost host) {
     final json = host.toJson();
     return jsonEncode([
+      baseHostId(host.id),
       for (final field in const [
-        'id',
         'host',
         'port',
         'username',
