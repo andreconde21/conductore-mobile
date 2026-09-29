@@ -127,10 +127,17 @@ class UsageAccountSummary {
       if (p.account.active) p.hostName,
   ];
 
+  /// Not managed by cswap on any machine: a live login never `cswap add`ed.
+  bool get unmanaged => placements.every((p) => !p.account.managed);
+
   /// Machines where it can be made the active account.
   List<UsageAccountPlacement> get switchTargets => [
     for (final p in placements)
-      if (p.canSwitch && !p.account.active && !p.account.disabled) p,
+      if (p.canSwitch &&
+          p.account.managed &&
+          !p.account.active &&
+          !p.account.disabled)
+        p,
   ];
 
   /// When the windows were measured (the newest machine's).
@@ -216,27 +223,39 @@ class UsageSummary {
   /// first. Empty without cswap.
   List<UsageAccountSummary> get accounts {
     final byLabel = <String, List<UsageAccountPlacement>>{};
+    // cswap has no windows for a login it does not manage; the machine's
+    // statusline limits are that live login's.
+    final liveLimits = <UsageAccountPlacement, List<UsageLimit>>{};
     for (final machine in machines) {
       for (final account in machine.accounts) {
-        (byLabel[account.label] ??= []).add(
-          UsageAccountPlacement(
-            hostId: machine.hostId,
-            hostName: machine.hostName,
-            account: account,
-            canSwitch: machine.canSwitchAccounts,
-          ),
+        final placement = UsageAccountPlacement(
+          hostId: machine.hostId,
+          hostName: machine.hostName,
+          account: account,
+          canSwitch: machine.canSwitchAccounts,
         );
+        if (!account.managed && account.active) {
+          liveLimits[placement] = machine.claudeLimits;
+        }
+        (byLabel[account.label] ??= []).add(placement);
       }
     }
+    UsageLimit? window(UsageAccountPlacement p, {required bool weekly}) =>
+        (weekly ? p.account.weekly : p.account.fiveHour) ??
+        liveLimits[p]
+            ?.where((l) => weekly ? l.isWeekly : l.isFiveHour)
+            .firstOrNull;
     final merged = [
       for (final MapEntry(key: label, value: placements) in byLabel.entries)
         UsageAccountSummary(
           label: label,
           placements: placements,
           fiveHour: _freshest([
-            for (final p in placements) ?p.account.fiveHour,
+            for (final p in placements) ?window(p, weekly: false),
           ]),
-          weekly: _freshest([for (final p in placements) ?p.account.weekly]),
+          weekly: _freshest([
+            for (final p in placements) ?window(p, weekly: true),
+          ]),
         ),
     ];
     // Stable: active first, otherwise in the machines' slot order.

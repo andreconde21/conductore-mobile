@@ -272,9 +272,10 @@ class _LabeledRing extends StatelessWidget {
   }
 }
 
-/// "+N accounts" (cswap), and "best: home 12%" when another account has
-/// clearly more headroom than the active one. Nothing without other
-/// accounts. Tapping it opens the breakdown ([onTap]).
+/// "N accounts" (cswap: every account, the active one included), and
+/// "best: home 12%" when another account has clearly more headroom than
+/// the active one. Nothing without other accounts. Tapping it opens the
+/// breakdown ([onTap]).
 class UsageAccountsChip extends StatelessWidget {
   const UsageAccountsChip({
     required this.summary,
@@ -297,11 +298,12 @@ class UsageAccountsChip extends StatelessWidget {
     if (others == 0) {
       return const SizedBox.shrink();
     }
+    final total = summary.accounts.length;
     final palette = AppPalette.of(context);
     final best = dense ? null : summary.bestAccount(now);
     final bestUsed = best?.usedPct(now);
     final text = [
-      dense ? '+$others' : '+$others account${others == 1 ? '' : 's'}',
+      dense ? '$total acc' : '$total accounts',
       if (best != null && bestUsed != null)
         'best: ${best.label} ${bestUsed.round()}%',
     ].join(' · ');
@@ -323,7 +325,9 @@ class UsageAccountsChip extends StatelessWidget {
       ),
     );
     return Tooltip(
-      message: '${summary.accounts.length} Claude accounts (cswap)',
+      message:
+          '$total Claude accounts (cswap): ${total - others} in use, '
+          '$others other${others == 1 ? '' : 's'}',
       child: InkWell(
         key: const ValueKey('usage-accounts-chip'),
         onTap: onTap,
@@ -1040,6 +1044,7 @@ class _AccountRow extends StatelessWidget {
       if (account.active && showMachines)
         'active on ${account.activeOn.join(', ')}',
       if (account.disabled) 'disabled',
+      if (account.unmanaged) 'not in cswap (cswap add to switch)',
       if (account.stale && usageAt != null)
         'as of ${_ago(now.difference(usageAt))}',
       if (resets.isNotEmpty) 'resets ${resets.join(' · ')}',
