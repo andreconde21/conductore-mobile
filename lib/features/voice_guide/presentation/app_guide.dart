@@ -230,7 +230,7 @@ class UsageGuideAccounts implements GuideAccounts {
         active: account.active,
         targets: [
           for (final p in account.switchTargets)
-            (hostId: p.hostId, hostName: p.hostName, slot: p.account.slot),
+            (hostId: p.hostId, hostName: p.hostName, slot: p.account.slot!),
         ],
       ),
   ];

@@ -349,7 +349,7 @@ void main() {
       expect(find.byKey(const ValueKey('usage-switch-best')), findsNothing);
     });
 
-    testWidgets('the home bar keeps the rings and adds +N accounts', (
+    testWidgets('the home bar keeps the rings and adds N accounts', (
       tester,
     ) async {
       final usage = controller(tester);
@@ -363,12 +363,57 @@ void main() {
       );
       final chip = find.byKey(const ValueKey('usage-accounts-chip'));
       expect(chip, findsOneWidget);
-      // The disabled account counts in "+2"; "best" measures the fuller
-      // window (home: 40 % weekly) against the active one's 83 %.
-      expect(find.text('+2 accounts · best: home 40%'), findsOneWidget);
+      // Every account counts, the active and the disabled one too; "best"
+      // measures the fuller window (home: 40 % weekly) against the active
+      // one's 83 %.
+      expect(find.text('3 accounts · best: home 40%'), findsOneWidget);
       await tester.tap(chip);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
+    });
+
+    // CON-057: André's three accounts, the live one not in cswap.
+    testWidgets('an unmanaged live login counts and lists, never switches', (
+      tester,
+    ) async {
+      runner.reply = () => FakeUsageRunner.ok(
+        usageReplyJson(
+          limits: [
+            {'label': '5h', 'usedPct': 38},
+            {'label': '7d', 'usedPct': 96},
+          ],
+          accounts: [
+            usageAccount(1, 'outsmartis', weekly: 100),
+            usageAccount(2, 'webmaster', weekly: 100),
+            usageUnmanagedAccount('a***@o***.com'),
+          ],
+        ),
+      );
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageHomeBar(controller: usage, now: now)));
+      await tester.pump();
+      expect(find.text('3 accounts'), findsOneWidget);
+      await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+      await tester.pump();
+      for (final label in ['a***@o***.com', 'outsmartis', 'webmaster']) {
+        expect(find.byKey(ValueKey('usage-account-$label')), findsOneWidget);
+      }
+      expect(
+        find.byKey(const ValueKey('usage-account-active-a***@o***.com')),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('not in cswap', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-switch-a***@o***.com')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-switch-outsmartis')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('the home bar hints at an account with more headroom', (
@@ -385,11 +430,11 @@ void main() {
       final usage = controller(tester);
       await tester.pumpWidget(app(UsageHomeBar(controller: usage, now: now)));
       await tester.pump();
-      expect(find.text('+1 account · best: home 12%'), findsOneWidget);
+      expect(find.text('2 accounts · best: home 12%'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('usage-bar-toggle')));
       await tester.pump();
       // Collapsed: the count only.
-      expect(find.text('+1'), findsOneWidget);
+      expect(find.text('2 acc'), findsOneWidget);
     });
 
     testWidgets('the compact summary shows the count', (tester) async {
@@ -409,7 +454,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('+2'), findsOneWidget);
+      expect(find.text('3 acc'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
       expect(tapped, 1);
       expect(tester.takeException(), isNull);

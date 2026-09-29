@@ -305,11 +305,13 @@ class UsageSession {
 
 /// One Claude account cswap (claude-swap) manages on a machine: its 5-hour
 /// and weekly windows. The companion sends the alias, else a masked email,
-/// as [label]; never the email itself.
+/// as [label]; never the email itself. The live login cswap does not
+/// manage (never `cswap add`ed) comes too, active and without a [slot].
 class UsageAccount {
   const UsageAccount({
     required this.slot,
     required this.label,
+    this.managed = true,
     this.alias,
     this.active = false,
     this.disabled = false,
@@ -321,9 +323,13 @@ class UsageAccount {
     this.usageAt,
   });
 
-  /// cswap's account number on that machine (`cswap switch <slot>`).
-  final int slot;
+  /// cswap's account number on that machine (`cswap switch <slot>`);
+  /// null for the unmanaged live login.
+  final int? slot;
   final String label;
+
+  /// cswap manages it, so it can be switched to.
+  final bool managed;
   final String? alias;
 
   /// The account new Claude sessions on the machine use.
@@ -358,7 +364,7 @@ class UsageAccount {
     }
     final slot = json['slot'];
     final label = json['label'];
-    if (slot is! num || label is! String || label.isEmpty) {
+    if ((slot != null && slot is! num) || label is! String || label.isEmpty) {
       return null;
     }
     UsageLimit? window(String key) {
@@ -375,8 +381,9 @@ class UsageAccount {
     final status = json['status'];
     final usageAt = json['usageAt'];
     return UsageAccount(
-      slot: slot.toInt(),
+      slot: slot is num ? slot.toInt() : null,
       label: label,
+      managed: slot is num && json['managed'] != false,
       alias: alias is String && alias.isNotEmpty ? alias : null,
       active: json['active'] == true,
       disabled: json['disabled'] == true,
