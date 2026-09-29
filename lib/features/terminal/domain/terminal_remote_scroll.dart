@@ -101,6 +101,17 @@ String encodeScrollArrow({
   return applicationCursorKeys ? '\x1bO$final_' : '\x1b[$final_';
 }
 
+/// Desktop: pixels of mouse wheel or trackpad travel per wheel report (or
+/// arrow press) sent to a remote program. A wheel notch is 53 px in Flutter
+/// on Linux, so each notch sends one report, as xterm, Ghostty and kitty do
+/// (tmux and Herdr then scroll several lines per report). The trackpad
+/// sends one per the same travel, which scrolls the local history 3 lines.
+const double desktopWheelStep = 50;
+
+/// Desktop: arrow presses per wheel notch for a program without mouse
+/// reports (less, man), the 3 lines a notch scrolls the local history.
+const int desktopArrowsPerNotch = 3;
+
 /// Turns finger travel into wheel notches (or arrow presses): one per
 /// [step] pixels, keeping the remainder between moves so slow drags still
 /// scroll.

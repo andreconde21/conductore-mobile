@@ -7,6 +7,7 @@ import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_path_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_remote_scroll.dart';
 import 'package:conduit/features/terminal/presentation/desktop_keyboard.dart';
+import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/foundation.dart';
@@ -115,6 +116,9 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   int _pointersDown = 0;
   // Copy mode this surface entered for a drag; a tap leaves it again.
   bool _dragEnteredScrollMode = false;
+  // Desktop: mouse wheel and trackpad travel towards the next report to a
+  // remote program (see _desktopScrollRoute).
+  final _desktopScroll = RemoteScrollAccumulator(step: desktopWheelStep);
   // Desktop: the mouse is over a link (a hand cursor), and the buttons of
   // the last press (a middle-click also reaches the secondary callback).
   bool _hoveringLink = false;
@@ -487,7 +491,11 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
 
   void _handleRemoteDragEnd(DragEndDetails details) {
     _remoteScroll.reset();
-    final schedule = remoteScrollMomentum(details.primaryVelocity ?? 0);
+    _startMomentum(remoteScrollMomentum(details.primaryVelocity ?? 0));
+  }
+
+  /// Sends the notches of a fling's [schedule], one per tick.
+  void _startMomentum(List<int> schedule) {
     if (schedule.isEmpty) {
       return;
     }
@@ -506,6 +514,95 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   void _stopMomentum() {
     _momentumTimer?.cancel();
     _momentumTimer = null;
+  }
+
+  /// Desktop: where a mouse wheel or trackpad scroll goes, like a native
+  /// terminal: to the program as wheel reports when it asked for mouse
+  /// reports (Herdr, tmux with `mouse on`, vim), as arrow keys on the
+  /// alternate screen otherwise, and to the local scrollback on the main
+  /// screen. A multiplexer without mouse reports gets its copy mode, as
+  /// for a drag on a phone ([RemoteScrollRoute.copyMode]).
+  RemoteScrollRoute _desktopScrollRoute() {
+    final terminal = widget.session.terminal;
+    final route = remoteScrollRouteFor(
+      mouseMode: terminal.mouseMode,
+      altBuffer: terminal.isUsingAltBuffer,
+      alternateScroll: terminal.altBufferMouseScrollMode,
+      multiplexer: widget.onEnterScrollMode != null,
+    );
+    if (route == RemoteScrollRoute.copyMode && widget.tmuxScrollMode) {
+      // Already in copy mode: arrows scroll there.
+      return RemoteScrollRoute.arrows;
+    }
+    return route;
+  }
+
+  /// Starts a wheel or trackpad scroll of the remote program at
+  /// [globalPosition] by [route], entering copy mode first if need be.
+  void _beginDesktopScroll(RemoteScrollRoute route, Offset globalPosition) {
+    _stopMomentum();
+    _remoteDragPosition = globalPosition;
+    if (route == RemoteScrollRoute.copyMode) {
+      _dragEnteredScrollMode = true;
+      route = RemoteScrollRoute.arrows;
+      widget.onEnterScrollMode?.call();
+    }
+    _remoteRoute = route;
+  }
+
+  /// Desktop mouse wheel. The terminal's own scrollables would send
+  /// Shift+wheel to the program (see [encodeWheelEvent]) and one report
+  /// per line of travel; this sits above them, so it claims the event
+  /// first whenever the program, not the scrollback, should scroll.
+  void _handleDesktopWheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || isWheelZoomModifierPressed) return;
+    final route = _desktopScrollRoute();
+    if (route == RemoteScrollRoute.local) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (event) {
+      final scroll = event as PointerScrollEvent;
+      if (scroll.scrollDelta.dy == 0) return;
+      _beginDesktopScroll(route, scroll.position);
+      // Wheel up (a negative delta) shows older output, like a finger
+      // moving down: a positive notch.
+      _sendDesktopScroll(_desktopScroll.add(-scroll.scrollDelta.dy));
+    });
+  }
+
+  bool _claimTrackpadScroll() =>
+      _desktopScrollRoute() != RemoteScrollRoute.local;
+
+  void _handleTrackpadStart(DragStartDetails details) {
+    _desktopScroll.reset();
+    _beginDesktopScroll(_desktopScrollRoute(), details.globalPosition);
+  }
+
+  void _handleTrackpadUpdate(DragUpdateDetails details) {
+    _remoteDragPosition = details.globalPosition;
+    _sendDesktopScroll(_desktopScroll.add(details.delta.dy));
+  }
+
+  /// One wheel report per notch (the program picks its own step), or the
+  /// lines of a notch as arrow presses.
+  void _sendDesktopScroll(int notches) {
+    _sendRemoteScroll(
+      _remoteRoute == RemoteScrollRoute.arrows
+          ? notches * desktopArrowsPerNotch
+          : notches,
+    );
+  }
+
+  void _handleTrackpadEnd(DragEndDetails details) {
+    _desktopScroll.reset();
+    // The fling after the fingers lift, as the scrollback has.
+    final schedule = remoteScrollMomentum(
+      details.primaryVelocity ?? 0,
+      step: desktopWheelStep,
+    );
+    _startMomentum(
+      _remoteRoute == RemoteScrollRoute.arrows
+          ? [for (final notches in schedule) notches * desktopArrowsPerNotch]
+          : schedule,
+    );
   }
 
   /// Sends [notches] of scrolling (positive: up, towards older output) by
@@ -656,6 +753,36 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
               ),
             ),
           ),
+          if (PlatformFeatures.isDesktop)
+            // Above the terminal view so it claims wheel and trackpad
+            // scrolls that belong to the remote program before the view's
+            // scrollables do. Local scrollback, clicks and selection pass
+            // through untouched.
+            Positioned.fill(
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerSignal: _handleDesktopWheel,
+                child: RawGestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  gestures: {
+                    _TrackpadScrollRecognizer:
+                        GestureRecognizerFactoryWithHandlers<
+                          _TrackpadScrollRecognizer
+                        >(
+                          () => _TrackpadScrollRecognizer(
+                            claim: _claimTrackpadScroll,
+                          ),
+                          (recognizer) => recognizer
+                            ..onStart = _handleTrackpadStart
+                            ..onUpdate = _handleTrackpadUpdate
+                            ..onEnd = _handleTrackpadEnd
+                            ..onCancel = _desktopScroll.reset,
+                        ),
+                  },
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
           if (widget.dragScrollsRemote)
             // Above the terminal view so it sees each move first: the
             // view's own scrollables would otherwise take the drag and, on
@@ -690,11 +817,23 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onVerticalDragUpdate: _handleTmuxScrollDrag,
-                onVerticalDragEnd: _handleTmuxScrollEnd,
                 // Copy mode a drag opened on its own closes with a tap.
                 onTap: _dragEnteredScrollMode ? _leaveDragScrollMode : null,
-                child: const SizedBox.expand(),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  // Fingers only on the desktop: the wheel and trackpad
+                  // scroll copy mode by notches (_handleDesktopWheel), and
+                  // a mouse drag selects.
+                  supportedDevices: PlatformFeatures.isDesktop
+                      ? const {
+                          PointerDeviceKind.touch,
+                          PointerDeviceKind.stylus,
+                        }
+                      : null,
+                  onVerticalDragUpdate: _handleTmuxScrollDrag,
+                  onVerticalDragEnd: _handleTmuxScrollEnd,
+                  child: const SizedBox.expand(),
+                ),
               ),
             ),
         ],
@@ -734,6 +873,19 @@ class _RemoteScrollDragRecognizer extends VerticalDragGestureRecognizer {
       resolve(GestureDisposition.rejected);
     }
   }
+}
+
+/// A two-finger trackpad scroll (a pan/zoom gesture) that only starts when
+/// [claim] says the remote program should scroll.
+class _TrackpadScrollRecognizer extends VerticalDragGestureRecognizer {
+  _TrackpadScrollRecognizer({required this.claim})
+    : super(supportedDevices: const {PointerDeviceKind.trackpad});
+
+  final bool Function() claim;
+
+  @override
+  bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) =>
+      super.isPointerPanZoomAllowed(event) && claim();
 }
 
 enum _TerminalMenuAction { copy, paste, selectAll }
