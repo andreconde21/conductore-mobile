@@ -2,6 +2,7 @@ import 'dart:math' show max, min;
 import 'dart:ui';
 
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:conduit_vt/src/core/buffer/cell_offset.dart';
 import 'package:conduit_vt/src/core/buffer/range.dart';
@@ -12,6 +13,7 @@ import 'package:conduit_vt/src/terminal.dart';
 import 'package:conduit_vt/src/ui/cell_overlay.dart';
 import 'package:conduit_vt/src/ui/controller.dart';
 import 'package:conduit_vt/src/ui/cursor_type.dart';
+import 'package:conduit_vt/src/ui/line_picture_cache.dart';
 import 'package:conduit_vt/src/ui/painter.dart';
 import 'package:conduit_vt/src/ui/selection_mode.dart';
 import 'package:conduit_vt/src/ui/terminal_size.dart';
@@ -29,6 +31,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     required bool autoResize,
     required TerminalStyle textStyle,
     required TextScaler textScaler,
+    double devicePixelRatio = 1.0,
     required TerminalTheme theme,
     required List<TerminalCellOverlay> overlays,
     required FocusNode focusNode,
@@ -51,7 +54,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
           theme: theme,
           textStyle: textStyle,
           textScaler: textScaler,
-        );
+        )..devicePixelRatio = devicePixelRatio;
 
   Terminal _terminal;
   set terminal(Terminal terminal) {
@@ -104,6 +107,12 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   set textScaler(TextScaler value) {
     if (value == _painter.textScaler) return;
     _painter.textScaler = value;
+    markNeedsLayout();
+  }
+
+  set devicePixelRatio(double value) {
+    if (value == _painter.devicePixelRatio) return;
+    _painter.devicePixelRatio = value;
     markNeedsLayout();
   }
 
@@ -161,12 +170,20 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   final TerminalPainter _painter;
 
+  /// Pictures of the lines painted recently; see [LinePictureCache].
+  final _lineCache = LinePictureCache();
+
+  /// Lines recorded (drawn cell by cell) so far, for tests and benchmarks:
+  /// a frame that only scrolls or repaints records none.
+  @visibleForTesting
+  int get debugLinesRecorded => _lineCache.recorded;
+
   var _stickToBottom = true;
 
   void _onScroll() {
     _stickToBottom = _scrollOffset >= _maxScrollExtent;
     markNeedsLayout();
-    _notifyEditableRect();
+    _scheduleEditableRect();
   }
 
   void _onFocusChange() {
@@ -180,7 +197,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     // would otherwise reuse the cached layer and never repaint. The visible
     // cell contents changed, so always repaint.
     markNeedsPaint();
-    _notifyEditableRect();
+    _scheduleEditableRect();
   }
 
   void _onControllerUpdate() {
@@ -204,10 +221,17 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   @override
   void detach() {
     super.detach();
+    _lineCache.clear();
     _offset.removeListener(_onScroll);
     _terminal.removeListener(_onTerminalChange);
     _controller.removeListener(_onControllerUpdate);
     _focusNode.removeListener(_onFocusChange);
+  }
+
+  @override
+  void dispose() {
+    _lineCache.clear();
+    super.dispose();
   }
 
   @override
@@ -255,7 +279,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final col = cellOffset.x;
     final x = col * _painter.cellSize.width;
     final y = row * _painter.cellSize.height;
-    return Offset(x + _padding.left, y + _padding.top - _scrollOffset);
+    return Offset(x + _padding.left, y + _lineOffset);
   }
 
   /// Get the [CellOffset] of the cell that [offset] is in.
@@ -325,6 +349,23 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     return _terminal.mouseInput(button, buttonState, position);
   }
 
+  var _editableRectScheduled = false;
+  Rect? _lastEditableRect;
+  Rect? _lastCaretRect;
+
+  /// Tells the text input where the cursor is once the frame is laid out.
+  /// Output and scrolling change it many times a frame; the platform only
+  /// needs the result, and only when it moved.
+  void _scheduleEditableRect() {
+    if (_editableRectScheduled || _onEditableRect == null) return;
+    _editableRectScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _editableRectScheduled = false;
+      if (attached && hasSize) _notifyEditableRect();
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
   void _notifyEditableRect() {
     final cursor = localToGlobal(cursorOffset);
 
@@ -337,6 +378,9 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
     final caretRect = cursor & _painter.cellSize;
 
+    if (rect == _lastEditableRect && caretRect == _lastCaretRect) return;
+    _lastEditableRect = rect;
+    _lastCaretRect = caretRect;
     _onEditableRect?.call(rect, caretRect);
   }
 
@@ -393,8 +437,11 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     return max(_terminalHeight - _viewportHeight, 0.0);
   }
 
+  /// The distance from this box's top to the top of the first line, on a
+  /// whole device pixel so that every line (a whole number of device pixels
+  /// tall) is too, whatever the scroll offset.
   double get _lineOffset {
-    return -_scrollOffset + _padding.top;
+    return _painter.snap(-_scrollOffset + _padding.top);
   }
 
   /// The offset of the cursor from the top left corner of this render object.
@@ -532,13 +579,26 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final effectFirstLine = firstLine.clamp(0, lines.length - 1);
     final effectLastLine = lastLine.clamp(0, lines.length - 1);
 
+    // The layout around the terminal can place it at a fractional device
+    // pixel; shift by that fraction so glyph origins, cell edges and lines
+    // land on the device's pixel grid.
+    offset += _pixelGridShift(offset);
+    final lineOffset = _lineOffset;
+    final generation = _painter.generation;
     for (var i = effectFirstLine; i <= effectLastLine; i++) {
-      _painter.paintLine(
-        canvas,
-        offset.translate(0, (i * charHeight + _lineOffset).truncateToDouble()),
+      final picture = _lineCache.pictureOf(
         lines[i],
+        generation,
+        _painter.recordLine,
       );
+      canvas.save();
+      canvas.translate(offset.dx, offset.dy + i * charHeight + lineOffset);
+      canvas.drawPicture(picture);
+      canvas.restore();
     }
+    // Keep a few screens of recently shown lines for scrolling back and
+    // forth; everything else is recorded again when it comes back.
+    _lineCache.trim((effectLastLine - effectFirstLine + 1) * 3 + 16);
 
     _paintOverlays(canvas, offset, effectFirstLine, effectLastLine);
 
@@ -573,6 +633,17 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
         effectLastLine,
       );
     }
+  }
+
+  /// The shift (under one device pixel) that puts [offset] in this box on
+  /// a whole device pixel of the window.
+  Offset _pixelGridShift(Offset offset) {
+    // A repaint boundary paints at its own layer's origin.
+    final global = localToGlobal(Offset.zero);
+    return Offset(
+      _painter.snap(global.dx) - global.dx,
+      _painter.snap(global.dy) - global.dy,
+    );
   }
 
   void _paintOverlays(

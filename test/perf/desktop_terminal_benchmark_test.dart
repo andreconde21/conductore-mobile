@@ -4,11 +4,13 @@
 // trackpad scrolling through 10,000 lines of scrollback, and the raster
 // time of one full terminal frame (the layer rasterized to an image).
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:conduit_vt/src/ui/painter.dart';
 import 'package:conduit_vt/src/ui/render.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -84,6 +86,8 @@ class _Frames {
 
 void main() {
   setUpAll(_loadFont);
+  TerminalPainter.debugDisableGlyphRuns =
+      Platform.environment['NO_RUNS'] == '1';
 
   late TerminalSessionController session;
 
@@ -262,4 +266,59 @@ void main() {
       variant: TargetPlatformVariant.only(TargetPlatform.linux),
     );
   }
+
+  test('recording and rasterizing one screen of new lines', () async {
+    final terminal = Terminal()..resize(192, 50);
+    terminal.write(_colouredLog(50));
+    final lines = [
+      for (var i = 0; i < terminal.buffer.lines.length; i++)
+        terminal.buffer.lines[i],
+    ];
+    for (final runs in [false, true]) {
+      TerminalPainter.debugDisableGlyphRuns = !runs;
+      final painter = TerminalPainter(
+        theme: AppPalette.catppuccin.terminalThemeFor(Brightness.dark),
+        textStyle: const TerminalStyle(fontFamily: _font, fontSize: 14),
+        textScaler: TextScaler.noScaling,
+      )..devicePixelRatio = 1.25;
+      late ui.Picture frame;
+      TerminalPainter.debugParagraphsDrawn = 0;
+      final recordUs = bestMicros(() {
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+        for (var i = 0; i < lines.length; i++) {
+          final line = painter.recordLine(lines[i]);
+          canvas
+            ..save()
+            ..translate(0, i * painter.cellSize.height)
+            ..drawPicture(line)
+            ..restore();
+          line.dispose();
+        }
+        frame = recorder.endRecording();
+      }, runs: 50);
+      // bestMicros records the screen once to warm up, then 50 times.
+      final paragraphs = TerminalPainter.debugParagraphsDrawn ~/ 51;
+      var rasterUs = -1;
+      for (var i = 0; i < 20; i++) {
+        final watch = Stopwatch()..start();
+        final image = await frame.toImage(
+          (192 * painter.cellSize.width * 1.25).ceil(),
+          (50 * painter.cellSize.height * 1.25).ceil(),
+        );
+        image.dispose();
+        final us = watch.elapsedMicroseconds;
+        if (rasterUs < 0 || us < rasterUs) rasterUs = us;
+      }
+      frame.dispose();
+      perfReport('desktop_terminal.record_screen', {
+        'runs': runs,
+        'lines': lines.length,
+        'paragraphs': paragraphs,
+        'record_ms': (recordUs / 1000).toStringAsFixed(2),
+        'raster_ms': (rasterUs / 1000).toStringAsFixed(2),
+      });
+    }
+    TerminalPainter.debugDisableGlyphRuns = false;
+  });
 }

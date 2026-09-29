@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 const _kDefaultFontSize = 13.0;
@@ -71,6 +72,24 @@ class TerminalStyle {
       decoration: underline ? TextDecoration.underline : TextDecoration.none,
     );
   }
+
+  // Value equality: a widget rebuild that passes an equal style must not
+  // make the renderer measure the font again and drop its glyph cache.
+  @override
+  bool operator ==(Object other) =>
+      other is TerminalStyle &&
+      other.fontSize == fontSize &&
+      other.height == height &&
+      other.fontFamily == fontFamily &&
+      listEquals(other.fontFamilyFallback, fontFamilyFallback);
+
+  @override
+  int get hashCode => Object.hash(
+        fontSize,
+        height,
+        fontFamily,
+        Object.hashAll(fontFamilyFallback),
+      );
 
   TerminalStyle copyWith({
     double? fontSize,
