@@ -168,6 +168,61 @@ void main() {
       expect(server.herdrArgs.where((args) => args.contains('focus')), isEmpty);
     });
 
+    test('an agent handed out with a session\'s host (as the agent monitors '
+        'list them) opens on its machine, and the other workspaces still '
+        'open there (CON-056)', () async {
+      mayMove = false;
+      final repository = FakeHostsRepository()..persisted = [host];
+      final hosts = HostsController(repository);
+      await hosts.load();
+      await flow.herdr.dispose();
+      flow = SessionConnectFlow(
+        hostsController: hosts,
+        workspace: workspace,
+        runnerFactory: (_) => server.runner(),
+        preferences: InMemoryConnectPreferencesRepository(),
+        mayMoveHerdrFocus: () => mayMove,
+      );
+      final herdrTab = workspace.open(
+        const ConnectTarget.herdr(workspaceId: 'w1').apply(host),
+      );
+
+      final shown = await flow.openAgent(
+        herdrTab.host,
+        const AgentInfo(
+          id: 'w1:p2',
+          name: '',
+          state: AgentAttentionState.unknown,
+          workspace: 'w1',
+          tab: 'w1:t1',
+          pane: 'w1:p2',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(shown, herdrTab);
+      expect(workspace.sessions, [herdrTab]);
+      expect(repository.persisted.map((saved) => saved.id), ['h']);
+
+      // Another workspace, from the same session's host: its place parses
+      // (no id derived from a derived id, pinned to workspace "w1#herdr").
+      final other = await flow.openAgentLocation(
+        herdrTab.host,
+        workspaceId: 'w3',
+        label: 'three',
+      );
+      expect(other, isNotNull);
+      for (final session in workspace.sessions) {
+        expect(baseHostId(session.host.id), 'h');
+        expect(
+          ConnectTarget.idSeparator.allMatches(session.host.id),
+          hasLength(1),
+        );
+      }
+      expect(flow.herdr.workspaceOf(other!), 'w3');
+      expect(repository.persisted.map((saved) => saved.id), ['h']);
+    });
+
     test('without a Herdr location it activates the host\'s tab', () async {
       final plain = workspace.open(host);
       workspace.open(buildHost('other'));

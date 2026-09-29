@@ -6,6 +6,7 @@ import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/domain/ssh_key.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -860,6 +861,69 @@ void main() {
       final saved = repository.persisted.single;
       expect(saved.username, 'new');
       expect(saved.lastConnectedAt, isNotNull);
+    });
+
+    test('markConnected with a session\'s host stamps its machine and never '
+        'saves the session as a machine (CON-056)', () async {
+      final machine = buildHost('dev').copyWith(name: 'development-central');
+      final repository = FakeHostsRepository()..persisted = [machine];
+      final controller = HostsController(repository);
+      await controller.load();
+      final session = const ConnectTarget.herdr(
+        workspaceId: 'w8',
+        label: 'lf-seguros-web',
+      ).apply(machine);
+
+      await controller.markConnected(session);
+
+      expect(repository.persisted.map((host) => host.id), ['dev']);
+      expect(repository.persisted.single.name, 'development-central');
+      expect(repository.persisted.single.lastConnectedAt, isNotNull);
+
+      // Nor when its machine is not saved (any more).
+      await controller.markConnected(
+        const ConnectTarget.tmux('main').apply(buildHost('gone')),
+      );
+      expect(repository.persisted.map((host) => host.id), ['dev']);
+    });
+
+    test('load removes session hosts earlier builds saved as machines, and '
+        'keeps look-alikes the user made (CON-056)', () async {
+      final machine = buildHost('dev').copyWith(name: 'development-central');
+      final copy = const ConnectTarget.herdr(
+        workspaceId: 'w8',
+        label: 'lf-seguros-web',
+      ).apply(machine);
+      final other = buildHost('other').copyWith(name: 'omarchy');
+      // Same address and a "<name>: …" name, but a machine of its own.
+      final named = machine.copyWith(
+        id: 'mine',
+        name: 'development-central: backup',
+      );
+      // A session id, but another address: not a copy of that machine.
+      final elsewhere = copy.copyWith(id: 'dev#tmux:x', host: '10.0.0.9');
+      final repository = FakeHostsRepository()
+        ..persisted = [copy, machine, other, named, elsewhere]
+        ..persistedSortMode = HostListSortMode.manual
+        ..persistedManualOrder = [
+          copy.id,
+          'dev',
+          'other',
+          'mine',
+          'dev#tmux:x',
+        ];
+      final controller = HostsController(repository);
+
+      await controller.load();
+
+      final kept = ['dev', 'other', 'mine', 'dev#tmux:x'];
+      expect(controller.hosts.map((host) => host.id), kept);
+      expect(repository.persisted.map((host) => host.id), kept);
+      expect(repository.persistedManualOrder, kept);
+
+      // Nor does a device sync bring one back.
+      await controller.replaceAll([machine, copy]);
+      expect(repository.persisted.map((host) => host.id), ['dev']);
     });
 
     test('sorts by last connected by default', () async {

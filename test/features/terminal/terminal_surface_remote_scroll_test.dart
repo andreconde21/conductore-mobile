@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/terminal/domain/terminal_remote_scroll.dart';
+import 'package:conduit/features/terminal/presentation/session_input_hold.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
 import 'package:conduit_vt/conduit_vt.dart';
@@ -139,6 +140,61 @@ void main() {
     expect(downs.length, inInclusiveRange(3, 4));
     expect(downs.every((m) => m.group(1) == '65'), isTrue);
     expect(downs.every((m) => m.group(2) == '31'), isTrue);
+  });
+
+  testWidgets('wheel notches are not typed input: Herdr showing another '
+      'workspace neither holds nor counts them (CON-056)', (tester) async {
+    await pumpSurface(tester, setup: _herdrLike);
+    var checks = 0;
+    // Herdr's focus is elsewhere and this device may not move it: typed
+    // keys would wait under the focus banner.
+    session.inputCheck = (_) {
+      checks += 1;
+      return Future.value(InputHoldDecision.block);
+    };
+
+    await slowDrag(tester, cellCenter(tester, 10, 8), steps: 4);
+
+    expect(session.inputHold.value, isNull);
+    expect(checks, 0);
+    expect(sgrNotch.allMatches(sent()).length, inInclusiveRange(4, 5));
+
+    // Held input (a real keystroke) still waits, and a drag meanwhile is
+    // neither queued behind it nor counted with it.
+    session.sendText('x');
+    await tester.pump();
+    remote.sent.clear();
+    await slowDrag(tester, cellCenter(tester, 10, 8), steps: 3);
+    final held = session.inputHold.value;
+    expect(held, isA<InputHoldBlocked>());
+    expect((held! as InputHoldBlocked).queued, 1);
+    expect(sent(), isEmpty);
+  });
+
+  testWidgets('a click on Herdr showing another workspace is dropped, '
+      'not held or counted: it would move the shared focus (CON-056)', (
+    tester,
+  ) async {
+    await pumpSurface(tester, setup: _herdrLike);
+    session.inputCheck = (_) => Future.value(InputHoldDecision.block);
+
+    session.terminal.textInput('\x1b[<0;5;5M\x1b[<0;5;5m');
+    await tester.pump();
+
+    expect(session.inputHold.value, isNull);
+    expect(sent(), isEmpty);
+  });
+
+  test('isWheelReport: SGR wheel notches only', () {
+    expect(TerminalSessionController.isWheelReport('\x1b[<64;3;4M'), isTrue);
+    expect(
+      TerminalSessionController.isWheelReport('\x1b[<65;3;4M\x1b[<69;3;4M'),
+      isTrue,
+    );
+    expect(TerminalSessionController.isWheelReport('\x1b[<0;3;4M'), isFalse);
+    expect(TerminalSessionController.isWheelReport('\x1b[<96;3;4M'), isFalse);
+    expect(TerminalSessionController.isWheelReport('\x1b[<64;3;4Mx'), isFalse);
+    expect(TerminalSessionController.isWheelReport(''), isFalse);
   });
 
   testWidgets('legacy mouse encoding sends ESC [ M with 32 + 64', (

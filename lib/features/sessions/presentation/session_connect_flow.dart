@@ -68,6 +68,17 @@ class SessionConnectFlow {
   /// tab strips and the navigator read it instead of polling).
   final LiveHostHub live;
 
+  /// The saved machine behind [host]: [host] itself, or the machine of a
+  /// session's host (`<machine id>#herdr:w1`, which the agent monitors and
+  /// everything listing their agents hand out). Sessions open on, and are
+  /// looked up by, the machine: a target applied to a session's host would
+  /// derive an id from a derived id, whose workspace no longer parses.
+  SavedHost machineOf(SavedHost host) {
+    final id = baseHostId(host.id);
+    if (id == host.id || host.isLocal) return host;
+    return hostsController.findById(id) ?? host.copyWith(id: id);
+  }
+
   /// Opens [host] at an agent's exact place in Herdr (see
   /// [HerdrSessionFocus.openAgentLocation]).
   Future<TerminalSessionController?> openAgentLocation(
@@ -77,6 +88,7 @@ class SessionConnectFlow {
     String paneId = '',
     String label = '',
   }) async {
+    host = machineOf(host);
     await hostsController.markConnected(host);
     return herdr.openAgentLocation(
       host,
@@ -118,6 +130,7 @@ class SessionConnectFlow {
     AgentInfo agent, {
     bool preferredView = false,
   }) async {
+    host = machineOf(host);
     final workspaceId = agent.workspace ?? '';
     final tmuxLocation = TmuxAgentLocation.parse(
       tab: agent.tab,
@@ -221,7 +234,7 @@ class SessionConnectFlow {
   /// UI.
   TerminalSessionController open(SavedHost host, ConnectTarget target) {
     return workspace.open(
-      target.apply(host),
+      target.apply(machineOf(host)),
       startupCommand: target.startupCommand,
       target: target,
     );
