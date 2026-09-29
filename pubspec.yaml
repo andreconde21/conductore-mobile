@@ -18,10 +18,10 @@ dependencies:
   # see third_party/dartssh2/README.md.
   dartssh2:
     path: third_party/dartssh2
+  # Vendored from gwitko/conduit_vt@b486b894 with a renderer patch;
+  # see third_party/conduit_vt/README.md.
   conduit_vt:
-    git:
-      url: https://github.com/gwitko/conduit_vt.git
-      ref: b486b894ea12b18b2ad76339ccd8c6ae3c12416f
+    path: third_party/conduit_vt
   dart_mosh: ^0.0.4
   flutter_pty: ^0.4.2
   ffi: ^2.2.0
