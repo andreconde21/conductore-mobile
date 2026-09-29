@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
@@ -48,7 +47,7 @@ class SshClientFactory {
     return keyPairs;
   }
 
-  static final _parsedKeys = LinkedHashMap<String, List<SSHKeyPair>>();
+  static final _parsedKeys = <String, List<SSHKeyPair>>{};
   static const _parsedKeysKept = 16;
 
   final HostKeyVerifier _hostKeyVerifier;
