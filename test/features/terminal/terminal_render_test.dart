@@ -28,6 +28,10 @@ Future<void> _loadFont() async {
   await loader.load();
 }
 
+/// Alpha of a line that joins without a lighter seam. Drawn at the font's
+/// own size in a wider cell, box drawing leaves seams of 205 to 217 here.
+const _solid = 240;
+
 final _theme = AppPalette.catppuccin.terminalThemeFor(Brightness.dark);
 
 TerminalPainter _painter(double dpr, {double fontSize = 14}) => TerminalPainter(
@@ -86,6 +90,144 @@ void main() {
       }
     }
   });
+
+  test('cells round up to whole device pixels, never below the font', () {
+    for (final dpr in [1.0, 1.25, 1.5, 2.0]) {
+      final painter = _painter(dpr);
+      final natural = TextPainter(
+        text: const TextSpan(
+          text: 'mmmmmmmmmm',
+          style: TextStyle(fontFamily: _font, fontSize: 14),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final advance = natural.width / 10;
+      natural.dispose();
+      final cell = painter.cellSize;
+      expect(cell.width, greaterThanOrEqualTo(advance - 1e-3), reason: '$dpr');
+      expect(cell.width - advance, lessThan(1 / dpr), reason: '$dpr');
+    }
+  });
+
+  test(
+    'box drawing joins across cells, and icons and lines stay in their cells',
+    () async {
+      final terminal = Terminal()..resize(12, 4);
+      // Nerd Font icons (folder, branch, terminal) and a powerline
+      // separator, each with a blank cell on both sides.
+      terminal.write(
+        '┌────┐\r\n'
+        '│ █▌ │\r\n'
+        '└────┘\r\n'
+        '     ',
+      );
+      for (final dpr in [1.0, 1.25, 2.0]) {
+        final painter = _painter(dpr);
+        final cell = painter.cellSize;
+        final cw = (cell.width * dpr).round();
+        final ch = (cell.height * dpr).round();
+        // The four lines stacked, with an empty cell of margin all round.
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+        final size = Size(14 * cell.width, 6 * cell.height);
+        for (var row = 0; row < 4; row++) {
+          final line = painter.recordLine(terminal.buffer.lines[row]);
+          canvas
+            ..save()
+            ..translate(cell.width, (row + 1) * cell.height)
+            ..drawPicture(line)
+            ..restore();
+          line.dispose();
+        }
+        final picture = recorder.endRecording();
+        final pixels = await _pixels(picture, size, dpr);
+        picture.dispose();
+        final width = (size.width * dpr).ceil();
+        int alpha(int x, int y) => pixels[(y * width + x) * 4 + 3];
+        // Ink anywhere in the device pixel column x between rows y0..y1.
+        // The threshold lets an icon's anti-aliased edge graze the next
+        // pixel, as the font draws it (the branch icon at 1x does).
+        bool inkInColumn(int x, int y0, int y1, {int over = 64}) {
+          for (var y = y0; y < y1; y++) {
+            if (alpha(x, y) > over) return true;
+          }
+          return false;
+        }
+
+        bool inkInRow(int y, int x0, int x1, {int over = 64}) {
+          for (var x = x0; x < x1; x++) {
+            if (alpha(x, y) > over) return true;
+          }
+          return false;
+        }
+
+        // Grid cell (column, row) of the terminal, in device pixels.
+        int left(int column) => (column + 1) * cw;
+        int top(int row) => (row + 1) * ch;
+
+        // ┌────┐ has no gap from the middle of ┌ to the middle of ┐.
+        for (var x = left(0) + cw ~/ 2; x < left(5) + cw ~/ 2; x++) {
+          expect(
+            inkInColumn(x, top(0), top(1), over: _solid),
+            isTrue,
+            reason: 'gap in the top border at x=$x at ${dpr}x',
+          );
+          expect(
+            inkInColumn(x, top(2), top(3), over: _solid),
+            isTrue,
+            reason: 'gap in the bottom border at x=$x at ${dpr}x',
+          );
+        }
+        // │ joins ┌ above and └ below.
+        for (var y = top(0) + ch ~/ 2; y < top(2) + ch ~/ 2; y++) {
+          expect(
+            inkInRow(y, left(0), left(1), over: _solid),
+            isTrue,
+            reason: 'gap in the left border at y=$y at ${dpr}x',
+          );
+        }
+        // █▌ fill their cells: no seam between them.
+        for (var x = left(2); x < left(3) + cw ~/ 2 - 1; x++) {
+          expect(
+            inkInColumn(x, top(1), top(2), over: _solid),
+            isTrue,
+            reason: 'seam in the blocks at x=$x at ${dpr}x',
+          );
+        }
+        // Nothing is drawn outside the grid: the margin stays empty. The
+        // font draws the branch icon one device pixel below its line at
+        // 1x (so does any terminal that does not clip glyphs).
+        for (var x = 0; x < width; x++) {
+          expect(inkInColumn(x, 0, top(0)), isFalse, reason: 'above, ${dpr}x');
+          expect(
+            inkInColumn(x, top(4) + 1, 6 * ch),
+            isFalse,
+            reason: 'below, ${dpr}x',
+          );
+        }
+        // Each icon keeps to its own cell: the blank cells between the
+        // icons on the last line stay empty. (Column 6 is left out: the
+        // powerline separator after it overlaps to the left by design, to
+        // meet the coloured cell before it.)
+        for (final column in [0, 2, 4, 8]) {
+          for (var x = left(column); x < left(column + 1); x++) {
+            expect(
+              inkInColumn(x, top(3), top(4)),
+              isFalse,
+              reason: 'icon ink in blank column $column at ${dpr}x',
+            );
+          }
+        }
+        for (final column in [1, 3, 5, 7]) {
+          var ink = false;
+          for (var x = left(column); x < left(column + 1); x++) {
+            ink = ink || inkInColumn(x, top(3), top(4));
+          }
+          expect(ink, isTrue, reason: 'icon in column $column at ${dpr}x');
+        }
+      }
+    },
+  );
 
   test(
     'a glyph run draws the same pixels as one paragraph per glyph',

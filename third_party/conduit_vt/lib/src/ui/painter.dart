@@ -104,22 +104,36 @@ class TerminalPainter {
     paragraph.layout(ParagraphConstraints(width: double.infinity));
 
     final advance = paragraph.maxIntrinsicWidth / test.length;
+    _glyphAdvance = advance;
     _glyphHeight = paragraph.height;
     paragraph.dispose();
 
-    // Whole device pixels, like Alacritty and Ghostty: with a fractional
-    // width every column starts at a different sub-pixel phase, glyphs are
-    // rasterized differently from column to column, and cell backgrounds
-    // get anti-aliased seams. The glyph keeps its natural size; only the
-    // grid rounds (by at most half a device pixel per cell).
+    // Whole device pixels, rounded up like Alacritty and Ghostty: with a
+    // fractional width every column starts at a different sub-pixel phase,
+    // glyphs are rasterized differently from column to column, and cell
+    // backgrounds get anti-aliased seams. Rounding up keeps every glyph
+    // (icons, wide characters) inside its cells; the glyph keeps its
+    // natural size and box drawing is stretched to join (see
+    // [_fillsCell]). The tolerance keeps float noise from adding a pixel.
     final ratio = _devicePixelRatio;
-    final result = Size(
-      max(1.0, (advance * ratio).roundToDouble()) / ratio,
-      max(1.0, (_glyphHeight * ratio).roundToDouble()) / ratio,
-    );
+    double ceilToDevice(double value) =>
+        max(1.0, (value * ratio - 1e-3).ceilToDouble()) / ratio;
+    final result = Size(ceilToDevice(advance), ceilToDevice(_glyphHeight));
     _glyphTop = snap((result.height - _glyphHeight) / 2);
     return result;
   }
+
+  /// The font's advance of one glyph, before the cell width was snapped.
+  var _glyphAdvance = 0.0;
+
+  /// Box drawing, block elements, legacy computing symbols and powerline
+  /// separators, which are meant to touch the next cell: they are stretched
+  /// from the font's cell to the grid's, as native terminals draw them edge
+  /// to edge, so lines and blocks join without seams.
+  static bool _fillsCell(int charCode) =>
+      (charCode >= 0x2500 && charCode <= 0x259F) ||
+      (charCode >= 0x1FB00 && charCode <= 0x1FBFF) ||
+      (charCode >= 0xE0B0 && charCode <= 0xE0BF);
 
   /// The size of each character in the terminal.
   Size get cellSize => _cellSize;
@@ -293,7 +307,19 @@ class TerminalPainter {
       );
     }
 
-    canvas.drawParagraph(paragraph, offset.translate(0, _glyphTop));
+    if (_fillsCell(charCode) && _glyphAdvance > 0 && _glyphHeight > 0) {
+      canvas
+        ..save()
+        ..translate(offset.dx, offset.dy)
+        ..scale(
+          _cellSize.width / _glyphAdvance,
+          _cellSize.height / _glyphHeight,
+        )
+        ..drawParagraph(paragraph, Offset.zero)
+        ..restore();
+    } else {
+      canvas.drawParagraph(paragraph, offset.translate(0, _glyphTop));
+    }
     debugParagraphsDrawn++;
   }
 
