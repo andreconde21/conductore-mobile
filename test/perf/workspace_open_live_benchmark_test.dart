@@ -85,116 +85,123 @@ void main() {
       ? 'Set CONDUCTORE_BENCH_HOST to run against a real machine.'
       : null;
 
-  test('opening a Herdr workspace, tap to Herdr on screen', () async {
-    final at = target!.indexOf('@');
-    final address = target.substring(at + 1).split(':');
-    final host = buildHost('bench').copyWith(
-      username: target.substring(0, at),
-      host: address.first,
-      port: address.length > 1 ? int.parse(address[1]) : 22,
-      authMethod: SshAuthMethod.privateKey,
-      privateKey: File(env['CONDUCTORE_BENCH_KEY']!).readAsStringSync(),
-      password: '',
-      useMosh: env['CONDUCTORE_BENCH_MOSH'] == '1',
-    );
-    final workspaceId = env['CONDUCTORE_BENCH_WORKSPACE'] ?? 'w2';
-    final moveFocus = env['CONDUCTORE_BENCH_MOVE_FOCUS'] == '1';
-    final runs = int.parse(env['CONDUCTORE_BENCH_RUNS'] ?? '3');
-    final verifier = _TrustAll();
-    final shared = SharedCommandRunners(
-      (host) => SshAgentCommandRunner(verifier, host),
-    );
-    // The home board keeps the machine's side connection open.
-    final board = shared.lease(host);
-    await board.run('true', timeout: const Duration(seconds: 20));
-
-    final totals = <String, List<int>>{};
-    for (var run = 0; run < runs; run++) {
-      final clock = Stopwatch();
-      final log = <String>[];
-      final workspace = TerminalWorkspaceController(
-        RoutingTerminalRepository(
-          ssh: DartSshTerminalRepository(verifier),
-          mosh: MoshTerminalRepository(verifier),
-          local: NoNetworkTerminalRepository(),
-        ),
+  test(
+    'opening a Herdr workspace, tap to Herdr on screen',
+    () async {
+      final at = target!.indexOf('@');
+      final address = target.substring(at + 1).split(':');
+      final host = buildHost('bench').copyWith(
+        username: target.substring(0, at),
+        host: address.first,
+        port: address.length > 1 ? int.parse(address[1]) : 22,
+        authMethod: SshAuthMethod.privateKey,
+        privateKey: File(env['CONDUCTORE_BENCH_KEY']!).readAsStringSync(),
+        password: '',
+        useMosh: env['CONDUCTORE_BENCH_MOSH'] == '1',
       );
-      final focus = HerdrSessionFocus(
-        workspace: workspace,
-        runnerFactory: (host) => _Logged(shared.lease(host), log, clock),
-        mayMoveFocus: () => moveFocus,
+      final workspaceId = env['CONDUCTORE_BENCH_WORKSPACE'] ?? 'w2';
+      final moveFocus = env['CONDUCTORE_BENCH_MOVE_FOCUS'] == '1';
+      final runs = int.parse(env['CONDUCTORE_BENCH_RUNS'] ?? '3');
+      final verifier = _TrustAll();
+      final shared = SharedCommandRunners(
+        (host) => SshAgentCommandRunner(verifier, host),
       );
-      final marks = <String, int>{};
-      void mark(String name) =>
-          marks.putIfAbsent(name, () => clock.elapsedMilliseconds);
+      // The home board keeps the machine's side connection open.
+      final board = shared.lease(host);
+      await board.run('true', timeout: const Duration(seconds: 20));
 
-      clock.start();
-      final session = (await focus.openAgentLocation(
-        host,
-        workspaceId: workspaceId,
-        label: 'bench',
-        open: (target) => workspace.open(
-          target.apply(host),
-          startupCommand: target.startupCommand,
-          target: target,
-        ),
-      ))!;
-      mark('session opened');
-      final done = Completer<void>();
-      void watch() {
-        final terminal = session.terminal;
-        if (session.status == TerminalConnectionStatus.connected) {
-          mark('connected (startup command sent)');
+      final totals = <String, List<int>>{};
+      for (var run = 0; run < runs; run++) {
+        final clock = Stopwatch();
+        final log = <String>[];
+        final workspace = TerminalWorkspaceController(
+          RoutingTerminalRepository(
+            ssh: DartSshTerminalRepository(verifier),
+            mosh: MoshTerminalRepository(verifier),
+            local: NoNetworkTerminalRepository(),
+          ),
+        );
+        final focus = HerdrSessionFocus(
+          workspace: workspace,
+          runnerFactory: (host) => _Logged(shared.lease(host), log, clock),
+          mayMoveFocus: () => moveFocus,
+        );
+        final marks = <String, int>{};
+        void mark(String name) =>
+            marks.putIfAbsent(name, () => clock.elapsedMilliseconds);
+
+        clock.start();
+        final session = (await focus.openAgentLocation(
+          host,
+          workspaceId: workspaceId,
+          label: 'bench',
+          open: (target) => workspace.open(
+            target.apply(host),
+            startupCommand: target.startupCommand,
+            target: target,
+          ),
+        ))!;
+        mark('session opened');
+        final done = Completer<void>();
+        void watch() {
+          final terminal = session.terminal;
+          if (session.status == TerminalConnectionStatus.connected) {
+            mark('connected (startup command sent)');
+          }
+          final text = terminal.buffer.lines
+              .toList()
+              .map((line) => line.toString())
+              .join('\n');
+          if (!terminal.isUsingAltBuffer && text.contains('herdr')) {
+            mark('herdr command text on screen');
+          }
+          if (terminal.isUsingAltBuffer ||
+              terminal.mouseMode != MouseMode.none) {
+            mark('Herdr on screen');
+            if (!done.isCompleted) done.complete();
+          }
         }
-        final text = terminal.buffer.lines
-            .toList()
-            .map((line) => line.toString())
-            .join('\n');
-        if (!terminal.isUsingAltBuffer && text.contains('herdr')) {
-          mark('herdr command text on screen');
+
+        session.addListener(watch);
+        session.terminalPaintListenable.addListener(watch);
+        final poll = Timer.periodic(const Duration(milliseconds: 2), (_) {
+          watch();
+        });
+        unawaited(session.connect());
+        await done.future.timeout(const Duration(seconds: 20));
+        poll.cancel();
+        // Let the side channel finish what the open started.
+        await Future<void>.delayed(const Duration(milliseconds: 2500));
+
+        stdout.writeln(
+          'run ${run + 1} (${host.useMosh ? 'mosh' : 'ssh'}, '
+          'move focus ${moveFocus ? 'on' : 'off'}, RTT as configured):',
+        );
+        final ordered = marks.entries.toList()
+          ..sort((a, b) => a.value.compareTo(b.value));
+        for (final entry in ordered) {
+          stdout.writeln(
+            '  ${entry.value.toString().padLeft(5)} ms  ${entry.key}',
+          );
+          (totals[entry.key] ??= []).add(entry.value);
         }
-        if (terminal.isUsingAltBuffer ||
-            terminal.mouseMode != MouseMode.none) {
-          mark('Herdr on screen');
-          if (!done.isCompleted) done.complete();
-        }
+        log.forEach(stdout.writeln);
+
+        await session.disconnect();
+        await focus.dispose();
+        workspace.dispose();
       }
-
-      session.addListener(watch);
-      session.terminalPaintListenable.addListener(watch);
-      final poll = Timer.periodic(const Duration(milliseconds: 2), (_) {
-        watch();
-      });
-      unawaited(session.connect());
-      await done.future.timeout(const Duration(seconds: 20));
-      poll.cancel();
-      // Let the side channel finish what the open started.
-      await Future<void>.delayed(const Duration(milliseconds: 2500));
-
-      stdout.writeln(
-        'run ${run + 1} (${host.useMosh ? 'mosh' : 'ssh'}, '
-        'move focus ${moveFocus ? 'on' : 'off'}, RTT as configured):',
-      );
-      final ordered = marks.entries.toList()
-        ..sort((a, b) => a.value.compareTo(b.value));
-      for (final entry in ordered) {
-        stdout.writeln('  ${entry.value.toString().padLeft(5)} ms  ${entry.key}');
-        (totals[entry.key] ??= []).add(entry.value);
+      stdout.writeln('median over $runs runs:');
+      for (final entry in totals.entries) {
+        final values = entry.value..sort();
+        stdout.writeln(
+          '  ${values[values.length ~/ 2].toString().padLeft(5)} ms  ${entry.key}',
+        );
       }
-      log.forEach(stdout.writeln);
-
-      await session.disconnect();
-      await focus.dispose();
-      workspace.dispose();
-    }
-    stdout.writeln('median over $runs runs:');
-    for (final entry in totals.entries) {
-      final values = entry.value..sort();
-      stdout.writeln(
-        '  ${values[values.length ~/ 2].toString().padLeft(5)} ms  ${entry.key}',
-      );
-    }
-    await board.close();
-    await shared.dispose();
-  }, skip: skip, timeout: const Timeout(Duration(minutes: 5)));
+      await board.close();
+      await shared.dispose();
+    },
+    skip: skip,
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
 }

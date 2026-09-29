@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
@@ -24,10 +25,12 @@ class MoshTerminalRepository implements SshTerminalRepository {
 
   final HostKeyVerifier _hostKeyVerifier;
 
-  /// A command channel to [host], used to stop a session's mosh-server
-  /// after it was left without a client (a Herdr detach). Null disables
-  /// that; hosts that ask for a security-key touch per connection never
-  /// get one.
+  /// A command channel to [host] (the machine's shared side connection):
+  /// it starts mosh-server, so a machine whose side connection is up (the
+  /// home board, the agent monitor, Herdr's focus) needs no SSH handshake
+  /// of its own for it, and stops a session's mosh-server after it was
+  /// left without a client (a Herdr detach). Null disables both; hosts
+  /// that ask for a security-key touch per connection never use it.
   final AgentCommandRunner Function(SavedHost host)? cleanupRunner;
 
   SshClientFactory get _clientFactory => SshClientFactory(_hostKeyVerifier);
@@ -40,15 +43,19 @@ class MoshTerminalRepository implements SshTerminalRepository {
   }) async {
     SSHClient? client;
     try {
-      // Opened by the user, who may decide on a changed host key.
-      client = await withInteractiveHostKeyCheck<SSHClient>(
-        () => _clientFactory.connect(host),
-      );
-      final server = await _bootstrap(client, host);
-      final socket = client.socket;
-      final address = socket is TcpSshSocket ? socket.remoteAddress : null;
-      client.close();
-      client = null;
+      var server = await bootstrapOnSideChannel(host);
+      InternetAddress? address;
+      if (server == null) {
+        // Opened by the user, who may decide on a changed host key.
+        client = await withInteractiveHostKeyCheck<SSHClient>(
+          () => _clientFactory.connect(host),
+        );
+        server = await _bootstrap(client, host);
+        final socket = client.socket;
+        address = socket is TcpSshSocket ? socket.remoteAddress : null;
+        client.close();
+        client = null;
+      }
 
       final session = await MoshSession.connect(
         server: server,
@@ -111,6 +118,34 @@ class MoshTerminalRepository implements SshTerminalRepository {
   @visibleForTesting
   static String bootstrapCommand(SavedHost host) =>
       '$moshServerTimeoutEnv ${_bootstrapFor(host).command()}';
+
+  /// Starts mosh-server over [cleanupRunnerFor] [host]; null when that
+  /// did not work for a reason a connection of the terminal's own may not
+  /// share (a changed host key, which only it may ask about; a stale side
+  /// connection; unexpected output). A machine that cannot be reached
+  /// fails here, rather than being tried twice.
+  @visibleForTesting
+  Future<MoshServerConfig?> bootstrapOnSideChannel(SavedHost host) async {
+    final runner = cleanupRunnerFor(host)?.call();
+    if (runner == null) return null;
+    try {
+      final result = await runner.run(
+        bootstrapCommand(host),
+        timeout: Duration(seconds: host.connectionTimeoutSeconds),
+      );
+      return MoshServerConfig.parse(
+        '${result.stdout}${result.stderr}',
+        host: host.host.trim(),
+      );
+    } on ConnectionFailure catch (failure) {
+      if (failure.kind == ConnectionProblemKind.unreachable) rethrow;
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      unawaited(runner.close().catchError((Object _) {}));
+    }
+  }
 
   Future<MoshServerConfig> _bootstrap(SSHClient client, SavedHost host) async {
     // Through sh, so the `VAR=value cmd` prefix works under any login shell.

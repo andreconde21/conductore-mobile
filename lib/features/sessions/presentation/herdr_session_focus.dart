@@ -669,12 +669,9 @@ class HerdrSessionFocus implements AppInputRouter {
     final check = control.workspaces().then((items) {
       if (items == null || _disposed) return null;
       final focused = items.where((item) => item.focused).firstOrNull;
-      _applyFocus(
-        key,
-        focused?.id,
-        {for (final item in items) item.id: item.label},
-        workspaces: items,
-      );
+      _applyFocus(key, focused?.id, {
+        for (final item in items) item.id: item.label,
+      }, workspaces: items);
       return _HerdrFocusView(focused?.id, focused?.label ?? '');
     });
     _checks[key] = check;

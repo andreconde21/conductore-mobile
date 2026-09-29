@@ -709,7 +709,8 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     );
   }
 
-  TerminalTheme get _theme => widget.palette.terminalThemeFor(widget.brightness);
+  TerminalTheme get _theme =>
+      widget.palette.terminalThemeFor(widget.brightness);
 }
 
 /// What the terminal shows while its Herdr attach starts.
