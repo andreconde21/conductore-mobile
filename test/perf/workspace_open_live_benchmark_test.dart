@@ -153,6 +153,8 @@ void main() {
               .toList()
               .map((line) => line.toString())
               .join('\n');
+          if (text.trim().isNotEmpty) mark('first output');
+          if (text.contains(r'$')) mark('shell prompt');
           if (!terminal.isUsingAltBuffer &&
               terminal.mouseMode == MouseMode.none &&
               text.contains('herdr')) {

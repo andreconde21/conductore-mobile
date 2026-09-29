@@ -495,56 +495,63 @@ class SSHClient {
 
     final channelController = await _openSessionChannel();
 
+    // Every request goes out at once and the replies, which come back in
+    // order, are checked after: one round trip instead of one per request.
+    final replies = <Future<bool>>[];
+    final failures = <String>[];
+    void request(Future<bool> reply, String failure) {
+      replies.add(reply);
+      failures.add(failure);
+    }
+
     if (environment != null) {
       for (var pair in environment.entries) {
-        final envOk = await channelController.sendEnv(pair.key, pair.value);
-        if (!envOk) {
-          channelController.close();
-          throw SSHChannelRequestError(
-            'Failed to set environment variable: ${pair.key}',
-          );
-        }
+        request(
+          channelController.sendEnv(pair.key, pair.value),
+          'Failed to set environment variable: ${pair.key}',
+        );
       }
     }
 
     if (agentHandler != null) {
-      final agentOk = await channelController.sendAgentForwardingRequest();
-      if (!agentOk) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to request agent forwarding');
-      }
+      request(
+        channelController.sendAgentForwardingRequest(),
+        'Failed to request agent forwarding',
+      );
     }
 
     if (pty != null) {
-      final ok = await channelController.sendPtyReq(
-        terminalType: pty.type,
-        terminalWidth: pty.width,
-        terminalHeight: pty.height,
-        terminalPixelWidth: pty.pixelWidth,
-        terminalPixelHeight: pty.pixelHeight,
+      request(
+        channelController.sendPtyReq(
+          terminalType: pty.type,
+          terminalWidth: pty.width,
+          terminalHeight: pty.height,
+          terminalPixelWidth: pty.pixelWidth,
+          terminalPixelHeight: pty.pixelHeight,
+        ),
+        'Failed to start pty',
       );
-      if (!ok) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to start pty');
-      }
     }
 
     if (x11 != null) {
-      final x11Ok = await channelController.sendX11Req(
-        singleConnection: x11.singleConnection,
-        authenticationProtocol: x11.authenticationProtocol,
-        authenticationCookie: x11.authenticationCookie,
-        screenNumber: x11.screenNumber,
+      request(
+        channelController.sendX11Req(
+          singleConnection: x11.singleConnection,
+          authenticationProtocol: x11.authenticationProtocol,
+          authenticationCookie: x11.authenticationCookie,
+          screenNumber: x11.screenNumber,
+        ),
+        'Failed to request x11 forwarding',
       );
-      if (!x11Ok) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to request x11 forwarding');
-      }
     }
 
-    if (!await channelController.sendShell()) {
-      channelController.close();
-      throw SSHChannelRequestError('Failed to start shell');
+    request(channelController.sendShell(), 'Failed to start shell');
+
+    for (var i = 0; i < replies.length; i++) {
+      if (!await replies[i]) {
+        channelController.close();
+        throw SSHChannelRequestError(failures[i]);
+      }
     }
 
     return SSHSession(channelController.channel);
