@@ -34,6 +34,7 @@ void main() {
     WidgetTester tester, {
     String setup = '',
     bool multiplexer = false,
+    bool tmuxScrollMode = false,
   }) async {
     remote = TrackableTerminalSession();
     session = TerminalSessionController(
@@ -62,7 +63,7 @@ void main() {
                 predictiveEchoEnabled: false,
                 terminalMouseInput: false,
                 focusNode: null,
-                tmuxScrollMode: false,
+                tmuxScrollMode: tmuxScrollMode,
                 onExitTmuxScrollMode: () {},
                 onEnterScrollMode: multiplexer
                     ? () => enteredScrollMode += 1
@@ -234,4 +235,64 @@ void main() {
     expect(sent(), isEmpty);
     expect(zoomedTo, isNotEmpty);
   }, variant: _desktop);
+
+  testWidgets(
+    'a mouse drag on the alternate screen selects, it never scrolls the '
+    'program',
+    (tester) async {
+      await pumpSurface(tester, setup: _herdrLike);
+
+      await tester.dragFrom(
+        cellCenter(tester, 5, 3),
+        const Offset(0, 160),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+
+      // The phone's drag-to-wheel is for fingers only.
+      expect(sgrNotch.allMatches(sent()), isEmpty);
+      expect(sent(), isNot(contains('\x1b[A')));
+      expect(sent(), isNot(contains('\x1b[B')));
+    },
+    variant: _desktop,
+  );
+
+  testWidgets(
+    'in tmux copy mode a trackpad scrolls by notches and a mouse drag sends '
+    'no arrows',
+    (tester) async {
+      await pumpSurface(
+        tester,
+        setup: _altOnly,
+        multiplexer: true,
+        tmuxScrollMode: true,
+      );
+      final at = cellCenter(tester, 5, 8);
+
+      await tester.dragFrom(
+        at,
+        const Offset(0, 160),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(sent(), isEmpty);
+
+      final pad = TestPointer(2, PointerDeviceKind.trackpad);
+      await tester.sendEventToBinding(pad.panZoomStart(at));
+      var pan = Offset.zero;
+      // Slowly: 4 notches of travel, 3 arrows each on the desktop (the
+      // phone's copy-mode drag would send one per 12 px, 16 of them).
+      for (var i = 0; i < 40; i++) {
+        pan += const Offset(0, desktopWheelStep / 10);
+        await tester.sendEventToBinding(pad.panZoomUpdate(at, pan: pan));
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await tester.sendEventToBinding(pad.panZoomEnd());
+      await tester.pumpAndSettle();
+      final arrows = '\x1b[A'.allMatches(sent()).length;
+      expect(arrows % desktopArrowsPerNotch, 0);
+      expect(arrows ~/ desktopArrowsPerNotch, inInclusiveRange(3, 4));
+    },
+    variant: _desktop,
+  );
 }

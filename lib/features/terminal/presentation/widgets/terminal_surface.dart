@@ -817,11 +817,23 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onVerticalDragUpdate: _handleTmuxScrollDrag,
-                onVerticalDragEnd: _handleTmuxScrollEnd,
                 // Copy mode a drag opened on its own closes with a tap.
                 onTap: _dragEnteredScrollMode ? _leaveDragScrollMode : null,
-                child: const SizedBox.expand(),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  // Fingers only on the desktop: the wheel and trackpad
+                  // scroll copy mode by notches (_handleDesktopWheel), and
+                  // a mouse drag selects.
+                  supportedDevices: PlatformFeatures.isDesktop
+                      ? const {
+                          PointerDeviceKind.touch,
+                          PointerDeviceKind.stylus,
+                        }
+                      : null,
+                  onVerticalDragUpdate: _handleTmuxScrollDrag,
+                  onVerticalDragEnd: _handleTmuxScrollEnd,
+                  child: const SizedBox.expand(),
+                ),
               ),
             ),
         ],

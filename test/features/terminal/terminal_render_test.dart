@@ -2,7 +2,6 @@
 // pixels, lines recorded once and replayed, and glyph runs that draw the
 // same pixels as one paragraph per glyph.
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:conduit/core/theme/app_palette.dart';
@@ -67,6 +66,7 @@ void main() {
   test('equal terminal styles are equal, so a rebuild keeps the caches', () {
     const a = TerminalStyle(fontFamily: _font, fontSize: 14);
     // Not const: a rebuild creates a new instance each time.
+    // ignore: prefer_const_constructors
     final b = TerminalStyle(fontFamily: _font, fontSize: 14.0 + 0);
     expect(identical(a, b), isFalse);
     expect(a, b);
@@ -153,6 +153,7 @@ void main() {
                 scrollController: scroll,
                 theme: _theme,
                 // A new instance on every build, as TerminalSurface does.
+                // ignore: prefer_const_constructors
                 textStyle: TerminalStyle(fontFamily: _font, fontSize: 14),
               ),
             ),
