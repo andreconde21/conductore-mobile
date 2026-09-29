@@ -3,9 +3,33 @@ import 'dart:async';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:flutter/foundation.dart';
+
+/// [hosts] without the session hosts that were saved as machines: a
+/// copy of another saved machine with that machine's id and name plus a
+/// session's (`<id>#herdr:w1`, "<name>: <workspace>") and the same
+/// address, port and user. Earlier builds saved one when a Herdr workspace
+/// was opened from an agent (CON-056). Anything else stays, even a close
+/// copy the user made.
+List<SavedHost> withoutSessionCopies(List<SavedHost> hosts) {
+  bool isSessionCopy(SavedHost host) => hosts.any(
+    (machine) =>
+        machine.id != host.id &&
+        host.id.startsWith('${machine.id}${ConnectTarget.idSeparator}') &&
+        host.name.startsWith('${machine.name}: ') &&
+        host.host == machine.host &&
+        host.port == machine.port &&
+        host.username == machine.username,
+  );
+  if (!hosts.any(isSessionCopy)) return hosts;
+  return [
+    for (final host in hosts)
+      if (!isSessionCopy(host)) host,
+  ];
+}
 
 class HostsController extends ChangeNotifier {
   /// With [thisComputerStore] (desktops), "This computer" is a machine
@@ -195,11 +219,22 @@ class HostsController extends ChangeNotifier {
       }
     }
     try {
-      final hosts = (await loadedHosts)
+      final loaded = (await loadedHosts)
           .where((host) => !host.isThisComputer)
           .toList(growable: false);
+      final hosts = withoutSessionCopies(loaded);
       _sortMode = await sortMode;
       _manualOrder = await manualOrder;
+      if (hosts.length != loaded.length) {
+        // Cleans up after CON-056 (opening a Herdr workspace saved the
+        // session's host as a machine).
+        _manualOrder = [
+          for (final id in _manualOrder)
+            if (hosts.any((host) => host.id == id)) id,
+        ];
+        await _repository.saveHosts(hosts);
+        await _repository.saveManualOrder(_manualOrder);
+      }
       _setHosts(hosts);
     } on AppFailure catch (failure) {
       _errorMessage = failure.toString();
@@ -337,7 +372,9 @@ class HostsController extends ChangeNotifier {
     List<String>? manualOrder,
   }) async {
     _errorMessage = null;
-    hosts = hosts.where((host) => !host.isThisComputer).toList();
+    hosts = withoutSessionCopies(
+      hosts.where((host) => !host.isThisComputer).toList(),
+    );
     try {
       await _repository.saveHosts(hosts);
       if (sortMode != null && sortMode != _sortMode) {
@@ -372,10 +409,17 @@ class HostsController extends ChangeNotifier {
       await upsert(local.copyWith(lastConnectedAt: DateTime.now()));
       return;
     }
-    final current = _hosts.firstWhere(
-      (currentHost) => currentHost.id == host.id,
-      orElse: () => host,
-    );
+    // A session's host (`<machine id>#herdr:w1`, as the agent monitors
+    // and the dashboard hand them out) stamps its machine; it is never
+    // saved as a machine of its own.
+    final machineId = baseHostId(host.id);
+    SavedHost? saved(String id) =>
+        _hosts.where((currentHost) => currentHost.id == id).firstOrNull;
+    final current =
+        saved(host.id) ??
+        saved(machineId) ??
+        (machineId == host.id ? host : null);
+    if (current == null) return;
     await upsert(current.copyWith(lastConnectedAt: DateTime.now()));
   }
 
