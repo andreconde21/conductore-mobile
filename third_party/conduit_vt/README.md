@@ -13,5 +13,19 @@ package keeps private.
 
 ## Local patch
 
-The diff against the origin commit is the git history of this directory
-after the commit that added the pristine copy.
+The desktop terminal renderer (CON-059). The exact diff against the origin
+commit is the git history of this directory after the commit that added the
+pristine copy.
+
+- `TerminalPainter` places the cell grid on whole device pixels (the
+  `devicePixelRatio` the view passes down): cell width and height, line tops
+  and glyph origins, so text stays sharp at 1x, 2x and fractional scales.
+- `RenderTerminal` shifts its paint origin onto the window's pixel grid and
+  keeps recorded pictures of lines (`LinePictureCache`): a line is drawn
+  directly the first time and recorded when it is painted again unchanged,
+  so scrolling and repaints replay it instead of drawing every cell.
+- A recorded line merges backgrounds into one rectangle per colour run and
+  draws printable ASCII of one style as one paragraph per run, letter-spaced
+  onto the grid (`debugDisableGlyphRuns` turns this off for comparisons).
+- `TerminalStyle` has value equality, so an equal style from a rebuild keeps
+  the caches; the text input caret rect is sent once per frame, when it moved.
