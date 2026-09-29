@@ -187,22 +187,21 @@ class TerminalPainter {
   /// Paints [line] to [canvas] at [offset]. The x offset of [offset] is usually
   /// 0, and the y offset is the top of the line.
   void paintLine(Canvas canvas, Offset offset, BufferLine line) {
+    canvas.save();
+    canvas.translate(offset.dx, offset.dy);
+    _paintLineBackground(canvas, line);
+    // One cached paragraph per glyph: the cheapest to draw for a line that
+    // is shown once (see RenderTerminal's streaming output).
     final cellData = CellData.empty();
     final cellWidth = _cellSize.width;
-
     for (var i = 0; i < line.length; i++) {
       line.getCellData(i, cellData);
-
-      final charWidth = cellData.content >> CellContent.widthShift;
-      final cellOffset = offset.translate(i * cellWidth, 0);
-
-      paintCell(canvas, cellOffset, cellData);
-
-      if (charWidth == 2) {
-        i++;
-      }
+      paintCellForeground(canvas, Offset(i * cellWidth, 0), cellData);
+      if (cellData.content >> CellContent.widthShift == 2) i++;
     }
+    canvas.restore();
   }
+
 
   void paintOverlayText(
     Canvas canvas,

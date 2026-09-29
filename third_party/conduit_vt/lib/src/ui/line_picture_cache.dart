@@ -20,20 +20,27 @@ class LinePictureCache {
   /// Lines recorded since the cache was created, for tests and benchmarks.
   int recorded = 0;
 
-  /// The picture of [line], recording it with [record] when there is none
-  /// or the line changed.
-  Picture pictureOf(
+  /// The picture recorded for [line] if it still shows the same cells
+  /// with the same [generation], or null.
+  Picture? lookup(BufferLine line, int generation) {
+    final entry = _entries.remove(line);
+    if (entry == null) return null;
+    if (!entry.matches(line, generation)) {
+      entry.picture.dispose();
+      return null;
+    }
+    // Re-inserted at the end: least recently used lines come first.
+    _entries[line] = entry;
+    return entry.picture;
+  }
+
+  /// Records [line] with [record] and keeps the picture.
+  Picture record(
     BufferLine line,
     int generation,
     Picture Function(BufferLine line) record,
   ) {
-    final entry = _entries.remove(line);
-    if (entry != null && entry.matches(line, generation)) {
-      // Re-inserted at the end: least recently used lines come first.
-      _entries[line] = entry;
-      return entry.picture;
-    }
-    entry?.picture.dispose();
+    _entries.remove(line)?.picture.dispose();
     final picture = record(line);
     recorded++;
     _entries[line] = _Entry(line, generation, picture);
