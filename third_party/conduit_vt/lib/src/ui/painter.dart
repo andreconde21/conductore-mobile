@@ -397,7 +397,13 @@ class TerminalPainter {
       runStart = -1;
       if (text.isEmpty) return;
       final paragraph = _layoutRun(text, runColor, runFlags);
-      canvas.drawParagraph(paragraph, Offset(start * cellWidth, _glyphTop));
+      // The text engine puts half the letter spacing before each glyph;
+      // undo that so every glyph starts exactly at its cell.
+      final spacing = _cellSize.width - _runAdvance(runFlags)!;
+      canvas.drawParagraph(
+        paragraph,
+        Offset(start * cellWidth - spacing / 2, _glyphTop),
+      );
       debugParagraphsDrawn++;
       paragraph.dispose();
     }
