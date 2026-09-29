@@ -585,24 +585,17 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     offset += _pixelGridShift(offset);
     final lineOffset = _lineOffset;
     final generation = _painter.generation;
-    final pictures = [
-      for (var i = effectFirstLine; i <= effectLastLine; i++)
-        _lineCache.lookup(lines[i], generation),
-    ];
-    // Fast output replaces most of the screen every frame, and such lines
-    // are usually gone by the next one: drawing them straight away is
-    // cheaper than recording them. Lines that stay (scrolling, a program
-    // redrawing parts of its screen) are recorded and then replayed.
-    final missing = pictures.where((picture) => picture == null).length;
-    final streaming = missing > max(4, pictures.length ~/ 2);
     for (var i = effectFirstLine; i <= effectLastLine; i++) {
       final top = offset.dy + i * charHeight + lineOffset;
-      var picture = pictures[i - effectFirstLine];
-      if (picture == null && streaming) {
+      final picture = _lineCache.pictureOf(
+        lines[i],
+        generation,
+        _painter.recordLine,
+      );
+      if (picture == null) {
         _painter.paintLine(canvas, Offset(offset.dx, top), lines[i]);
         continue;
       }
-      picture ??= _lineCache.record(lines[i], generation, _painter.recordLine);
       canvas.save();
       canvas.translate(offset.dx, top);
       canvas.drawPicture(picture);

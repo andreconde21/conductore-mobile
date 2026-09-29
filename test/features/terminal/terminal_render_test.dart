@@ -172,36 +172,96 @@ void main() {
     }
 
     testWidgets(
-      'scrolling and rebuilds replay recorded lines; only new lines record',
+      'lines are recorded once they stay, then replayed; only new lines record',
       (tester) async {
         final render = await pumpView(tester, 1.25);
-        final afterFirst = render.debugLinesRecorded;
+        final screen = terminal.viewHeight;
 
-        // A rebuild with an equal (but new) style draws nothing again.
-        rebuild.value++;
-        await tester.pump();
-        expect(render.debugLinesRecorded, afterFirst);
+        // Output draws its lines straight away: fast output replaces them
+        // before a recording would pay off.
+        final afterOutput = render.debugLinesRecorded;
+        expect(afterOutput, lessThanOrEqualTo(1));
 
-        // Scrolling up by less than a line exposes one line at the top.
+        // Painted again unchanged (a small scroll): now they are recorded,
+        // and the line the scroll exposed at the top is drawn directly.
         scroll.jumpTo(scroll.offset - 5);
         await tester.pump();
-        expect(render.debugLinesRecorded - afterFirst, lessThanOrEqualTo(1));
+        final recordedScreen = render.debugLinesRecorded - afterOutput;
+        expect(recordedScreen, inInclusiveRange(screen - 1, screen + 1));
+
+        // Further scrolling replays them and records only the lines that
+        // are new on screen.
+        var before = render.debugLinesRecorded;
+        scroll.jumpTo(scroll.offset - 5);
+        await tester.pump();
+        expect(render.debugLinesRecorded - before, lessThanOrEqualTo(1));
+
+        // A rebuild with an equal (but new) style keeps every recording.
+        before = render.debugLinesRecorded;
+        rebuild.value++;
+        await tester.pump();
+        scroll.jumpTo(scroll.offset - 1);
+        await tester.pump();
+        expect(render.debugLinesRecorded - before, lessThanOrEqualTo(1));
 
         // Back to the bottom: those lines are still recorded.
-        final beforeReturn = render.debugLinesRecorded;
         scroll.jumpTo(scroll.position.maxScrollExtent);
         await tester.pump();
-        expect(render.debugLinesRecorded, beforeReturn);
+        before = render.debugLinesRecorded;
+        scroll.jumpTo(scroll.offset - 2);
+        await tester.pump();
+        scroll.jumpTo(scroll.position.maxScrollExtent);
+        await tester.pump();
+        expect(render.debugLinesRecorded - before, lessThanOrEqualTo(1));
 
-        // New output records the lines it changed, not the screen.
+        // New output changes one or two lines; the rest stay recorded.
+        before = render.debugLinesRecorded;
         terminal.write('\r\nnew line');
         await tester.pump();
-        expect(
-          render.debugLinesRecorded - beforeReturn,
-          inInclusiveRange(1, 2),
-        );
+        scroll.jumpTo(scroll.offset - 1);
+        await tester.pump();
+        expect(render.debugLinesRecorded - before, inInclusiveRange(1, 3));
       },
       variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    );
+
+    testWidgets(
+      'a line drawn directly and its recording draw the same pixels',
+      (tester) async {
+        await tester.runAsync(() async {
+          final terminal = Terminal()..resize(60, 2);
+          terminal.write(
+            '\x1b[1;34mbold blue\x1b[0m plain \x1b[32mgreen\x1b[0m '
+            // Not underlines: one paragraph per cell overlaps them by the
+            // advance's rounding at cell edges, a run draws them evenly.
+            '\x1b[7minverse\x1b[0m café ✓ \x1b[3mitalic\x1b[0m\r\n'
+            '\x1b[48;5;236m background run \x1b[0m ~!@#^&*()_+=|<>?,./',
+          );
+          for (final dpr in [1.0, 1.25, 2.0]) {
+            final painter = _painter(dpr);
+            final size = Size(
+              60 * painter.cellSize.width,
+              painter.cellSize.height,
+            );
+            for (var row = 0; row < 2; row++) {
+              final line = terminal.buffer.lines[row];
+              final recorder = ui.PictureRecorder();
+              painter.paintLine(Canvas(recorder), Offset.zero, line);
+              final direct = recorder.endRecording();
+              final recorded = painter.recordLine(line);
+              final a = await _pixels(direct, size, dpr);
+              final b = await _pixels(recorded, size, dpr);
+              direct.dispose();
+              recorded.dispose();
+              var differing = 0;
+              for (var i = 0; i < a.length; i++) {
+                if ((a[i] - b[i]).abs() > 8) differing++;
+              }
+              expect(differing, 0, reason: 'row $row at ${dpr}x');
+            }
+          }
+        });
+      },
     );
 
     testWidgets(

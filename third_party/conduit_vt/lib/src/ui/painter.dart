@@ -191,7 +191,7 @@ class TerminalPainter {
     canvas.translate(offset.dx, offset.dy);
     _paintLineBackground(canvas, line);
     // One cached paragraph per glyph: the cheapest to draw for a line that
-    // is shown once (see RenderTerminal's streaming output).
+    // is shown once (see LinePictureCache).
     final cellData = CellData.empty();
     final cellWidth = _cellSize.width;
     for (var i = 0; i < line.length; i++) {
@@ -201,7 +201,6 @@ class TerminalPainter {
     }
     canvas.restore();
   }
-
 
   void paintOverlayText(
     Canvas canvas,

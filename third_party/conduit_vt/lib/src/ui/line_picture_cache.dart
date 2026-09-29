@@ -9,6 +9,13 @@ import 'package:conduit_vt/src/core/buffer/line.dart';
 /// streaming output then only record the lines that are new or changed,
 /// like a native terminal's damage tracking.
 ///
+/// A line is recorded the second time it is painted unchanged. The first
+/// time it is drawn straight away: fast output replaces most of the screen
+/// every frame, and such lines are usually gone by the next one, so
+/// recording them would cost more than it saves. Lines that stay
+/// (scrolling, a static screen, a program redrawing parts of it) are
+/// recorded on their second frame and replayed after that.
+///
 /// A picture is reused only while its line holds exactly the cells it was
 /// recorded from (compared cell by cell, so no mutation can be missed) and
 /// the painter's [generation] is unchanged.
@@ -20,51 +27,47 @@ class LinePictureCache {
   /// Lines recorded since the cache was created, for tests and benchmarks.
   int recorded = 0;
 
-  /// The picture recorded for [line] if it still shows the same cells
-  /// with the same [generation], or null.
-  Picture? lookup(BufferLine line, int generation) {
-    final entry = _entries.remove(line);
-    if (entry == null) return null;
-    if (!entry.matches(line, generation)) {
-      entry.picture.dispose();
-      return null;
-    }
-    // Re-inserted at the end: least recently used lines come first.
-    _entries[line] = entry;
-    return entry.picture;
-  }
-
-  /// Records [line] with [record] and keeps the picture.
-  Picture record(
+  /// The picture of [line], recorded with [record] if the line was already
+  /// painted with the same cells and [generation] last time; null when it
+  /// is new or changed, and should be drawn directly.
+  Picture? pictureOf(
     BufferLine line,
     int generation,
     Picture Function(BufferLine line) record,
   ) {
-    _entries.remove(line)?.picture.dispose();
-    final picture = record(line);
+    final entry = _entries.remove(line);
+    if (entry == null || !entry.matches(line, generation)) {
+      entry?.dispose();
+      // Seen once: remember its cells to know whether it stays.
+      _entries[line] = _Entry(line, generation);
+      return null;
+    }
+    // Re-inserted at the end: least recently used lines come first.
+    _entries[line] = entry;
+    final picture = entry.picture;
+    if (picture != null) return picture;
     recorded++;
-    _entries[line] = _Entry(line, generation, picture);
-    return picture;
+    return entry.picture = record(line);
   }
 
-  /// Drops the least recently used pictures beyond [maxLines].
+  /// Drops the least recently used lines beyond [maxLines].
   void trim(int maxLines) {
     while (_entries.length > maxLines) {
       final line = _entries.keys.first;
-      _entries.remove(line)!.picture.dispose();
+      _entries.remove(line)!.dispose();
     }
   }
 
   void clear() {
     for (final entry in _entries.values) {
-      entry.picture.dispose();
+      entry.dispose();
     }
     _entries.clear();
   }
 }
 
 class _Entry {
-  _Entry(BufferLine line, this.generation, this.picture)
+  _Entry(BufferLine line, this.generation)
       : length = line.length,
         cells = Uint32List.fromList(
           Uint32List.sublistView(line.data, 0, line.length * _intsPerCell),
@@ -75,7 +78,7 @@ class _Entry {
   final int generation;
   final int length;
   final Uint32List cells;
-  final Picture picture;
+  Picture? picture;
 
   bool matches(BufferLine line, int generation) {
     if (generation != this.generation || line.length != length) return false;
@@ -86,4 +89,6 @@ class _Entry {
     }
     return true;
   }
+
+  void dispose() => picture?.dispose();
 }
