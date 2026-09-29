@@ -7,6 +7,7 @@
 //   CONDUCTORE_BENCH_HOST=dev@10.0.0.2 CONDUCTORE_BENCH_KEY=/path/key \
 //   CONDUCTORE_BENCH_WORKSPACE=w2 [CONDUCTORE_BENCH_MOSH=1] \
 //   [CONDUCTORE_BENCH_MOVE_FOCUS=1] [CONDUCTORE_BENCH_RUNS=5] \
+//   [CONDUCTORE_BENCH_PASSPHRASE=...] \
 //   flutter test test/perf/workspace_open_live_benchmark_test.dart
 //
 // Skipped without CONDUCTORE_BENCH_HOST.
@@ -96,6 +97,7 @@ void main() {
         port: address.length > 1 ? int.parse(address[1]) : 22,
         authMethod: SshAuthMethod.privateKey,
         privateKey: File(env['CONDUCTORE_BENCH_KEY']!).readAsStringSync(),
+        passphrase: env['CONDUCTORE_BENCH_PASSPHRASE'] ?? '',
         password: '',
         useMosh: env['CONDUCTORE_BENCH_MOSH'] == '1',
       );
@@ -153,7 +155,6 @@ void main() {
               .toList()
               .map((line) => line.toString())
               .join('\n');
-          if (text.trim().isNotEmpty) mark('first output');
           if (text.contains(r'$')) mark('shell prompt');
           if (!terminal.isUsingAltBuffer &&
               terminal.mouseMode == MouseMode.none &&
