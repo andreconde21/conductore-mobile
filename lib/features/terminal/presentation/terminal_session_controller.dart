@@ -272,6 +272,10 @@ class TerminalSessionController extends ChangeNotifier {
   /// device may not move it; null while it shows this session's own.
   ValueListenable<String?> get focusElsewhere => _focusElsewhere;
 
+  set focusElsewhereLabel(String? label) {
+    if (!_disposed) _focusElsewhere.value = label;
+  }
+
   /// True from typing a Herdr attach into the fresh shell until Herdr has
   /// drawn (it took the alternate screen, or turned on mouse reports,
   /// which is all a Mosh session passes on), for at most
@@ -282,10 +286,6 @@ class TerminalSessionController extends ChangeNotifier {
   /// How long [startupCover] waits for Herdr before showing the shell
   /// anyway (Herdr missing, or failing to start, prints why there).
   static const startupCoverTimeout = Duration(seconds: 3);
-
-  set focusElsewhereLabel(String? label) {
-    if (!_disposed) _focusElsewhere.value = label;
-  }
 
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
