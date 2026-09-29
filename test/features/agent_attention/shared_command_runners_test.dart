@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/data/shared_command_runners.dart';
@@ -11,10 +12,15 @@ import '../../support/test_doubles.dart';
 
 /// One fake SSH connection: commands wait for [release] when [hold] is set.
 class _Connection
-    implements StdinAgentCommandRunner, ReconnectingCommandRunner {
+    implements
+        StdinAgentCommandRunner,
+        ReconnectingCommandRunner,
+        AddressedCommandRunner {
   _Connection(this.host);
 
   final String host;
+  @override
+  InternetAddress? remoteAddress;
   final List<String> commands = [];
   int closeCount = 0;
   int drops = 0;
@@ -85,6 +91,14 @@ void main() {
     await session.run('herdr workspace list', timeout: timeout);
     expect(opened, hasLength(1));
     expect(opened.single.commands, ['status', 'herdr workspace list']);
+  });
+
+  test('a runner tells the address its connection reached', () async {
+    final (pool, opened) = makePool();
+    final runner = pool.lease(buildHost('a')) as AddressedCommandRunner;
+    expect(runner.remoteAddress, isNull);
+    opened.single.remoteAddress = InternetAddress('192.0.2.7');
+    expect(runner.remoteAddress, InternetAddress('192.0.2.7'));
   });
 
   test('a closed runner fails alone; the connection lingers after the '

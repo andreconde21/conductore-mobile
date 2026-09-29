@@ -347,7 +347,10 @@ void main() {
         final first = await provider.fetchAgents(runner);
         expect(runner.commands.first, contains('status --herdr-agents --gzip'));
         final second = await provider.fetchAgents(runner);
-        expect(runner.commands.last, contains('status --etag e1.7 --herdr-agents --gzip'));
+        expect(
+          runner.commands.last,
+          contains('status --etag e1.7 --herdr-agents --gzip'),
+        );
         expect(second.agents, first.agents);
         expect(second.sequence, 7);
         expect(second.capabilities, {'digest'});

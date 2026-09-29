@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
+import 'package:conduit/features/agent_attention/data/shared_command_runners.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
@@ -43,8 +44,9 @@ class MoshTerminalRepository implements SshTerminalRepository {
   }) async {
     SSHClient? client;
     try {
-      var server = await bootstrapOnSideChannel(host);
-      InternetAddress? address;
+      final started = await bootstrapOnSideChannel(host);
+      var server = started?.server;
+      var address = started?.address;
       if (server == null) {
         // Opened by the user, who may decide on a changed host key.
         client = await withInteractiveHostKeyCheck<SSHClient>(
@@ -119,23 +121,39 @@ class MoshTerminalRepository implements SshTerminalRepository {
   static String bootstrapCommand(SavedHost host) =>
       '$moshServerTimeoutEnv ${_bootstrapFor(host).command()}';
 
-  /// Starts mosh-server over [cleanupRunnerFor] [host]; null when that
+  /// How long the side connection may take to start mosh-server (not to
+  /// connect) before the terminal opens a connection of its own: a stale
+  /// side connection must not hold the terminal up for a whole connection
+  /// timeout. A mosh-server started too late exits on its own, after a
+  /// minute without a client.
+  static const sideChannelBootstrapTimeout = Duration(seconds: 4);
+
+  /// Starts mosh-server over [cleanupRunnerFor] [host], with the address
+  /// that connection reached (Mosh must use that one: the first address
+  /// a name resolves to may be one SSH could not reach); null when that
   /// did not work for a reason a connection of the terminal's own may not
   /// share (a changed host key, which only it may ask about; a stale side
   /// connection; unexpected output). A machine that cannot be reached
   /// fails here, rather than being tried twice.
   @visibleForTesting
-  Future<MoshServerConfig?> bootstrapOnSideChannel(SavedHost host) async {
+  Future<({MoshServerConfig server, InternetAddress? address})?>
+  bootstrapOnSideChannel(SavedHost host) async {
     final runner = cleanupRunnerFor(host)?.call();
     if (runner == null) return null;
     try {
       final result = await runner.run(
         bootstrapCommand(host),
-        timeout: Duration(seconds: host.connectionTimeoutSeconds),
+        timeout: sideChannelBootstrapTimeout,
       );
-      return MoshServerConfig.parse(
-        '${result.stdout}${result.stderr}',
-        host: host.host.trim(),
+      return (
+        server: MoshServerConfig.parse(
+          '${result.stdout}${result.stderr}',
+          host: host.host.trim(),
+        ),
+        address: switch (runner) {
+          final AddressedCommandRunner addressed => addressed.remoteAddress,
+          _ => null,
+        },
       );
     } on ConnectionFailure catch (failure) {
       if (failure.kind == ConnectionProblemKind.unreachable) rethrow;
