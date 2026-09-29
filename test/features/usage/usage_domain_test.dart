@@ -231,11 +231,14 @@ void main() {
       String id,
       List<Map<String, Object?>>? accounts, {
       bool cswap = true,
+      List<Map<String, Object?>> limits = const [],
     }) => MachineUsage(
       hostId: id,
       hostName: id.toUpperCase(),
       report: parseUsageReport(
-        jsonEncode(usageReplyJson(accounts: accounts, cswap: cswap)),
+        jsonEncode(
+          usageReplyJson(accounts: accounts, cswap: cswap, limits: limits),
+        ),
       ),
     );
 
@@ -289,6 +292,46 @@ void main() {
       expect(m.accounts, hasLength(1));
       expect(m.canSwitchAccounts, isFalse);
       expect(UsageSummary([m]).accounts.single.switchTargets, isEmpty);
+    });
+
+    // CON-057: two managed accounts, neither live, and the live login a
+    // third account cswap does not manage (companion 1.3: slot null).
+    test('an unmanaged live login is the third, active account', () {
+      final m = machine(
+        'a',
+        [
+          usageAccount(1, 'outsmartis', weekly: 100),
+          usageAccount(2, 'webmaster', weekly: 100),
+          usageUnmanagedAccount('a***@o***.com'),
+        ],
+        limits: [
+          {'label': '5h', 'usedPct': 38},
+          {'label': '7d', 'usedPct': 96},
+        ],
+      );
+      expect(m.accounts, hasLength(3));
+      final live = m.accounts.last;
+      expect(live.slot, isNull);
+      expect(live.managed, isFalse);
+      expect(live.active, isTrue);
+      expect(m.accounts.first.managed, isTrue);
+      final summary = UsageSummary([m]);
+      final accounts = summary.accounts;
+      expect(accounts.map((a) => a.label), [
+        'a***@o***.com',
+        'outsmartis',
+        'webmaster',
+      ]);
+      final first = accounts.first;
+      expect(first.active, isTrue);
+      expect(first.unmanaged, isTrue);
+      // Never a switch target; its windows are the machine's live ones.
+      expect(first.switchTargets, isEmpty);
+      expect(first.fiveHour?.usedPct, 38);
+      expect(first.weekly?.usedPct, 96);
+      expect(accounts[1].unmanaged, isFalse);
+      expect(accounts[1].switchTargets.single.account.slot, 1);
+      expect(summary.otherAccountCount, 2);
     });
 
     test('merges across machines by label, active first', () {

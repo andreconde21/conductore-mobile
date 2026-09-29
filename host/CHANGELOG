@@ -1,5 +1,10 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: `usage` lists the live Claude login when cswap does not manage it (CON-057): with no managed account active, `cswap status --json` names it and it is added as an active row with `slot: null`, `managed: false` and no windows (a masked email as label). Before, a `/login` to an account never `cswap add`ed was missing and both managed accounts showed as inactive. Only asked when no managed account is live; for an unmanaged login cswap reads `~/.claude.json` alone.
+- fix: a `cswap add` or `remove` shows at once: the 60 s account cache is dropped when cswap's `sequence.json` changes.
+
 ## 1.2.0 (2026-09-28)
 
 - feat: live Herdr and tmux state (capability `live`). `status --live` and `events --live [--only live]` carry workspaces, tabs and panes of every Herdr server and the sessions and windows of the default tmux server as entities (`docs/herdr-live.md`), pushed instead of polled: one read-only `events.subscribe` connection per Herdr server for lifecycle events plus one for per-pane `pane.agent_status_changed` (renewed when panes come and go, retried on `pane_not_found`), a `session.snapshot` after each event and every 60 s; one tmux control client (`-C attach-session -f read-only,ignore-size,no-output`) that only ever gets `list-sessions`, `list-windows -a` and `list-clients`. Activity-only changes are lazy: they wait for the next change or the long-poll's timeout. The bridge runs only while a phone asks (it stops 15 minutes after the last `--live` or `--herdr-agents` request); older phones never start it. Herdr without `events.subscribe` is read by snapshot every 10 s.

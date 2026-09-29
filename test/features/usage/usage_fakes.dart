@@ -122,6 +122,18 @@ Map<String, Object?> usageAccount(
   ],
 };
 
+/// The live login cswap does not manage (companion 1.3, CON-057).
+Map<String, Object?> usageUnmanagedAccount(String label) => {
+  'slot': null,
+  'alias': null,
+  'label': label,
+  'active': true,
+  'disabled': false,
+  'managed': false,
+  'status': null,
+  'limits': <String, Object?>{},
+};
+
 Map<String, Object?> usageRow(
   String date, {
   String project = 'api',
