@@ -892,7 +892,12 @@ class TerminalSessionController extends ChangeNotifier {
       // the multiplexer shows: not typed input, so it is never held (nor
       // counted as waiting). Dropped while input is held: the screen is
       // about to change, or shows another place than the session's own.
-      if (!_inputHold.holding) _deliverInput(normalized);
+      // A click also needs the place confirmed, since in Herdr it moves
+      // the focus every screen shares; a scroll does not.
+      if (_inputHold.holding) return;
+      if (isWheelReport(normalized) || inputCheck?.call(this) == null) {
+        _deliverInput(normalized);
+      }
       return;
     }
     if (_inputHold.offer(normalized)) {
@@ -915,6 +920,24 @@ class TerminalSessionController extends ChangeNotifier {
   /// encodings): wheel notches of a drag, or the terminal's own clicks.
   @visibleForTesting
   static bool isMouseReport(String data) => _mouseReports.hasMatch(data);
+
+  static final _sgrMouseReport = RegExp(r'\x1b\[<(\d+);\d+;\d+[Mm]');
+
+  /// Whether [data] is only SGR wheel notches (button bit 64, any
+  /// shift/alt/ctrl, no motion), which scroll and never move focus.
+  @visibleForTesting
+  static bool isWheelReport(String data) {
+    final reports = _sgrMouseReport.allMatches(data).toList();
+    if (reports.isEmpty ||
+        reports.fold(0, (length, m) => length + m.group(0)!.length) !=
+            data.length) {
+      return false;
+    }
+    return reports.every((m) {
+      final button = int.parse(m.group(1)!);
+      return button & 64 != 0 && button & (128 | 32) == 0;
+    });
+  }
 
   void _deliverInput(String normalized) {
     final session = _session;

@@ -171,6 +171,32 @@ void main() {
     expect(sent(), isEmpty);
   });
 
+  testWidgets('a click on Herdr showing another workspace is dropped, '
+      'not held or counted: it would move the shared focus (CON-056)', (
+    tester,
+  ) async {
+    await pumpSurface(tester, setup: _herdrLike);
+    session.inputCheck = (_) => Future.value(InputHoldDecision.block);
+
+    session.terminal.textInput('\x1b[<0;5;5M\x1b[<0;5;5m');
+    await tester.pump();
+
+    expect(session.inputHold.value, isNull);
+    expect(sent(), isEmpty);
+  });
+
+  test('isWheelReport: SGR wheel notches only', () {
+    expect(TerminalSessionController.isWheelReport('\x1b[<64;3;4M'), isTrue);
+    expect(
+      TerminalSessionController.isWheelReport('\x1b[<65;3;4M\x1b[<69;3;4M'),
+      isTrue,
+    );
+    expect(TerminalSessionController.isWheelReport('\x1b[<0;3;4M'), isFalse);
+    expect(TerminalSessionController.isWheelReport('\x1b[<96;3;4M'), isFalse);
+    expect(TerminalSessionController.isWheelReport('\x1b[<64;3;4Mx'), isFalse);
+    expect(TerminalSessionController.isWheelReport(''), isFalse);
+  });
+
   testWidgets('legacy mouse encoding sends ESC [ M with 32 + 64', (
     tester,
   ) async {
