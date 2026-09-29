@@ -8,7 +8,6 @@ import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
-import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -88,22 +87,6 @@ void main() {
     expect(session.startupCover.value, isFalse);
   });
 
-  test('a Herdr that does not start shows the shell after a while', () {
-    fakeAsync((async) {
-      final repo = _Repo();
-      final session = herdrSession(repo);
-      unawaited(session.connect());
-      async.flushMicrotasks();
-      repo.session.stdoutCtl.add(utf8.encode('herdr: command not found\r\n'));
-      async.flushMicrotasks();
-      expect(session.startupCover.value, isTrue);
-
-      async.elapse(TerminalSessionController.startupCoverTimeout);
-      expect(session.startupCover.value, isFalse);
-      session.dispose();
-    });
-  });
-
   test('a shell, tmux or a cd is never covered', () async {
     for (final startup in [null, 'cd /srv', 'tmux new-session -A -s main']) {
       final repo = _Repo();
@@ -128,32 +111,33 @@ void main() {
     expect(session.startupCover.value, isFalse);
   });
 
+  Widget surface(TerminalSessionController session) => MaterialApp(
+    home: Scaffold(
+      body: TerminalSurface(
+        session: session,
+        palette: AppPalette.catppuccin,
+        brightness: Brightness.dark,
+        fontFamily: 'monospace',
+        fontSize: 12,
+        predictiveEchoEnabled: false,
+        terminalMouseInput: false,
+        focusNode: null,
+        tmuxScrollMode: false,
+        onExitTmuxScrollMode: () {},
+      ),
+    ),
+  );
+
+  final cover = find.byKey(const ValueKey('terminal-startup-cover'));
+
   testWidgets('the terminal view hides the typed attach behind it', (
     tester,
   ) async {
     final repo = _Repo();
     final session = herdrSession(repo);
     addTearDown(session.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: TerminalSurface(
-            session: session,
-            palette: AppPalette.catppuccin,
-            brightness: Brightness.dark,
-            fontFamily: 'monospace',
-            fontSize: 12,
-            predictiveEchoEnabled: false,
-            terminalMouseInput: false,
-            focusNode: null,
-            tmuxScrollMode: false,
-            onExitTmuxScrollMode: () {},
-          ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(surface(session));
     await tester.pump();
-    final cover = find.byKey(const ValueKey('terminal-startup-cover'));
     expect(cover, findsOneWidget);
     expect(find.text('Opening Herdr…'), findsOneWidget);
 
@@ -161,5 +145,36 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(cover, findsNothing);
+  });
+
+  testWidgets('a Herdr that does not start shows the shell after a while', (
+    tester,
+  ) async {
+    final repo = _Repo();
+    final session = herdrSession(repo);
+    addTearDown(session.dispose);
+    await tester.pumpWidget(surface(session));
+    await tester.pump();
+    repo.session.stdoutCtl.add(utf8.encode('herdr: command not found\r\n'));
+    await tester.pump();
+    expect(cover, findsOneWidget);
+
+    await tester.pump(TerminalSessionController.startupCoverTimeout);
+    await tester.pump();
+    expect(cover, findsNothing);
+    expect(session.startupCover.value, isFalse);
+  });
+
+  testWidgets('a covered session nobody shows holds no timer', (tester) async {
+    // The app keeps sessions whose view is gone (another tab, the home
+    // board): a timer of theirs would outlive every widget.
+    final repo = _Repo();
+    final session = herdrSession(repo);
+    addTearDown(session.dispose);
+    await tester.pumpWidget(surface(session));
+    await tester.pump();
+    expect(cover, findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    expect(session.startupCover.value, isTrue);
   });
 }

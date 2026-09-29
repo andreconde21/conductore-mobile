@@ -701,7 +701,12 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
           ValueListenableBuilder<bool>(
             valueListenable: widget.session.startupCover,
             builder: (context, covered, _) => covered
-                ? Positioned.fill(child: _StartupCover(theme: _theme))
+                ? Positioned.fill(
+                    child: _StartupCover(
+                      session: widget.session,
+                      theme: _theme,
+                    ),
+                  )
                 : const SizedBox.shrink(),
           ),
         ],
@@ -713,19 +718,43 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
       widget.palette.terminalThemeFor(widget.brightness);
 }
 
-/// What the terminal shows while its Herdr attach starts.
-class _StartupCover extends StatelessWidget {
-  const _StartupCover({required this.theme});
+/// What the terminal shows while its Herdr attach starts, for at most
+/// [TerminalSessionController.startupCoverTimeout].
+class _StartupCover extends StatefulWidget {
+  const _StartupCover({required this.session, required this.theme});
 
+  final TerminalSessionController session;
   final TerminalTheme theme;
 
   @override
+  State<_StartupCover> createState() => _StartupCoverState();
+}
+
+class _StartupCoverState extends State<_StartupCover> {
+  late final Timer _timeout;
+
+  @override
+  void initState() {
+    super.initState();
+    _timeout = Timer(
+      TerminalSessionController.startupCoverTimeout,
+      widget.session.uncoverStartup,
+    );
+  }
+
+  @override
+  void dispose() {
+    _timeout.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final muted = theme.foreground.withValues(alpha: 0.6);
+    final muted = widget.theme.foreground.withValues(alpha: 0.6);
     return IgnorePointer(
       child: ColoredBox(
         key: const ValueKey('terminal-startup-cover'),
-        color: theme.background,
+        color: widget.theme.background,
         child: Center(
           child: Row(
             mainAxisSize: MainAxisSize.min,

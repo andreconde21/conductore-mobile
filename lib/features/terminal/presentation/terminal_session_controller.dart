@@ -106,7 +106,6 @@ class TerminalSessionController extends ChangeNotifier {
   final _sharedView = ValueNotifier<SharedViewSnapshot?>(null);
   final _focusElsewhere = ValueNotifier<String?>(null);
   final _startupCover = ValueNotifier<bool>(false);
-  Timer? _startupCoverTimer;
 
   static const _iosDuplicateEnterWindow = Duration(milliseconds: 80);
   static const _gracefulMoshCloseTimeout = Duration(milliseconds: 1500);
@@ -278,14 +277,20 @@ class TerminalSessionController extends ChangeNotifier {
 
   /// True from typing a Herdr attach into the fresh shell until Herdr has
   /// drawn (it took the alternate screen, or turned on mouse reports,
-  /// which is all a Mosh session passes on), for at most
-  /// [startupCoverTimeout]. The terminal view covers the shell meanwhile,
-  /// so the typed attach and its focus commands never show.
+  /// which is all a Mosh session passes on). The terminal view covers the
+  /// shell meanwhile, so the typed attach and its focus commands never
+  /// show, and lifts it after [startupCoverTimeout] on screen.
   ValueListenable<bool> get startupCover => _startupCover;
 
-  /// How long [startupCover] waits for Herdr before showing the shell
-  /// anyway (Herdr missing, or failing to start, prints why there).
+  /// How long the view keeps [startupCover] up before showing the shell
+  /// anyway (Herdr missing, or failing to start, prints why there). The
+  /// view times it, so a session nobody shows holds no timer.
   static const startupCoverTimeout = Duration(seconds: 3);
+
+  /// Shows the shell under [startupCover] (its time on screen ran out).
+  void uncoverStartup() {
+    if (!_disposed) _startupCover.value = false;
+  }
 
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
@@ -522,7 +527,7 @@ class TerminalSessionController extends ChangeNotifier {
     final session = _session;
     _session = null;
     _inputHold.reset();
-    _uncoverStartup();
+    uncoverStartup();
     try {
       final leavesServer = await _closeRemoteMoshSession(session);
       await session?.close();
@@ -662,22 +667,10 @@ class TerminalSessionController extends ChangeNotifier {
     if (command == null) {
       return;
     }
-    if (_startsHerdr(explicit)) _coverStartup();
+    if (_startsHerdr(explicit)) _startupCover.value = true;
     unawaited(
       session.send(utf8.encode(command)).catchError(_handleStreamError),
     );
-  }
-
-  void _coverStartup() {
-    _startupCoverTimer?.cancel();
-    _startupCoverTimer = Timer(startupCoverTimeout, _uncoverStartup);
-    _startupCover.value = true;
-  }
-
-  void _uncoverStartup() {
-    _startupCoverTimer?.cancel();
-    _startupCoverTimer = null;
-    if (!_disposed) _startupCover.value = false;
   }
 
   void _runConnectSnippetIfConfigured(SshTerminalSession session) {
@@ -1030,7 +1023,7 @@ class TerminalSessionController extends ChangeNotifier {
     }
     if (_startupCover.value &&
         (terminal.isUsingAltBuffer || terminal.mouseMode != MouseMode.none)) {
-      _uncoverStartup();
+      uncoverStartup();
     }
     if (_predictiveEcho.hasPredictions) {
       _predictiveEcho.removeWhere(_isConfirmedPrediction);
@@ -1178,7 +1171,7 @@ class TerminalSessionController extends ChangeNotifier {
   void _teardownSession({bool drainOutput = false}) {
     final session = _session;
     _session = null;
-    _uncoverStartup();
+    uncoverStartup();
     _resizeTimer?.cancel();
     _resizeTimer = null;
     _resizePending = false;
@@ -1232,7 +1225,7 @@ class TerminalSessionController extends ChangeNotifier {
     if (_disposed) {
       return;
     }
-    _uncoverStartup();
+    uncoverStartup();
     _status = TerminalConnectionStatus.failed;
     terminal.write('\r\n$message\r\n');
     notifyListeners();
@@ -1258,7 +1251,6 @@ class TerminalSessionController extends ChangeNotifier {
     _inputHold.dispose();
     _sharedView.dispose();
     _focusElsewhere.dispose();
-    _startupCoverTimer?.cancel();
     _startupCover.dispose();
     _terminalPaintNotifier.dispose();
     _terminalTitle.dispose();
