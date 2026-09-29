@@ -175,8 +175,8 @@ void main() {
         expect(opened.single.key, 'herdr:w2');
         expect(
           opened.single.startupCommand,
-          'herdr workspace focus w2 >/dev/null 2>&1; '
-          'herdr agent focus w2:p7 >/dev/null 2>&1; herdr',
+          'herdr agent focus w2:p7 >/dev/null 2>&1 || '
+          'herdr workspace focus w2 >/dev/null 2>&1; herdr',
         );
       },
     );

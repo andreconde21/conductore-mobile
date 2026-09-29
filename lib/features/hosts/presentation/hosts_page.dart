@@ -1783,7 +1783,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     AgentInfo? agent,
     bool preferredView = true,
   }) async {
-    await widget.hostsController.markConnected(host);
+    unawaited(widget.hostsController.markConnected(host));
     final flow = widget.connectFlow;
     final TerminalSessionController session;
     if (flow != null) {

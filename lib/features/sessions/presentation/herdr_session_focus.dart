@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
@@ -668,9 +669,12 @@ class HerdrSessionFocus implements AppInputRouter {
     final check = control.workspaces().then((items) {
       if (items == null || _disposed) return null;
       final focused = items.where((item) => item.focused).firstOrNull;
-      _applyFocus(key, focused?.id, {
-        for (final item in items) item.id: item.label,
-      });
+      _applyFocus(
+        key,
+        focused?.id,
+        {for (final item in items) item.id: item.label},
+        workspaces: items,
+      );
       return _HerdrFocusView(focused?.id, focused?.label ?? '');
     });
     _checks[key] = check;
@@ -684,8 +688,15 @@ class HerdrSessionFocus implements AppInputRouter {
 
   /// Herdr's focus on server [key] is on [focusedId]: the session on that
   /// workspace previews live and takes keys; the others say what Herdr
-  /// shows instead, and preview their own workspace.
-  void _applyFocus(String key, String? focusedId, Map<String, String> labels) {
+  /// shows instead, and preview their own workspace. [workspaces] is the
+  /// listing that answer came from, if any, so the previews need not ask
+  /// for it again.
+  void _applyFocus(
+    String key,
+    String? focusedId,
+    Map<String, String> labels, {
+    List<HerdrWorkspaceInfo>? workspaces,
+  }) {
     final now = _clock();
     for (final session in _workspace.sessions) {
       if (herdrTargetOf(session) == null || serverKey(session) != key) {
@@ -719,7 +730,7 @@ class HerdrSessionFocus implements AppInputRouter {
               capturedAt: now,
               label: _labelOf(session),
             );
-      unawaited(_readPreview(session));
+      unawaited(_readPreview(session, workspaces: workspaces));
     }
   }
 
@@ -756,8 +767,12 @@ class HerdrSessionFocus implements AppInputRouter {
   /// The pane the app writes to for [session]: the pane a deep link asked
   /// for while it is still in the session's workspace, else the pane that
   /// workspace has focused in its active tab (each workspace remembers its
-  /// own, whatever the server's focus). Read-only.
-  Future<_HerdrPane?> _paneFor(TerminalSessionController session) async {
+  /// own, whatever the server's focus). Read-only. [workspaces], a fresh
+  /// `herdr workspace list`, saves reading it again.
+  Future<_HerdrPane?> _paneFor(
+    TerminalSessionController session, {
+    List<HerdrWorkspaceInfo>? workspaces,
+  }) async {
     final control = controlFor(session);
     final workspaceId = workspaceOf(session);
     if (control == null || workspaceId == null) return null;
@@ -770,9 +785,9 @@ class HerdrSessionFocus implements AppInputRouter {
     final preferred = _preferredPanes[session];
     final asked = panes.where((pane) => pane.id == preferred).firstOrNull;
     if (asked != null) return asked;
-    final workspaces = await control.workspaces();
+    final listing = workspaces ?? await control.workspaces();
     final activeTab =
-        workspaces
+        listing
             ?.where((item) => item.id == workspaceId)
             .firstOrNull
             ?.activeTabId ??
@@ -790,10 +805,13 @@ class HerdrSessionFocus implements AppInputRouter {
 
   /// Reads what [session]'s own workspace shows (`herdr pane read`, with
   /// colours) for its preview, without moving any focus.
-  Future<void> _readPreview(TerminalSessionController session) async {
+  Future<void> _readPreview(
+    TerminalSessionController session, {
+    List<HerdrWorkspaceInfo>? workspaces,
+  }) async {
     final control = controlFor(session);
     if (control == null) return;
-    final pane = await _paneFor(session);
+    final pane = await _paneFor(session, workspaces: workspaces);
     if (pane == null) return;
     final read = await control.query(control.commands.paneReadVisible(pane.id));
     if (read == null ||

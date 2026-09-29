@@ -638,7 +638,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                       autofocus: widget.focusNode != null,
                       deleteDetection: true,
                       keyboardType: TextInputType.visiblePassword,
-                      theme: widget.palette.terminalThemeFor(widget.brightness),
+                      theme: _theme,
                       overlays: overlays,
                       textStyle: TerminalStyle(
                         fontFamily: widget.fontFamily,
@@ -697,7 +697,47 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                 child: const SizedBox.expand(),
               ),
             ),
+          // Over the shell while Herdr starts: the typed attach never shows.
+          ValueListenableBuilder<bool>(
+            valueListenable: widget.session.startupCover,
+            builder: (context, covered, _) => covered
+                ? Positioned.fill(child: _StartupCover(theme: _theme))
+                : const SizedBox.shrink(),
+          ),
         ],
+      ),
+    );
+  }
+
+  TerminalTheme get _theme => widget.palette.terminalThemeFor(widget.brightness);
+}
+
+/// What the terminal shows while its Herdr attach starts.
+class _StartupCover extends StatelessWidget {
+  const _StartupCover({required this.theme});
+
+  final TerminalTheme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = theme.foreground.withValues(alpha: 0.6);
+    return IgnorePointer(
+      child: ColoredBox(
+        key: const ValueKey('terminal-startup-cover'),
+        color: theme.background,
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: muted),
+              ),
+              const SizedBox(width: 10),
+              Text('Opening Herdr…', style: TextStyle(color: muted)),
+            ],
+          ),
+        ),
       ),
     );
   }

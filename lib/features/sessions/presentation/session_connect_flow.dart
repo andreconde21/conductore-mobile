@@ -89,7 +89,8 @@ class SessionConnectFlow {
     String label = '',
   }) async {
     host = machineOf(host);
-    await hostsController.markConnected(host);
+    // Not awaited: saving the host list must not hold up the terminal.
+    unawaited(hostsController.markConnected(host));
     return herdr.openAgentLocation(
       host,
       workspaceId: workspaceId,
@@ -138,7 +139,7 @@ class SessionConnectFlow {
     );
     TerminalSessionController? session;
     if (tmuxLocation != null && !host.isLocal) {
-      await hostsController.markConnected(host);
+      unawaited(hostsController.markConnected(host));
       session = await tmux.openAgentLocation(
         host,
         tmuxLocation,
@@ -186,7 +187,7 @@ class SessionConnectFlow {
     SavedHost host, {
     bool forcePicker = false,
   }) async {
-    await hostsController.markConnected(host);
+    unawaited(hostsController.markConnected(host));
     if (host.isLocal) {
       return workspace.open(host);
     }

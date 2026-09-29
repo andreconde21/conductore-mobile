@@ -144,17 +144,30 @@ void main() {
       expect(ConnectTarget.fromJson(target.toJson()), target);
     });
 
-    test('a pane target focuses the tab, then the agent pane', () {
+    test('a pane target focuses the agent pane, the tab only if that '
+        'fails', () {
       const target = ConnectTarget.herdr(
         workspaceId: 'w1',
         tabId: 'w1:t2',
         paneId: 'w1:p5',
       );
       expect(target.key, 'herdr:w1:w1:t2');
+      // `agent focus` switches workspace and tab itself (Herdr 0.9.1):
+      // one herdr call before the attach, not two.
       expect(
         target.startupCommand,
-        'herdr tab focus w1:t2 >/dev/null 2>&1; '
-        'herdr agent focus w1:p5 >/dev/null 2>&1; herdr',
+        'herdr agent focus w1:p5 >/dev/null 2>&1 || '
+        'herdr tab focus w1:t2 >/dev/null 2>&1; herdr',
+      );
+      expect(ConnectTarget.withoutHerdrFocus(target.startupCommand!), 'herdr');
+    });
+
+    test('a deep link to a pane falls back to its workspace', () {
+      const target = ConnectTarget.herdr(workspaceId: 'w1', paneId: 'w1:p5');
+      expect(
+        target.startupCommand,
+        'herdr agent focus w1:p5 >/dev/null 2>&1 || '
+        'herdr workspace focus w1 >/dev/null 2>&1; herdr',
       );
     });
   });

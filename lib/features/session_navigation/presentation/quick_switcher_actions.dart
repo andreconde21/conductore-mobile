@@ -188,14 +188,14 @@ Future<void> openSwitcherItem(
           source.workspace.activate(session);
         } else {
           if (flow == null) return;
-          await flow.hostsController.markConnected(host);
+          unawaited(flow.hostsController.markConnected(host));
           session = flow.open(host, ConnectTarget.tmux(id));
         }
       }
       show(session);
     case SwitcherRecentItem(:final host, :final target):
       if (flow == null) return;
-      await flow.hostsController.markConnected(host);
+      unawaited(flow.hostsController.markConnected(host));
       show(flow.open(host, target));
   }
 }
