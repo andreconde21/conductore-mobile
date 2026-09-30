@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 1.2.1 (2026-09-30)
 
 - fix: `usage` lists the live Claude login when cswap does not manage it (CON-057): with no managed account active, `cswap status --json` names it and it is added as an active row with `slot: null`, `managed: false` and no windows (a masked email as label). Before, a `/login` to an account never `cswap add`ed was missing and both managed accounts showed as inactive. Only asked when no managed account is live; for an unmanaged login cswap reads `~/.claude.json` alone.
 - fix: a `cswap add` or `remove` shows at once: the 60 s account cache is dropped when cswap's `sequence.json` changes.
