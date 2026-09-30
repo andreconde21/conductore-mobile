@@ -735,7 +735,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                       autofocus: widget.focusNode != null,
                       deleteDetection: true,
                       keyboardType: TextInputType.visiblePassword,
-                      theme: widget.palette.terminalThemeFor(widget.brightness),
+                      theme: _theme,
                       overlays: overlays,
                       textStyle: TerminalStyle(
                         fontFamily: widget.fontFamily,
@@ -836,7 +836,77 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                 ),
               ),
             ),
+          // Over the shell while Herdr starts: the typed attach never shows.
+          ValueListenableBuilder<bool>(
+            valueListenable: widget.session.startupCover,
+            builder: (context, covered, _) => covered
+                ? Positioned.fill(
+                    child: _StartupCover(
+                      session: widget.session,
+                      theme: _theme,
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
+      ),
+    );
+  }
+
+  TerminalTheme get _theme =>
+      widget.palette.terminalThemeFor(widget.brightness);
+}
+
+/// What the terminal shows while its Herdr attach starts, for at most
+/// [TerminalSessionController.startupCoverTimeout].
+class _StartupCover extends StatefulWidget {
+  const _StartupCover({required this.session, required this.theme});
+
+  final TerminalSessionController session;
+  final TerminalTheme theme;
+
+  @override
+  State<_StartupCover> createState() => _StartupCoverState();
+}
+
+class _StartupCoverState extends State<_StartupCover> {
+  late final Timer _timeout;
+
+  @override
+  void initState() {
+    super.initState();
+    _timeout = Timer(
+      TerminalSessionController.startupCoverTimeout,
+      widget.session.uncoverStartup,
+    );
+  }
+
+  @override
+  void dispose() {
+    _timeout.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = widget.theme.foreground.withValues(alpha: 0.6);
+    return IgnorePointer(
+      child: ColoredBox(
+        key: const ValueKey('terminal-startup-cover'),
+        color: widget.theme.background,
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: muted),
+              ),
+              const SizedBox(width: 10),
+              Text('Opening Herdr…', style: TextStyle(color: muted)),
+            ],
+          ),
+        ),
       ),
     );
   }

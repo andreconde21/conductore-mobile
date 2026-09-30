@@ -1,15 +1,23 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 
 /// A runner whose connection can be dropped on purpose; the next command
 /// reconnects (a network change leaves idle SSH sockets half dead).
 abstract interface class ReconnectingCommandRunner {
   Future<void> dropConnection();
+}
+
+/// A runner that knows the address its connection reached.
+abstract interface class AddressedCommandRunner {
+  /// The machine's address, while the connection is up over TCP.
+  InternetAddress? get remoteAddress;
 }
 
 /// One connection per machine for every side channel: the agent monitor,
@@ -88,13 +96,16 @@ class SharedCommandRunners {
     }
   }
 
-  /// What makes two saved records the same connection: the record and
-  /// how it signs in, not its name, tags or agent settings.
+  /// What makes two saved records the same connection: the machine and
+  /// how it signs in, not its name, tags or agent settings. A session's
+  /// host (`<machine id>#herdr:w1`, which Herdr's focus and the terminal's
+  /// Mosh start run on) is its machine: a workspace opened from the home
+  /// board rides on the connection the board already has.
   static String _keyOf(SavedHost host) {
     final json = host.toJson();
     return jsonEncode([
+      baseHostId(host.id),
       for (final field in const [
-        'id',
         'host',
         'port',
         'username',
@@ -158,7 +169,7 @@ class _SharedConnection {
 }
 
 /// One caller's handle on a shared connection.
-class _Lease implements StdinAgentCommandRunner {
+class _Lease implements StdinAgentCommandRunner, AddressedCommandRunner {
   _Lease(this._pool, this._key, this._connection);
 
   final SharedCommandRunners _pool;
@@ -200,6 +211,12 @@ class _Lease implements StdinAgentCommandRunner {
       cancel: cancel,
     ),
   );
+
+  @override
+  InternetAddress? get remoteAddress => switch (_connection.runner) {
+    final AddressedCommandRunner runner => runner.remoteAddress,
+    _ => null,
+  };
 
   @override
   Future<void> close() async {

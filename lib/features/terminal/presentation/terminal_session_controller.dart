@@ -105,6 +105,7 @@ class TerminalSessionController extends ChangeNotifier {
   bool _answeringRemote = false;
   final _sharedView = ValueNotifier<SharedViewSnapshot?>(null);
   final _focusElsewhere = ValueNotifier<String?>(null);
+  final _startupCover = ValueNotifier<bool>(false);
 
   static const _iosDuplicateEnterWindow = Duration(milliseconds: 80);
   static const _gracefulMoshCloseTimeout = Duration(milliseconds: 1500);
@@ -272,6 +273,23 @@ class TerminalSessionController extends ChangeNotifier {
 
   set focusElsewhereLabel(String? label) {
     if (!_disposed) _focusElsewhere.value = label;
+  }
+
+  /// True from typing a Herdr attach into the fresh shell until Herdr has
+  /// drawn (it took the alternate screen, or turned on mouse reports,
+  /// which is all a Mosh session passes on). The terminal view covers the
+  /// shell meanwhile, so the typed attach and its focus commands never
+  /// show, and lifts it after [startupCoverTimeout] on screen.
+  ValueListenable<bool> get startupCover => _startupCover;
+
+  /// How long the view keeps [startupCover] up before showing the shell
+  /// anyway (Herdr missing, or failing to start, prints why there). The
+  /// view times it, so a session nobody shows holds no timer.
+  static const startupCoverTimeout = Duration(seconds: 3);
+
+  /// Shows the shell under [startupCover] (its time on screen ran out).
+  void uncoverStartup() {
+    if (!_disposed) _startupCover.value = false;
   }
 
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
@@ -509,6 +527,7 @@ class TerminalSessionController extends ChangeNotifier {
     final session = _session;
     _session = null;
     _inputHold.reset();
+    uncoverStartup();
     try {
       final leavesServer = await _closeRemoteMoshSession(session);
       await session?.close();
@@ -648,6 +667,7 @@ class TerminalSessionController extends ChangeNotifier {
     if (command == null) {
       return;
     }
+    if (_startsHerdr(explicit)) _startupCover.value = true;
     unawaited(
       session.send(utf8.encode(command)).catchError(_handleStreamError),
     );
@@ -1001,6 +1021,10 @@ class TerminalSessionController extends ChangeNotifier {
     } finally {
       _answeringRemote = false;
     }
+    if (_startupCover.value &&
+        (terminal.isUsingAltBuffer || terminal.mouseMode != MouseMode.none)) {
+      uncoverStartup();
+    }
     if (_predictiveEcho.hasPredictions) {
       _predictiveEcho.removeWhere(_isConfirmedPrediction);
       _notifyTerminalPaint();
@@ -1147,6 +1171,7 @@ class TerminalSessionController extends ChangeNotifier {
   void _teardownSession({bool drainOutput = false}) {
     final session = _session;
     _session = null;
+    uncoverStartup();
     _resizeTimer?.cancel();
     _resizeTimer = null;
     _resizePending = false;
@@ -1200,6 +1225,7 @@ class TerminalSessionController extends ChangeNotifier {
     if (_disposed) {
       return;
     }
+    uncoverStartup();
     _status = TerminalConnectionStatus.failed;
     terminal.write('\r\n$message\r\n');
     notifyListeners();
@@ -1225,6 +1251,7 @@ class TerminalSessionController extends ChangeNotifier {
     _inputHold.dispose();
     _sharedView.dispose();
     _focusElsewhere.dispose();
+    _startupCover.dispose();
     _terminalPaintNotifier.dispose();
     _terminalTitle.dispose();
     unawaited(_remoteClipboardWrites.close());

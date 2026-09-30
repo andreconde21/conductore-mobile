@@ -29,7 +29,26 @@ class SshClientFactory {
              onPinRequest: SecurityKeyInteraction.instance.requestPin,
              onKeySelect: SecurityKeyInteraction.instance.requestKeySelection,
            ),
-       _keyPairParser = keyPairParser ?? SSHKeyPair.fromPem;
+       _keyPairParser = keyPairParser ?? parseKeyPairs;
+
+  /// [SSHKeyPair.fromPem], remembered per key and passphrase for the
+  /// app's run: decrypting a passphrase-protected key runs bcrypt, about
+  /// 1.5 s of the UI isolate, and every connection to a machine (each
+  /// terminal, the side connection, SFTP) would pay it again. The key and
+  /// its passphrase are in memory anyway, in the saved machine.
+  static List<SSHKeyPair> parseKeyPairs(String pemText, String? passphrase) {
+    final key = '${passphrase ?? ''}\u0000$pemText';
+    final known = _parsedKeys.remove(key);
+    final keyPairs = known ?? SSHKeyPair.fromPem(pemText, passphrase);
+    _parsedKeys[key] = keyPairs;
+    if (_parsedKeys.length > _parsedKeysKept) {
+      _parsedKeys.remove(_parsedKeys.keys.first);
+    }
+    return keyPairs;
+  }
+
+  static final _parsedKeys = <String, List<SSHKeyPair>>{};
+  static const _parsedKeysKept = 16;
 
   final HostKeyVerifier _hostKeyVerifier;
   final OpenSshSecurityKeySigner _securityKeySigner;

@@ -140,18 +140,20 @@ class ConnectTarget {
     // client that attaches shows whatever is focused (checked against
     // Herdr 0.9.1 with two clients), so this is what steers the new client.
     // Without `exec` a detach lands back in the shell, like the tmux path.
+    // One focus command runs: `agent focus` switches workspace and tab,
+    // and `tab focus` the workspace, so the next one down is only the
+    // fallback for a pane (or tab) that is gone.
     final focus = [
-      // `tab focus` switches the workspace too, so only one is needed.
+      if (paneId.isNotEmpty) '$herdr agent focus ${shellQuote(paneId)}',
       if (tabId.isNotEmpty)
         '$herdr tab focus ${shellQuote(tabId)}'
       else if (name.isNotEmpty)
         '$herdr workspace focus ${shellQuote(name)}',
-      if (paneId.isNotEmpty) '$herdr agent focus ${shellQuote(paneId)}',
     ];
     if (focus.isEmpty) {
       return herdr;
     }
-    return '${focus.map((command) => '$command >/dev/null 2>&1').join('; ')}'
+    return '${focus.map((command) => '$command >/dev/null 2>&1').join(' || ')}'
         '; $herdr';
   }
 

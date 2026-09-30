@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:conduit/core/app_failure.dart';
@@ -10,6 +11,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/ssh_error_formatter.dart';
+import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:dartssh2/dartssh2.dart';
 
@@ -24,7 +26,10 @@ import 'package:dartssh2/dartssh2.dart';
 /// through [posixShellCommand] so the account's login shell (fish, csh)
 /// never parses them, or any path or name quoted into them.
 class SshAgentCommandRunner
-    implements StdinAgentCommandRunner, ReconnectingCommandRunner {
+    implements
+        StdinAgentCommandRunner,
+        ReconnectingCommandRunner,
+        AddressedCommandRunner {
   SshAgentCommandRunner(this._hostKeyVerifier, this._host);
 
   final HostKeyVerifier _hostKeyVerifier;
@@ -32,6 +37,11 @@ class SshAgentCommandRunner
 
   Future<SSHClient>? _client;
   bool _closed = false;
+
+  InternetAddress? _remoteAddress;
+
+  @override
+  InternetAddress? get remoteAddress => _remoteAddress;
 
   @override
   Future<AgentCommandResult> run(
@@ -70,9 +80,12 @@ class SshAgentCommandRunner
       throw const AppFailure('This connection is closed.');
     }
     try {
-      return await (_client ??= SshClientFactory(
+      final client = await (_client ??= SshClientFactory(
         _hostKeyVerifier,
       ).connect(_host));
+      final socket = client.socket;
+      _remoteAddress = socket is TcpSshSocket ? socket.remoteAddress : null;
+      return client;
     } catch (error) {
       _client = null;
       throw ConnectionFailure(
@@ -162,6 +175,7 @@ class SshAgentCommandRunner
   Future<void> _dropClient() async {
     final pending = _client;
     _client = null;
+    _remoteAddress = null;
     if (pending != null) {
       try {
         (await pending).close();

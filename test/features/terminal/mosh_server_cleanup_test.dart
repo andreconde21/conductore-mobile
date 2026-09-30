@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:conduit/core/connection_problem.dart';
+import 'package:conduit/features/agent_attention/data/shared_command_runners.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -143,6 +147,122 @@ void main() {
     );
   });
 
+  group('starting mosh-server over the side connection', () {
+    final host = buildHost('m').copyWith(useMosh: true);
+
+    test('needs no SSH connection of its own', () async {
+      final runner = ScriptedAgentCommandRunner([
+        const AgentCommandResult(
+          stdout: 'MOSH CONNECT 60001 AAAAAAAAAAAAAAAAAAAAAA\n',
+          stderr: '[mosh-server detached, pid = 1142291]\n',
+          exitCode: 0,
+        ),
+      ]);
+      final repository = MoshTerminalRepository(
+        NoopVerifier(),
+        cleanupRunner: (_) => runner,
+      );
+
+      final started = await repository.bootstrapOnSideChannel(host);
+
+      final server = started!.server;
+      expect(server.port, 60001);
+      expect(server.host, host.host);
+      expect(MoshServerHandle.parsePid(server.rawOutput), 1142291);
+      expect(
+        runner.commands.single,
+        MoshTerminalRepository.bootstrapCommand(host),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(runner.closeCount, 1);
+    });
+
+    test('Mosh goes to the address the side connection reached', () async {
+      // A name's first address may be one SSH fell back from (an IPv6 one
+      // without a route): Mosh must use the one that answered.
+      final runner = _AddressedRunner(InternetAddress('192.0.2.7'));
+      final repository = MoshTerminalRepository(
+        NoopVerifier(),
+        cleanupRunner: (_) => runner,
+      );
+
+      final started = await repository.bootstrapOnSideChannel(host);
+
+      expect(started?.address, InternetAddress('192.0.2.7'));
+      expect(
+        runner.timeouts.single,
+        MoshTerminalRepository.sideChannelBootstrapTimeout,
+      );
+    });
+
+    test(
+      'leaves a changed host key to the terminal\'s own connection',
+      () async {
+        final repository = MoshTerminalRepository(
+          NoopVerifier(),
+          cleanupRunner: (_) => ScriptedAgentCommandRunner([
+            const ConnectionFailure(
+              'Could not reach m.',
+              'host key mismatch',
+              kind: ConnectionProblemKind.hostKey,
+            ),
+          ]),
+        );
+        expect(await repository.bootstrapOnSideChannel(host), isNull);
+      },
+    );
+
+    test('falls back on output it cannot read', () async {
+      final repository = MoshTerminalRepository(
+        NoopVerifier(),
+        cleanupRunner: (_) => ScriptedAgentCommandRunner([
+          const AgentCommandResult(
+            stdout: '',
+            stderr: 'mosh-server: command not found',
+            exitCode: 127,
+          ),
+        ]),
+      );
+      expect(await repository.bootstrapOnSideChannel(host), isNull);
+    });
+
+    test('does not try an unreachable machine twice', () async {
+      final repository = MoshTerminalRepository(
+        NoopVerifier(),
+        cleanupRunner: (_) => ScriptedAgentCommandRunner([
+          const ConnectionFailure(
+            'Could not reach m.',
+            'No route to host',
+            kind: ConnectionProblemKind.unreachable,
+          ),
+        ]),
+      );
+      await expectLater(
+        repository.bootstrapOnSideChannel(host),
+        throwsA(isA<ConnectionFailure>()),
+      );
+    });
+
+    test('security-key hosts and repositories without one skip it', () async {
+      final repository = MoshTerminalRepository(
+        NoopVerifier(),
+        cleanupRunner: (_) => fail('no side channel for a security key'),
+      );
+      expect(
+        await repository.bootstrapOnSideChannel(
+          host.copyWith(authMethod: SshAuthMethod.hardwareKey),
+        ),
+        isNull,
+      );
+      expect(
+        await MoshTerminalRepository(
+          NoopVerifier(),
+        ).bootstrapOnSideChannel(host),
+        isNull,
+      );
+    });
+  });
+
   group('after closing a Mosh session', () {
     setUp(HerdrKeymapCache.instance.clear);
     tearDown(HerdrKeymapCache.instance.clear);
@@ -202,4 +322,29 @@ void main() {
       expect(remote.reaps, 0);
     });
   });
+}
+
+/// A side connection that is up to [remoteAddress].
+class _AddressedRunner implements AgentCommandRunner, AddressedCommandRunner {
+  _AddressedRunner(this.remoteAddress);
+
+  @override
+  final InternetAddress remoteAddress;
+  final timeouts = <Duration>[];
+
+  @override
+  Future<AgentCommandResult> run(
+    String command, {
+    required Duration timeout,
+  }) async {
+    timeouts.add(timeout);
+    return const AgentCommandResult(
+      stdout: 'MOSH CONNECT 60001 AAAAAAAAAAAAAAAAAAAAAA\n',
+      stderr: '',
+      exitCode: 0,
+    );
+  }
+
+  @override
+  Future<void> close() async {}
 }

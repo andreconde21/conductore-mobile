@@ -22,6 +22,10 @@ Kept small so it can be sent upstream as is:
 - `SftpClient.supportsExtension(name, version)`: whether the server
   advertised an extension in its version handshake, so callers can pick a
   fallback before sending the request.
+- `SSHClient.shell()` sends its channel requests (env, agent forwarding,
+  pty, x11, shell) at once and checks the in-order replies after, so a
+  terminal opens one round trip sooner instead of waiting a round trip
+  per request.
 
 The diff against the origin commit is the git history of this directory
 after the commit that added the pristine copy.
