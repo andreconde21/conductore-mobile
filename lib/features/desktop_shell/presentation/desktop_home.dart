@@ -27,10 +27,12 @@ import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/shell_palette.dart';
 import 'package:conduit/features/desktop_shell/presentation/terminal_shell_embedding.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/layout_picker.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/project_sidebar.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_dashboard.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_sidebar.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -140,6 +142,7 @@ class DesktopHome extends StatefulWidget {
     this.connectFlow,
     this.sessionRestore,
     this.usageSummary,
+    this.projectLayout,
     this.previewRefreshInterval = const Duration(seconds: 2),
     super.key,
   });
@@ -160,6 +163,11 @@ class DesktopHome extends StatefulWidget {
   /// The usage summary for the dashboard and the sidebar footer; null
   /// keeps the slot empty (the usage feature fills it).
   final UsageSummaryBuilder? usageSummary;
+
+  /// The project view's layout (CON-065); null uses the app's
+  /// ([ProjectLayoutController.instance]), and without one the Projects
+  /// tab groups by what agents report, as before.
+  final ProjectLayoutController? projectLayout;
 
   /// How often the dashboard's live previews redraw while it is shown.
   final Duration previewRefreshInterval;
@@ -272,6 +280,7 @@ class DesktopHomeState extends State<DesktopHome> {
     widget.workspace.addListener(_handleWorkspaceChanged);
     widget.agentAttention.addListener(_rebuildTree);
     widget.boards?.addListener(_rebuildTree);
+    _projectLayout?.addListener(_rebuildTree);
     _controller.addListener(_handleControllerChanged);
     _controller.layout.addListener(_syncViewed);
     _controller.layout.addListener(_reportContinuity);
@@ -358,6 +367,13 @@ class DesktopHomeState extends State<DesktopHome> {
       widget.boards?.addListener(_rebuildTree);
       _rebuildTree();
     }
+    final oldLayout =
+        oldWidget.projectLayout ?? ProjectLayoutController.instance;
+    if (oldLayout != _projectLayout) {
+      oldLayout?.removeListener(_rebuildTree);
+      _projectLayout?.addListener(_rebuildTree);
+      _rebuildTree();
+    }
   }
 
   @override
@@ -370,6 +386,7 @@ class DesktopHomeState extends State<DesktopHome> {
     widget.workspace.removeListener(_handleWorkspaceChanged);
     widget.agentAttention.removeListener(_rebuildTree);
     widget.boards?.removeListener(_rebuildTree);
+    _projectLayout?.removeListener(_rebuildTree);
     _controller.removeListener(_handleControllerChanged);
     _controller.layout.removeListener(_syncViewed);
     _controller.layout.removeListener(_reportContinuity);
@@ -884,8 +901,16 @@ class DesktopHomeState extends State<DesktopHome> {
 
   // Context menus.
 
-  Future<void> showNodeMenu(SidebarNode node, Offset position) async {
+  /// A row's right-click menu; [entry] in [project] adds the project
+  /// view's "Move to project…", "Move to Other" and "Hide".
+  Future<void> showNodeMenu(
+    SidebarNode node,
+    Offset position, {
+    ProjectEntry? entry,
+    ProjectGroup? project,
+  }) async {
     final prefs = _controller.prefs;
+    final layout = _projectLayout;
     final machine = node.kind == SidebarNodeKind.machine;
     final unread = _unreadKeys.any((key) => SidebarKeys.isUnder(key, node.key));
     final host = node.target.host;
@@ -898,6 +923,14 @@ class DesktopHomeState extends State<DesktopHome> {
         const PopupMenuItem(
           value: _NodeAction.openRight,
           child: _MenuRow(Icons.vertical_split_outlined, 'Open in a split'),
+        ),
+        const PopupMenuDivider(),
+      ],
+      if (entry != null && project != null && layout != null) ...[
+        ...projectEntryMenuItems<_NodeAction>(
+          entry,
+          project: project,
+          value: _NodeAction.project,
         ),
         const PopupMenuDivider(),
       ],
@@ -983,6 +1016,15 @@ class DesktopHomeState extends State<DesktopHome> {
         );
       case _NodeActionKind.machine:
         await widget.actions.machineMenu(action.choice!, host);
+      case _NodeActionKind.project:
+        if (entry == null || project == null || layout == null) return;
+        await runProjectEntryAction(
+          context,
+          layout,
+          entry,
+          action.projectAction!,
+          project: project,
+        );
     }
   }
 
@@ -2036,11 +2078,20 @@ enum _NodeActionKind {
   ungroup,
   newGroup,
   machine,
+  project,
 }
 
 @immutable
 class _NodeAction {
-  const _NodeAction._(this.kind, {this.groupId, this.choice});
+  const _NodeAction._(
+    this.kind, {
+    this.groupId,
+    this.choice,
+    this.projectAction,
+  });
+
+  const _NodeAction.project(ProjectEntryAction action)
+    : this._(_NodeActionKind.project, projectAction: action);
 
   const _NodeAction.group(String id)
     : this._(_NodeActionKind.group, groupId: id);
@@ -2059,16 +2110,18 @@ class _NodeAction {
   final _NodeActionKind kind;
   final String? groupId;
   final MachineMenuChoice? choice;
+  final ProjectEntryAction? projectAction;
 
   @override
   bool operator ==(Object other) =>
       other is _NodeAction &&
       other.kind == kind &&
       other.groupId == groupId &&
-      other.choice == choice;
+      other.choice == choice &&
+      other.projectAction == projectAction;
 
   @override
-  int get hashCode => Object.hash(kind, groupId, choice);
+  int get hashCode => Object.hash(kind, groupId, choice, projectAction);
 }
 
 class _MenuRow extends StatelessWidget {

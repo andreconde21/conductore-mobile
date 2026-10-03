@@ -40,6 +40,7 @@ import 'package:conduit/features/continuity/presentation/continuity_controller.d
 import 'package:conduit/features/continuity/presentation/continuity_places.dart';
 import 'package:conduit/features/continuity/presentation/continuity_scope.dart';
 import 'package:conduit/features/continuity/presentation/continuity_sync_link.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
@@ -274,6 +275,12 @@ void main() {
       CompanionPreferences.secure(secureStorage, attention: agentAttention);
   agentAttention.onCompanionCapabilities = (host, capabilities) =>
       unawaited(companionPreferences.hostConnected(host, capabilities));
+  // The project view (CON-065): its prefs sync with the app settings; the
+  // machines' sidebar.toml is read when a project view shows.
+  ProjectLayoutController.instance = ProjectLayoutController(
+    theme: themeController,
+    attention: agentAttention,
+  );
   // Crash reports never carry Claude account names (cswap aliases, masked
   // emails).
   addTelemetryTerms(() => usage.summary.accountTerms);

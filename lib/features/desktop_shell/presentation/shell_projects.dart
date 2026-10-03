@@ -15,7 +15,16 @@ extension _ShellProjects on DesktopHomeState {
     return result;
   }
 
+  /// The project layout (sheprd's sidebar.toml, or the app's), if any.
+  ProjectLayoutController? get _projectLayout =>
+      widget.projectLayout ?? ProjectLayoutController.instance;
+
   List<ProjectGroup> _buildProjects() =>
+      _projectLayout?.build(
+        _tree,
+        agentsByMachine: _agentsByMachine(),
+        hosts: widget.hostsController.machines,
+      ) ??
       ProjectTreeBuilder.build(_tree, agentsByMachine: _agentsByMachine());
 
   /// The project the focused session belongs to.
@@ -41,14 +50,13 @@ extension _ShellProjects on DesktopHomeState {
   (AgentInfo, SavedHost)? _agentOf(ProjectGroup project) {
     final attention = widget.agentAttention;
     (AgentInfo, SavedHost)? fallback;
-    for (final host in attention.monitoredHosts) {
-      if (!project.machineIds.contains(baseHostId(host.id))) continue;
-      for (final agent
-          in attention.statusFor(host.id)?.agents ?? const <AgentInfo>[]) {
-        if (agent.projectLabel?.toLowerCase() != project.key) continue;
-        if (agent.state.needsAttention) return (agent, host);
-        fallback ??= (agent, host);
-      }
+    for (final (machineId, agent) in project.agents) {
+      final host = attention.monitoredHosts
+          .where((host) => baseHostId(host.id) == machineId)
+          .firstOrNull;
+      if (host == null) continue;
+      if (agent.state.needsAttention) return (agent, host);
+      fallback ??= (agent, host);
     }
     return fallback;
   }
@@ -197,8 +205,10 @@ extension _ShellProjects on DesktopHomeState {
   /// A project's menu: its quick actions, then Add action, open all,
   /// reload.
   Future<void> _showProjectMenu(ProjectGroup project, Offset? position) async {
+    if (project.isOther) return;
     _projectFiles.ensure(project);
     final actions = _actionsFor(project);
+    final layout = _projectLayout;
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
     final at = position ?? overlay.size.center(Offset.zero);
@@ -230,10 +240,16 @@ extension _ShellProjects on DesktopHomeState {
           value: 'reload',
           child: _MenuRow(Icons.refresh_rounded, 'Reload icon and actions'),
         ),
+        if (layout != null) ...[
+          const PopupMenuDivider(),
+          ...projectGroupMenuItems<Object>(project, value: (action) => action),
+        ],
       ],
     );
     if (!mounted) return;
     switch (picked) {
+      case final ProjectGroupAction action when layout != null:
+        await runProjectGroupAction(context, layout, project, action);
       case final QuickAction action:
         await _runQuickAction(project, action);
       case 'add':
@@ -359,11 +375,45 @@ extension _ShellProjects on DesktopHomeState {
   Widget _projectSidebar() {
     final projects = _projects;
     for (final project in projects) {
-      _projectFiles.ensure(project);
+      if (!project.isOther) _projectFiles.ensure(project);
     }
+    final layout = _projectLayout;
+    if (layout != null) unawaited(layout.refresh());
+    final usage = UsageScope.maybeOf(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([_projectFiles, widget.themeController]),
+      listenable: Listenable.merge([
+        _projectFiles,
+        widget.themeController,
+        ?usage,
+      ]),
       builder: (context, _) => ProjectSidebar(
+        layout: layout,
+        tokensToday: layout == null || usage == null
+            ? const {}
+            : layout.tokensToday(projects, usage.summary),
+        onEntryMenu: layout == null
+            ? null
+            : (entry, project, position) => unawaited(
+                showNodeMenu(
+                  entry.node,
+                  position,
+                  entry: entry,
+                  project: project,
+                ),
+              ),
+        onNeedsYou: () {
+          for (final project in projects) {
+            for (final entry in project.entries) {
+              if (entry.hidden) continue;
+              for (final node in [...entry.agentRows, entry.node]) {
+                if (node.dot == SidebarDot.needsYou) {
+                  unawaited(open(node));
+                  return;
+                }
+              }
+            }
+          }
+        },
         key: const ValueKey('shell-project-sidebar'),
         controller: _controller,
         projects: projects,
