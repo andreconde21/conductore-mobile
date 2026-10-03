@@ -160,7 +160,7 @@ function systemPrompt (maxWords) {
 }
 
 function claudeArgs (maxWords) {
-  return ['-p', '--tools', '', '--safe-mode', '--no-session-persistence', '--output-format', 'json', '--model', MODEL, '--system-prompt', systemPrompt(maxWords)]
+  return require('./adapters/claude').brainArgs({ system: systemPrompt(maxWords), model: MODEL })
 }
 
 // Stdin: the reply between delimiters no reply can contain (a random tag
@@ -337,45 +337,26 @@ async function summarize ({ input, maxWords = DEFAULT_MAX_WORDS, timeoutMs = DEF
   if (words(plain) < PASSTHROUGH_WORDS || words(plain) <= maxWords) {
     return { schema: SCHEMA, summary: plain, ms: 0, model: null, passthrough: true }
   }
-  const bin = findClaude(env)
-  if (!bin) return failure('claude-missing', 'claude is not installed or not on PATH')
+  // The brain runner (lib/adapters): `claude -p` today.
+  const adapters = require('./adapters')
+  const found = adapters.brain(env)
+  if (!found) return failure(adapters.get(adapters.DEFAULT_KIND).brain.missing.error, adapters.get(adapters.DEFAULT_KIND).brain.missing.message)
 
   const release = await acquireLock(lockFile, BUSY_WAIT_MS)
   if (!release) return failure('busy', 'another summary is being made')
-  const childEnv = { ...env }
-  // A nested call must not look like it runs inside a Claude Code session.
-  delete childEnv.CLAUDECODE
-  delete childEnv.CLAUDE_CODE_ENTRYPOINT
-  // Haiku's extended thinking took 5-55 s here for a 45-word summary;
-  // without it a call takes about 3 s.
-  childEnv.MAX_THINKING_TOKENS = '0'
   const started = Date.now()
-  let r
+  let o
   try {
-    r = await runClaude(bin, buildPrompt(input.trim(), maxWords), { maxWords, timeoutMs, env: childEnv, onChild })
+    o = await found.runner.run({ system: systemPrompt(maxWords), prompt: buildPrompt(input.trim(), maxWords), model: MODEL, timeoutMs, onChild })
   } finally {
     release()
   }
   const ms = Date.now() - started
-  if (r.spawnError) {
-    if (r.spawnError.code === 'ENOENT' || r.spawnError.code === 'EACCES') return failure('claude-missing', `cannot run ${bin}`)
-    return failure('failed', `cannot run claude: ${r.spawnError.code || r.spawnError.message}`)
-  }
-  if (r.timedOut) return failure('timeout', `claude did not answer within ${timeoutMs} ms`)
-
-  let res = null
-  try { res = JSON.parse(r.stdout.trim().split('\n').pop()) } catch {}
-  const errText = [res && typeof res.result === 'string' && res.is_error ? res.result : '', r.stderr, res ? '' : r.stdout].join('\n')
-  if ((!res || res.is_error || r.code !== 0) && NOT_LOGGED_IN.test(errText)) {
-    return failure('not-logged-in', 'claude is not logged in on this machine: run claude and /login')
-  }
-  if (!res || res.is_error || typeof res.result !== 'string') {
-    const reason = res && res.is_error ? (res.subtype || 'error') : (r.code !== 0 ? `exit ${r.code === null ? r.signal : r.code}` : 'unreadable output')
-    return failure('failed', `claude failed (${String(reason).slice(0, 80)})`)
-  }
-  const summary = capWords(cleanSummary(res.result), maxWords)
+  if (!o.ok) return failure(o.error, o.message)
+  if (o.text === null) return failure('failed', `claude failed (${String(o.noTextReason).slice(0, 80)})`)
+  const summary = capWords(cleanSummary(o.text), maxWords)
   if (!summary) return failure('failed', 'claude returned an empty summary')
-  return { schema: SCHEMA, summary, ms, model: modelFrom(res) }
+  return { schema: SCHEMA, summary, ms, model: o.model }
 }
 
 module.exports = {

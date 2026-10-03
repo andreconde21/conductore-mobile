@@ -230,6 +230,9 @@ class Activity {
       this.push(ch.sessionId, [ag.updatedAt || now, 'S', code])
     }
     const meta = { name: ag.name || null, cwd: ag.cwd || null, transcriptPath: ag.transcriptPath || null, startedAt: ag.startedAt || null, endedAt: ag.endedAt || null, lastMessage: typeof ag.lastMessage === 'string' ? ag.lastMessage.slice(0, 500) : null }
+    // Another agent's adapter reads its transcript later (digest): keep its
+    // kind; none means Claude Code, as in older files.
+    if (ag.kind && ag.kind !== 'claude') meta.kind = ag.kind
     if (JSON.stringify(meta) !== JSON.stringify(rec.meta)) { rec.meta = meta; this.dirty = true }
   }
 
