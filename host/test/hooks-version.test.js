@@ -12,7 +12,9 @@ const fs = require('fs')
 const path = require('path')
 const { execFile } = require('child_process')
 const settings = require('../lib/settings')
-const { tempDir, cleanup } = require('./helpers/cleanup')
+const { tempDir, cleanup, guardRealConfigs } = require('./helpers/cleanup')
+// Taken before anything runs; checked by the last test.
+const realConfigs = guardRealConfigs()
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const root = tempDir('cnd-hooksver-')
@@ -29,6 +31,8 @@ const env = {
   CONDUCTORE_HOME: path.join(root, 'state'),
   CONDUCTORE_SOCKET: path.join(root, 'state', 'hostd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: file,
+  CODEX_HOME: path.join(home, '.codex'),
+  XDG_CONFIG_HOME: path.join(home, '.config'),
   TMUX_TMPDIR: tempDir('cnd-hooksver-tmux-')
 }
 for (const k of Object.keys(env)) if (/^(HERDR_|TMUX$|TMUX_PANE)/.test(k)) delete env[k]
@@ -135,3 +139,5 @@ test('no claude found: nothing optional is registered', async () => {
   assert.ok(i.json.skipped.every(s => s.reason === 'Claude Code version unknown'))
   await cli('uninstall')
 })
+
+test('no test touched the real agent configs (~/.claude, ~/.codex, ~/.config/opencode)', () => realConfigs())

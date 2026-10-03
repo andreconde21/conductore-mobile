@@ -845,6 +845,16 @@ class DigestAgentCard extends StatelessWidget {
             children: [
               Row(
                 children: [
+                  // Agents other than Claude Code carry their badge (Codex).
+                  if (normalizeAgentKind(agent.kind) != defaultAgentKind)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: AgentKindBadge(
+                        key: ValueKey('digest-kind-${agent.sessionId}'),
+                        kind: agent.kind,
+                        size: 18,
+                      ),
+                    ),
                   Expanded(
                     child: Text.rich(
                       TextSpan(

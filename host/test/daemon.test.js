@@ -6,7 +6,9 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
-const { tempDir, cleanup } = require('./helpers/cleanup')
+const { tempDir, cleanup, guardRealConfigs } = require('./helpers/cleanup')
+// Taken before anything runs; checked by the last test.
+const realConfigs = guardRealConfigs()
 const { spawn, execFile } = require('child_process')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
@@ -49,7 +51,11 @@ const env = {
   PATH: `${fakeBin}:${process.env.PATH}`,
   CONDUCTORE_HOME: home,
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
-  CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json')
+  CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json'),
+  // install / uninstall run every agent adapter: never the real configs.
+  HOME: path.join(home, 'user'),
+  CODEX_HOME: path.join(home, 'user', '.codex'),
+  XDG_CONFIG_HOME: path.join(home, 'user', '.config')
 }
 // Even a tmux call without -S (the fake on PATH aside) can only reach a
 // private "default" server, never the real one.
@@ -576,3 +582,5 @@ test.after(async () => {
   await cli('stop').catch(() => {})
   await cleanup()
 })
+
+test('no test touched the real agent configs (~/.claude, ~/.codex, ~/.config/opencode)', () => realConfigs())

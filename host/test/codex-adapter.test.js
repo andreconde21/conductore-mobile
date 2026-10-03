@@ -13,7 +13,9 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 const { execFileSync, spawn } = require('child_process')
-const { tempDir, cleanup } = require('./helpers/cleanup')
+const { tempDir, cleanup, guardRealConfigs } = require('./helpers/cleanup')
+// Taken before anything runs; checked by the last test.
+const realConfigs = guardRealConfigs()
 
 const root = tempDir('conductore-codex-')
 const home = path.join(root, 'state')
@@ -541,3 +543,18 @@ test("the app's Codex chat fixture is what the adapter reads from the real sessi
   assert.equal(agent.state, 'waiting_input')
   assert.deepEqual(page, JSON.parse(JSON.stringify(codex.readTranscript(fixtures.agent, {}))))
 })
+
+test('the dashboard digest names a Codex agent\'s kind and reads its facts from the session file', async () => {
+  const digest = require('../lib/digest')
+  const now = Date.parse('2026-10-03T12:09:00Z')
+  const agent = { sessionId: SID, kind: 'codex', name: 'repo', cwd: '/work/repo', transcriptPath: TUI_ROLLOUT, state: 'waiting_input', lastMessage: 'Done: I listed the files and added hello.txt.', startedAt: now - 120000, updatedAt: now - 1000, pending: [] }
+  const claudeAgent = { sessionId: 'c-1', kind: 'claude', name: 'api', cwd: '/work/api', state: 'working', startedAt: now - 1000, updatedAt: now - 1000, pending: [] }
+  const r = await digest.digest({ now, since: now - 3600000, data: { status: { agents: [agent, claudeAgent] }, activity: {}, source: 'test', hasActivity: false }, storeFile: path.join(root, 'digest.json'), env: { HOME: root }, gitTimeoutMs: 1 })
+  const codexEntry = r.agents.find(a => a.sessionId === SID)
+  assert.equal(codexEntry.kind, 'codex')
+  assert.equal(codexEntry.facts.tokens.output, 720)
+  // Claude Code's entries are as before: no kind.
+  assert.equal('kind' in r.agents.find(a => a.sessionId === 'c-1'), false)
+})
+
+test('no test touched the real agent configs (~/.claude, ~/.codex, ~/.config/opencode)', () => realConfigs())

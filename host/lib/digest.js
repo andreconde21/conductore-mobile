@@ -666,6 +666,8 @@ async function digest (opts) {
     const lastText = agent.lastMessage && !GENERIC_NOTICE.test(agent.lastMessage) ? agent.lastMessage : ((tail && tail.lastReply) || agent.lastMessage)
     const entry = {
       sessionId: sid,
+      // Another agent's kind (Codex, ...); Claude Code's entries stay as before.
+      ...(agent.kind && agent.kind !== 'claude' ? { kind: agent.kind } : {}),
       name: agent.name || null,
       machine: opts.machine || os.hostname(),
       project: projectOf(agent.cwd),
