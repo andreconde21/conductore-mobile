@@ -3,6 +3,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_settings.dart';
@@ -247,6 +248,27 @@ void main() {
       open: const AgentOpenTarget(hostId: 'h', agentId: 's-1'),
       detail: detail,
     );
+
+    test('a Codex approval says it is Codex and keeps its buttons', () {
+      final codex = AgentInfo(
+        id: 's-1',
+        name: 'repo',
+        project: 'api',
+        kind: 'codex',
+        state: AgentAttentionState.needsInput,
+        pendingRequests: [
+          _request('r1', risk: PermissionRiskLevel.low, reason: 'Tests'),
+        ],
+      );
+      final notification = build(codex);
+      expect(notification.title, 'api (Codex) · VTM needs you');
+      expect(notification.publicTitle, 'Conductore: api (Codex) needs you');
+      expect(notification.action?.requestId, 'r1');
+      // Claude Code's titles are unchanged (the test below).
+      expect(otherAgentKindName('claude'), isNull);
+      expect(otherAgentKindName(''), isNull);
+      expect(otherAgentKindName('Codex'), 'Codex');
+    });
 
     test('one approval: title, the item with its risk, one set of '
         'buttons', () {

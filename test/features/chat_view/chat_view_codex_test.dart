@@ -67,7 +67,12 @@ void main() {
     expect(page.entries, isEmpty);
     // A Claude Code page stays as it was.
     final claude = TranscriptParser.parsePage(
-      jsonEncode({'offset': 10, 'size': 10, 'start': 0, 'entries': []}),
+      jsonEncode({
+        'offset': 10,
+        'size': 10,
+        'start': 0,
+        'entries': <Object?>[],
+      }),
     );
     expect(claude.isNeutral, isFalse);
     expect(claude.cursor, isNull);
@@ -99,7 +104,7 @@ void main() {
       expect(controller.name, 'repo');
 
       await controller.refresh();
-      expect(runner.commands[1], contains("transcript s-1 --cursor 19864"));
+      expect(runner.commands[1], contains('transcript s-1 --cursor 19864'));
       expect(controller.items, hasLength(15));
       final denied = controller.items.whereType<ChatToolCall>().where(
         (c) => c.result?.isError ?? false,
@@ -112,7 +117,7 @@ void main() {
       // Nothing new: nothing rebuilt, the cursor stays.
       final before = controller.items;
       await controller.refresh();
-      expect(runner.commands[2], contains("--cursor 44075"));
+      expect(runner.commands[2], contains('--cursor 44075'));
       expect(identical(controller.items, before), isTrue);
     },
   );
@@ -138,7 +143,7 @@ void main() {
       expect(controller.activity, ChatActivity.working);
 
       await controller.refresh();
-      expect(runner.commands[1], contains("--cursor 5695"));
+      expect(runner.commands[1], contains('--cursor 5695'));
       final done = controller.items.whereType<ChatToolCall>().single;
       expect(done.id, 'call_5');
       expect(done.running, isFalse);
@@ -154,7 +159,7 @@ void main() {
     final controller = controllerFor(runner);
     await controller.refresh();
     expect(runner.commands, hasLength(2));
-    expect(runner.commands[1], contains("--cursor 10"));
+    expect(runner.commands[1], contains('--cursor 10'));
     expect(controller.items, hasLength(15));
   });
 
@@ -182,11 +187,11 @@ void main() {
     await controller.loadOlder();
     expect(
       runner.commands[1],
-      contains("--before-cursor 34116 --max-bytes 1000"),
+      contains('--before-cursor 34116 --max-bytes 1000'),
     );
     expect(controller.hasOlder, isTrue);
     await controller.loadOlder();
-    expect(runner.commands[2], contains("--before-cursor 19864"));
+    expect(runner.commands[2], contains('--before-cursor 19864'));
     expect(controller.hasOlder, isFalse);
     expect(controller.olderOnlyInTerminal, isFalse);
     expect(

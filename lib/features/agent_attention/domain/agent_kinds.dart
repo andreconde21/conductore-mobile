@@ -205,6 +205,14 @@ String normalizeAgentKind(String kind) {
   return key;
 }
 
+/// A person's name for an agent kind other than Claude Code (`Codex`), for
+/// texts that must say which agent it is; null for Claude Code.
+String? otherAgentKindName(String kind) {
+  final key = normalizeAgentKind(kind);
+  if (key == defaultAgentKind) return null;
+  return const {'codex': 'Codex', 'opencode': 'OpenCode'}[key] ?? key;
+}
+
 /// Transcript formats the Chat View renders: Claude Code's `entries` and
 /// the neutral `items` (`NeutralChatItems`, paged by the companion's opaque
 /// cursor, CON-068).

@@ -523,7 +523,7 @@ void main() {
     );
 
     testWidgets(
-      "Always for Codex offers only a Conductore rule: Codex has no own "
+      'Always for Codex offers only a Conductore rule: Codex has no own '
       'Always to write',
       (tester) async {
         String status(String kind) =>
