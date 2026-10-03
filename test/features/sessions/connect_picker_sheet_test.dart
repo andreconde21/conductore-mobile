@@ -383,13 +383,117 @@ void main() {
   });
 
   testWidgets('new tmux session asks for a name', (tester) async {
-    final (_, picked) = await pumpPicker(tester, [tmuxOutput, herdrOutput]);
+    final (runner, picked) = await pumpPicker(tester, [
+      tmuxOutput,
+      herdrOutput,
+    ]);
     await tester.tap(find.text('New session'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'agents');
-    await tester.tap(find.text('Connect'));
+    await tester.enterText(
+      find.byKey(const ValueKey('new-workspace-name')),
+      'agents',
+    );
+    await tester.tap(find.byKey(const ValueKey('new-workspace-create')));
     await tester.pumpAndSettle();
+    // Only a name: attach-or-create, as before, with no extra command.
     expect(picked.single.target, const ConnectTarget.tmux('agents'));
+    expect(runner.commands, hasLength(3));
+  });
+
+  testWidgets('new tmux session in a suggested folder with Claude', (
+    tester,
+  ) async {
+    final runner = ScriptedAgentCommandRunner([
+      tmuxOutput,
+      herdrOutput,
+      herdrOutput,
+      const AgentCommandResult(stdout: '', stderr: '', exitCode: 0),
+    ]);
+    final picked = <ConnectPickerResult>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ConnectPickerSheet(
+            host: buildHost('h'),
+            runner: runner,
+            recentDirectories: const ['/home/a/Projects/TheCalendar', '/srv'],
+            onPicked: picked.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New session'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(
+        const ValueKey('new-workspace-folder-/home/a/Projects/TheCalendar'),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('new-workspace-claude')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('new-workspace-create')));
+    await tester.pumpAndSettle();
+
+    // Named after the folder, created there, Claude typed in; then opened.
+    expect(picked.single.target, const ConnectTarget.tmux('TheCalendar'));
+    expect(runner.commands, hasLength(4));
+    final create = runner.commands.last;
+    expect(create, startsWith("sh -c 'eval"));
+    expect(create, contains('new-session'));
+    expect(create, contains('send-keys'));
+  });
+
+  testWidgets('new Herdr workspace: created, then picked by id; a failure '
+      'stays in the dialog', (tester) async {
+    const created = AgentCommandResult(
+      stdout:
+          '{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":'
+          '"w9:p1","workspace_id":"w9"},"type":"workspace_created",'
+          '"workspace":{"label":"api","workspace_id":"w9"}}}',
+      stderr: '',
+      exitCode: 0,
+    );
+    final (runner, picked) = await pumpPicker(tester, [
+      tmuxOutput,
+      herdrOutput,
+      herdrOutput,
+      const AgentCommandResult(
+        stdout: '',
+        stderr: 'No such folder: /nope',
+        exitCode: 3,
+      ),
+      created,
+    ], initialTab: ConnectPickerTab.herdr);
+    await tester.tap(find.byKey(const ValueKey('herdr-new-workspace')));
+    await tester.pumpAndSettle();
+    expect(find.text('New Herdr workspace'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('new-workspace-name')),
+      'api',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('new-workspace-folder')),
+      '/nope',
+    );
+    await tester.tap(find.byKey(const ValueKey('new-workspace-create')));
+    await tester.pumpAndSettle();
+    expect(find.text('No such folder: /nope'), findsOneWidget);
+    expect(picked, isEmpty);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('new-workspace-folder')),
+      '~/api',
+    );
+    await tester.tap(find.byKey(const ValueKey('new-workspace-create')));
+    await tester.pumpAndSettle();
+    expect(find.text('New Herdr workspace'), findsNothing);
+    expect(
+      picked.single.target,
+      const ConnectTarget.herdr(workspaceId: 'w9', label: 'api'),
+    );
+    // No Claude asked for: no pane command after the create.
+    expect(runner.commands, hasLength(5));
   });
 
   testWidgets('does not list automatically for hardware-key logins', (
