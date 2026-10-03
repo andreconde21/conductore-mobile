@@ -30,6 +30,7 @@ const reviewMod = lazy('./review')
 const agentsMod = lazy('./agents')
 const configMod = lazy('./config')
 const talkbawtCliMod = lazy('./talkbawt-cli')
+const sheprdMod = lazy('./sheprd')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -52,6 +53,9 @@ const USAGE = `usage: conductore-hostd <command>
   agent-wait <target> [--until idle,done,blocked] [--timeout 120]
   agent-read <target> [--lines 80]
                                   the agent's latest answer, else its screen
+  sidebar-layout                  sheprd's project sidebar (~/.config/herdr/
+                                  sidebar.toml) as JSON, read-only:
+                                  {found, path, layout} or {found: false}
   config [get [<key>] | set <key> <value>]
                                   herdr-sidebar on|off, tmux-live off|on,
                                   worktree-location
@@ -1155,6 +1159,7 @@ async function main (argv) {
     case 'agent-wait': return agentWaitCmd(args)
     case 'agent-read': return agentReadCmd(args)
     case 'config': return configCmd(args)
+    case 'sidebar-layout': return out({ ok: true, ...sheprdMod().readLayout() })
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()
