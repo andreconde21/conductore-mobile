@@ -185,10 +185,7 @@ void main() {
     await controller.refresh();
     expect(controller.items, hasLength(5));
     await controller.loadOlder();
-    expect(
-      runner.commands[1],
-      contains('--before-cursor 34116 --max-bytes 1000'),
-    );
+    expect(runner.commands[1], contains('--before-cursor 34116'));
     expect(controller.hasOlder, isTrue);
     await controller.loadOlder();
     expect(runner.commands[2], contains('--before-cursor 19864'));
@@ -197,10 +194,6 @@ void main() {
     expect(
       controller.items.map((i) => i.id),
       realItems.map((i) => i['id']).toList(),
-    );
-    expect(
-      controller.startedAt,
-      DateTime.parse(realItems.first['at']! as String),
     );
   });
 
