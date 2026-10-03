@@ -228,6 +228,32 @@ void main() {
     expect(find.text('Allow'), findsOneWidget);
   });
 
+  testWidgets('a Codex agent carries its badge; Claude Code cards none', (
+    tester,
+  ) async {
+    await start(
+      tester,
+      facts: digestReplyJson([
+        // The companion names the kind only for agents other than Claude.
+        {
+          ...digestAgentJson('repo', headline: 'Added hello.txt.'),
+          'kind': 'codex',
+        },
+        digestAgentJson('api', headline: 'Done.'),
+      ]),
+    );
+    await pumpView(tester);
+    expect(find.byKey(const ValueKey('digest-kind-repo')), findsOneWidget);
+    expect(find.byKey(const ValueKey('digest-kind-api')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('digest-kind-repo')),
+        matching: find.text('CX'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('group by project: layout projects first, then Other; '
       'collapsing hides the cards', (tester) async {
     await start(tester, facts: _digest());

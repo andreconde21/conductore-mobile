@@ -410,6 +410,7 @@ class UsageAccount {
     this.needsLogin = false,
     this.inCswap,
     this.live = false,
+    this.plan,
   });
 
   /// cswap's account number on that machine (`cswap switch <slot>`);
@@ -433,6 +434,10 @@ class UsageAccount {
   /// The running sessions use it (their limits match it).
   final bool live;
   final String? alias;
+
+  /// Agents that only show their login (Codex): its plan (`plus`, `pro`),
+  /// when known.
+  final String? plan;
 
   /// The account new Claude sessions on the machine use.
   final bool active;
@@ -513,6 +518,9 @@ class UsageAccount {
       usageAt: usageAt is num
           ? DateTime.fromMillisecondsSinceEpoch(usageAt.toInt(), isUtc: true)
           : null,
+      plan: json['plan'] is String && (json['plan'] as String).isNotEmpty
+          ? json['plan'] as String
+          : null,
     );
   }
 }
@@ -547,8 +555,8 @@ class UsageSection {
   /// Per day and session (`--sessions`); empty from older companions.
   final List<UsageRow> bySession;
 
-  /// Claude only: every account cswap manages on the machine. Empty
-  /// without cswap and from companions before it.
+  /// Claude: every account cswap manages on the machine (empty without
+  /// cswap and from companions before it). Codex: the active login only.
   final List<UsageAccount> accounts;
 
   /// Claude only: the companion found cswap, so it can switch accounts.

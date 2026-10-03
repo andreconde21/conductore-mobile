@@ -14,6 +14,7 @@
 // runner, `install`): Claude Code first, as before adapters existed.
 const MODULES = {
   claude: './claude',
+  codex: './codex',
   opencode: './opencode'
 }
 

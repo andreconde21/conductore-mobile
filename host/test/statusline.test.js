@@ -8,7 +8,9 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
-const { tempDir, cleanup } = require('./helpers/cleanup')
+const { tempDir, cleanup, guardRealConfigs } = require('./helpers/cleanup')
+// Taken before anything runs; checked by the last test.
+const realConfigs = guardRealConfigs()
 const { spawn } = require('child_process')
 const sl = require('../lib/statusline')
 
@@ -108,9 +110,10 @@ const env = {
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json'),
   CONDUCTORE_USAGE_THROTTLE_MS: '3000',
-  // `install` also registers the other agents present here (OpenCode's
-  // plugin goes to $XDG_CONFIG_HOME/opencode): never the real config.
-  XDG_CONFIG_HOME: path.join(home, 'config')
+  // install / uninstall run every agent adapter: never the real configs.
+  HOME: path.join(home, 'user'),
+  CODEX_HOME: path.join(home, 'user', '.codex'),
+  XDG_CONFIG_HOME: path.join(home, 'user', '.config')
 }
 for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_AGENT_NAME']) delete env[k]
 
@@ -288,3 +291,5 @@ test('install migrates a 0.3 install (Node hook entries, Node statusline) idempo
   assert.equal(fs.statSync(file).mtimeMs, mtime)
   await cli('uninstall')
 })
+
+test('no test touched the real agent configs (~/.claude, ~/.codex, ~/.config/opencode)', () => realConfigs())

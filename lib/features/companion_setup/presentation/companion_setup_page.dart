@@ -6,6 +6,7 @@ import 'package:conduit/core/presentation/adaptive_page.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
+import 'package:conduit/features/companion_setup/presentation/agent_setup_steps.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_install_sheet.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
@@ -276,6 +277,7 @@ class _CompanionSetupPageState extends State<CompanionSetupPage> {
                   ),
                 ),
               if (status != null) ..._actions(status),
+              if (status != null) ...agentSetupSteps(status.checks),
               if (_testResult != null) _TestResultCard(result: _testResult!),
               if (_log.isNotEmpty) _LogCard(lines: _log),
               if (status != null && status.checks.isNotEmpty)

@@ -108,4 +108,20 @@ async function cleanup ({ strict = true } = {}) {
   }
 }
 
-module.exports = { tempDir, cleanup, stopDaemons, daemonsIn }
+// The user's real agent configs, which no test may write: install and
+// uninstall run every present adapter. Returns a check that fails when
+// any of them changed (appeared, vanished, or got a new mtime or size).
+const REAL_CONFIGS = ['.claude/settings.json', '.claude.json', '.codex/hooks.json', '.codex/config.toml', '.codex', '.config/opencode']
+
+function guardRealConfigs (home = os.homedir()) {
+  const snap = () => REAL_CONFIGS.map(rel => {
+    try { const st = fs.statSync(path.join(home, rel)); return `${rel}:${st.mtimeMs}:${st.isDirectory() ? 'd' : st.size}` } catch { return `${rel}:-` }
+  }).join('\n')
+  const before = snap()
+  return () => {
+    const after = snap()
+    if (after !== before) throw new Error(`a test touched the real agent config under ${home}:\n${before}\n---\n${after}`)
+  }
+}
+
+module.exports = { tempDir, cleanup, stopDaemons, daemonsIn, guardRealConfigs }

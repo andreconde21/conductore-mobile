@@ -181,12 +181,12 @@ const NOT_LOGGED_IN = /not logged in|please run \/login|invalid api key|oauth to
 // Runs claude with the prompt on stdin. Resolves
 // { code, signal, stdout, stderr, timedOut, spawnError }. `args` defaults to
 // the summary's own (the guide passes its own fixed ones).
-function runClaude (bin, prompt, { maxWords, args, timeoutMs, env, onChild }) {
+function runClaude (bin, prompt, { maxWords, args, timeoutMs, env, onChild, cwd }) {
   return new Promise(resolve => {
     let child
     try {
       child = spawn(bin, args || claudeArgs(maxWords), {
-        cwd: os.homedir(),
+        cwd: cwd || os.homedir(),
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
         // Its own process group, so a timeout kills everything it started.

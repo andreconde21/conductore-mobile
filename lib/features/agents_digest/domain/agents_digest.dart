@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 
 /// The dashboard's sections, in display order.
 enum DigestSection {
@@ -208,6 +209,7 @@ class DigestAgent {
     this.summaryPending = false,
     this.lastError,
     this.fromStatus = false,
+    this.kind = defaultAgentKind,
   });
 
   /// The monitored session host it belongs to, and the machine's name.
@@ -215,6 +217,10 @@ class DigestAgent {
   final String hostName;
   final String sessionId;
   final String name;
+
+  /// The agent CLI (`claude`, `codex`, ...); companions only name it for
+  /// agents other than Claude Code.
+  final String kind;
 
   /// The companion's state: `working`, `waiting_input`, `needs_permission`
   /// or `ended`.
@@ -426,6 +432,7 @@ DigestAgent? _parseAgent(
     hostId: hostId,
     hostName: hostName,
     sessionId: sessionId,
+    kind: _text(raw['kind']) ?? defaultAgentKind,
     name: _text(raw['name']) ?? _text(raw['project']) ?? 'Claude session',
     state: _text(raw['state']) ?? 'working',
     attention: DigestAttention.parse(raw['attention']),
@@ -476,6 +483,7 @@ DigestReport digestFromStatus({
           hostName: hostName,
           sessionId: agent.id,
           name: agent.name,
+          kind: agent.kind.isEmpty ? defaultAgentKind : agent.kind,
           project: agent.projectLabel,
           fromStatus: true,
           state: switch (agent.state) {

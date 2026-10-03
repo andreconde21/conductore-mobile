@@ -522,6 +522,39 @@ void main() {
       },
     );
 
+    testWidgets(
+      'Always for Codex offers only a Conductore rule: Codex has no own '
+      'Always to write',
+      (tester) async {
+        String status(String kind) =>
+            '{"version":1,"seq":5,"capabilities":["smart-approvals"],'
+            '"adapters":{"claude":{"label":"Claude Code","approvals":"hook",'
+            '"always":true,"chat":"entries"},"codex":{"label":"Codex",'
+            '"approvals":"hook","always":false,"chat":"items",'
+            '"setup":["trust-hooks"]}},'
+            '"agents":[{"sessionId":"s-1","kind":"$kind","name":"api",'
+            '"cwd":"/home/a/api","state":"needs_permission",'
+            '"updatedAt":1790000003000,"pending":[$_lowGit]}]}';
+        for (final (kind, native) in [('codex', false), ('claude', true)]) {
+          final (controller, _) = await start(tester, {
+            'status': [status(kind)],
+            'approvals': [_approvals],
+          });
+          await pumpSheet(tester, controller);
+          await tester.tap(find.text('Always'));
+          await tester.pumpAndSettle();
+          expect(find.text('Save a rule'), findsOneWidget, reason: kind);
+          expect(
+            find.textContaining("Claude Code's own Always"),
+            native ? findsOneWidget : findsNothing,
+            reason: kind,
+          );
+          await tester.pumpWidget(const SizedBox());
+          await tester.pumpAndSettle();
+        }
+      },
+    );
+
     testWidgets('the auto-approved list undoes a trust', (tester) async {
       final (controller, runner) = await start(tester, {
         'status': [_status([], [])],

@@ -92,14 +92,16 @@ void main() {
           'claude': {'chat': 'entries'},
           'codex': {'chat': 'items'},
           'gemini': {'chat': 'entries'},
+          'future': {'chat': 'other-format'},
           'cursor': {'chat': 'jsonl'},
         })!;
         expect(supportsChatView(agent('cursor'), catalog), isFalse);
         expect(supportsChatView(agent('claude'), catalog), isTrue);
         expect(supportsChatView(agent('gemini'), catalog), isTrue);
-        // The neutral format (NeutralChatItems), paged by cursor (CON-069).
+        // The neutral format, paged by cursor (CON-068).
         expect(renderableChatFormats.contains('items'), isTrue);
         expect(supportsChatView(agent('codex'), catalog), isTrue);
+        expect(supportsChatView(agent('future'), catalog), isFalse);
         expect(
           supportsChatView(agent('claude', id: 'herdr/w1:p2'), catalog),
           isFalse,

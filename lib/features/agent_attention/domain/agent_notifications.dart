@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -466,7 +467,11 @@ abstract final class AgentNotificationPolicy {
     required AgentOpenTarget open,
     String? detail,
   }) {
-    final label = agentLabel(agent);
+    // Which agent, when it is not Claude Code: "api (Codex)".
+    final kindName = otherAgentKindName(agent.kind);
+    final label = kindName == null
+        ? agentLabel(agent)
+        : '${agentLabel(agent)} ($kindName)';
     final requests = need == AgentNeed.approval
         ? agent.pendingRequests
         : const <PendingPermissionRequest>[];

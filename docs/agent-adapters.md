@@ -117,6 +117,35 @@ point there in a small, separate commit so parallel adapters do not collide.
 * `NeutralChatItems.parse()` (`lib/features/chat_view/domain/neutral_chat_items.dart`)
   turns `format: "items"` pages into the app's existing chat rows.
 
+## Codex (CON-068, built)
+
+`host/lib/adapters/codex.js` + `codex-rollout.js`, checked against real
+Codex 0.160.0 and 0.130.0 runs in Docker (mock model API;
+`host/test/fixtures/codex/README.md`). What the live runs showed, beyond
+the design doc:
+
+* Codex's hook input already is Claude Code's (`tool_name: "Bash"`,
+  `tool_input.command`); only `apply_patch` (→ Edit with `file_path`) and
+  `Interrupt` (→ Stop) need mapping. Allow/deny JSON works as designed.
+* Trust: at start Codex asks "Hooks need review" (Trust all) or `/hooks`
+  then `t`; it writes `[hooks.state."<hooks.json>:<snake_event>:<group>:<handler>"]
+  trusted_hash` to config.toml. `doctor` reads that read-only; the key
+  includes the position, so `install` updates our handlers in place.
+* Daemon mode: hooks run in `codex app-server` (outlives the TUIs, its
+  `TMUX_PANE` is the first TUI's). `origin()` (a new optional adapter
+  hook, called by `daemon.process`) finds the session's TUI by cwd and
+  takes its pid and pane from `/proc/<pid>/environ`; none when ambiguous.
+  SessionEnd arrives a few seconds after a TUI quits.
+* Rollouts: tools from `response_item` (both history modes), the user's
+  prompt from `item_completed` UserMessage (paginated) or `user_message`
+  (legacy). A denied exec has no `CommandExecution` item, only its output.
+* Brain: `codex exec --ephemeral --json --sandbox read-only --disable
+  shell_tool,unified_exec,hooks,... --ignore-user-config --ignore-rules`;
+  `include_apply_patch_tool` is ignored by 0.160 (apply_patch stays, but the
+  read-only sandbox rejects it).
+* App: `renderableChatFormats` includes `items`; the Chat View pages by
+  cursor and replaces an item re-sent with the same id.
+
 ## What the next adapters need (from the design doc)
 
 **Codex (CON-068, hooks and pane first; socket later).**

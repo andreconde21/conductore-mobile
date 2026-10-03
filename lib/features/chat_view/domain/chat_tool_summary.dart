@@ -150,6 +150,26 @@ class ChatToolSummary {
               : _head(result.content, _previewLines),
         );
     }
+    // Other agents' tools (neutral items) by their kind: a command, or a
+    // patch (Codex's apply_patch).
+    if (call.kind == ChatToolKind.bash && str('command') != null) {
+      return ChatToolSummary(
+        title: 'Shell',
+        subject: _firstLine(str('command')!),
+        detail: str('description'),
+        exitCode: _exitCode(result),
+        resultPreview: result == null ? null : _tail(result.content),
+      );
+    }
+    if (call.kind == ChatToolKind.edit && str('patch') != null) {
+      final files = input['files'];
+      return ChatToolSummary(
+        title: 'Edit',
+        subject: files is List ? files.whereType<String>().join(', ') : '',
+        diff: _patchDiff(str('patch')!),
+        resultPreview: _errorPreview(result),
+      );
+    }
     final title = call.name.startsWith('mcp__')
         ? call.name.substring(5).replaceFirst('__', ': ')
         : call.name;
@@ -225,6 +245,25 @@ class ChatToolSummary {
       return int.tryParse(match.group(1)!);
     }
     return result.isError ? null : 0;
+  }
+
+  /// The changed lines of a patch (`*** Begin Patch` format or a unified
+  /// diff), headers left out.
+  static List<ChatDiffLine> _patchDiff(String patch) {
+    final changed = [
+      for (final line in patch.split('\n'))
+        if ((line.startsWith('+') || line.startsWith('-')) &&
+            !line.startsWith('+++') &&
+            !line.startsWith('---'))
+          ChatDiffLine(line[0], line.substring(1)),
+    ];
+    if (changed.length <= _diffLines) {
+      return changed;
+    }
+    return [
+      ...changed.take(_diffLines),
+      ChatDiffLine(' ', '… ${changed.length - _diffLines} more'),
+    ];
   }
 
   static List<ChatDiffLine> _diff(String before, String after) {
