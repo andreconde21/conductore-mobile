@@ -80,7 +80,13 @@ class CompanionDoctorCheck {
     'claude',
   };
 
-  bool get optional => optionalNames.contains(name);
+  /// Other agents' checks (`codex`, `codex hooks`, ...): informative, an
+  /// agent the machine lacks is no failure.
+  static const otherAgents = {'codex'};
+
+  bool get optional =>
+      optionalNames.contains(name) ||
+      otherAgents.any((id) => name == id || name.startsWith('$id '));
 }
 
 /// The raw outputs one status check collects; [classifyCompanionStatus]

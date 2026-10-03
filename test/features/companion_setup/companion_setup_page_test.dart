@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:conduit/features/companion_setup/presentation/companion_install_sheet.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
@@ -555,5 +557,70 @@ void main() {
         findsOneWidget,
       );
     });
+  });
+
+  testWidgets('a machine with Codex explains the hook trust step, with the '
+      'docs, until Codex trusts the hooks', (tester) async {
+    // What the companion's doctor printed with Codex 0.160.0 (in Docker),
+    // before and after "Trust all" in Codex.
+    String doctorWithCodex({required bool trusted}) {
+      final doctor = jsonDecode(doctorJson(daemon: true)) as Map;
+      (doctor['checks'] as List).addAll([
+        {'name': 'codex', 'ok': true, 'detail': '/usr/bin/codex (0.160.0)'},
+        {
+          'name': 'codex hooks',
+          'ok': true,
+          'detail': '8 registered in /home/andre/.codex/hooks.json',
+        },
+        {
+          'name': 'codex hooks trusted',
+          'ok': trusted,
+          'detail': trusted
+              ? 'trusted in Codex'
+              : 'not trusted yet (SessionStart, UserPromptSubmit, '
+                    'PreToolUse, PostToolUse, PermissionRequest, Stop, '
+                    'Interrupt, SessionEnd): start Codex and choose "Trust '
+                    'all" when it asks, or open /hooks and press t',
+        },
+      ]);
+      return jsonEncode(doctor);
+    }
+
+    runner.responses.addAll({
+      ...healthyResponses(),
+      'conductore-hostd doctor': ok(doctorWithCodex(trusted: false)),
+    });
+    await pumpPage(tester);
+    // Codex's checks never make the companion look broken.
+    expect(badge('Hooks not registered'), findsNothing);
+    await scrollTo(tester, find.byKey(const ValueKey('codex-trust-card')));
+    expect(find.text('Codex: trust the Conductore hooks'), findsOneWidget);
+    expect(find.byKey(const ValueKey('codex-trust-steps')), findsOneWidget);
+    expect(find.textContaining('Trust all and continue'), findsOneWidget);
+    expect(find.textContaining('never does that for you'), findsOneWidget);
+    expect(find.text('Codex hooks documentation'), findsOneWidget);
+    await scrollTo(tester, find.text('Doctor checks'));
+    expect(find.text('codex hooks trusted (optional)'), findsOneWidget);
+
+    runner.responses['conductore-hostd doctor'] = ok(
+      doctorWithCodex(trusted: true),
+    );
+    await tester.tap(find.byTooltip('Check again'));
+    await tester.pumpAndSettle();
+    // Back up to the card (the checks are below it).
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('codex-trust-card')),
+      -200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Codex trusts the Conductore hooks'), findsOneWidget);
+    expect(find.byKey(const ValueKey('codex-trust-steps')), findsNothing);
+  });
+
+  testWidgets('a machine without Codex shows no Codex step', (tester) async {
+    runner.responses.addAll(healthyResponses());
+    await pumpPage(tester);
+    expect(find.byKey(const ValueKey('codex-trust-card')), findsNothing);
   });
 }
