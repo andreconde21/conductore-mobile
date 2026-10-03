@@ -19,10 +19,9 @@ const state = require('./state')
 const spool = require('./spool')
 const context = require('./context')
 const proc = require('./proc')
-const { permissionOutput, answerInput } = require('./permission')
+const adapters = require('./adapters')
 const { Approvals, CAPABILITIES } = require('./approvals')
 const approvalOps = require('./approval-ops')
-const { usageFrom } = require('./statusline')
 const { Activity } = require('./activity')
 const { Turns } = require('./turns')
 const { LiveBridge } = require('./live')
@@ -135,7 +134,7 @@ function loadSnapshot () {
     const snap = JSON.parse(fs.readFileSync(paths.statePath(), 'utf8'))
     if (snap && Array.isArray(snap.agents)) {
       st.seq = Number(snap.seq) || 0
-      for (const a of snap.agents) if (a && a.sessionId) st.agents[a.sessionId] = { ...a, pending: [] }
+      for (const a of snap.agents) if (a && a.sessionId) st.agents[a.sessionId] = { kind: adapters.DEFAULT_KIND, ...a, pending: [] }
     }
   } catch {}
   return st
@@ -262,6 +261,7 @@ class Daemon {
       }
     })
     this.sidebarQueued = false
+    this.adapterCaps = null
   }
 
   start () {
@@ -392,19 +392,23 @@ class Daemon {
     if (header.kind === 'usage') return this.onUsageReport(body, true, mtime)
     if (header.kind !== 'hook') return
     if (oversize) log('daemon', `dropped an oversized ${header.event} event`)
-    const event = body && typeof body === 'object' && !Array.isArray(body) ? body : {}
-    if (!event.hook_event_name && header.event) event.hook_event_name = header.event
+    // The agent's adapter turns its hook input into the daemon's event
+    // vocabulary (Claude Code's hook names and fields); no `agent=` header
+    // means Claude Code, an agent this companion does not know is dropped.
+    const adapter = adapters.forHeader(header)
+    const event = adapter ? adapter.normalize(body && typeof body === 'object' && !Array.isArray(body) ? body : {}, header) : null
     const fifo = header.fifo || null
-    if (!event.session_id || !event.hook_event_name) {
+    if (!event || !event.session_id || !event.hook_event_name) {
       if (fifo && isOurFifo(fifo)) writeFifo(fifo, '\n')
       return
     }
     // Before the auto-approve path too: an agent first seen through an
     // auto-approved request still gets its process (M20, M18).
     const known = this.state.agents[event.session_id]
-    if (header.claude_pid && !(known && known.process && known.process.pid === Number(header.claude_pid))) {
-      const claude = proc.identifyClaude(header.claude_pid)
-      if (claude) event.process = claude
+    const pid = header.agent_pid || header.claude_pid
+    if (pid && !(known && known.process && known.process.pid === Number(pid))) {
+      const found = adapter.identifyProcess(pid)
+      if (found) event.process = found
     }
     if (event.hook_event_name === 'PermissionRequest') {
       event.request_id = requestId()
@@ -463,8 +467,7 @@ class Daemon {
     clearTimeout(waiter.timer)
     let delivered = false
     if (decision !== 'gone') {
-      const out = permissionOutput(waiter.event, decision, message, answers)
-      delivered = writeFifo(waiter.fifo, out ? JSON.stringify(out) + '\n' : '\n')
+      delivered = writeFifo(waiter.fifo, adapters.of(waiter.event).hookAnswer(waiter.event, decision, message, answers))
     }
     if (!delivered) {
       // The hook is gone; its FIFO would otherwise linger.
@@ -489,7 +492,8 @@ class Daemon {
     const sid = input.session_id
     if (mtime < (this.usageSeen.get(sid) || 0)) return
     this.usageSeen.set(sid, mtime)
-    this.handleUsage({ sessionId: sid, usage: usageFrom(input) })
+    // Only Claude Code has a statusline today: its reports carry no agent.
+    this.handleUsage({ sessionId: sid, usage: adapters.get(adapters.DEFAULT_KIND).liveUsage(input) })
     if (fromSpool) this.hold(sid)
   }
 
@@ -782,7 +786,7 @@ class Daemon {
       this.reply(c, { error: 'a question takes an answer: decide <id> answer --answers <json>' }); c.end(); return
     }
     if (decision === 'answer') {
-      const checked = answerInput(waiter.event, req.answers)
+      const checked = adapters.of(waiter.event).checkAnswers(waiter.event, req.answers)
       if (checked.error) { this.reply(c, { error: checked.error }); c.end(); return }
     }
     const verdict = approvalOps.decideVerdict(found.request, decision)
@@ -801,7 +805,9 @@ class Daemon {
       this.reply(c, { version: this.state.version, seq: this.state.seq, etag, unchanged: true, source: 'daemon', capabilities: CAPABILITIES })
       return
     }
-    this.reply(c, { ...this.snapshotFor(req), etag, source: 'daemon', capabilities: CAPABILITIES })
+    // What each agent kind supports (static, computed once).
+    if (!this.adapterCaps) this.adapterCaps = adapters.capabilityMap()
+    this.reply(c, { ...this.snapshotFor(req), etag, source: 'daemon', capabilities: CAPABILITIES, adapters: this.adapterCaps })
   }
 
   // `status` / a resync snapshot, with what the request asked for.
