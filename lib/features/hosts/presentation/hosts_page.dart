@@ -1406,6 +1406,20 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         trailing: _groupByToggle(projects),
       ),
     ),
+    // Machines that cannot be listed keep their notice, as one line each.
+    for (final group in _otherWorkspaceGroups())
+      if (group.notice case final notice?)
+        SliverToBoxAdapter(
+          child: HomeNoticeLine(
+            key: ValueKey('home-notice-line-${group.host.id}'),
+            machine: group.host.name,
+            notice: notice,
+            palette: widget.themeController.palette,
+            onAction: notice.action == null
+                ? null
+                : () => _handleNoticeAction(group.host, notice.action!),
+          ),
+        ),
     SliverToBoxAdapter(
       child: HomeProjectsList(
         controller: projects,

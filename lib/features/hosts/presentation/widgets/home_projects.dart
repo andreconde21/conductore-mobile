@@ -331,3 +331,73 @@ class _HomeProjectRow extends StatelessWidget {
     return faded ? Opacity(opacity: 0.5, child: row) : row;
   }
 }
+
+/// A machine's home-board notice ("Can't reach omarchy", "Could not list
+/// workspaces") as one line above the projects, with its action (Retry,
+/// List, Start Herdr); a tap shows the whole notice with its details.
+class HomeNoticeLine extends StatelessWidget {
+  const HomeNoticeLine({
+    required this.machine,
+    required this.notice,
+    required this.palette,
+    this.onAction,
+    super.key,
+  });
+
+  final String machine;
+  final HomeBoardNotice notice;
+  final AppPalette palette;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = palette.mutedForeground;
+    final title = notice.title.contains(machine)
+        ? notice.title
+        : '$machine: ${notice.title}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => showDialog<void>(
+          context: context,
+          builder: (dialogContext) => Dialog(
+            child: HomeBoardNoticeTile(
+              notice: notice,
+              palette: palette,
+              brightness: Theme.of(context).brightness,
+              onAction: onAction == null
+                  ? null
+                  : () {
+                      Navigator.pop(dialogContext);
+                      onAction!();
+                    },
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            children: [
+              Icon(notice.icon, size: 16, color: muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: muted, fontSize: 13),
+                ),
+              ),
+              if (notice.actionLabel case final label? when onAction != null)
+                TextButton(
+                  onPressed: notice.busy ? null : onAction,
+                  child: Text(label),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

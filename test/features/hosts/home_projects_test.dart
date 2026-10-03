@@ -1,3 +1,4 @@
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:flutter/material.dart';
@@ -70,6 +71,67 @@ void main() {
     await tester.tap(back);
     await settleShell(tester);
     expect(find.byKey(const ValueKey('home-projects')), findsNothing);
+    await tearDownShell(tester);
+  });
+
+  testWidgets('in project mode an unreachable machine keeps its notice as '
+      'one line, with Retry and the details', (tester) async {
+    late ProjectLayoutController layout;
+    final h = await pumpShell(
+      tester,
+      size: const Size(390, 844),
+      shellMode: false,
+      before: (h) {
+        h.runners['build-box']!.error = const ConnectionFailure(
+          'Could not reach build-box.',
+          'SocketException: Connection timed out, errno = 110',
+          kind: ConnectionProblemKind.unreachable,
+        );
+        layout = ProjectLayoutController.instance = ProjectLayoutController(
+          theme: h.theme,
+          clock: () => h.now,
+        );
+      },
+    );
+    addTearDown(() {
+      ProjectLayoutController.instance = null;
+      layout.dispose();
+    });
+    await layout.setGroupByProject(true);
+    await h.boards['build-box']?.refresh();
+    await tester.pumpWidget(h.page(shellMode: false));
+    await settleShell(tester);
+    final line = find.byKey(const ValueKey('home-notice-line-build-box'));
+    await tester.scrollUntilVisible(line, 200);
+    expect(line, findsOneWidget);
+    expect(
+      find.descendant(of: line, matching: find.textContaining("Can't reach")),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('home-notice-line-workstation')),
+      findsNothing,
+    );
+    // Tap: the whole notice with its details.
+    await tester.tap(
+      find.descendant(of: line, matching: find.byType(Text)).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-board-notice-details')));
+    await tester.pump();
+    expect(find.textContaining('errno = 110'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    // Retry lists again: once reachable, the line goes away.
+    h.runners['build-box']!.error = null;
+    await tester.tap(
+      find.descendant(
+        of: line,
+        matching: find.widgetWithText(TextButton, 'Retry'),
+      ),
+    );
+    await settleShell(tester);
+    expect(line, findsNothing);
     await tearDownShell(tester);
   });
 }
