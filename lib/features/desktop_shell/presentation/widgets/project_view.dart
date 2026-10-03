@@ -47,7 +47,12 @@ class ProjectViewBar extends StatelessWidget {
             onTap: onTap,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: Text(text, style: style),
+              child: Text(
+                text,
+                style: style,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
         );
@@ -61,14 +66,16 @@ class ProjectViewBar extends StatelessWidget {
             size: 13,
             color: active ? palette.accent : palette.mutedForeground,
           ),
-          label(
-            active ? 'active' : 'all agents',
-            active
-                ? 'Showing what is working, needs you, or changed in the '
-                      'last ${controller.recentHours} h. Tap for all.'
-                : 'Showing everything. Tap for active only.',
-            () => controller.setActiveOnly(!active),
-            const ValueKey('project-filter-toggle'),
+          Flexible(
+            child: label(
+              active ? 'active' : 'all agents',
+              active
+                  ? 'Showing what is working, needs you, or changed in the '
+                        'last ${controller.recentHours} h. Tap for all.'
+                  : 'Showing everything. Tap for active only.',
+              () => controller.setActiveOnly(!active),
+              const ValueKey('project-filter-toggle'),
+            ),
           ),
           if (needsYou > 0)
             Tooltip(
@@ -97,13 +104,15 @@ class ProjectViewBar extends StatelessWidget {
               ),
             ),
           const Spacer(),
-          label(
-            controller.compact ? 'compact' : 'detailed',
-            controller.compact
-                ? 'One line per workspace. Tap for one row per agent.'
-                : 'One row per agent. Tap for one line per workspace.',
-            () => controller.setCompact(!controller.compact),
-            const ValueKey('project-view-toggle'),
+          Flexible(
+            child: label(
+              controller.compact ? 'compact' : 'detailed',
+              controller.compact
+                  ? 'One line per workspace. Tap for one row per agent.'
+                  : 'One row per agent. Tap for one line per workspace.',
+              () => controller.setCompact(!controller.compact),
+              const ValueKey('project-view-toggle'),
+            ),
           ),
           _ViewMenu(controller: controller, hiddenCount: hiddenCount),
         ],
@@ -126,9 +135,11 @@ class _ViewMenu extends StatelessWidget {
     return PopupMenuButton<_ViewChoice>(
       key: const ValueKey('project-view-menu'),
       tooltip: 'Project view',
-      iconSize: 17,
       padding: EdgeInsets.zero,
-      icon: const Icon(Icons.more_vert_rounded),
+      child: const Padding(
+        padding: EdgeInsets.all(4),
+        child: Icon(Icons.more_vert_rounded, size: 17),
+      ),
       onSelected: (choice) async {
         switch (choice) {
           case _ViewChoice.hours:
