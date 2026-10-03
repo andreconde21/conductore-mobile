@@ -489,7 +489,7 @@ class Daemon {
     const sid = input.session_id
     if (mtime < (this.usageSeen.get(sid) || 0)) return
     this.usageSeen.set(sid, mtime)
-    this.handleUsage({ sessionId: sid, usage: usageFrom(input) })
+    this.handleUsage({ sessionId: sid, usage: usageFrom(input), at: Math.round(mtime) })
     if (fromSpool) this.hold(sid)
   }
 
@@ -535,7 +535,7 @@ class Daemon {
     const sid = req.sessionId
     if (typeof sid !== 'string' || !sid) return 'ignored'
     const usage = req.usage && typeof req.usage === 'object' ? req.usage : null
-    const result = state.setUsage(this.state, sid, usage)
+    const result = state.setUsage(this.state, sid, usage, Number.isFinite(req.at) ? req.at : Date.now())
     if (result !== 'stored') return result
     const entry = this.usageEmits.get(sid) || { at: 0, timer: null }
     this.usageEmits.set(sid, entry)

@@ -344,21 +344,25 @@ function resolvePermission (state, requestId, resolution, now = Date.now()) {
 const PENDING_USAGE_MAX = 50
 
 // Stores a statusline usage record on the session without touching its
-// state or updatedAt. Returns 'unchanged', 'stored' (agent updated, caller
-// decides when to publish) or 'pending' (session not known yet; kept until
-// its first hook event).
-function setUsage (state, sessionId, usage) {
+// state or updatedAt, stamped with when it was reported (`at`, ms: the
+// limits of an idle session are as old as its last report). Returns
+// 'unchanged', 'stored' (agent updated, caller decides when to publish) or
+// 'pending' (session not known yet; kept until its first hook event).
+function setUsage (state, sessionId, usage, at = Date.now()) {
+  const stamped = usage ? { ...usage, at } : null
   const agent = state.agents[sessionId]
   if (!agent) {
     state.pendingUsage = state.pendingUsage || {}
     delete state.pendingUsage[sessionId]
-    state.pendingUsage[sessionId] = usage
+    state.pendingUsage[sessionId] = stamped
     const keys = Object.keys(state.pendingUsage)
     if (keys.length > PENDING_USAGE_MAX) delete state.pendingUsage[keys[0]]
     return 'pending'
   }
-  if (JSON.stringify(agent.usage || null) === JSON.stringify(usage || null)) return 'unchanged'
-  if (usage) agent.usage = usage
+  const known = agent.usage ? { ...agent.usage } : null
+  if (known) delete known.at
+  if (JSON.stringify(known) === JSON.stringify(usage || null)) return 'unchanged'
+  if (stamped) agent.usage = stamped
   else delete agent.usage
   return 'stored'
 }

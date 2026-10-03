@@ -332,4 +332,107 @@ test('CLI: cswap-switch validates its arguments and reports the switch', async (
   assert.match(missing.json.error, /not installed/)
 })
 
+// CON-067 (development-central, 2026-10-03): three managed accounts, two
+// needing a new login, none live; the live login a fourth account. The
+// sessions' statusline says which account they really run on.
+const ANDRE = JSON.stringify({
+  schemaVersion: 1,
+  activeAccountNumber: null,
+  accounts: [
+    { number: 1, email: 'alice@example.com', alias: 'work', active: false, usageStatus: 'relogin_required', usage: null, lastGoodUsage: { fiveHour: { pct: 0 }, sevenDay: { pct: 100, resetsAt: '2026-10-03T21:59:59.962513+00:00' } }, lastGoodFetchedAt: '2026-10-02T14:51:45Z' },
+    { number: 2, email: 'bob@example.org', alias: 'home', active: false, usageStatus: 'relogin_required', usage: null, lastGoodUsage: { fiveHour: { pct: 0 }, sevenDay: { pct: 100, resetsAt: '2026-10-04T20:59:59.965163+00:00' } }, lastGoodFetchedAt: '2026-10-02T21:16:42Z' },
+    { number: 3, email: 'carol@example.net', active: false, usageStatus: 'ok', usage: { fiveHour: { pct: 0 }, sevenDay: { pct: 100, resetsAt: '2026-10-03T13:00:00.007850+00:00' }, scoped: [{ name: 'Fable', pct: 3, resetsAt: '2026-10-03T13:00:00.008027+00:00' }] }, usageFetchedAt: '2026-10-03T11:18:42Z' }
+  ]
+})
+const AT = Date.parse('2026-10-03T11:22:00Z')
+const LIVE = [
+  { label: '5h', usedPct: 14, resetsAt: Date.parse('2026-10-03T16:20:00Z'), expired: false, at: AT - 60000 },
+  { label: '7d', usedPct: 52, resetsAt: Date.parse('2026-10-05T07:00:00Z'), expired: false, at: AT - 60000 }
+]
+const andreRows = async (now = AT) => {
+  const dir = tmpDir()
+  const bin = fakeCswap(dir, { stdout: ANDRE, statusOut: UNMANAGED })
+  return (await cswap.accounts({ bin, cacheFile: path.join(dir, 'c.json'), listMtime: 1, now })).accounts
+}
+
+test('withLiveLimits: the unmanaged login is "not in cswap" only when the sessions\' limits match no managed account', async () => {
+  const rows = cswap.withLiveLimits(await andreRows(), LIVE, AT)
+  const login = rows.find(r => r.slot == null)
+  assert.equal(login.inCswap, false)
+  assert.equal(login.live, true)
+  assert.equal(login.source, 'statusline')
+  assert.equal(login.usageAt, AT - 60000)
+  assert.deepEqual(login.limits, { '5h': { usedPct: 14, resetsAt: LIVE[0].resetsAt, expired: false }, '7d': { usedPct: 52, resetsAt: LIVE[1].resetsAt, expired: false } })
+  assert.ok(rows.filter(r => r.slot != null).every(r => !r.live))
+  // No session reported limits: cswap's word only (from ~/.claude.json,
+  // which may lag): the current login, nothing claimed.
+  const unknown = cswap.withLiveLimits(await andreRows(), [], AT).find(r => r.slot == null)
+  assert.equal(unknown.inCswap, null)
+  assert.deepEqual(unknown.limits, {})
+})
+
+test('withLiveLimits: limits matching a managed account make it the live one, with the newer numbers', async () => {
+  const onCarol = [
+    { label: '5h', usedPct: 30, resetsAt: Date.parse('2026-10-03T15:00:00Z'), expired: false, at: AT - 1000 },
+    { label: '7d', usedPct: 100, resetsAt: Date.parse('2026-10-03T13:00:00Z'), expired: false, at: AT - 1000 }
+  ]
+  const rows = cswap.withLiveLimits(await andreRows(), onCarol, AT)
+  const carol = rows.find(r => r.slot === 3)
+  assert.equal(carol.live, true)
+  assert.equal(carol.usageAt, AT - 1000)
+  assert.equal(carol.limits['5h'].usedPct, 30)
+  // cswap says the login is someone else: unsure, so nothing is claimed.
+  assert.equal(rows.find(r => r.slot == null).inCswap, null)
+  // Two managed accounts on the same weekly reset: no guess.
+  const twins = JSON.parse(ANDRE)
+  twins.accounts[1].lastGoodUsage.sevenDay.resetsAt = twins.accounts[2].usage.sevenDay.resetsAt
+  const dir = tmpDir()
+  const bin = fakeCswap(dir, { stdout: JSON.stringify(twins), statusOut: UNMANAGED })
+  const both = (await cswap.accounts({ bin, cacheFile: path.join(dir, 'c.json'), listMtime: 1, now: AT })).accounts
+  const r2 = cswap.withLiveLimits(both, onCarol, AT)
+  assert.ok(r2.every(r => !r.live))
+  assert.equal(r2.find(r => r.slot == null).inCswap, null)
+})
+
+test('accounts: relogin_required is needsLogin; windows that reset since are expired at 0 %, also from the cache', async () => {
+  const dir = tmpDir()
+  const cacheFile = path.join(dir, 'c.json')
+  const bin = fakeCswap(dir, { stdout: ANDRE, statusOut: UNMANAGED })
+  const first = await cswap.accounts({ bin, cacheFile, listMtime: 1, now: Date.parse('2026-10-03T12:59:50Z') })
+  assert.deepEqual(first.accounts.map(a => [a.slot, !!a.needsLogin, !!a.stale]), [[1, true, true], [2, true, true], [3, false, false], [null, false, false]])
+  assert.equal(first.accounts[2].limits['7d'].usedPct, 100)
+  // 13:00 passed; the 60 s cache still answers, but not with 100 %.
+  const after = await cswap.accounts({ bin, cacheFile, listMtime: 1, now: Date.parse('2026-10-03T13:00:30Z') })
+  assert.equal(calls(dir).filter(c => c === 'list --json').length, 1)
+  assert.deepEqual(after.accounts[2].limits['7d'], { usedPct: 0, resetsAt: Date.parse('2026-10-03T13:00:00.007Z'), expired: true })
+  assert.equal(after.accounts[2].perModel[0].usedPct, 0)
+  // withLiveLimits settles them again too.
+  const settled = cswap.withLiveLimits(first.accounts, [], Date.parse('2026-10-03T13:00:30Z'))
+  assert.equal(settled[2].limits['7d'].expired, true)
+})
+
+test('CLI: usage --fresh asks cswap again; sessions\' limits confirm the unmanaged login', async () => {
+  const dir = tmpDir()
+  const home = path.join(dir, 'home')
+  const chome = path.join(dir, 'chome')
+  fs.mkdirSync(home)
+  fs.mkdirSync(chome)
+  const now = Date.now()
+  const week = now + 40 * 3600 * 1000
+  // No daemon: `usage` reads the agents from the last snapshot.
+  fs.writeFileSync(path.join(chome, 'state.json'), JSON.stringify({ seq: 1, agents: [{ sessionId: 's1', state: 'working', cwd: home, updatedAt: now, pending: [], usage: { at: now, limits: [{ label: '7d', usedPct: 52, resetsAt: week }] } }] }))
+  const bin = fakeCswap(dir, { stdout: noneActive(), statusOut: UNMANAGED })
+  const env = { HOME: home, XDG_DATA_HOME: path.join(dir, 'xdg'), CONDUCTORE_HOME: chome, CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', CONDUCTORE_CSWAP: bin }
+  const r = await hostd(['usage', '--days', '1'], env)
+  assert.equal(r.code, 0)
+  const login = r.json.claude.accounts.find(a => a.slot == null)
+  assert.equal(login.inCswap, false)
+  assert.equal(login.limits['7d'].usedPct, 52)
+  assert.equal(r.json.claude.limits[0].at, now)
+  await hostd(['usage', '--days', '1'], env)
+  assert.equal(calls(dir).filter(c => c === 'list --json').length, 1, 'cached for 60 s')
+  await hostd(['usage', '--days', '1', '--fresh'], env)
+  assert.equal(calls(dir).filter(c => c === 'list --json').length, 2, '--fresh asks again')
+})
+
 test.after(() => cleanup())

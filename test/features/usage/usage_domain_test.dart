@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/usage/domain/usage_alert.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
 import 'package:conduit/features/usage/domain/usage_summary.dart';
@@ -470,6 +471,205 @@ void main() {
           alerted: null,
         ),
         isNull,
+      );
+    });
+  });
+
+  // CON-067: limits are per account. Sessions left open on another account
+  // (a /login since), another machine, or the companion's remembered copy
+  // reported windows of that account, and "the later window wins" let
+  // them stand for the live login, for days.
+  group('current login limits', () {
+    final at = DateTime.utc(2026, 10, 3, 11, 21);
+    UsageLimit limit(
+      String label,
+      double pct,
+      DateTime resetsAt, {
+      DateTime? reportedAt,
+    }) => UsageLimit(
+      label: label,
+      usedPct: pct,
+      resetsAt: resetsAt,
+      reportedAt: reportedAt,
+    );
+
+    test('the newest report decides the account; others are dropped', () {
+      final current = [
+        limit('5h', 14, DateTime.utc(2026, 10, 3, 16, 20), reportedAt: at),
+        limit('7d', 52, DateTime.utc(2026, 10, 5, 7), reportedAt: at),
+      ];
+      // Yesterday, on an account whose windows reset later.
+      final other = [
+        limit(
+          '5h',
+          90,
+          DateTime.utc(2026, 10, 3, 16, 50),
+          reportedAt: at.subtract(const Duration(hours: 20)),
+        ),
+        limit(
+          '7d',
+          95,
+          DateTime.utc(2026, 10, 6),
+          reportedAt: at.subtract(const Duration(hours: 20)),
+        ),
+      ];
+      // Same account, a little behind: the higher use of the window counts.
+      final sibling = [
+        limit(
+          '7d',
+          50,
+          DateTime.utc(2026, 10, 5, 7, 0, 1),
+          reportedAt: at.subtract(const Duration(hours: 2)),
+        ),
+      ];
+      final merged = currentLoginLimits([other, current, sibling]);
+      expect(merged.map((l) => (l.label, l.usedPct)), [('5h', 14), ('7d', 52)]);
+      expect(merged.first.reportedAt, at);
+      // What the app showed before: the other account's numbers.
+      expect(mergeUsageLimits([other, current]).map((l) => l.usedPct), [
+        90,
+        95,
+      ]);
+      // Without report times (older companions), as before.
+      final legacy = [
+        for (final list in [other, current])
+          [for (final l in list) l.withReportedAt(null)],
+      ];
+      expect(currentLoginLimits(legacy).map((l) => l.usedPct), [90, 95]);
+    });
+
+    test('a machine and the summary follow the newest report', () {
+      final machine = MachineUsage(
+        hostId: 'a',
+        hostName: 'A',
+        report: parseUsageReport(
+          jsonEncode(
+            usageReplyJson(
+              limits: [
+                {
+                  'label': '7d',
+                  'usedPct': 99,
+                  'resetsAt': DateTime.utc(2026, 10, 6).millisecondsSinceEpoch,
+                  'at': at
+                      .subtract(const Duration(hours: 5))
+                      .millisecondsSinceEpoch,
+                },
+              ],
+            ),
+          ),
+        ),
+        liveLimits: [
+          limit('7d', 52, DateTime.utc(2026, 10, 5, 7), reportedAt: at),
+        ],
+      );
+      expect(machine.claudeLimits.single.usedPct, 52);
+      expect(machine.claudeLimits.single.reportedAt, at);
+      final other = MachineUsage(
+        hostId: 'b',
+        hostName: 'B',
+        liveLimits: [
+          limit(
+            '7d',
+            10,
+            DateTime.utc(2026, 10, 9),
+            reportedAt: at.subtract(const Duration(days: 1)),
+          ),
+        ],
+      );
+      expect(UsageSummary([machine, other]).weekly?.usedPct, 52);
+    });
+
+    test('accounts: needs re-login, inCswap, live', () {
+      final summary = UsageSummary([
+        MachineUsage(
+          hostId: 'a',
+          hostName: 'A',
+          report: parseUsageReport(
+            jsonEncode(
+              usageReplyJson(
+                limits: [
+                  {'label': '7d', 'usedPct': 52},
+                ],
+                accounts: [
+                  usageAccount(
+                    1,
+                    'outsmartis',
+                    weekly: 100,
+                    status: 'relogin_required',
+                  ),
+                  usageAccount(3, 'a***@o***.com', weekly: 100),
+                  usageUnmanagedAccount(
+                    'g***@t***.pt',
+                    inCswap: false,
+                    limits: {
+                      '7d': {'usedPct': 52, 'resetsAt': null, 'expired': false},
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ]);
+      final byLabel = {for (final a in summary.accounts) a.label: a};
+      expect(byLabel['outsmartis']!.needsLogin, isTrue);
+      expect(byLabel['a***@o***.com']!.needsLogin, isFalse);
+      expect(byLabel['g***@t***.pt']!.notInCswap, isTrue);
+      expect(byLabel['g***@t***.pt']!.weekly?.usedPct, 52);
+
+      // Sessions run on a managed account: the unmanaged login claims
+      // nothing and does not take the machine's limits.
+      final matched = UsageSummary([
+        MachineUsage(
+          hostId: 'a',
+          hostName: 'A',
+          report: parseUsageReport(
+            jsonEncode(
+              usageReplyJson(
+                limits: [
+                  {'label': '7d', 'usedPct': 30},
+                ],
+                accounts: [
+                  usageAccount(3, 'carol', weekly: 30, live: true),
+                  usageUnmanagedAccount('g***@t***.pt'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ]);
+      final login = matched.accounts.firstWhere((a) => a.unmanaged);
+      expect(login.notInCswap, isFalse);
+      expect(login.weekly, isNull);
+      expect(
+        matched.accounts.firstWhere((a) => a.label == 'carol').live,
+        isTrue,
+      );
+    });
+
+    test("a session's usage record says when it was reported", () {
+      final usage = ConductoreHostAttentionProvider.parseUsage({
+        'limits': [
+          {'label': '7d', 'usedPct': 52},
+        ],
+        'at': at.millisecondsSinceEpoch,
+      });
+      expect(usage!.reportedAt, at);
+      expect(
+        ConductoreHostAttentionProvider.parseUsage({
+          'limits': [
+            {'label': '7d', 'usedPct': 52},
+          ],
+        })!.reportedAt,
+        isNull,
+      );
+    });
+
+    test('the usage command asks cswap again only when fresh', () {
+      expect(companionUsageArguments(), isNot(contains('--fresh')));
+      expect(
+        companionUsageArguments(fresh: true),
+        'usage --days 7 --fresh --gzip',
       );
     });
   });

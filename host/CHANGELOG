@@ -1,5 +1,11 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: `usage` limits follow the account sessions really run on (CON-067). Sessions left open on another account (a `/login` since, `cswap run`) kept their old windows, and "the later window wins" let them, and the remembered copy in `usage-cache.json`, override the live login's numbers for days. Now the most recent statusline report decides the account (its weekly reset time identifies it) and only that account's reports count; remembered limits give way to any newer report. Statusline usage records carry `at` (when reported) and every limit carries its age `at`; a window that reset since it was reported is `expired` at `usedPct: 0` (with its old `resetsAt`), never the old figure. cswap rows are re-settled the same way whenever answered, also from the 60 s cache.
+- fix: the unmanaged live login is `inCswap: false` ("not in cswap") only when the sessions' weekly window matches no managed account, and then carries the live numbers (`source: "statusline"`, `usageAt`); without live limits, or when they match a managed account, it is `inCswap: null` (current login, nothing claimed). The one managed account the sessions' window matches is `live: true` and takes the newer statusline numbers. Accounts cswap lost the login of (`relogin_required`, `token_expired`, ...) are `needsLogin: true`.
+- feat: `usage --fresh` asks cswap again instead of answering from the 60 s cache (the phone sends it when the usage screen opens and on pull to refresh). Older companions ignore the flag.
+
 ## 1.3.0 (2026-10-03)
 
 - feat: `sidebar-layout` (capability `sheprd-sidebar`, CON-065): sheprd's project sidebar, `$XDG_CONFIG_HOME/herdr/sidebar.toml` else `~/.config/herdr/sidebar.toml`, read-only as JSON (`{found, path, mtimeMs, layout}`, `{found: false}`, or `{found: true, error}` for a file it cannot read), so the app groups workspaces into the same projects. Only `compact`, `active_only`, `show_hidden`, `other_collapsed`, `recent_hours`, `hidden`, `ungrouped` and `[[group]]` `name`/`pinned`/`collapsed`/`match`/`members`/`short` are passed on. Parsed by `lib/toml-lite.js`, a strict TOML subset (strings, integers, booleans, one-level arrays, tables and arrays of tables) that refuses anything else instead of guessing. The file is never written.

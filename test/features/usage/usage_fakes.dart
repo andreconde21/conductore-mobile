@@ -94,13 +94,16 @@ Map<String, Object?> usageAccount(
   DateTime? fiveHourResets,
   DateTime? weeklyResets,
   DateTime? usageAt,
+  String? status,
+  bool live = false,
 }) => {
   'slot': slot,
   'alias': label.contains('*') ? null : label,
   'label': label,
   'active': active,
   'disabled': disabled,
-  'status': stale ? 'unavailable' : 'ok',
+  'status': status ?? (stale ? 'unavailable' : 'ok'),
+  if (live) 'live': true,
   'limits': {
     if (fiveHour != null)
       '5h': {
@@ -122,8 +125,15 @@ Map<String, Object?> usageAccount(
   ],
 };
 
-/// The live login cswap does not manage (companion 1.3, CON-057).
-Map<String, Object?> usageUnmanagedAccount(String label) => {
+/// The live login cswap does not manage (companion 1.3, CON-057), with
+/// whether the sessions' limits confirm it is none of cswap's accounts
+/// ([inCswap], companion 1.3.1, CON-067; absent before).
+Map<String, Object?> usageUnmanagedAccount(
+  String label, {
+  bool? inCswap,
+  Map<String, Object?> limits = const {},
+  DateTime? usageAt,
+}) => {
   'slot': null,
   'alias': null,
   'label': label,
@@ -131,7 +141,9 @@ Map<String, Object?> usageUnmanagedAccount(String label) => {
   'disabled': false,
   'managed': false,
   'status': null,
-  'limits': <String, Object?>{},
+  'limits': limits,
+  'inCswap': ?inCswap,
+  if (usageAt != null) 'usageAt': usageAt.millisecondsSinceEpoch,
 };
 
 Map<String, Object?> usageRow(

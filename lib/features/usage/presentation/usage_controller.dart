@@ -60,14 +60,26 @@ class AttentionUsageHostSource implements UsageHostSource {
   }
 
   @override
-  List<UsageLimit> liveLimitsFor(String hostId) => mergeUsageLimits([
+  List<UsageLimit> liveLimitsFor(String hostId) => currentLoginLimits([
     for (final AgentInfo agent
         in attention.statusFor(hostId)?.agents ?? const <AgentInfo>[])
       [
         for (final limit in agent.usage?.limits ?? const <AgentRateLimit>[])
-          UsageLimit.fromAgent(limit),
+          UsageLimit.fromAgent(limit, reportedAt: _reportedAt(agent)),
       ],
   ]);
+
+  /// When [agent]'s limits were last reported: its statusline record's
+  /// time, or its last state change when later (a session at the same
+  /// numbers does not stamp a new record) or the companion is older.
+  static DateTime? _reportedAt(AgentInfo agent) {
+    final reported = agent.usage?.reportedAt;
+    final changed = agent.stateChangedAt;
+    if (reported == null || changed == null) {
+      return reported ?? changed;
+    }
+    return changed.isAfter(reported) ? changed : reported;
+  }
 
   @override
   (AgentCommandRunner, {bool owned}) runnerFor(SavedHost host) =>
@@ -270,9 +282,18 @@ class UsageController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Call when a widget that shows usage appears; call the returned
   /// function when it goes away. Polling runs while any view is attached.
-  VoidCallback attachView() {
+  /// With [refresh] (the usage screen, the accounts card) every machine is
+  /// asked now, cswap included ([refresh]), whatever the cached replies'
+  /// age: a view opened to look at the numbers never starts on old ones.
+  VoidCallback attachView({bool refresh = false}) {
     _views++;
-    if (_views == 1) {
+    if (refresh) {
+      scheduleMicrotask(() {
+        if (!_disposed && _views > 0) {
+          unawaited(this.refresh());
+        }
+      });
+    } else if (_views == 1) {
       // Views attach while they build: start after this frame's work.
       scheduleMicrotask(() {
         if (!_disposed && _views > 0 && _timer == null && _inFlight.isEmpty) {
@@ -312,8 +333,10 @@ class UsageController extends ChangeNotifier with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) =>
       setAppActive(state == AppLifecycleState.resumed);
 
-  /// Asks every machine now (pull to refresh, the Usage tab's button).
-  Future<void> refresh() => _pollAll(force: true);
+  /// Asks every machine now (pull to refresh, the Usage tab's button,
+  /// a usage screen opening), and the companion asks cswap again rather
+  /// than answer from its 60 s cache (`usage --fresh`).
+  Future<void> refresh() => _pollAll(force: true, fresh: true);
 
   Future<void> setAlertEnabled(bool enabled) async {
     // Turning it on while already past the threshold alerts right away;
@@ -471,14 +494,14 @@ class UsageController extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _pollAll({bool force = false}) async {
+  Future<void> _pollAll({bool force = false, bool fresh = false}) async {
     if (_disposed) {
       return;
     }
     final now = _clock();
     await Future.wait([
       for (final host in _hosts.values.toList())
-        if (force || _due(_machines[host.id], now)) _fetch(host),
+        if (force || _due(_machines[host.id], now)) _fetch(host, fresh: fresh),
     ]);
     if (!_disposed) {
       _reschedule();
@@ -500,7 +523,7 @@ class UsageController extends ChangeNotifier with WidgetsBindingObserver {
     return age >= interval - const Duration(seconds: 1);
   }
 
-  Future<void> _fetch(SavedHost host) async {
+  Future<void> _fetch(SavedHost host, {bool fresh = false}) async {
     if (_disposed || !_inFlight.add(host.id)) {
       return;
     }
@@ -512,7 +535,9 @@ class UsageController extends ChangeNotifier with WidgetsBindingObserver {
       runner = r;
       owned = o;
       final result = await r.run(
-        CompanionCommands.hostdCommand(companionUsageArguments(days: days)),
+        CompanionCommands.hostdCommand(
+          companionUsageArguments(days: days, fresh: fresh),
+        ),
         timeout: commandTimeout,
       );
       // Some runners report no exit status: the reply itself decides.

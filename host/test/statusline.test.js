@@ -170,7 +170,10 @@ test('statusline stores usage without changing state; reports are held and the l
   assert.equal(r.code, 0)
   assert.equal(r.stdout, 'Opus · api · 43% ctx · 5h 24%\n')
   const after = await agentOf('st1')
-  assert.deepEqual(after.usage, sl.usageFrom(sample()))
+  // Stamped with when it was reported (CON-067: limits age with it).
+  const { at, ...reported } = after.usage
+  assert.deepEqual(reported, sl.usageFrom(sample()))
+  assert.ok(Math.abs(at - Date.now()) < 10000, 'reported now')
   assert.equal(after.state, before.state)
   assert.equal(after.updatedAt, before.updatedAt)
 

@@ -480,6 +480,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       contextUsedPct: _percent(raw['contextUsedPct']),
       contextTokens: _int(raw['contextTokens']),
       windowLabel: _string(raw['windowLabel']),
+      reportedAt: _timestamp(raw['at']),
       limits: [
         if (limitsRaw is List)
           for (final entry in limitsRaw)

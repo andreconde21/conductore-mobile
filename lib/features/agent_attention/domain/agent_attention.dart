@@ -537,7 +537,12 @@ class AgentUsage {
     this.contextTokens,
     this.windowLabel,
     this.limits = const [],
+    this.reportedAt,
   });
+
+  /// When the statusline reported this (companion 1.3.1+): an idle
+  /// session's limits are as old as its last report.
+  final DateTime? reportedAt;
 
   /// Share of the context window in use, 0 to 100.
   final double? contextUsedPct;
@@ -560,6 +565,7 @@ class AgentUsage {
         other.contextUsedPct != contextUsedPct ||
         other.contextTokens != contextTokens ||
         other.windowLabel != windowLabel ||
+        other.reportedAt != reportedAt ||
         other.limits.length != limits.length) {
       return false;
     }
@@ -576,6 +582,7 @@ class AgentUsage {
     contextUsedPct,
     contextTokens,
     windowLabel,
+    reportedAt,
     Object.hashAll(limits),
   );
 }
