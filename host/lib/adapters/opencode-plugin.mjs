@@ -58,7 +58,7 @@ function createPlugin ({ hook = HOOK, spawnFn = spawn, env = process.env } = {})
         let out = ''
         let child
         try {
-          child = spawnFn(hook, ['--agent', AGENT, event], { stdio: ['pipe', 'pipe', 'ignore'], env })
+          child = spawnFn(hook, ['--agent', AGENT, event], { stdio: ['pipe', 'pipe', 'ignore'], env, detached: !!track })
         } catch { return resolve('') }
         if (track) waiting.set(track, child)
         child.stdout.on('data', d => { out += d })
@@ -131,7 +131,8 @@ function createPlugin ({ hook = HOOK, spawnFn = spawn, env = process.env } = {})
       const child = waiting.get(id)
       if (!child) return
       waiting.delete(id)
-      try { child.kill('SIGTERM') } catch {}
+      // The whole group: the hook's watchdog holds the FIFO open too.
+      try { process.kill(-child.pid, 'SIGTERM') } catch { try { child.kill('SIGTERM') } catch {} }
     }
 
     return {
