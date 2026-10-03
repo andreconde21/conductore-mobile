@@ -411,8 +411,8 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('in the whole app: a second workspace joins the open tab; back '
-      'with the system button and the header, reopen from the tile', (
+  testWidgets('in the whole app: a second workspace opens its own tab; back '
+      'with the system button and the header, reopen the first from its tile', (
     tester,
   ) async {
     final errors = await pumpWholeApp(tester);
@@ -424,9 +424,12 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('other-herdr-a-w2')));
     await settle(tester);
-    // One app tab per Herdr server: the open one moves to w2.
-    expect(workspace.sessions, [first]);
-    expectShowing(tester, first);
+    // CON-062: the open tab is not moved to w2 (its own tile would then
+    // land on w2, and w1 could not be opened again): w2 gets its own.
+    expect(workspace.sessions, hasLength(2));
+    final second = workspace.sessions.last;
+    expect(second, isNot(first));
+    expectShowing(tester, second);
     await tester.tap(find.byTooltip('Machines'));
     await settle(tester);
     expect(find.byType(TerminalPage), findsNothing);
