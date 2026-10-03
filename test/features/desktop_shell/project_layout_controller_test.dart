@@ -156,11 +156,13 @@ void main() {
       ],
     };
     var groups = controller.build(tree, agentsByMachine: agents, hosts: [dev]);
-    expect(groups.map((g) => g.name), ['api', 'Other']);
-    expect(controller.projectNames, ['api']);
+    // Found from the agents, else the row's own name (CON-032).
+    expect(groups.map((g) => g.name), ['api', 'web']);
+    expect(controller.projectNames, ['api', 'web']);
     await controller.moveTo(groups.last.entries.single, 'Frontend');
     groups = controller.build(tree, agentsByMachine: agents, hosts: [dev]);
-    expect(groups.map((g) => g.name), ['api', 'Frontend']);
+    expect(groups.map((g) => g.name), ['api', 'web', 'Frontend']);
+    expect(groups[1].members, isEmpty);
     expect(groups.first.members.map((n) => n.label), ['api-1', 'api-2']);
     expect(controller.layout.groups.first.match, ['api']);
 
@@ -173,15 +175,17 @@ void main() {
     final tree = [
       _machine(dev, ['a']),
     ];
+    await controller.addProject('zzz');
     final groups = controller.build(tree, hosts: [dev]);
-    final other = groups.single;
+    expect(groups.map((g) => g.name), ['zzz', 'Other']);
+    final other = groups.last;
     expect(other.isOther, isTrue);
     expect(controller.isCollapsed(other), isFalse);
     await controller.toggleCollapsed(other);
     expect(controller.isCollapsed(other), isTrue);
     expect(theme.projectPrefs.collapsed, {ProjectPrefs.otherKey: true});
-    // Nothing active: the active view leaves Other out.
-    expect(controller.visibleGroups(groups), hasLength(1));
+    // Nothing active: the active view leaves both out.
+    expect(controller.visibleGroups(groups), hasLength(2));
     await controller.setActiveOnly(true);
     expect(controller.visibleGroups(groups), isEmpty);
   });

@@ -76,8 +76,8 @@ void main() {
         ],
       },
     );
-    // Found projects by urgency, then Other (rows no agent names).
-    expect(projects.map((p) => p.name), ['VisitTomar', 'Other']);
+    // Needs-you first, then by name.
+    expect(projects.map((p) => p.name), ['VisitTomar', 'infra', 'scratch']);
     final vtm = projects.first;
     expect(vtm.members.map((node) => node.label), ['vtm', 'visit']);
     expect(vtm.machineIds, {'omarchy', 'dev-central'});
@@ -87,8 +87,7 @@ void main() {
       const ProjectLocation('omarchy', '/home/andre/src/VisitTomar'),
       const ProjectLocation('dev-central', '/root/Projects/VisitTomar'),
     ]);
-    expect(projects[1].isOther, isTrue);
-    expect(projects[1].members.map((node) => node.label), ['scratch', 'infra']);
+    // Rows without agents are their own project, with no location.
     expect(projects[1].locations, isEmpty);
     expect(projects[1].dot, SidebarDot.none);
   });

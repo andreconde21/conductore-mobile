@@ -138,9 +138,10 @@ class ProjectGroup {
 /// Groups the machine tree by project, sheprd's way. With a [ProjectLayout]
 /// that names projects, a row goes to the project listing it, else to the
 /// first whose rule is a substring of its name, folders or reported repo,
-/// else to Other (and a row moved to Other stays there). With none, a row
-/// goes under the project its agents report (the git repo's name from the
-/// companion, or the basename of their working directory), else to Other.
+/// else to Other (and a row moved to Other stays there). With none (CON-032),
+/// a row goes under the project its agents report (the git repo's name from
+/// the companion, or the basename of their working directory), else under
+/// its own name; only rows moved to Other go there.
 /// The same name on several machines is one project; layout projects come
 /// in the layout's order (pinned first), found ones by urgency, then Other.
 abstract final class ProjectTreeBuilder {
@@ -199,12 +200,9 @@ abstract final class ProjectTreeBuilder {
             }
           }
         } else {
-          final name =
-              layout.ungrouped.any(
-                (entry) => keys.any((key) => ProjectKeys.same(entry, key)),
-              )
+          final name = keys.any(layout.isUngrouped)
               ? null
-              : _projectName(nodeAgents);
+              : _projectName(nodeAgents) ?? node.label;
           group = name == null
               ? other
               : groups.putIfAbsent(name.toLowerCase(), () => _Group(name));

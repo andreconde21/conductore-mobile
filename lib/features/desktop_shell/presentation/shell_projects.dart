@@ -266,7 +266,7 @@ extension _ShellProjects on DesktopHomeState {
   List<Widget> _quickActionButtons() {
     final project = _focusedProject();
     if (project == null) return const [];
-    _projectFiles.ensure(project);
+    if (!project.isOther) _projectFiles.ensure(project);
     final actions = _actionsFor(project);
     return [
       for (final action in actions.take(3))
