@@ -9,6 +9,7 @@ import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
+import 'package:conduit/features/chat_view/domain/neutral_chat_window.dart';
 import 'package:conduit/features/voice/domain/speech_summary.dart';
 import 'package:flutter/foundation.dart';
 
@@ -101,6 +102,10 @@ class ChatViewController extends ChangeNotifier {
   static const _maxCatchUpReads = 8;
 
   final List<TranscriptEntry> _entries = [];
+
+  /// Set once the companion answers in the neutral format (every agent but
+  /// Claude Code): the window it pages by cursor instead of [_offset].
+  NeutralChatWindow? _neutral;
   List<ChatItem> _items = const [];
   int? _offset;
   int _start = 0;
@@ -191,10 +196,13 @@ class ChatViewController extends ChangeNotifier {
   ChatUnsupportedKind? get unsupportedKind => _unsupportedKind;
 
   /// Whether older lines exist before the loaded window.
-  bool get hasOlder => _start > 0 && !_olderExhausted;
+  bool get hasOlder => _neutral != null
+      ? _neutral!.startCursor != null
+      : _start > 0 && !_olderExhausted;
 
   /// Older lines exist but cannot be shown here (they only fit the TUI).
-  bool get olderOnlyInTerminal => _start > 0 && _olderExhausted;
+  bool get olderOnlyInTerminal =>
+      _neutral == null && _start > 0 && _olderExhausted;
 
   bool isDeciding(String requestId) => _deciding.contains(requestId);
 
@@ -315,12 +323,28 @@ class ChatViewController extends ChangeNotifier {
     try {
       var reads = 0;
       while (true) {
+        if (_neutral case final neutral?) {
+          final more = await _pollNeutral(neutral);
+          if (_disposed || !more || ++reads >= _maxCatchUpReads) {
+            break;
+          }
+          continue;
+        }
         final offset = _offset;
         final page = offset == null
             ? await _client.transcript(sessionId, tailBytes: _tailBytes)
             : await _client.transcript(sessionId, since: offset);
         if (_disposed) {
           return;
+        }
+        if (page.isNeutral) {
+          // The first page says which format this agent's transcript has.
+          final neutral = _neutral = NeutralChatWindow();
+          if (!_applyNeutral(neutral, page)) {
+            break;
+          }
+          reads += 1;
+          continue;
         }
         if (offset == null || page.reset) {
           _entries
@@ -369,6 +393,35 @@ class ChatViewController extends ChangeNotifier {
     }
   }
 
+  /// One neutral read from the window's cursor; whether another page
+  /// follows at once.
+  Future<bool> _pollNeutral(NeutralChatWindow neutral) async {
+    final page = await _client.transcript(sessionId, cursor: neutral.cursor);
+    if (_disposed) {
+      return false;
+    }
+    return _applyNeutral(neutral, page);
+  }
+
+  bool _applyNeutral(NeutralChatWindow neutral, TranscriptPage page) {
+    final grew = neutral.apply(page);
+    var changed = grew || _error != null || _loading;
+    if (page.agent case final agent? when agent != _agent) {
+      _agent = agent;
+      changed = true;
+    }
+    if (grew) {
+      _items = neutral.build();
+      _confirmOutgoing();
+    }
+    _error = null;
+    _loading = false;
+    _quietPolls = changed ? 0 : _quietPolls + 1;
+    _retime();
+    if (changed) notifyListeners();
+    return page.more;
+  }
+
   /// Loads the lines before the current window. No-op when there are none
   /// or a load is running.
   Future<void> loadOlder() async {
@@ -377,6 +430,23 @@ class ChatViewController extends ChangeNotifier {
     }
     _loadingOlder = true;
     notifyListeners();
+    if (_neutral case final neutral?) {
+      try {
+        final page = await _client.transcript(
+          sessionId,
+          beforeCursor: neutral.startCursor,
+        );
+        if (!_disposed && neutral.applyOlder(page)) {
+          _items = neutral.build();
+        }
+      } catch (error) {
+        _error = _describe(error);
+      } finally {
+        _loadingOlder = false;
+        if (!_disposed) notifyListeners();
+      }
+      return;
+    }
     try {
       final page = await _client.transcript(
         sessionId,
