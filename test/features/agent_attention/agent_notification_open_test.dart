@@ -113,8 +113,10 @@ void main() {
       workspace.dispose();
     });
 
-    test('lands on the pane in the open Herdr tab and asks for the '
-        'terminal', () async {
+    // CON-062: the open tab of another workspace was re-pointed at the
+    // agent's: it showed the wrong workspace, and its own was lost.
+    test('lands on the pane in a tab of its own and asks for the terminal; '
+        'the open tab of another workspace stays there', () async {
       final herdrTab = workspace.open(
         const ConnectTarget.herdr(workspaceId: 'w1').apply(host),
       );
@@ -135,14 +137,18 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
 
-      expect(shown, herdrTab);
-      expect(workspace.activeSession, herdrTab);
-      expect(server.focusedPane, 'w3:p2');
+      expect(shown, isNot(herdrTab));
+      expect(workspace.activeSession, shown);
+      expect(flow.herdr.workspaceOf(shown!), 'w3');
+      expect(flow.herdr.workspaceOf(herdrTab), 'w1');
+      // Its attach focuses the exact pane.
+      expect(shown.startupCommand, contains('herdr agent focus w3:p2'));
       expect(requests, 1);
     });
 
-    test('with the focus setting off it opens the tab without moving '
-        'Herdr\'s focus', () async {
+    test('with the focus setting off: never moves Herdr\'s focus, shows '
+        'the agent\'s own screen with "Show here", and the other workspace '
+        'still opens', () async {
       mayMove = false;
       final herdrTab = workspace.open(
         const ConnectTarget.herdr(workspaceId: 'w1').apply(host),
@@ -162,10 +168,47 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
 
-      expect(shown, herdrTab);
-      expect(workspace.activeSession, herdrTab);
-      expect(flow.herdr.workspaceOf(herdrTab), 'w3');
+      expect(shown, isNot(herdrTab));
+      expect(workspace.activeSession, shown);
+      expect(flow.herdr.workspaceOf(shown!), 'w3');
+      expect(flow.herdr.workspaceOf(herdrTab), 'w1');
       expect(server.herdrArgs.where((args) => args.contains('focus')), isEmpty);
+      // Not the live screen, which mirrors whatever Herdr shows.
+      expect(flow.herdr.agentViews.value, contains(shown));
+      expect(shown.sharedView.value, isNotNull);
+
+      // "Show here": the user asked, so the focus moves once, to the pane.
+      expect(await flow.herdr.takeFocusOnce(shown), isTrue);
+      expect(server.focusedWorkspace, 'w3');
+      expect(server.focusedPane, 'w3:p2');
+      expect(flow.herdr.agentViews.value, isNot(contains(shown)));
+
+      // The other workspace's tab still opens on its workspace.
+      expect(
+        flow.open(host, const ConnectTarget.herdr(workspaceId: 'w1')),
+        herdrTab,
+      );
+      expect(workspace.activeSession, herdrTab);
+      expect(flow.herdr.workspaceOf(herdrTab), 'w1');
+    });
+
+    test('opening a workspace whose tab drifted elsewhere puts it back '
+        '(CON-062)', () async {
+      final herdrTab = workspace.open(
+        const ConnectTarget.herdr(workspaceId: 'w1').apply(host),
+      );
+      // The user went to w2 inside that tab's Herdr.
+      flow.herdr.noteWorkspace(herdrTab, 'w2');
+      workspace.open(host);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        flow.open(host, const ConnectTarget.herdr(workspaceId: 'w1')),
+        herdrTab,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(flow.herdr.workspaceOf(herdrTab), 'w1');
+      expect(server.focusedWorkspace, 'w1');
     });
 
     test('an agent handed out with a session\'s host (as the agent monitors '

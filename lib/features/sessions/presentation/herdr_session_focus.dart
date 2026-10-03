@@ -152,6 +152,26 @@ class HerdrSessionFocus implements AppInputRouter {
   /// The pane a deep link asked for, for the app's writes.
   final _preferredPanes = <TerminalSessionController, String>{};
 
+  /// The tab a deep link asked for, for [takeFocusOnce].
+  final _preferredTabs = <TerminalSessionController, String>{};
+
+  /// Sessions opened at an agent's place while this device may not move
+  /// Herdr's focus: until the shared focus is on their workspace, they show
+  /// their own workspace's screen (read-only, `herdr pane read`) instead of
+  /// the live one, which mirrors whatever Herdr shows, and offer to show it
+  /// here ([takeFocusOnce]). Never moved on their own.
+  final agentViews = ValueNotifier<Set<TerminalSessionController>>(const {});
+
+  void _setAgentView(TerminalSessionController session, bool on) {
+    final current = agentViews.value;
+    if (current.contains(session) == on) return;
+    agentViews.value = {
+      for (final other in current)
+        if (other != session) other,
+      if (on) session,
+    };
+  }
+
   /// Focus checks on their way, by server.
   final _checks = <String, Future<_HerdrFocusView?>>{};
   final _timers = <Timer>{};
@@ -260,6 +280,13 @@ class HerdrSessionFocus implements AppInputRouter {
     _verifiedAt.removeWhere((session, _) => !sessions.contains(session));
     _ownScreens.removeWhere((session, _) => !sessions.contains(session));
     _preferredPanes.removeWhere((session, _) => !sessions.contains(session));
+    _preferredTabs.removeWhere((session, _) => !sessions.contains(session));
+    if (agentViews.value.any((session) => !sessions.contains(session))) {
+      agentViews.value = {
+        for (final session in agentViews.value)
+          if (sessions.contains(session)) session,
+      };
+    }
     _syncRefreshTimer(sessions);
     for (final session in sessions) {
       if (!_statuses.containsKey(session) && herdrTargetOf(session) != null) {
@@ -500,10 +527,18 @@ class HerdrSessionFocus implements AppInputRouter {
   /// Opens the app at an agent's exact place on [host]: its workspace, tab
   /// and pane in the default Herdr session.
   ///
-  /// Reuses an open Herdr session on that server (the one already on the
-  /// workspace if any), reconnecting it when it dropped; otherwise opens a
-  /// new one whose attach command focuses the place first. Returns the
-  /// session to show, or null when [open] is null and nothing was open.
+  /// Reuses the open Herdr session already on that workspace, reconnecting
+  /// it when it dropped; otherwise opens a new one for the workspace, whose
+  /// attach command focuses the place first. Another workspace's session is
+  /// never re-pointed here: its tab would then show this workspace, and
+  /// opening its own workspace again would land here (CON-062).
+  ///
+  /// While this device may not move Herdr's focus, nothing is focused: the
+  /// session shows the agent's own screen with a way to show it live
+  /// ([agentViews], [takeFocusOnce] on the exact pane). Herdr has one focus
+  /// for every client, so without moving it no tab can show the agent live;
+  /// opening the agent must never show another workspace instead. Returns
+  /// the session to show, or null when [open] is null and nothing was open.
   Future<TerminalSessionController?> openAgentLocation(
     SavedHost host, {
     required String workspaceId,
@@ -514,9 +549,7 @@ class HerdrSessionFocus implements AppInputRouter {
   }) async {
     final existing = _herdrSessionFor(host, workspaceId);
     if (existing != null) {
-      // Recorded first, so the switch-over focuses the right workspace.
-      noteWorkspace(existing, workspaceId);
-      if (paneId.isNotEmpty) _preferredPanes[existing] = paneId;
+      _notePlace(existing, tabId: tabId, paneId: paneId);
       _workspace.activate(existing);
       final control = controlFor(existing);
       final reconnect = existing.shouldConnect;
@@ -541,6 +574,8 @@ class HerdrSessionFocus implements AppInputRouter {
             ),
           );
         }
+      } else if (control != null) {
+        _showAgentView(existing);
       }
       return existing;
     }
@@ -548,7 +583,7 @@ class HerdrSessionFocus implements AppInputRouter {
       return null;
     }
     // One app tab per workspace: the pane (or tab) only steers this attach.
-    return open(
+    final session = open(
       ConnectTarget.herdr(
         workspaceId: workspaceId,
         label: label,
@@ -556,15 +591,51 @@ class HerdrSessionFocus implements AppInputRouter {
         paneId: paneId,
       ),
     );
+    noteWorkspace(session, workspaceId);
+    _notePlace(session, tabId: tabId, paneId: paneId);
+    if (!mayMoveFocus && controlFor(session) != null) {
+      _showAgentView(session);
+    }
+    return session;
   }
 
-  /// An open Herdr session on [host]'s default server, preferring one that
-  /// is on [workspaceId].
+  void _notePlace(
+    TerminalSessionController session, {
+    required String tabId,
+    required String paneId,
+  }) {
+    if (paneId.isNotEmpty) {
+      _preferredPanes[session] = paneId;
+    } else {
+      _preferredPanes.remove(session);
+    }
+    if (tabId.isNotEmpty) {
+      _preferredTabs[session] = tabId;
+    } else {
+      _preferredTabs.remove(session);
+    }
+  }
+
+  /// [session] shows its own screen until Herdr's focus is on its
+  /// workspace (an empty one at once, so the live mirror of another
+  /// workspace never shows), then reads where the focus is.
+  void _showAgentView(TerminalSessionController session) {
+    session.sharedViewSnapshot = SharedViewSnapshot(
+      preview: StyledTerminalPreview.empty,
+      capturedAt: _clock(),
+      label: _labelOf(session),
+    );
+    _setAgentView(session, true);
+    unawaited(_checkServer(session));
+  }
+
+  /// The open Herdr session on [host]'s default server that is on
+  /// [workspaceId], if any.
   TerminalSessionController? _herdrSessionFor(
     SavedHost host,
     String workspaceId,
   ) {
-    TerminalSessionController? any;
+    if (workspaceId.isEmpty) return null;
     for (final session in _workspace.sessions) {
       if (baseHostId(session.host.id) != host.id) {
         continue;
@@ -573,12 +644,11 @@ class HerdrSessionFocus implements AppInputRouter {
       if (target == null || target.session.isNotEmpty) {
         continue;
       }
-      if (workspaceId.isNotEmpty && workspaceOf(session) == workspaceId) {
+      if (workspaceOf(session) == workspaceId) {
         return session;
       }
-      any ??= session;
     }
-    return any;
+    return null;
   }
 
   void _later(Future<void> Function() action) {
@@ -628,8 +698,9 @@ class HerdrSessionFocus implements AppInputRouter {
   }
 
   /// Moves Herdr's focus to [session]'s workspace this one time (the user
-  /// asked, from the banner or a split pane's cover), then sends what was
-  /// held. True when Herdr focused it.
+  /// asked, from the banner or a split pane's cover), then to the tab and
+  /// pane a deep link asked for, if any, and sends what was held. True when
+  /// Herdr focused it.
   Future<bool> takeFocusOnce(TerminalSessionController session) async {
     final control = controlFor(session);
     final workspaceId = workspaceOf(session);
@@ -640,6 +711,11 @@ class HerdrSessionFocus implements AppInputRouter {
         _unpinned.add(session.host.id);
       }
       return false;
+    }
+    final paneId = _preferredPanes[session] ?? '';
+    final tabId = _preferredTabs[session] ?? '';
+    if (paneId.isNotEmpty || tabId.isNotEmpty) {
+      await control.focusLocation(tabId: tabId, paneId: paneId);
     }
     _applyFocus(serverKey(session), workspaceId, const {});
     session.releaseHeldInput();
@@ -653,6 +729,8 @@ class HerdrSessionFocus implements AppInputRouter {
     final shown = view?.focusedId;
     if (shown == null) return false;
     noteWorkspace(session, shown);
+    _preferredPanes.remove(session);
+    _preferredTabs.remove(session);
     _applyFocus(serverKey(session), shown, {shown: view!.focusedLabel});
     session.releaseHeldInput();
     return true;
@@ -701,6 +779,7 @@ class HerdrSessionFocus implements AppInputRouter {
       }
       final own = workspaceOf(session);
       if (own != null && own == focusedId) {
+        _setAgentView(session, false);
         _verifiedAt[session] = now;
         session
           ..focusElsewhereLabel = null
@@ -893,6 +972,7 @@ class HerdrSessionFocus implements AppInputRouter {
   Iterable<HerdrRemoteControl> get controls => _controls.values;
 
   Future<void> dispose() async {
+    if (_disposed) return;
     _disposed = true;
     _lifecycle?.dispose();
     _refreshTimer?.cancel();
@@ -910,6 +990,7 @@ class HerdrSessionFocus implements AppInputRouter {
       timer.cancel();
     }
     _timers.clear();
+    agentViews.dispose();
     final controls = List.of(_controls.values);
     _controls.clear();
     for (final control in controls) {

@@ -233,12 +233,33 @@ class SessionConnectFlow {
 
   /// Opens (or activates) the session for [target] on [host] without any
   /// UI.
+  ///
+  /// An open session for a Herdr workspace may have been moved to another
+  /// one since (the user went there inside Herdr, or it was re-pointed): an
+  /// explicit open of that workspace puts it back first, so its tab shows
+  /// the workspace asked for and not the one it drifted to (CON-062).
   TerminalSessionController open(SavedHost host, ConnectTarget target) {
-    return workspace.open(
-      target.apply(machineOf(host)),
+    final applied = target.apply(machineOf(host));
+    TerminalSessionController? repinned;
+    if (target.kind == ConnectTargetKind.herdr && target.name.isNotEmpty) {
+      final existing = workspace.sessions
+          .where((session) => session.host.id == applied.id)
+          .firstOrNull;
+      // Before the switch-over, which focuses the session's workspace.
+      if (existing != null && herdr.workspaceOf(existing) != target.name) {
+        herdr.noteWorkspace(existing, target.name);
+        repinned = existing;
+      }
+    }
+    final wasActive = repinned != null && workspace.activeSession == repinned;
+    final session = workspace.open(
+      applied,
       startupCommand: target.startupCommand,
       target: target,
     );
+    // Already in use, so no switch-over: re-assert its workspace now.
+    if (wasActive) herdr.reassertActive();
+    return session;
   }
 
   /// Lets the user choose a saved machine, then runs [connect] for it.
