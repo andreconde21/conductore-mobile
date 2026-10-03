@@ -30,7 +30,8 @@
 // their call id, so a tool re-read with its result replaces the running
 // one in the app. A page never ends after a call whose result has not
 // been written yet: its cursor stays on that call, so the next read
-// returns it again, finished.
+// returns it again, finished. A call whose result lies past the page is
+// finished from the lines after it.
 
 const fs = require('fs')
 const items = require('./chat-items')
@@ -311,10 +312,44 @@ function build (lines, paginated) {
         break
     }
   }
-  // The first call still waiting for its result (page cursors stop there).
-  let waiting = null
-  for (const call of calls.values()) if (!call.done && (waiting === null || call.offset < waiting)) waiting = call.offset
-  return { items: out, waiting }
+  return {
+    items: out,
+    // Calls without their result in these lines: [{ id, offset }].
+    open: () => [...calls.entries()].filter(([, c]) => !c.done && c.item).map(([id, c]) => ({ id, offset: c.offset })),
+    finish: (id, result) => { const c = calls.get(id); if (c && !c.done && c.item) finish(c, result) }
+  }
+}
+
+// How far past a page to look for the results of its open calls.
+const LOOKAHEAD = 2 * 1024 * 1024
+
+// Finds the results of calls left open in a page in the lines after it
+// (a page boundary between a call and its output, or an older page whose
+// results came later). Returns the calls still open.
+function settleOpen (fd, built, from, size) {
+  const open = new Map(built.open().map(c => [c.id, c]))
+  let pos = from
+  const limit = Math.min(size, from + LOOKAHEAD)
+  while (open.size && pos < limit) {
+    const { lines, end } = linesOf(readRange(fd, pos, Math.min(4 * CHUNK, limit - pos)), pos)
+    if (end === pos) { pos = nextLineStart(fd, pos, size); continue }
+    pos = end
+    for (const { text } of lines) {
+      if (text.indexOf('"turn_aborted"') !== -1 || text.indexOf('"task_complete"') !== -1) {
+        const why = text.indexOf('"turn_aborted"') !== -1 ? 'Interrupted' : 'No result recorded'
+        for (const id of open.keys()) built.finish(id, { ok: false, text: why })
+        open.clear()
+        break
+      }
+      if (text.indexOf('_output"') === -1) continue
+      const o = parseLine(text)
+      const p = o && o.payload
+      if (!p || !open.has(p.call_id) || (p.type !== 'function_call_output' && p.type !== 'custom_tool_call_output')) continue
+      built.finish(p.call_id, resultOf(p.output))
+      open.delete(p.call_id)
+    }
+  }
+  return [...open.values()]
 }
 
 // --- transcript pages ----------------------------------------------------------
@@ -344,8 +379,9 @@ function readPage (file, opts = {}) {
         start += from
       }
       const { lines } = linesOf(buf.subarray(from), start)
-      const { items: built } = build(lines, paginated)
-      return items.page({ items: built, cursor: end, startCursor: start > 0 ? start : null })
+      const built = build(lines, paginated)
+      settleOpen(fd, built, end, size)
+      return items.page({ items: built.items, cursor: end, startCursor: start > 0 ? start : null })
     }
 
     let since = opts.cursor !== undefined && opts.cursor !== null ? num(opts.cursor) : null
@@ -365,10 +401,13 @@ function readPage (file, opts = {}) {
       const past = nextLineStart(fd, start, size)
       return items.page({ items: [], cursor: past, startCursor: start > 0 ? start : null, more: past < size, reset })
     }
-    const { items: built, waiting } = build(lines, paginated)
-    // Stop on a call still running, so its result comes with the next page.
+    const built = build(lines, paginated)
+    const open = settleOpen(fd, built, end, size)
+    // A call still running at the end of the session file holds the
+    // cursor, so its result comes with a later page.
+    const waiting = end === size && open.length ? Math.min(...open.map(c => c.offset)) : null
     const cursor = waiting !== null ? waiting : end
-    return items.page({ items: built, cursor, startCursor: start > 0 ? start : null, more: waiting === null && end < size, reset })
+    return items.page({ items: built.items, cursor, startCursor: start > 0 ? start : null, more: waiting === null && end < size, reset })
   } finally {
     try { fs.closeSync(fd) } catch {}
   }

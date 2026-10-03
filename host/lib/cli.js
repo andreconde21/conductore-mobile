@@ -660,6 +660,16 @@ async function usageCmd (args) {
       result.claude.accounts = cswapMod().withLiveLimits(accounts, result.claude.limits, result.generatedAt)
       result.claude.cswap = meta
     }
+    // Agents that only show their login (Codex): the active account next to
+    // the section's limits (decision 8: no switching).
+    for (const a of adaptersMod().all()) {
+      const section = a.usageSection && result[a.usageSection]
+      if (!section || !section.present || !a.accounts || a.capabilities().accounts !== 'show') continue
+      try {
+        const r = await a.accounts({})
+        if (r && r.present) section.accounts = r.accounts
+      } catch {}
+    }
     // The companion's own claude calls for `digest --summaries` (not in any
     // transcript: they run without session persistence).
     const digestToday = digestMod().loadStore(paths.digestPath()).usage

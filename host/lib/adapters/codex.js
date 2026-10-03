@@ -29,8 +29,8 @@
 //   usage         usage.js already scans the sessions (`codex` section,
 //                 limits from token_count rate_limits); accounts() names
 //                 the active login (auth.json, read-only, email masked)
-//   brain         `codex exec --ephemeral` with the shell, patches, web
-//                 search, plugins and hooks off and a read-only sandbox
+//   brain         `codex exec --ephemeral` with the shell, web search,
+//                 plugins and hooks off and a read-only sandbox
 //
 // Everything is required lazily: the daemon loads this module for every
 // Codex event.
@@ -173,7 +173,9 @@ function merge (doc, hookBin) {
   const hooks = out.hooks && typeof out.hooks === 'object' && !Array.isArray(out.hooks) ? out.hooks : {}
   out.hooks = hooks
   for (const event of new Set([...EVENTS, ...Object.keys(hooks)])) {
-    const groups = Array.isArray(hooks[event]) ? hooks[event] : []
+    // Not a list of groups: not ours to judge, left as it is.
+    if (hooks[event] !== undefined && !Array.isArray(hooks[event])) continue
+    const groups = hooks[event] || []
     const wanted = EVENTS.includes(event)
     let placed = false
     for (const g of groups) {
@@ -197,8 +199,8 @@ function unmerge (doc) {
   const out = JSON.parse(JSON.stringify(doc || {}))
   if (!out.hooks || typeof out.hooks !== 'object') return out
   for (const event of Object.keys(out.hooks)) {
-    const groups = Array.isArray(out.hooks[event]) ? out.hooks[event] : []
-    const kept = groups
+    if (!Array.isArray(out.hooks[event])) continue
+    const kept = out.hooks[event]
       .map(g => (g && Array.isArray(g.hooks) ? { ...g, hooks: g.hooks.filter(h => !isOurs(h)) } : g))
       .filter(g => !g || !Array.isArray(g.hooks) || g.hooks.length)
     if (kept.length) out.hooks[event] = kept
@@ -389,9 +391,15 @@ function argvOf (pid) {
   try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean) } catch { return [] }
 }
 
-// The subcommand of a codex command line ('' for the TUI).
+// Options that take a value (`codex --help`), skipped to find the
+// subcommand.
+const VALUE_FLAGS = new Set(['-c', '--config', '-m', '--model', '-p', '--profile', '-s', '--sandbox', '-a', '--ask-for-approval', '-C', '--cd', '-i', '--image', '--enable', '--disable', '--remote', '--remote-auth-token-env', '--add-dir', '--local-provider'])
+
+// The subcommand of a codex command line ('' for the TUI, or its prompt).
 function subcommand (argv) {
-  for (const a of argv.slice(1)) {
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i]
+    if (VALUE_FLAGS.has(a)) { i++; continue }
     if (a.startsWith('-')) continue
     return a
   }
@@ -570,12 +578,15 @@ async function accounts ({ env = process.env } = {}) {
 // Everything that could act or reach out, off: the shell and patch tools,
 // web search, plugins, apps, subagents, images, hooks, the user's config
 // and rules. Read-only sandbox, no session file (--ephemeral).
-const BRAIN_OFF = ['shell_tool', 'unified_exec', 'multi_agent', 'apps', 'plugins', 'goals', 'image_generation', 'browser_use', 'computer_use', 'view_image']
+// (Checked with Codex 0.160.0: only request_user_input and apply_patch are
+// left, and the read-only sandbox with exec's "never ask" policy rejects
+// any patch.)
+const BRAIN_OFF = ['shell_tool', 'unified_exec', 'multi_agent', 'apps', 'plugins', 'goals', 'image_generation', 'browser_use', 'computer_use', 'view_image', 'hooks']
 
 function brainArgs ({ schemaFile, model = MODEL, outFile }) {
   const args = ['exec', '--ephemeral', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules']
   for (const f of BRAIN_OFF) args.push('--disable', f)
-  args.push('-c', 'web_search="disabled"', '-c', 'include_apply_patch_tool=false', '-c', 'hooks={}', '-c', 'approval_policy="never"')
+  args.push('-c', 'web_search="disabled"')
   if (schemaFile) args.push('--output-schema', schemaFile)
   if (outFile) args.push('-o', outFile)
   args.push('-m', model, '-')
