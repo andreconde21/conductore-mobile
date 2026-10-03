@@ -1,5 +1,12 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: questions (AskUserQuestion) can be answered from the phone (CON-062, capability `question-answers`). Claude Code ignores a hook's plain `allow` for a question (its dialog is the input), so the phone's Allow left the dialog in the terminal while the request vanished from the phone. Pending questions now carry `questions` (each question whole, with header, kind, multiSelect and options; previews left out, so toolInput's 4 KB cap no longer hides them) and a readable `summary`; `decide <id> answer --answers '{"<question>": "<answer>"}'` answers with `updatedInput` = the tool input unchanged plus `answers` (a list joins with ", "), the form Claude Code 2.1.285 admits. `decide <id> allow|always` on a question is refused and the request stays pending; deny still works. No rule and no trust ever answers a question.
+- fix: a question the phone did not answer in time is reported as `waiting_input` ("Question is waiting in the terminal: ..."), not as a permission prompt with nothing pending; a question's PreToolUse spooled after its PermissionRequest keeps the agent in `needs_permission`.
+- fix: plan approvals from the phone reach Claude Code: `allow` on ExitPlanMode carries the plan as `updatedInput` (a plain allow was ignored), and `always` ("Approve, auto-edit") switches the session to `acceptEdits` with a `setMode` update instead of saving a rule that approved every later plan.
+- fix: an agent's Herdr location follows its pane after `herdr pane move`. The pane gets a new id while Claude Code keeps the `HERDR_*` it started with, so "Open in terminal" landed on another workspace. Each hook event's location is checked against Herdr's pane list (one cached read-only `herdr pane list` per server every 10 s, only while events arrive): the pane holding the Claude session wins, then the header's pane, followed through a move with `herdr pane get <old id>`.
+
 ## 1.2.1 (2026-09-30)
 
 - fix: `usage` lists the live Claude login when cswap does not manage it (CON-057): with no managed account active, `cswap status --json` names it and it is added as an active row with `slot: null`, `managed: false` and no windows (a masked email as label). Before, a `/login` to an account never `cswap add`ed was missing and both managed accounts showed as inactive. Only asked when no managed account is live; for an unmanaged login cswap reads `~/.claude.json` alone.
