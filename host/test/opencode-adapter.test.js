@@ -263,6 +263,7 @@ test('usage: an opencode section with tokens and cost per day, project and model
   assert.equal(oc.rows[0].costUsd, 0)
   assert.equal(oc.bySession.length, 2)
   assert.equal(oc.range.messages, 4)
+  assert.ok(oc.range.input > 0 && oc.range.tokens === oc.range.input + oc.range.output + oc.range.cacheWrite + oc.range.cacheRead)
   // Without OpenCode data, the section says so.
   const none = usage.compute({ now: at, env: { ...process.env, HOME: emptyDir, XDG_DATA_HOME: emptyDir } })
   assert.deepEqual(none.opencode, { present: false })
@@ -337,4 +338,12 @@ test('only an opencode process is taken for the agent', () => {
   assert.equal(opencode.identifyProcess(process.pid), null)
   assert.equal(opencode.identifyProcess(0), null)
   assert.equal(opencode.identifyProcess('1; rm'), null)
+})
+
+test("the app's OpenCode transcript fixture is what the adapter reads today", { skip: !sqliteOk && 'no node:sqlite' }, () => {
+  const file = path.join(__dirname, '..', '..', 'test', 'fixtures', 'agent_adapters', 'opencode_transcript.json')
+  const dir = path.join(root, 'app-fixture')
+  fs.mkdirSync(dir, { recursive: true })
+  const replies = require('./fixtures/opencode-transcript').replies(dir)
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), JSON.parse(JSON.stringify(replies)), 'regenerate: node host/test/fixtures/opencode-transcript.js > test/fixtures/agent_adapters/opencode_transcript.json')
 })

@@ -733,8 +733,14 @@ function usageReport ({ range, projectOf, localDate, detail = {}, env = process.
   const fromMs = new Date(`${range.from < range.today ? range.from : range.today}T00:00:00`).getTime()
   const rows = new Map()
   const bySession = new Map()
-  const totals = { tokens: 0, messages: 0, costUsd: 0 }
-  const today = { tokens: 0, messages: 0, costUsd: 0 }
+  // The same totals as Claude Code's section (usage.js totalsOf).
+  const zero = () => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0, tokens: 0, messages: 0, costUsd: 0 })
+  const addTo = (t, u, cost) => {
+    t.input += u.input; t.output += u.output; t.cacheWrite += u.cacheWrite; t.cacheRead += u.cacheRead
+    t.tokens += u.input + u.output + u.cacheWrite + u.cacheRead; t.messages++; t.costUsd += cost
+  }
+  const totals = zero()
+  const today = zero()
   const providers = new Map()
   let active = null
   for (const file of files) {
@@ -751,16 +757,15 @@ function usageReport ({ range, projectOf, localDate, detail = {}, env = process.
         if (!active || r.at > active.at) active = { at: r.at, provider: m.providerID || null, model: m.modelID || null }
         const u = tokensOf(m)
         const cost = typeof m.cost === 'number' ? m.cost : 0
-        const sum = u.input + u.output + u.cacheWrite + u.cacheRead
         const add = (map, key, base) => {
           const row = map.get(key) || { ...base, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, messages: 0, costUsd: 0 }
           row.input += u.input; row.output += u.output; row.cacheWrite += u.cacheWrite; row.cacheRead += u.cacheRead; row.messages++; row.costUsd += cost
           map.set(key, row)
         }
         const project = projectOf(r.dir)
-        if (day === range.today) { today.tokens += sum; today.messages++; today.costUsd += cost }
+        if (day === range.today) addTo(today, u, cost)
         if (day < range.from || day > range.to) continue
-        totals.tokens += sum; totals.messages++; totals.costUsd += cost
+        addTo(totals, u, cost)
         add(rows, `${day}\t${project}\t${model}`, { date: day, project, model, provider: m.providerID || null })
         if (detail.sessions) add(bySession, `${day}\t${r.sid}\t${model}`, { date: day, session: r.sid, project, model, provider: m.providerID || null })
         const pv = providers.get(m.providerID) || { provider: m.providerID || null, messages: 0, costUsd: 0 }
