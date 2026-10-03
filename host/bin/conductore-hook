@@ -29,6 +29,9 @@ if [ "${1:-}" = --agent ]; then
   agent=$2
   shift 2
 fi
+# The companion's own brain calls (an agent run with no tools for a
+# summary) are never agents of their own.
+[ -n "${CONDUCTORE_BRAIN:-}" ] && exit 0
 ev=${1:-}
 [ -d "$d/spool" ] && [ -d "$d/tmp" ] || mkdir -p "$d/spool" "$d/tmp" || exit 0
 

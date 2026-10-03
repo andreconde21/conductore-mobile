@@ -402,6 +402,9 @@ class Daemon {
       if (fifo && isOurFifo(fifo)) writeFifo(fifo, '\n')
       return
     }
+    // Where the event really comes from, when the hook's own pid and pane
+    // are not the agent's (Codex's shared daemon runs its hooks).
+    if (adapter.origin) header = adapter.origin(event, header) || header
     // Before the auto-approve path too: an agent first seen through an
     // auto-approved request still gets its process (M20, M18).
     const known = this.state.agents[event.session_id]

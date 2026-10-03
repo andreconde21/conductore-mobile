@@ -13,7 +13,8 @@
 // Order matters where the registry picks "the first" adapter (the brain
 // runner, `install`): Claude Code first, as before adapters existed.
 const MODULES = {
-  claude: './claude'
+  claude: './claude',
+  codex: './codex'
 }
 
 // Events and records with no agent id are Claude Code's: hooks registered
