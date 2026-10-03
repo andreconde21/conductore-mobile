@@ -341,7 +341,7 @@ void main() {
           ],
         ),
         now: now,
-        recentHours: 24,
+        recentHours: 12,
       );
       final byLabel = {
         for (final project in projects)

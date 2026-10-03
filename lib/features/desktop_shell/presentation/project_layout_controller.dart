@@ -229,6 +229,39 @@ class ProjectLayoutController extends ChangeNotifier {
     ..._found,
   }.toList();
 
+  /// The project of one agent seen without the machine tree (the agents
+  /// dashboard): its Herdr workspace or tmux session on machine [host] as
+  /// the layout places it (listed, else caught by a rule on its repo or
+  /// folder), else Other. With no layout projects, the repo it reports
+  /// (CON-032), else Other. Returns the project's name; Other is
+  /// [ProjectGroup.otherKey].
+  String projectOfAgent(SavedHost host, {AgentInfo? live, String? project}) {
+    final layout = this.layout;
+    final repo = project ?? live?.projectLabel;
+    final names = aliasesOf([host]).values.single;
+    final workspace = live?.workspace?.trim() ?? '';
+    final tab = live?.tab?.trim() ?? '';
+    final keys = [
+      for (final name in names) ...[
+        if (RegExp(r'^w[A-Za-z0-9]+$').hasMatch(workspace))
+          ProjectKeys.herdr(name, workspace, ''),
+        if (tab.isNotEmpty && !RegExp(r'^w[A-Za-z0-9]+$').hasMatch(workspace))
+          ProjectKeys.named(name, tab.split(':').first),
+      ],
+    ];
+    if (keys.any(layout.isUngrouped)) return ProjectGroup.otherKey;
+    if (layout.groups.isEmpty) return repo ?? ProjectGroup.otherKey;
+    for (final key in keys) {
+      final explicit = layout.explicitGroup(key);
+      if (explicit != null) return layout.groups[explicit].name;
+    }
+    final index = layout.groupOf('', [
+      ?repo,
+      if (workspace.startsWith('/') || workspace.startsWith('~')) workspace,
+    ]);
+    return index == null ? ProjectGroup.otherKey : layout.groups[index].name;
+  }
+
   // sidebar.toml from the machines.
 
   /// Asks every machine whose companion can tell for its sidebar.toml,

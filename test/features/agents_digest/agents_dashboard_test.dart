@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -7,6 +8,8 @@ import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
 import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_settings.dart';
+import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_dashboard.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
@@ -170,6 +173,7 @@ void main() {
     WidgetTester tester, {
     SessionViewController? views,
     List<String>? sentText,
+    ProjectLayoutController? projects,
   }) async {
     // Tall enough for every card (the list builds lazily).
     tester.view.physicalSize = const Size(900, 4000);
@@ -184,6 +188,7 @@ void main() {
       onOpenTerminal: (host, agent) => opened.add('terminal:${agent.id}'),
       sendText: (host, sessionId, text) async =>
           sentText?.add('$sessionId:$text'),
+      projects: projects,
     );
     if (views != null) view = SessionViewScope(controller: views, child: view);
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: view)));
@@ -221,6 +226,49 @@ void main() {
     // The question gets an Answer button, the approval its buttons.
     expect(find.widgetWithText(TextButton, 'Answer'), findsOneWidget);
     expect(find.text('Allow'), findsOneWidget);
+  });
+
+  testWidgets('group by project: layout projects first, then Other; '
+      'collapsing hides the cards', (tester) async {
+    await start(tester, facts: _digest());
+    final theme = ThemeController(InMemoryThemePreferences());
+    await theme.load();
+    final projects = ProjectLayoutController(theme: theme);
+    addTearDown(projects.dispose);
+    await projects.addProject('Backend', rules: ['api', 'etl']);
+    await pumpView(tester, projects: projects);
+    expect(find.byKey(const ValueKey('digest-section-needsYou')), findsOne);
+    await tester.tap(find.byKey(const ValueKey('digest-group-by-toggle')));
+    await tester.pump();
+    expect(theme.projectPrefs.groupByProject, isTrue);
+    expect(find.byKey(const ValueKey('digest-section-needsYou')), findsNothing);
+    final backend = find.byKey(const ValueKey('digest-project-backend'));
+    final other = find.byKey(
+      const ValueKey('digest-project-${ProjectGroup.otherKey}'),
+    );
+    expect(backend, findsOneWidget);
+    expect(other, findsOneWidget);
+    expect(
+      tester.getTopLeft(backend).dy,
+      lessThan(tester.getTopLeft(other).dy),
+    );
+    // Backend: api and etl; Other: web and docs.
+    double y(String id) =>
+        tester.getTopLeft(find.byKey(ValueKey('digest-card-$id'))).dy;
+    expect(y('api'), lessThan(tester.getTopLeft(other).dy));
+    expect(y('etl'), lessThan(tester.getTopLeft(other).dy));
+    expect(y('web'), greaterThan(tester.getTopLeft(other).dy));
+    expect(y('docs'), greaterThan(tester.getTopLeft(other).dy));
+
+    await tester.tap(backend);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('digest-card-api')), findsNothing);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('project-count-backend')))
+          .data,
+      '2',
+    );
   });
 
   testWidgets('approve from the card goes through the monitor', (tester) async {
