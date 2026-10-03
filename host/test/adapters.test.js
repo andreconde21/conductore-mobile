@@ -79,12 +79,13 @@ test('events and records without an agent belong to Claude Code; an unknown agen
   assert.equal(adapters.of({ sessionId: 'x' }), claude)
   assert.equal(adapters.of({ kind: 'nope' }), claude)
   assert.equal(adapters.of({ agent_kind: 'claude' }), claude)
-  assert.deepEqual(adapters.ids(), ['claude'])
+  // Claude Code first (the default brain and install order).
+  assert.equal(adapters.ids()[0], 'claude')
 })
 
 test('the capability map names every adapter with its label', () => {
   const map = adapters.capabilityMap()
-  assert.deepEqual(Object.keys(map), ['claude'])
+  assert.deepEqual(Object.keys(map), adapters.ids())
   assert.equal(map.claude.label, 'Claude Code')
   assert.equal(map.claude.chat, 'entries')
   assert.equal(map.claude.approvals, 'hook')
