@@ -849,6 +849,16 @@ class _MachineLimits extends StatelessWidget {
           else
             for (final limit in machine.codexLimits)
               UsageLimitBar(agent: 'Codex', limit: limit, now: now),
+        // Codex shows its active login only (no switching).
+        if (codexPresent)
+          if (report!.codex.accounts.where((a) => a.active).firstOrNull
+              case final account?)
+            Text(
+              'Codex account: ${account.label}'
+              '${account.plan == null ? '' : ' · ${_planLabel(account.plan!)}'}',
+              key: ValueKey('usage-codex-account-${machine.hostId}'),
+              style: muted,
+            ),
         if (report != null && report.partial)
           Text('Still counting older transcripts…', style: muted),
       ],
@@ -1373,3 +1383,7 @@ class _GroupRow extends StatelessWidget {
     );
   }
 }
+
+/// `plus` -> `Plus`; an API key login has no plan.
+String _planLabel(String plan) =>
+    plan.isEmpty ? plan : plan[0].toUpperCase() + plan.substring(1);

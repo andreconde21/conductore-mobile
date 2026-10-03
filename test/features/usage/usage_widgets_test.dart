@@ -197,6 +197,39 @@ void main() {
     );
   });
 
+  testWidgets('Codex shows its active login and plan, nothing to switch', (
+    tester,
+  ) async {
+    runner.reply = () => FakeUsageRunner.ok(
+      usageReplyJson(
+        codex: {
+          'present': true,
+          'limits': [
+            {'label': '5h', 'usedPct': 40},
+          ],
+          'rows': <Object?>[],
+          // What the companion's Codex adapter sends (CON-068): the
+          // email masked, no slot, no token.
+          'accounts': [
+            {
+              'label': 'd***@e***.com',
+              'active': true,
+              'plan': 'plus',
+              'mode': 'chatgpt',
+            },
+          ],
+        },
+      ),
+    );
+    final usage = controller(tester);
+    await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+    await tester.pump();
+    expect(find.text('Codex account: d***@e***.com · Plus'), findsOneWidget);
+    expect(find.text('Codex · 5-hour'), findsOneWidget);
+    // Not one of Claude's cswap accounts.
+    expect(find.byKey(const ValueKey('usage-accounts-chip')), findsNothing);
+  });
+
   group('cswap accounts', () {
     Map<String, Object?> reply({bool cswap = true}) => usageReplyJson(
       limits: [
