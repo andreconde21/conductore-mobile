@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -28,7 +29,7 @@ bool agentOpensInChat({
 }) {
   if (views == null || attention == null) return false;
   final runsClaude =
-      isClaudeAgent(agent) &&
+      supportsChatView(agent, attention.agentKinds(monitoredHost.id)) &&
       agent.state != AgentAttentionState.finished &&
       chatViewAvailable(attention, monitoredHost);
   return views.viewFor(
@@ -129,7 +130,13 @@ Future<bool> openPreferredChatView(
       _Show(:final host, :final agent) => (host, agent),
       _Pick(:final host, :final candidates) => (
         host,
-        await _pickInPlace(candidates, session, location(), herdr),
+        await _pickInPlace(
+          candidates,
+          session,
+          location(),
+          herdr,
+          attention.agentKinds(host.id),
+        ),
       ),
       _ => (null, null),
     };
@@ -238,12 +245,15 @@ _ChatStep _nextStep(
   // A failed poll says nothing yet; the next one may.
   final settled = status.error == null ? const _GiveUp() : notYet;
   if (!chatViewAvailable(attention, host)) return settled;
+  final kinds = attention.agentKinds(host.id);
   if (agent != null) {
     final live = _sameAgent(agent, status.agents);
-    return live != null && isClaudeAgent(live) ? _Show(host, live) : settled;
+    return live != null && supportsChatView(live, kinds)
+        ? _Show(host, live)
+        : settled;
   }
   return switch (resolveChatAgent(host, status.agents, location: location)) {
-    ChatAgentMatched(:final agent) when isClaudeAgent(agent) => _Show(
+    ChatAgentMatched(:final agent) when supportsChatView(agent, kinds) => _Show(
       host,
       agent,
     ),
@@ -283,6 +293,7 @@ Future<AgentInfo?> _pickInPlace(
   TerminalSessionController session,
   ChatSessionLocation location,
   HerdrSessionFocus? herdr,
+  AgentKindCatalog kinds,
 ) async {
   HerdrFocusedPane? focused;
   final control = HerdrSessionFocus.herdrTargetOf(session) == null
@@ -305,12 +316,12 @@ Future<AgentInfo?> _pickInPlace(
     final paneId = focused.paneId;
     final inPane = candidates.where((agent) => agent.pane == paneId);
     if (inPane.isNotEmpty) {
-      return isClaudeAgent(inPane.first) ? inPane.first : null;
+      return supportsChatView(inPane.first, kinds) ? inPane.first : null;
     }
   }
   final claude = [
     for (final agent in candidates)
-      if (isClaudeAgent(agent)) agent,
+      if (supportsChatView(agent, kinds)) agent,
   ];
   return claude.isEmpty ? null : mostRecentAgent(claude);
 }

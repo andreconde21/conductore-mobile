@@ -9,6 +9,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention_notifier
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
@@ -540,6 +541,11 @@ class AgentAttentionController extends ChangeNotifier {
   /// Whether [hostId]'s companion reported [capability] (`status`).
   bool companionSupports(String hostId, String capability) =>
       _monitors[hostId]?.capabilities?.contains(capability) ?? false;
+
+  /// What each agent kind on [hostId] supports: the companion's report,
+  /// else what companions before agent adapters implied (Claude Code only).
+  AgentKindCatalog agentKinds(String hostId) =>
+      _monitors[hostId]?.kinds ?? AgentKindCatalog.legacy;
 
   /// Every waiting request on the monitored hosts, oldest first.
   List<PendingApproval> get pendingApprovals {
@@ -1312,6 +1318,8 @@ class AgentAttentionController extends ChangeNotifier {
       monitor.capabilities = capabilities;
       if (changed) onCompanionCapabilities?.call(monitor.host, capabilities);
     }
+    // Only full `status` replies carry it; a resync keeps the last one.
+    if (snapshot.kinds case final kinds?) monitor.kinds = kinds;
     _noticeAutoApprovals(monitor, snapshot.agents);
     await _syncNotifications(
       monitor,
@@ -1513,6 +1521,10 @@ class _HostMonitor {
   /// The companion's reported features (from `status`); null until known.
   Set<String>? capabilities;
 
+  /// What each agent kind supports (`status` → `adapters`); null until a
+  /// companion reported it.
+  AgentKindCatalog? kinds;
+
   /// Newest `lastAutoApprovedAt` seen among the host's agents.
   DateTime? lastAutoApprovedAt;
 
@@ -1534,6 +1546,7 @@ class _MonitorView {
     this.unavailableReason,
     this.provider,
     this.capabilities,
+    this.kinds,
   );
 
   factory _MonitorView.of(_HostMonitor monitor) => _MonitorView(
@@ -1543,6 +1556,7 @@ class _MonitorView {
     monitor.status.unavailableReason,
     monitor.provider,
     monitor.capabilities,
+    monitor.kinds,
   );
 
   final List<AgentInfo> agents;
@@ -1551,10 +1565,12 @@ class _MonitorView {
   final String? unavailableReason;
   final AgentAttentionProvider? provider;
   final Set<String>? capabilities;
+  final AgentKindCatalog? kinds;
 
   @override
   bool operator ==(Object other) =>
       other is _MonitorView &&
+      other.kinds == kinds &&
       listEquals(other.agents, agents) &&
       other.loading == loading &&
       other.error == error &&

@@ -1,3 +1,4 @@
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:flutter/foundation.dart';
 
 /// The attention-relevant state of one remote agent, normalized across
@@ -623,6 +624,7 @@ class AgentAttentionSnapshot {
     required this.agents,
     this.sequence,
     this.capabilities,
+    this.kinds,
   });
 
   final List<AgentInfo> agents;
@@ -630,6 +632,10 @@ class AgentAttentionSnapshot {
   /// Features the provider reported (the companion's `capabilities`, e.g.
   /// `smart-approvals`); null when it reports none (older versions).
   final Set<String>? capabilities;
+
+  /// What each agent kind supports (the companion's `adapters`); null when
+  /// the provider reports none (older companions, Herdr).
+  final AgentKindCatalog? kinds;
 
   /// Monotonic snapshot sequence, when the provider numbers its snapshots
   /// (used to resume a change stream and to drop stale results).

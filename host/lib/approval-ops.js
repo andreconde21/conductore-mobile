@@ -12,7 +12,7 @@
 const state = require('./state')
 const rules = require('./rules')
 const context = require('./context')
-const { permissionOutput } = require('./permission')
+const adapters = require('./adapters')
 const { log } = require('./log')
 
 // daemon.js requires this module; its FIFO helpers are read at call time.
@@ -25,7 +25,7 @@ async function autoApprove (daemon, event, fifoPath, header) {
   daemon.approvals.assess(event)
   const { isOurFifo, writeFifo } = fifo()
   const rule = fifoPath && isOurFifo(fifoPath) ? daemon.approvals.match(event) : null
-  if (!rule || !writeFifo(fifoPath, JSON.stringify(permissionOutput(event, 'allow')) + '\n')) return false
+  if (!rule || !writeFifo(fifoPath, adapters.of(event).hookAnswer(event, 'allow'))) return false
   await context.enrich(event, header)
   daemon.commit(state.autoApproved(daemon.state, event))
   daemon.approvals.record(rule, event, daemon.state.agents[event.session_id])

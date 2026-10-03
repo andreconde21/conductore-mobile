@@ -15,6 +15,7 @@
 
 const crypto = require('crypto')
 const sm = require('./summarize')
+const adapters = require('./adapters')
 
 const SCHEMA = 1
 const MAX_INPUT_BYTES = 32 * 1024
@@ -58,7 +59,7 @@ const SYSTEM_PROMPT = [
 ].join('\n')
 
 function claudeArgs () {
-  return ['-p', '--tools', '', '--safe-mode', '--no-session-persistence', '--output-format', 'json', '--model', MODEL, '--system-prompt', SYSTEM_PROMPT, '--json-schema', JSON.stringify(OUTPUT_SCHEMA)]
+  return require('./adapters/claude').brainArgs({ system: SYSTEM_PROMPT, schema: OUTPUT_SCHEMA, model: MODEL })
 }
 
 // Stdin: the request between delimiters no request can contain.
@@ -126,58 +127,30 @@ function normalizeAction (raw, context) {
   return { action: { action, target, text, minutes, speak: action === 'say' && !speak ? 'Sorry, I did not understand.' : speak } }
 }
 
-// The structured answer: `structured_output`, else `result` as JSON.
-function answerFrom (res) {
-  if (res && res.structured_output && typeof res.structured_output === 'object') return res.structured_output
-  if (res && typeof res.result === 'string') {
-    try { return JSON.parse(res.result.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) } catch {}
-  }
-  return null
-}
-
 // input: the raw stdin text. Resolves the JSON object to print (never
 // rejects for expected failures).
 async function guide ({ input, timeoutMs = DEFAULT_TIMEOUT_MS, lockFile, env = process.env, onChild }) {
   if (Buffer.byteLength(input || '', 'utf8') > MAX_INPUT_BYTES) return failure('failed', `stdin is larger than ${MAX_INPUT_BYTES} bytes`)
   const parsed = parseInput(input || '')
   if (parsed.error) return failure('failed', parsed.error)
-  const bin = sm.findClaude(env)
-  if (!bin) return failure('claude-missing', 'claude is not installed or not on PATH')
+  // The brain runner (lib/adapters): `claude -p` today.
+  const found = adapters.brain(env)
+  if (!found) return failure(adapters.get(adapters.DEFAULT_KIND).brain.missing.error, adapters.get(adapters.DEFAULT_KIND).brain.missing.message)
 
   const release = await sm.acquireLock(lockFile, BUSY_WAIT_MS)
   if (!release) return failure('busy', 'another guide request is running')
-  const childEnv = { ...env }
-  delete childEnv.CLAUDECODE
-  delete childEnv.CLAUDE_CODE_ENTRYPOINT
-  // Thinking makes Haiku slow (see summarize); one action needs none.
-  childEnv.MAX_THINKING_TOKENS = '0'
+  // No thinking (the runner turns it off): one action needs none.
   const started = Date.now()
-  let r
+  let o
   try {
-    r = await sm.runClaude(bin, buildPrompt(parsed.utterance, parsed.context), { args: claudeArgs(), timeoutMs, env: childEnv, onChild })
+    o = await found.runner.run({ system: SYSTEM_PROMPT, prompt: buildPrompt(parsed.utterance, parsed.context), schema: OUTPUT_SCHEMA, model: MODEL, timeoutMs, onChild })
   } finally {
     release()
   }
   const ms = Date.now() - started
-  if (r.spawnError) {
-    if (r.spawnError.code === 'ENOENT' || r.spawnError.code === 'EACCES') return failure('claude-missing', `cannot run ${bin}`)
-    return failure('failed', `cannot run claude: ${r.spawnError.code || r.spawnError.message}`)
-  }
-  if (r.timedOut) return failure('timeout', `claude did not answer within ${timeoutMs} ms`)
-
-  let res = null
-  try { res = JSON.parse(r.stdout.trim().split('\n').pop()) } catch {}
-  const errText = [res && typeof res.result === 'string' && res.is_error ? res.result : '', r.stderr, res ? '' : r.stdout].join('\n')
-  if ((!res || res.is_error || r.code !== 0) && sm.NOT_LOGGED_IN.test(errText)) {
-    return failure('not-logged-in', 'claude is not logged in on this machine: run claude and /login')
-  }
-  if (!res || res.is_error) {
-    const reason = res && res.is_error ? (res.subtype || 'error') : (r.code !== 0 ? `exit ${r.code === null ? r.signal : r.code}` : 'unreadable output')
-    return failure('failed', `claude failed (${String(reason).slice(0, 80)})`)
-  }
-  const answer = answerFrom(res)
-  if (!answer) return failure('failed', 'claude returned no action')
-  return { schema: SCHEMA, ...normalizeAction(answer, parsed.context), ms, model: sm.modelFrom(res) }
+  if (!o.ok) return failure(o.error, o.message)
+  if (!o.answer) return failure('failed', 'claude returned no action')
+  return { schema: SCHEMA, ...normalizeAction(o.answer, parsed.context), ms, model: o.model }
 }
 
 module.exports = {

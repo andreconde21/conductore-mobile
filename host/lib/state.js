@@ -4,7 +4,7 @@
 //
 // State shape (also what `status` prints):
 //   { version: 1, seq: N, agents: { [sessionId]: Agent } }
-//   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, process, state, lastEvent, lastToolName,
+//   Agent = { sessionId, kind, name, cwd, transcriptPath, tmux, herdr, process, state, lastEvent, lastToolName,
 //             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest],
 //             lastError?, permissionMode? }
 //   lastError = { type, at }: the last turn ended on an API error (StopFailure),
@@ -43,6 +43,9 @@ function createState () {
 function newAgent (sessionId, now) {
   return {
     sessionId,
+    // The agent adapter that owns the session (lib/adapters): 'claude',
+    // 'codex', ... Records from before adapters carry none: Claude Code.
+    kind: 'claude',
     name: null,
     cwd: null,
     transcriptPath: null,
@@ -111,6 +114,7 @@ function pickName (event, cwd) {
 }
 
 function applyContext (agent, event) {
+  if (typeof event.agent_kind === 'string' && event.agent_kind) agent.kind = event.agent_kind
   if (event.cwd) agent.cwd = event.cwd
   if (typeof event.transcript_path === 'string' && event.transcript_path) agent.transcriptPath = event.transcript_path
   if (event.tmux) {
@@ -189,6 +193,11 @@ function reduce (state, event, now = Date.now()) {
         }
         const questions = questionsOf(event.tool_name, event.tool_input)
         if (questions) request.questions = questions
+        // Set by an adapter only (Claude Code's requests carry neither):
+        // the neutral tool kind, and false when the phone can only watch
+        // the request (the agent's own prompt must answer it).
+        if (typeof event.tool_kind === 'string' && event.tool_kind) request.toolKind = event.tool_kind
+        if (event.answerable === false) request.answerable = false
         if (event.risk) {
           request.risk = event.risk
           request.batchable = !!event.batchable

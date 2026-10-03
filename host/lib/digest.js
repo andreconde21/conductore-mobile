@@ -32,6 +32,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { execFile } = require('child_process')
 const sm = require('./summarize')
+const adapters = require('./adapters')
 const pricing = require('./pricing')
 const { resolveProject, localDate } = require('./usage')
 const { isTestCommand, errorSignature, commandLabel, hash: activityHash } = require('./activity')
@@ -496,7 +497,7 @@ function systemPrompt (lang) {
 }
 
 function claudeArgs (lang) {
-  return ['-p', '--tools', '', '--safe-mode', '--no-session-persistence', '--output-format', 'json', '--model', MODEL, '--system-prompt', systemPrompt(lang), '--json-schema', JSON.stringify(OUTPUT_SCHEMA)]
+  return require('./adapters/claude').brainArgs({ system: systemPrompt(lang), schema: OUTPUT_SCHEMA, model: MODEL })
 }
 
 const cap = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
@@ -544,39 +545,21 @@ function buildPrompt (inputs) {
   ].join('\n')
 }
 
-function answerFrom (res) {
-  if (res && res.structured_output && typeof res.structured_output === 'object') return res.structured_output
-  if (res && typeof res.result === 'string') {
-    try { return JSON.parse(res.result.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) } catch {}
-  }
-  return null
-}
-
 function cleanText (s) {
   const t = sm.cleanSummary(String(s || ''))
   return t.length > SUMMARY_MAX ? sm.capWords(t, 60).slice(0, SUMMARY_MAX) : t
 }
 
-function usageOf (res) {
-  const u = (res && res.usage) || {}
-  const n = v => (typeof v === 'number' && v > 0 ? v : 0)
-  const t = { input: n(u.input_tokens), output: n(u.output_tokens), cacheWrite: n(u.cache_creation_input_tokens), cacheRead: n(u.cache_read_input_tokens) }
-  t.total = t.input + t.output + t.cacheWrite + t.cacheRead
-  return { tokens: t, costUsd: typeof res?.total_cost_usd === 'number' ? res.total_cost_usd : null }
-}
-
-// One claude call for a batch. Resolves { summaries: Map(id -> text),
+// One brain call for a batch. Resolves { summaries: Map(id -> text),
 // tokens, costUsd, model, error? }.
-async function summarizeBatch (bin, inputs, { lang, timeoutMs, env, onChild }) {
-  const r = await sm.runClaude(bin, buildPrompt(inputs), { args: claudeArgs(lang), timeoutMs, env, onChild })
-  if (r.spawnError) return { error: r.spawnError.code === 'ENOENT' || r.spawnError.code === 'EACCES' ? 'claude-missing' : 'failed' }
-  if (r.timedOut) return { error: 'timeout' }
-  let res = null
-  try { res = JSON.parse(r.stdout.trim().split('\n').pop()) } catch {}
-  const errText = [res && typeof res.result === 'string' && res.is_error ? res.result : '', r.stderr, res ? '' : r.stdout].join('\n')
-  if ((!res || res.is_error || r.code !== 0) && sm.NOT_LOGGED_IN.test(errText)) return { error: 'not-logged-in' }
-  if (!res || res.is_error) return { error: 'failed', ...(res ? usageOf(res) : {}) }
-  const answer = answerFrom(res)
+async function summarizeBatch (runner, inputs, { lang, timeoutMs, onChild }) {
+  const o = await runner.run({ system: systemPrompt(lang), prompt: buildPrompt(inputs), schema: OUTPUT_SCHEMA, model: MODEL, timeoutMs, onChild })
+  if (!o.ok) {
+    const out = { error: o.error }
+    if (o.tokens) Object.assign(out, { tokens: o.tokens, costUsd: o.costUsd })
+    return out
+  }
+  const answer = o.answer
   const summaries = new Map()
   const ids = new Set(inputs.map(i => i.id))
   for (const a of (answer && Array.isArray(answer.agents)) ? answer.agents : []) {
@@ -584,7 +567,7 @@ async function summarizeBatch (bin, inputs, { lang, timeoutMs, env, onChild }) {
     const text = cleanText(a.summary)
     if (text) summaries.set(a.id, text)
   }
-  return { summaries, ...usageOf(res), model: sm.modelFrom(res) }
+  return { summaries, tokens: o.tokens, costUsd: o.costUsd, model: o.model }
 }
 
 // Runs `tasks` (functions returning promises) at most `n` at a time.
@@ -624,7 +607,7 @@ function mergeAgents (status, activity) {
     const m = act.meta
     list.push({
       sid,
-      agent: { sessionId: sid, name: m.name, cwd: m.cwd, transcriptPath: m.transcriptPath, state: 'ended', lastEvent: 'SessionEnd', lastMessage: m.lastMessage, startedAt: m.startedAt, updatedAt: m.endedAt || (act.ev.length ? act.ev[act.ev.length - 1][0] : 0), endedAt: m.endedAt, pending: [] },
+      agent: { sessionId: sid, ...(m.kind ? { kind: m.kind } : {}), name: m.name, cwd: m.cwd, transcriptPath: m.transcriptPath, state: 'ended', lastEvent: 'SessionEnd', lastMessage: m.lastMessage, startedAt: m.startedAt, updatedAt: m.endedAt || (act.ev.length ? act.ev[act.ev.length - 1][0] : 0), endedAt: m.endedAt, pending: [] },
       act,
       live: false
     })
@@ -666,11 +649,13 @@ async function digest (opts) {
     // Agents that ended before the window and were quiet since are history.
     if (agent.state === 'ended' && last < since) continue
     // Tokens and the replies for a summary: only agents active in the window.
+    // The agent's adapter reads its transcript (Claude Code: readTail).
     let tail = null
-    if (last >= since && typeof agent.transcriptPath === 'string' && path.isAbsolute(agent.transcriptPath) && agent.transcriptPath.endsWith('.jsonl')) {
+    const adapter = adapters.of(agent)
+    if (last >= since && adapter.readTail) {
       const prev = store.agents[sid]
-      tail = readTail(agent.transcriptPath, { since, repliesSince: prev && prev.basis ? Math.min(prev.basis, now) : since, runsSince: Math.min(since, now - t.windowMin * 60000) })
-      tails.set(sid, tail)
+      tail = adapter.readTail(agent, { since, repliesSince: prev && prev.basis ? Math.min(prev.basis, now) : since, runsSince: Math.min(since, now - t.windowMin * 60000) })
+      if (tail) tails.set(sid, tail)
     }
     const log = withTranscriptFacts(act, tail, hooks)
     const facts = countFacts(log, since, now, (act && act.state) || STATE_CODES[agent.state])
@@ -762,14 +747,11 @@ async function digest (opts) {
 
 async function runSummaries (wanted, opts) {
   const out = { done: 0, calls: 0, ms: 0, tokens: zeroTokens(), costUsd: 0, model: null }
-  const bin = sm.findClaude(opts.env)
-  if (!bin) return { ...out, error: 'claude-missing' }
+  // The brain runner (lib/adapters): `claude -p` today.
+  const found = adapters.brain(opts.env || process.env)
+  if (!found) return { ...out, error: adapters.get(adapters.DEFAULT_KIND).brain.missing.error }
   const release = await sm.acquireLock(opts.lockFile, BUSY_WAIT_MS)
   if (!release) return { ...out, error: 'busy' }
-  const childEnv = { ...(opts.env || process.env) }
-  delete childEnv.CLAUDECODE
-  delete childEnv.CLAUDE_CODE_ENTRYPOINT
-  childEnv.MAX_THINKING_TOKENS = '0'
   const t0 = Date.now()
   const deadline = opts.started + (opts.maxMs || DEFAULT_MAX_MS)
   const ids = new Map()
@@ -786,7 +768,7 @@ async function runSummaries (wanted, opts) {
     await pool(batches.map(batch => async () => {
       const left = deadline - Date.now()
       if (left < 2000) { errors.push('timeout'); return }
-      const r = await summarizeBatch(bin, batch, { lang: opts.lang, timeoutMs: left, env: childEnv, onChild: opts.onChild })
+      const r = await summarizeBatch(found.runner, batch, { lang: opts.lang, timeoutMs: left, onChild: opts.onChild })
       out.calls++
       if (r.tokens) out.tokens = addTokens(out.tokens, r.tokens)
       if (typeof r.costUsd === 'number') out.costUsd += r.costUsd

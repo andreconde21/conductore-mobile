@@ -186,6 +186,7 @@ word as its value) and answer plain JSON, so check for `encoding`.
   "agents": [
     {
       "sessionId": "0f2c…",
+      "kind": "claude",
       "name": "reviewer",
       "cwd": "/home/andre/Projects/Foo",
       "transcriptPath": "/home/andre/.claude/projects/-home-andre-Projects-Foo/0f2c….jsonl",
@@ -217,10 +218,24 @@ word as its value) and answer plain JSON, so check for `encoding`.
       ]
     }
   ],
-  "capabilities": ["smart-approvals", "digest"]
+  "capabilities": ["smart-approvals", "digest"],
+  "adapters": { "claude": { "label": "Claude Code", "events": "hooks", "approvals": "hook", "chat": "entries", "…": "…" } }
 }
 ```
 
+* `kind`: the agent adapter that owns the session (`claude`; `codex`,
+  `opencode`, … as adapters arrive). An agent record without one (an older
+  companion) is Claude Code's.
+* `adapters` (full replies, and `version`): per agent kind, what the phone
+  may offer: approvals (`hook`, `server`, `observe`, `none`), `always`,
+  `questions`, `plans`, `chat` (`entries`: Claude Code's own format, `items`:
+  the neutral one, `false`), `send`, `interrupt`, `liveUsage`, `limits`,
+  `history`, `brain`, `brainSchema`, `accounts`, `facts`, `undo`, `setup`.
+  Static, see `lib/adapters/types.js`; older companions send none, and the
+  phone then assumes Claude Code with today's `capabilities`.
+* `pending[].toolKind` / `pending[].answerable`: set only by adapters that
+  need them (never for Claude Code): the neutral tool kind, and `false` when
+  the phone can only watch the request (answer it in the terminal).
 * `name`: Herdr agent name, else the tmux window name (unless it is a generic
   process name like `node` or `claude`), else the basename of `cwd`. Leading
   status glyphs from Claude Code's terminal title (`⚠`, `✳`, `●`, emoji,
@@ -392,6 +407,10 @@ after the same pane check as `send`. Prints `{"ok":true,"via":"tmux","target":"m
 ### `conductore-hostd transcript <sessionId> [--since <offset> | --before <offset>] [--tail-bytes N] [--max-bytes 262144]`
 
 Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
+Other agents (adapters with `chat: "items"`) answer with the neutral format
+of `lib/adapters/chat-items.js` instead: `{format: "items", items, cursor,
+startCursor, more}`, paged with `--cursor <cursor>` and `--before-cursor
+<startCursor>`. Claude Code's reply below is unchanged.
 
 ```json
 {"sessionId":"0f2c…","offset":183422,"size":183422,"start":0,"skipped":0,
@@ -1408,6 +1427,17 @@ shows no syscalls).
   only `kill -0`: a recycled pid can delay the automatic restart until the
   phone's next `status`/`events` (which pings the socket and restarts it).
 
+## Agent adapters
+
+Everything that differs between coding agents lives in one adapter per
+agent in `lib/adapters/` (CON-045): registration, turning its hook or plugin
+events into the daemon's event vocabulary, liveness, the approval bridge,
+the chat reader, dashboard facts, live usage, the brain runner and accounts.
+Claude Code is the first adapter (`lib/adapters/claude.js`) and wraps the
+modules that did this before. The daemon, the CLI, `summarize`, `guide` and
+`digest` reach agents only through the registry (`lib/adapters/index.js`).
+How to add one: [`docs/agent-adapters.md`](../docs/agent-adapters.md).
+
 ## Development
 
 ```sh
@@ -1415,7 +1445,10 @@ cd host && node --test test/*.test.js
 host/bench.sh 200        # per-event cost on this machine (throwaway state dir)
 ```
 
-`test/state.test.js` covers the reducer, `test/settings.test.js` the
+`test/adapters.test.js` runs the adapter contract
+(`test/helpers/adapter-contract.js`, which every adapter must pass) against
+Claude Code, checks that Claude Code's output did not change, and drives a
+second adapter through the daemon. `test/state.test.js` covers the reducer, `test/settings.test.js` the
 settings merge, `test/transcript.test.js` the transcript reader,
 `test/statusline.test.js` usage mapping, statusLine wiring and 0.3 migration,
 the sh statusline (default line parity with `lib/statusline.js`, hold and
