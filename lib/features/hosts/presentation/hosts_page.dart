@@ -30,6 +30,7 @@ import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
 import 'package:conduit/features/hosts/data/secure_home_preferences_repository.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
@@ -38,6 +39,7 @@ import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
+import 'package:conduit/features/hosts/presentation/widgets/home_projects.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/hosts/presentation/widgets/host_card.dart';
 import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
@@ -1019,7 +1021,12 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         !widget.workspaceController.hasSessions) {
       return [_buildNoMachines(context)];
     }
-    return [..._buildSessions(context), ..._buildOtherWorkspaces(context)];
+    return [
+      ..._buildSessions(context),
+      ...(ProjectLayoutController.instance?.groupByProject ?? false)
+          ? _buildProjects(context, ProjectLayoutController.instance!)
+          : _buildOtherWorkspaces(context),
+    ];
   }
 
   /// The proot local-shell section ("This device"): Android only, and
@@ -1296,23 +1303,30 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         child: _SectionHeader(
           label: 'OTHER WORKSPACES',
           detail: count == 0 ? null : '$count not open',
-          trailing: IconButton(
-            key: const ValueKey('workspaces-view-toggle'),
-            tooltip: view == HomeWorkspacesView.list
-                ? 'Show as grid'
-                : 'Show as list',
-            icon: Icon(
-              view == HomeWorkspacesView.list
-                  ? Icons.grid_view_rounded
-                  : Icons.view_list_rounded,
-            ),
-            onPressed: () => _savePreferences(
-              _preferences.copyWith(
-                workspacesView: view == HomeWorkspacesView.list
-                    ? HomeWorkspacesView.grid
-                    : HomeWorkspacesView.list,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (ProjectLayoutController.instance case final projects?)
+                _groupByToggle(projects),
+              IconButton(
+                key: const ValueKey('workspaces-view-toggle'),
+                tooltip: view == HomeWorkspacesView.list
+                    ? 'Show as grid'
+                    : 'Show as list',
+                icon: Icon(
+                  view == HomeWorkspacesView.list
+                      ? Icons.grid_view_rounded
+                      : Icons.view_list_rounded,
+                ),
+                onPressed: () => _savePreferences(
+                  _preferences.copyWith(
+                    workspacesView: view == HomeWorkspacesView.list
+                        ? HomeWorkspacesView.grid
+                        : HomeWorkspacesView.list,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -1367,6 +1381,43 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       ],
     ];
   }
+
+  /// Group by project or by machine (CON-065), next to the view toggle.
+  Widget _groupByToggle(ProjectLayoutController projects) => IconButton(
+    key: const ValueKey('home-group-by-toggle'),
+    tooltip: projects.groupByProject ? 'Group by machine' : 'Group by project',
+    icon: Icon(
+      projects.groupByProject ? Icons.dns_outlined : Icons.folder_copy_outlined,
+    ),
+    onPressed: () async {
+      await projects.setGroupByProject(!projects.groupByProject);
+      if (mounted) setState(() {});
+    },
+  );
+
+  /// The workspaces of the shown machines by project, sheprd's way.
+  List<Widget> _buildProjects(
+    BuildContext context,
+    ProjectLayoutController projects,
+  ) => [
+    SliverToBoxAdapter(
+      child: _SectionHeader(
+        label: 'PROJECTS',
+        trailing: _groupByToggle(projects),
+      ),
+    ),
+    SliverToBoxAdapter(
+      child: HomeProjectsList(
+        controller: projects,
+        hosts: _shownHosts,
+        sessions: widget.workspaceController.sessions,
+        attention: widget.agentAttention,
+        boards: _boards,
+        herdrWorkspaceOf: widget.connectFlow?.herdr.workspaceOf,
+        onOpen: (target) => unawaited(_openSidebarTarget(target)),
+      ),
+    ),
+  ];
 
   void _handleNoticeAction(SavedHost host, HomeBoardNoticeAction action) {
     final board = _boards?[host.id];
