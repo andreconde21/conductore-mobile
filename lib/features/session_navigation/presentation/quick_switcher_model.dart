@@ -40,7 +40,8 @@ sealed class SwitcherItem {
   String get machineName;
 
   /// What a search matches: workspace, pane title, machine, project and
-  /// tmux session names.
+  /// tmux session names, and the topics, projects and folders of the
+  /// agents inside.
   List<String> get searchTerms;
 }
 
@@ -103,10 +104,14 @@ class SwitcherSessionItem extends SwitcherItem {
     required this.session,
     required this.info,
     this.active = false,
+    this.agentTerms = const [],
   });
 
   final TerminalSessionController session;
   final HomeSessionInfo info;
+
+  /// Topics, projects and folders of the agents inside it (searchable).
+  final List<String> agentTerms;
 
   /// The session on screen in the terminal.
   final bool active;
@@ -137,6 +142,8 @@ class SwitcherSessionItem extends SwitcherItem {
     info.targetLabel,
     machineName,
     ?HomeSessionInfo.tmuxSessionOf(session),
+    ?ConnectTarget.fromSessionHostId(session.host.id)?.name,
+    ...agentTerms,
   ];
 }
 
@@ -150,6 +157,7 @@ class SwitcherWorkspaceItem extends SwitcherItem {
     this.details = '',
     this.attention,
     this.paneTitles = const [],
+    this.agentTerms = const [],
   });
 
   /// The saved machine.
@@ -169,6 +177,9 @@ class SwitcherWorkspaceItem extends SwitcherItem {
   /// Titles of the agent panes inside it (searchable).
   final List<String> paneTitles;
 
+  /// Topics, projects and folders of the agents inside it (searchable).
+  final List<String> agentTerms;
+
   @override
   SwitcherSection get section => SwitcherSection.otherWorkspaces;
 
@@ -182,7 +193,13 @@ class SwitcherWorkspaceItem extends SwitcherItem {
   String get machineName => host.name;
 
   @override
-  List<String> get searchTerms => [label, id, machineName, ...paneTitles];
+  List<String> get searchTerms => [
+    label,
+    id,
+    machineName,
+    ...paneTitles,
+    ...agentTerms,
+  ];
 }
 
 /// A target picked recently in the connect picker.
@@ -324,6 +341,44 @@ String _machineNameOf(SavedHost host, Map<String, SavedHost> machines) {
 /// One machine's home board: its Herdr workspaces and tmux sessions.
 typedef SwitcherBoard = ({SavedHost host, HomeBoardState state});
 
+/// Every agent [attention] reports, by saved machine id.
+Map<String, List<AgentInfo>> _agentsOf(AgentAttentionController? attention) {
+  final result = <String, List<AgentInfo>>{};
+  if (attention == null) return result;
+  for (final host in attention.monitoredHosts) {
+    final agents = attention.statusFor(host.id)?.agents;
+    if (agents == null || agents.isEmpty) continue;
+    (result[baseHostId(host.id)] ??= []).addAll(agents);
+  }
+  return result;
+}
+
+/// The agents of [machineAgents] running in Herdr workspace [id] (with
+/// the board's own [panes]), or in tmux session [tmux].
+Iterable<AgentInfo> _agentsIn(
+  List<AgentInfo> machineAgents, {
+  String? herdr,
+  String? tmux,
+  List<HomeBoardPane> panes = const [],
+}) => [
+  for (final pane in panes) pane.agent,
+  for (final agent in machineAgents)
+    if ((herdr != null && agent.workspace == herdr) ||
+        (tmux != null &&
+            (agent.tab == tmux || (agent.tab?.startsWith('$tmux:') ?? false))))
+      agent,
+];
+
+/// What [agents] add to a search of the place they run in: their topics,
+/// projects and folders.
+List<String> _agentTerms(Iterable<AgentInfo> agents) => {
+  for (final agent in agents) ...[
+    agent.name,
+    ?agent.projectLabel,
+    if (agent.workspace case final path? when path.contains('/')) path,
+  ],
+}.toList();
+
 /// Everything the switcher lists, section by section:
 ///
 /// * agents needing input or an approval on every monitored machine, one
@@ -332,6 +387,10 @@ typedef SwitcherBoard = ({SavedHost host, HomeBoardState state});
 /// * Herdr workspaces and tmux sessions on the home boards' machines that
 ///   no open session shows;
 /// * recent connect-picker targets that are neither open nor listed above.
+///
+/// Sessions and workspaces are also found by the topics, projects and
+/// folders of the agents in them: [agentsByMachine] (every agent per
+/// saved machine id), read from [attention] when not given.
 List<SwitcherItem> buildSwitcherItems({
   required List<TerminalSessionController> sessions,
   TerminalSessionController? active,
@@ -339,9 +398,11 @@ List<SwitcherItem> buildSwitcherItems({
   List<SavedHost> machines = const [],
   List<SwitcherBoard> boards = const [],
   Map<String, List<ConnectTarget>> recents = const {},
+  Map<String, List<AgentInfo>>? agentsByMachine,
 }) {
   final boardStates = {for (final board in boards) board.host.id: board.state};
   final byId = {for (final machine in machines) machine.id: machine};
+  final allAgents = agentsByMachine ?? _agentsOf(attention);
 
   final agents = <SwitcherAgentItem>[];
   if (attention != null) {
@@ -376,23 +437,40 @@ List<SwitcherItem> buildSwitcherItems({
     });
   }
 
-  final open = <SwitcherSessionItem>[
-    for (final session in sessions)
+  final open = <SwitcherSessionItem>[];
+  for (final session in sessions) {
+    final machine = baseHostId(session.host.id);
+    final workspaces = boardStates[machine]?.workspaces ?? const [];
+    final target = ConnectTarget.fromSessionHostId(session.host.id);
+    final herdr = target?.kind == ConnectTargetKind.herdr && target!.name != ''
+        ? target.name
+        : null;
+    open.add(
       SwitcherSessionItem(
         session: session,
         active: session == active,
         info: HomeSessionInfo.of(
           session,
-          workspaces:
-              boardStates[baseHostId(session.host.id)]?.workspaces ?? const [],
+          workspaces: workspaces,
           agentState: summarizeAgentState(
             attention?.statusFor(session.host.id),
             session.host.id,
           ),
           machineName: _machineNameOf(session.host, byId),
         ),
+        agentTerms: _agentTerms(
+          _agentsIn(
+            allAgents[machine] ?? const [],
+            herdr: herdr,
+            tmux: HomeSessionInfo.tmuxSessionOf(session),
+            panes:
+                workspaces.where((w) => w.id == herdr).firstOrNull?.panes ??
+                const [],
+          ),
+        ),
       ),
-  ];
+    );
+  }
 
   // What each machine already has open.
   final openHerdr = <String, Set<String>>{};
@@ -425,6 +503,13 @@ List<SwitcherItem> buildSwitcherItems({
           details: herdrDetails(workspace),
           attention: workspace.summary,
           paneTitles: [for (final pane in workspace.panes) pane.title],
+          agentTerms: _agentTerms(
+            _agentsIn(
+              allAgents[host.id] ?? const [],
+              herdr: workspace.id,
+              panes: workspace.panes,
+            ),
+          ),
         ),
       );
     }
@@ -438,6 +523,9 @@ List<SwitcherItem> buildSwitcherItems({
           id: tmux.name,
           label: tmux.name,
           details: tmuxDetails(tmux),
+          agentTerms: _agentTerms(
+            _agentsIn(allAgents[host.id] ?? const [], tmux: tmux.name),
+          ),
         ),
       );
     }

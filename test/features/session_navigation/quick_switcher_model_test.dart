@@ -181,6 +181,78 @@ void main() {
       expect(open.first.machineName, 'Host h');
     });
 
+    test('workspaces and sessions are found by the topic, project and '
+        'folder of the agents in them', () {
+      final workspace = TerminalWorkspaceController(
+        ImmediateTerminalRepository(TrackableTerminalSession()),
+      );
+      addTearDown(workspace.dispose);
+      workspace.open(const ConnectTarget.tmux('open-one').apply(host));
+      const board = HomeBoardState(
+        workspaces: [
+          HomeBoardWorkspace(
+            workspace: HerdrWorkspaceInfo(id: 'w1', label: 'Main'),
+            panes: [
+              HomeBoardPane(
+                agent: AgentInfo(
+                  id: 'p1',
+                  name: 'Fixing the login bug',
+                  state: AgentAttentionState.working,
+                  workspace: 'w1',
+                ),
+              ),
+            ],
+          ),
+          HomeBoardWorkspace(
+            workspace: HerdrWorkspaceInfo(id: 'w2', label: 'Other'),
+          ),
+        ],
+        tmux: HomeTmuxStatus.available,
+        tmuxSessions: [
+          TmuxSessionInfo(name: 'scratch'),
+          TmuxSessionInfo(name: 'idle'),
+        ],
+      );
+      final items = buildSwitcherItems(
+        sessions: workspace.sessions,
+        machines: [host],
+        boards: [(host: host, state: board)],
+        agentsByMachine: {
+          'h': const [
+            // The companion's agents: tmux location, cwd as workspace.
+            AgentInfo(
+              id: 'c1',
+              name: 'Refactor billing',
+              state: AgentAttentionState.working,
+              workspace: '/home/andre/Projects/TheCalendar',
+              tab: 'scratch:1',
+            ),
+            AgentInfo(
+              id: 'c2',
+              name: 'Release notes',
+              state: AgentAttentionState.idle,
+              workspace: '/srv/vale-da-teja',
+              project: 'ValeDaTeja',
+              tab: 'open-one',
+            ),
+          ],
+        },
+      );
+      List<String> keys(String query) => [
+        for (final section in filterSwitcher(items, query))
+          for (final item in section.items) item.key,
+      ];
+      // Agent topic: a Herdr pane, a companion agent in tmux.
+      expect(keys('login bug'), ['workspace-h-herdr-w1']);
+      expect(keys('billing'), ['workspace-h-tmux-scratch']);
+      // Folder and repo.
+      expect(keys('Projects/TheCal'), ['workspace-h-tmux-scratch']);
+      expect(keys('thecalendar'), ['workspace-h-tmux-scratch']);
+      // Project, on an open session.
+      expect(keys('valedateja'), ['session-h#tmux:open-one']);
+      expect(keys('vale-da-teja'), ['session-h#tmux:open-one']);
+    });
+
     test('what a waiting agent asks for', () {
       SwitcherAgentItem item(AgentInfo agent) =>
           SwitcherAgentItem(host: host, agent: agent, machineName: 'Host h');

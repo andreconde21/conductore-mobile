@@ -9,6 +9,7 @@ class HomeTopBar extends StatelessWidget {
     required this.onSettings,
     this.machine,
     this.onSwitcher,
+    this.onSearch,
     this.onGuide,
     this.onAgents,
     this.agentsBadge = 0,
@@ -20,6 +21,10 @@ class HomeTopBar extends StatelessWidget {
 
   /// Opens the quick switcher; null hides its button.
   final VoidCallback? onSwitcher;
+
+  /// Opens the quick switcher to search, keyboard up; null hides its
+  /// button.
+  final VoidCallback? onSearch;
 
   /// Starts the voice guide; null hides its button.
   final VoidCallback? onGuide;
@@ -73,6 +78,15 @@ class HomeTopBar extends StatelessWidget {
               color: colorScheme.onSurface,
               icon: const Icon(Icons.headset_mic_outlined),
               onPressed: onGuide,
+            ),
+          if (onSearch != null)
+            IconButton(
+              key: const ValueKey('home-search'),
+              tooltip: 'Search workspaces, sessions and agents',
+              iconSize: 24,
+              color: colorScheme.onSurface,
+              icon: const Icon(Icons.search_rounded),
+              onPressed: onSearch,
             ),
           if (onSwitcher != null)
             IconButton(
