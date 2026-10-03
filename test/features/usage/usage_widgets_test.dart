@@ -197,6 +197,74 @@ void main() {
     );
   });
 
+  testWidgets('OpenCode: its model and reported cost, counted in the totals', (
+    tester,
+  ) async {
+    // The `opencode` section as the companion's adapter builds it.
+    runner.reply = () => FakeUsageRunner.ok(
+      usageReplyJson(
+        opencode: {
+          'present': true,
+          'limits': <Object?>[],
+          'costSource': 'reported',
+          'active': {'provider': 'opencode', 'model': 'mimo-v2.6-flash-free'},
+          'today': {
+            'input': 4000,
+            'output': 1000,
+            'cacheWrite': 0,
+            'cacheRead': 0,
+            'tokens': 5000,
+            'messages': 3,
+            'costUsd': 0.25,
+          },
+          'range': {
+            'input': 4000,
+            'output': 1000,
+            'cacheWrite': 0,
+            'cacheRead': 0,
+            'tokens': 5000,
+            'messages': 3,
+            'costUsd': 0.25,
+          },
+          'rows': [
+            {
+              'date': '2026-09-25',
+              'project': 'api',
+              'model': 'opencode/mimo-v2.6-flash-free',
+              'provider': 'opencode',
+              'input': 4000,
+              'output': 1000,
+              'cacheWrite': 0,
+              'cacheRead': 0,
+              'messages': 3,
+              'costUsd': 0.25,
+            },
+          ],
+        },
+      ),
+    );
+    final usage = controller(tester);
+    await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+    await tester.pump();
+    expect(
+      find.text(
+        'OpenCode: opencode/mimo-v2.6-flash-free · cost as reported by OpenCode',
+      ),
+      findsOneWidget,
+    );
+    final report = usage.summary.machines.single.report!;
+    expect(report.opencode.present, isTrue);
+    expect(report.opencode.agent, UsageAgent.opencode);
+    expect(report.opencode.limits, isEmpty);
+    expect(report.agents.map((s) => s.agent), contains(UsageAgent.opencode));
+    expect(
+      usage.summary.rows.where((r) => r.agent == UsageAgent.opencode),
+      hasLength(1),
+    );
+    expect(usage.summary.todayFor(UsageAgent.opencode).costUsd, 0.25);
+    expect(usage.summary.todayFor(UsageAgent.opencode).tokens, 5000);
+  });
+
   group('cswap accounts', () {
     Map<String, Object?> reply({bool cswap = true}) => usageReplyJson(
       limits: [

@@ -337,7 +337,9 @@ class UsageSummary {
   UsageTotals get today {
     var total = UsageTotals.zero;
     for (final report in _reports) {
-      total = total + report.claude.today + report.codex.today;
+      for (final section in report.agents) {
+        total = total + section.today;
+      }
     }
     return total;
   }
@@ -347,7 +349,11 @@ class UsageSummary {
     for (final report in _reports) {
       total =
           total +
-          (agent == UsageAgent.claude ? report.claude : report.codex).today;
+          switch (agent) {
+            UsageAgent.claude => report.claude,
+            UsageAgent.codex => report.codex,
+            UsageAgent.opencode => report.opencode,
+          }.today;
     }
     return total;
   }
@@ -355,7 +361,9 @@ class UsageSummary {
   UsageTotals get range {
     var total = UsageTotals.zero;
     for (final report in _reports) {
-      total = total + report.claude.range + report.codex.range;
+      for (final section in report.agents) {
+        total = total + section.range;
+      }
     }
     return total;
   }

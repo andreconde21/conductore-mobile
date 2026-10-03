@@ -107,7 +107,10 @@ const env = {
   CONDUCTORE_HOME: home,
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json'),
-  CONDUCTORE_USAGE_THROTTLE_MS: '3000'
+  CONDUCTORE_USAGE_THROTTLE_MS: '3000',
+  // `install` also registers the other agents present here (OpenCode's
+  // plugin goes to $XDG_CONFIG_HOME/opencode): never the real config.
+  XDG_CONFIG_HOME: path.join(home, 'config')
 }
 for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_AGENT_NAME']) delete env[k]
 

@@ -779,6 +779,17 @@ function compute (opts = {}) {
   const codex = codexDirs.length
     ? { present: true, limits: publicLimits(cache.limits.codex, now, cache.codexLimitsAt), ...report('codex', cache.codex, daysOf('codex'), range, detail, unpriced) }
     : { present: false }
+  // Every other agent's section, from its adapter (lib/adapters
+  // usageReport): OpenCode keeps its own token and cost records.
+  const others = {}
+  for (const a of require('./adapters').all()) {
+    if (typeof a.usageReport !== 'function' || !a.usageSection || a.usageSection === 'claude' || a.usageSection === 'codex') continue
+    try {
+      others[a.usageSection] = a.usageReport({ range, projectOf, localDate, detail, env, now })
+    } catch (err) {
+      others[a.usageSection] = { present: false, error: err.message }
+    }
+  }
   let cacheBytes = null
   try { cacheBytes = fs.statSync(cacheFile).size } catch {}
   return {
@@ -798,6 +809,7 @@ function compute (opts = {}) {
     historyFrom,
     claude,
     codex,
+    ...others,
     pricing: {
       estimate: true,
       asOf: pricing.AS_OF,

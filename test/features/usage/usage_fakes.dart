@@ -25,6 +25,7 @@ Map<String, Object?> usageReplyJson({
   List<Map<String, Object?>> limits = const [],
   List<Map<String, Object?>> rows = const [],
   Map<String, Object?>? codex,
+  Map<String, Object?>? opencode,
   bool partial = false,
   List<Map<String, Object?>>? accounts,
   bool cswap = true,
@@ -72,6 +73,7 @@ Map<String, Object?> usageReplyJson({
       },
     },
     'codex': codex ?? {'present': false},
+    'opencode': ?opencode,
     'pricing': {
       'estimate': true,
       'asOf': '2026-09-25',

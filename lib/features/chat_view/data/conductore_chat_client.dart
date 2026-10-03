@@ -56,12 +56,18 @@ class ConductoreChatClient {
     int? before,
     int? tailBytes,
     int? maxBytes,
+    String? cursor,
+    String? beforeCursor,
   }) {
     final args = [
       'transcript',
       shellQuoteArgument(sessionId),
       if (since != null) '--since $since',
       if (before != null) '--before $before',
+      // Neutral pages (every agent but Claude Code) page by opaque cursor.
+      if (cursor != null) '--cursor ${shellQuoteArgument(cursor)}',
+      if (beforeCursor != null)
+        '--before-cursor ${shellQuoteArgument(beforeCursor)}',
       if (tailBytes != null) '--tail-bytes $tailBytes',
       if (maxBytes != null) '--max-bytes $maxBytes',
       // Last: an older companion would read a word after it as its value.
@@ -122,6 +128,8 @@ class ConductoreChatClient {
     int? before,
     int? tailBytes,
     int? maxBytes,
+    String? cursor,
+    String? beforeCursor,
   }) async {
     final result = await _runner.run(
       transcriptCommand(
@@ -130,6 +138,8 @@ class ConductoreChatClient {
         before: before,
         tailBytes: tailBytes,
         maxBytes: maxBytes,
+        cursor: cursor,
+        beforeCursor: beforeCursor,
       ),
       timeout: _timeout,
     );

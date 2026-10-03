@@ -80,6 +80,23 @@ test('decision resolves pending and returns to working; timeout keeps needs_perm
   assert.equal(st.agents.s1.state, 'working')
 })
 
+test('a request answered in the terminal after the turn ended leaves the agent idle, not working', () => {
+  const st = fresh(
+    ev('PermissionRequest', { request_id: 'r1', tool_name: 'Bash', tool_input: { command: 'ls' } }),
+    ev('PostToolUse', { tool_name: 'Bash', tool_input: {}, tool_response: {} }),
+    ev('Stop', { last_assistant_message: 'Done.' })
+  )
+  // The daemon notices the hook is gone only after the Stop.
+  state.resolvePermission(st, 'r1', 'gone')
+  assert.equal(st.agents.s1.state, 'waiting_input')
+  assert.equal(st.agents.s1.pending.length, 0)
+  // Mid-turn, a gone hook still means the agent works on.
+  state.reduce(st, ev('UserPromptSubmit'))
+  state.reduce(st, ev('PermissionRequest', { request_id: 'r2', tool_name: 'Bash', tool_input: { command: 'ls' } }))
+  state.resolvePermission(st, 'r2', 'gone')
+  assert.equal(st.agents.s1.state, 'working')
+})
+
 test('two pending requests: resolving one keeps needs_permission', () => {
   const st = fresh(
     ev('PermissionRequest', { request_id: 'r1', tool_name: 'Bash', tool_input: { command: 'a' } }),
