@@ -593,8 +593,20 @@ class HerdrSessionFocus implements AppInputRouter {
     );
     noteWorkspace(session, workspaceId);
     _notePlace(session, tabId: tabId, paneId: paneId);
-    if (!mayMoveFocus && controlFor(session) != null) {
+    final control = controlFor(session);
+    if (control == null) return session;
+    if (!mayMoveFocus) {
       _showAgentView(session);
+    } else if (session.isConnected) {
+      // The workspace's own tab, already attached (it had drifted to
+      // another workspace): no attach command will focus the pane.
+      unawaited(
+        control.focusLocation(
+          workspaceId: workspaceId,
+          tabId: tabId,
+          paneId: paneId,
+        ),
+      );
     }
     return session;
   }
