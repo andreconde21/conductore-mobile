@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
+import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
@@ -32,6 +33,7 @@ class ThemePreferences {
     this.speechLanguage = '',
     this.voice = VoicePreferences.defaults,
     this.quickActions = const [],
+    this.projectPrefs = ProjectPrefs.defaults,
     this.remoteClipboardEnabled = true,
     this.pasteImagesAsFiles = true,
     this.restoreSessionsOnLaunch = true,
@@ -83,6 +85,9 @@ class ThemePreferences {
 
   /// Personal quick actions (Settings), for every project or one.
   final List<QuickAction> quickActions;
+
+  /// The project view's layout and choices (CON-065).
+  final ProjectPrefs projectPrefs;
 
   /// Whether text the remote copies with OSC 52 lands on the phone
   /// clipboard. On by default, like most desktop terminals.
@@ -148,6 +153,7 @@ class ThemePreferencesRepository {
   static const _speechLanguageKey = 'conduit.speech_language.v1';
   static const _voiceKey = 'conductore.voice.v1';
   static const _quickActionsKey = 'conductore.quick_actions.v1';
+  static const _projectPrefsKey = 'conductore.project_prefs.v1';
   static const _remoteClipboardEnabledKey =
       'conduit.remote_clipboard_enabled.v1';
   static const _pasteImagesAsFilesKey = 'conductore.paste_images_as_files.v1';
@@ -180,6 +186,7 @@ class ThemePreferencesRepository {
     _speechLanguageKey,
     _voiceKey,
     _quickActionsKey,
+    _projectPrefsKey,
     _remoteClipboardEnabledKey,
     _restoreSessionsOnLaunchKey,
     _multiplexerTabsKey,
@@ -227,6 +234,7 @@ class ThemePreferencesRepository {
     final rawSpeechLanguage = await read(_speechLanguageKey);
     final rawVoice = await read(_voiceKey);
     final rawQuickActions = await read(_quickActionsKey);
+    final rawProjectPrefs = await read(_projectPrefsKey);
     final rawRemoteClipboardEnabled = await read(_remoteClipboardEnabledKey);
     final rawRestoreSessionsOnLaunch = await read(_restoreSessionsOnLaunchKey);
     final rawMultiplexerTabs = await read(_multiplexerTabsKey);
@@ -273,6 +281,7 @@ class ThemePreferencesRepository {
       speechLanguage: rawSpeechLanguage?.trim() ?? '',
       voice: VoicePreferences.decode(rawVoice),
       quickActions: QuickAction.decodeList(rawQuickActions),
+      projectPrefs: _parseProjectPrefs(rawProjectPrefs),
       remoteClipboardEnabled:
           rawRemoteClipboardEnabled == null ||
           rawRemoteClipboardEnabled == 'true',
@@ -303,6 +312,15 @@ class ThemePreferencesRepository {
       (font) => font.name == raw,
       orElse: () => defaultTerminalFont,
     );
+  }
+
+  static ProjectPrefs _parseProjectPrefs(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return ProjectPrefs.defaults;
+    try {
+      return ProjectPrefs.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return ProjectPrefs.defaults;
+    }
   }
 
   static OmarchySyncedTheme? _parseSyncedTheme(String? raw) {
@@ -401,6 +419,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _quickActionsKey,
       value: QuickAction.encodeList(preferences.quickActions),
+    );
+    await _storage.write(
+      key: _projectPrefsKey,
+      value: jsonEncode(preferences.projectPrefs.toJson()),
     );
     await _storage.write(
       key: _remoteClipboardEnabledKey,
