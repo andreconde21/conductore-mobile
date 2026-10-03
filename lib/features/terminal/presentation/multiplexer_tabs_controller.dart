@@ -98,9 +98,18 @@ class TmuxTabsBackend implements MultiplexerTabsBackend {
 /// Herdr tabs of the focused workspace, over the session's shared Herdr
 /// command channel (which this backend does not own).
 class HerdrTabsBackend implements MultiplexerTabsBackend {
-  HerdrTabsBackend({required this.control, this.fallbackWorkspaceId});
+  HerdrTabsBackend({
+    required this.control,
+    this.fallbackWorkspaceId,
+    this.createTab,
+  });
 
   final HerdrRemoteControl control;
+
+  /// Opens a tab in the session's own workspace (see
+  /// [TerminalSessionController.herdrPaneCreator]); without it, in the
+  /// focused one.
+  final Future<bool> Function()? createTab;
 
   /// The workspace the app thinks the session is on, for when Herdr
   /// reports no focused tab.
@@ -140,7 +149,7 @@ class HerdrTabsBackend implements MultiplexerTabsBackend {
 
   @override
   Future<bool> create({MultiplexerTab? active}) =>
-      control.createPane(HerdrNewPane.newTab);
+      createTab?.call() ?? control.createPane(HerdrNewPane.newTab);
 
   @override
   Future<bool> rename(MultiplexerTab tab, String name) =>

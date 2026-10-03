@@ -225,6 +225,25 @@ mixin MultiplexerPillActions<T extends StatefulWidget> on State<T> {
     HerdrNewPane kind, {
     AgentCommandRunner? runner,
   }) async {
+    // A Herdr session the app tracks: where the session is, whatever
+    // Herdr's shared focus shows (the laptop's workspace, maybe).
+    final creator = _session.herdrPaneCreator;
+    if (creator != null) {
+      final created = await creator(kind);
+      if (!mounted) return;
+      if (created) {
+        focusTerminalAfterMultiplexer();
+      } else if (_session.focusElsewhere.value != null) {
+        // A key binding would act on the workspace Herdr shows instead.
+        _snack(
+          'Herdr shows another workspace: take the focus first, so '
+          '"${kind.label}" acts on this one.',
+        );
+      } else {
+        sendHerdrShortcut(kind.shortcut);
+      }
+      return;
+    }
     final own = runner == null ? _openRunner(_session.host) : null;
     final channel = runner ?? own;
     try {

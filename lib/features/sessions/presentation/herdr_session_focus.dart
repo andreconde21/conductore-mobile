@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/domain/new_workspace.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
@@ -102,6 +103,11 @@ class HerdrSessionFocus implements AppInputRouter {
   static bool _never() => false;
 
   final bool Function() _mayMoveFocus;
+
+  /// Opens [target] on the machine of a session's host in a new (or
+  /// reused) app session: how a workspace created without focus is shown.
+  TerminalSessionController Function(SavedHost host, ConnectTarget target)?
+  openTarget;
 
   /// Whether this device may move Herdr's shared focus on its own (the
   /// setting). Read at each use, so a change applies at once.
@@ -267,7 +273,14 @@ class HerdrSessionFocus implements AppInputRouter {
           ..inputClaimer = _claim
           ..inputCheck = _checkBeforeInput
           ..startupCommandFilter = _filterStartup
-          ..appInputRouter = this;
+          ..appInputRouter = this
+          ..herdrPaneCreator = (kind) => createPane(
+            session,
+            kind,
+            open: openTarget == null
+                ? null
+                : (target) => openTarget!(session.host, target),
+          );
       }
       final before = _statuses[session];
       final now = session.status;
@@ -800,6 +813,56 @@ class HerdrSessionFocus implements AppInputRouter {
     return pane.withSize(_HerdrPane.sizeInLayout(layout!.stdout, pane.id));
   }
 
+  /// Opens [kind] for [session] where the session is, never where Herdr's
+  /// shared focus happens to be: a split of its own pane, a tab in its own
+  /// workspace (in that pane's folder), or a new workspace. It takes
+  /// Herdr's focus only when this device may move it; otherwise a new
+  /// workspace opens in a new app tab through [open], like any workspace.
+  ///
+  /// False when it could not be done that way. With the focus elsewhere
+  /// ([TerminalSessionController.focusElsewhere]) the caller must then not
+  /// fall back to a key binding: that would act on the shared view.
+  Future<bool> createPane(
+    TerminalSessionController session,
+    HerdrNewPane kind, {
+    TerminalSessionController Function(ConnectTarget target)? open,
+  }) async {
+    final control = controlFor(session);
+    if (_disposed || control == null) return false;
+    final own = await _paneFor(session);
+    if (own == null) {
+      // Its own place is unknown: only where Herdr's focus may go anyway.
+      return mayMoveFocus && await control.createPane(kind);
+    }
+    final command = control.commands.newPane(
+      kind,
+      HerdrFocusedPane(
+        paneId: own.id,
+        workspaceId: own.workspaceId,
+        tabId: own.tabId,
+        cwd: own.cwd,
+      ),
+      focus: mayMoveFocus,
+    );
+    if (command == null) return false;
+    if (kind != HerdrNewPane.newWorkspace || mayMoveFocus) {
+      return control.run(command);
+    }
+    final result = await control.query(command);
+    if (result == null || !HerdrRemoteControl.succeeded(result)) return false;
+    final created = NewWorkspaceCommands.parseHerdrCreated(result.stdout);
+    if (created != null && open != null) {
+      open(
+        ConnectTarget.herdr(
+          workspaceId: created.workspaceId,
+          label: created.label,
+          session: herdrTargetOf(session)?.session ?? '',
+        ),
+      );
+    }
+    return true;
+  }
+
   /// Reads what [session]'s own workspace shows (`herdr pane read`, with
   /// colours) for its preview, without moving any focus.
   Future<void> _readPreview(
@@ -933,6 +996,7 @@ class _HerdrPane {
     required this.workspaceId,
     required this.tabId,
     required this.hasAgent,
+    this.cwd = '',
     this.columns = 80,
     this.rows = 24,
   });
@@ -941,6 +1005,9 @@ class _HerdrPane {
   final String workspaceId;
   final String tabId;
   final bool hasAgent;
+
+  /// The pane's working directory; empty when Herdr did not report one.
+  final String cwd;
   final int columns;
   final int rows;
 
@@ -951,6 +1018,7 @@ class _HerdrPane {
           workspaceId: workspaceId,
           tabId: tabId,
           hasAgent: hasAgent,
+          cwd: cwd,
           columns: size.columns,
           rows: size.rows,
         );
@@ -981,6 +1049,9 @@ class _HerdrPane {
             workspaceId: text(pane, 'workspace_id'),
             tabId: text(pane, 'tab_id'),
             hasAgent: text(pane, 'agent').isNotEmpty,
+            cwd: text(pane, 'cwd').isNotEmpty
+                ? text(pane, 'cwd')
+                : text(pane, 'foreground_cwd'),
           ),
     ];
   }

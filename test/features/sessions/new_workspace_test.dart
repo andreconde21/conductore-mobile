@@ -158,7 +158,7 @@ void main() {
       await WorkspaceCreator(runner, mayMoveHerdrFocus: true).create(
         const NewWorkspaceRequest(kind: MultiplexerKind.herdr, name: 'api'),
       );
-      expect(scriptOf(runner.commands.single), endsWith("--label api --focus"));
+      expect(scriptOf(runner.commands.single), endsWith('--label api --focus'));
     });
 
     test('Herdr not running reads as such', () async {

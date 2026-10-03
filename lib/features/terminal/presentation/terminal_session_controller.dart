@@ -11,6 +11,7 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/mosh_server_cleanup.dart';
 import 'package:conduit/features/terminal/domain/network_connectivity.dart';
 import 'package:conduit/features/terminal/domain/osc52_clipboard.dart';
@@ -210,6 +211,11 @@ class TerminalSessionController extends ChangeNotifier {
   /// quick actions, menu answers, image paths) to its own place without
   /// the terminal, when set and able; see [sendAppText].
   AppInputRouter? appInputRouter;
+
+  /// Opens a Herdr pane, tab or workspace where this session is (its own
+  /// pane and workspace), not where Herdr's shared focus is; false when it
+  /// could not. Set by whoever tracks the session's Herdr workspace.
+  Future<bool> Function(HerdrNewPane kind)? herdrPaneCreator;
 
   /// Types [text] the app wrote (not the user's keys) into this session,
   /// and presses Enter after it with [submit]: through [appInputRouter]

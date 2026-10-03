@@ -46,7 +46,9 @@ class SessionConnectFlow {
          workspace: workspace,
          runnerFactory: runnerFactory,
        ),
-       live = LiveHostHub(runnerFactory: runnerFactory);
+       live = LiveHostHub(runnerFactory: runnerFactory) {
+    herdr.openTarget = open;
+  }
 
   final HostsController hostsController;
   final TerminalWorkspaceController workspace;
