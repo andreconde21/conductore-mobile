@@ -65,11 +65,16 @@ class CompanionDoctorCheck {
     required this.name,
     required this.ok,
     required this.detail,
+    this.reportedOptional = false,
   });
 
   final String name;
   final bool ok;
   final String detail;
+
+  /// The companion marked the check informative (`optional: true`, e.g. an
+  /// agent adapter's own checks).
+  final bool reportedOptional;
 
   /// Checks `doctor` itself does not count against `ok` (see host/lib/cli.js).
   static const optionalNames = {
@@ -80,7 +85,7 @@ class CompanionDoctorCheck {
     'claude',
   };
 
-  bool get optional => optionalNames.contains(name);
+  bool get optional => reportedOptional || optionalNames.contains(name);
 }
 
 /// The raw outputs one status check collects; [classifyCompanionStatus]
@@ -250,6 +255,7 @@ List<CompanionDoctorCheck> parseDoctorChecks(String stdout) {
           name: check['name']?.toString() ?? '?',
           ok: check['ok'] == true,
           detail: check['detail']?.toString() ?? '',
+          reportedOptional: check['optional'] == true,
         ),
   ];
 }

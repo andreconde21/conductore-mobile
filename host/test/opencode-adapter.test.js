@@ -347,3 +347,19 @@ test("the app's OpenCode transcript fixture is what the adapter reads today", { 
   const replies = require('./fixtures/opencode-transcript').replies(dir)
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), JSON.parse(JSON.stringify(replies)), 'regenerate: node host/test/fixtures/opencode-transcript.js > test/fixtures/agent_adapters/opencode_transcript.json')
 })
+
+test('doctor: nothing where OpenCode is missing; informative checks where it is', async () => {
+  assert.deepEqual(await opencode.doctor({ env: { PATH: emptyDir, HOME: emptyDir } }), [])
+  const bin = path.join(root, 'docbin')
+  fs.mkdirSync(bin, { recursive: true })
+  fs.writeFileSync(path.join(bin, 'opencode'), '#!/bin/sh\necho 1.18.34\n', { mode: 0o755 })
+  const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: emptyDir, XDG_CONFIG_HOME: path.join(root, 'doccfg') }
+  const hookBin = path.join(__dirname, '..', 'bin', 'conductore-hook')
+  let checks = await opencode.doctor({ env, hookBin })
+  assert.ok(checks.every(c => c.optional === true))
+  assert.equal(checks.find(c => c.name === 'OpenCode').detail.endsWith('1.18.34'), true)
+  assert.equal(checks.find(c => c.name === 'OpenCode plugin').ok, false)
+  opencode.install({ hookBin, env })
+  checks = await opencode.doctor({ env, hookBin })
+  assert.equal(checks.find(c => c.name === 'OpenCode plugin').ok, true)
+})

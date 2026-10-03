@@ -147,10 +147,13 @@ function uninstall ({ env = process.env } = {}) {
 }
 
 async function doctor ({ env = process.env, hookBin } = {}) {
-  const checks = []
+  // Informative only (`optional`: the phone never counts them as a
+  // failure); nothing at all where OpenCode is not installed.
   const found = detect(env)
-  checks.push({ name: 'OpenCode', ok: found.present, detail: found.present ? `${found.bin} ${found.version || '(version unknown)'}` : 'not installed (optional)' })
-  if (!found.present) return checks
+  if (!found.present) return []
+  const checks = []
+  const add = (name, ok, detail) => checks.push({ name, ok, detail, optional: true })
+  add('OpenCode', true, `${found.bin} ${found.version || '(version unknown)'}`)
   const file = pluginPath(env)
   let text = null
   try { text = fs.readFileSync(file, 'utf8') } catch {}
@@ -159,8 +162,8 @@ async function doctor ({ env = process.env, hookBin } = {}) {
   let hook = null
   try { hook = m ? JSON.parse(m[1]) : null } catch {}
   const hookOk = !!hook && fs.existsSync(hook) && (!hookBin || hook === hookBin)
-  checks.push({ name: 'OpenCode plugin', ok: ours && hookOk, detail: !ours ? `${file} missing: run install` : hookOk ? file : `${file} points at ${hook}: run install` })
-  checks.push({ name: 'OpenCode chat reader', ok: !!sqlite(), detail: sqlite() ? 'node:sqlite' : `Node ${process.versions.node} has no node:sqlite (22.5+): no chat view or usage for OpenCode` })
+  add('OpenCode plugin', ours && hookOk, !ours ? `${file} missing: run install` : hookOk ? file : `${file} points at ${hook}: run install`)
+  add('OpenCode chat reader', !!sqlite(), sqlite() ? 'node:sqlite' : `Node ${process.versions.node} has no node:sqlite (22.5+): no chat view or usage for OpenCode`)
   return checks
 }
 
