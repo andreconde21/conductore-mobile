@@ -424,9 +424,10 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     final name =
         _string(item['name']) ??
         _basename(cwd) ??
+        // Companions with agent adapters send `kind: "claude"` too.
         switch (_string(item['kind'])) {
-          final kind? => kind,
-          null => 'Claude session',
+          final kind? when normalizeAgentKind(kind) != defaultAgentKind => kind,
+          _ => 'Claude session',
         };
     final tmux = item['tmux'];
     final herdr = item['herdr'];

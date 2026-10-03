@@ -138,5 +138,24 @@ void main() {
       );
       expect(older.kinds, isNull);
     });
+
+    test('a nameless Claude Code agent is still a "Claude session"', () {
+      final snapshot = ConductoreHostAttentionProvider.parseSnapshot(
+        jsonEncode({
+          'version': 1,
+          'seq': 1,
+          'agents': [
+            {'sessionId': 'a', 'state': 'working'},
+            {'sessionId': 'b', 'state': 'working', 'kind': 'claude'},
+            {'sessionId': 'c', 'state': 'working', 'kind': 'codex'},
+          ],
+        }),
+      );
+      expect(snapshot.agents.map((a) => a.name), [
+        'Claude session',
+        'Claude session',
+        'codex',
+      ]);
+    });
   });
 }
