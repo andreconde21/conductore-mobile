@@ -1290,6 +1290,8 @@ class _ChatViewPageState extends State<ChatViewPage>
         ? 'Chat unavailable'
         : _chat.agent?.state == 'ended'
         ? 'This session has ended'
+        : _chat.pending.isNotEmpty && _chat.pending.every((r) => r.isQuestion)
+        ? 'Answer the question above first'
         : 'Answer the approval above first',
     sending: _chat.sending,
     showInterrupt:
