@@ -187,3 +187,13 @@ test('names drop Claude title glyphs; a bare "claude" window falls back to cwd',
   assert.equal(fresh(ev('SessionStart', { herdr: { paneId: 'w1:p1', name: '✳ builder' } })).agents.s1.name, 'builder')
   assert.equal(state.cleanName('  plain '), 'plain')
 })
+
+test('a question PreToolUse spooled after its PermissionRequest keeps the request answerable (CON-062)', () => {
+  const input = { questions: [{ question: 'Pick?', options: [{ label: 'A' }, { label: 'B' }] }] }
+  const st = fresh(ev('PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: input }), ev('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: input }))
+  const a = st.agents.s1
+  assert.equal(a.state, 'needs_permission')
+  assert.equal(a.pending.length, 1)
+  assert.equal(a.pending[0].summary, 'Pick?')
+  assert.deepEqual(a.pending[0].questions, [{ question: 'Pick?', kind: 'choice', multiSelect: false, options: [{ label: 'A' }, { label: 'B' }] }])
+})

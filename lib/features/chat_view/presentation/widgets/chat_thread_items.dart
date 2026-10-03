@@ -687,13 +687,23 @@ class ChatPlanCard extends StatelessWidget {
 /// the agent waits, each option is a button that types its number into the
 /// terminal menu ([onPick] gets the 1-based number).
 class ChatQuestionCard extends StatelessWidget {
-  const ChatQuestionCard({required this.item, required this.onPick, super.key});
+  const ChatQuestionCard({
+    required this.item,
+    required this.onPick,
+    this.note,
+    super.key,
+  });
 
   final ChatQuestion item;
 
   /// Null when options cannot be picked now (answered, or the agent is not
   /// waiting on this question).
   final ValueChanged<int>? onPick;
+
+  /// Why the options cannot be picked here, while unanswered (answered
+  /// below through the companion, or not waiting on it any more): never
+  /// options that look dead without a word.
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -735,6 +745,14 @@ class ChatQuestionCard extends StatelessWidget {
               style: theme.textTheme.bodySmall,
               maxLines: 6,
               overflow: TextOverflow.ellipsis,
+            )
+          else if (note case final note?)
+            Text(
+              note,
+              key: ValueKey('chat-question-note-${item.id}'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             )
           else if (onPick != null && item.questions.length > 1)
             Text(

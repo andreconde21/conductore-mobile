@@ -416,6 +416,13 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
                       request: request,
                       verdict: verdict,
                     ),
+                    onAnswer: (answers) => answerPermissionRequest(
+                      context,
+                      controller: controller,
+                      hostId: host.id,
+                      request: request.withAnswers(answers),
+                      verdict: PermissionVerdict.allow,
+                    ),
                     onTrust: controller.supportsSmartApprovals(host.id)
                         ? () => trustPermissionRequest(
                             context,

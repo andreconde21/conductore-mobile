@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/question_request_card.dart';
 import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:flutter/material.dart';
 
@@ -469,12 +470,15 @@ class AgentInboxRow extends StatelessWidget {
 /// One pending permission request: what the agent wants to run, its risk
 /// label, the full tool input on demand, and the answers. With [onTrust]
 /// (a companion that keeps rules), a "Trust" button saves a time-boxed
-/// rule; high-risk requests get neither Trust nor Always.
+/// rule; high-risk requests get neither Trust nor Always. A question
+/// (AskUserQuestion) shows its options instead ([QuestionRequestCard]),
+/// answered through [onAnswer].
 class PendingRequestCard extends StatefulWidget {
   const PendingRequestCard({
     required this.request,
     required this.busy,
     required this.onDecide,
+    required this.onAnswer,
     this.onTrust,
     super.key,
   });
@@ -482,6 +486,9 @@ class PendingRequestCard extends StatefulWidget {
   final PendingPermissionRequest request;
   final bool busy;
   final ValueChanged<PermissionVerdict> onDecide;
+
+  /// A question's answers, question -> answer.
+  final ValueChanged<Map<String, String>> onAnswer;
   final VoidCallback? onTrust;
 
   @override
@@ -495,6 +502,16 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final request = widget.request;
+    if (request.isQuestion) {
+      // Allow / Always mean nothing to a question: Claude Code waits for
+      // the answers themselves.
+      return QuestionRequestCard(
+        request: request,
+        busy: widget.busy,
+        onAnswer: widget.onAnswer,
+        onDecline: () => widget.onDecide(PermissionVerdict.deny),
+      );
+    }
     final hasInput = request.toolInput.trim().isNotEmpty;
     final high = request.risk?.level == PermissionRiskLevel.high;
     final onTrust = request.trustable ? widget.onTrust : null;

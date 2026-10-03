@@ -8,6 +8,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/question_request_card.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/data/platform_text_share.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
@@ -906,10 +907,13 @@ class _ChatViewPageState extends State<ChatViewPage>
     try {
       await _chat.decide(request, verdict);
     } catch (error) {
+      final what = request.answers != null
+          ? 'send the answer'
+          : '${verdict.label.toLowerCase()} ${request.toolName}';
       messenger?.showSnackBar(
         SnackBar(
           content: Text(
-            'Could not ${verdict.label.toLowerCase()} ${request.toolName}: '
+            'Could not $what: '
             '${error is AppFailure ? error.userMessage : error}',
           ),
         ),
@@ -1398,7 +1402,21 @@ class _ChatViewPageState extends State<ChatViewPage>
       for (final request in pending.reversed)
         _ThreadRow(
           ValueKey('approval-${request.id}'),
-          () => ChatApprovalCard(
+          () => request.isQuestion
+              ? QuestionRequestCard(
+                  key: ValueKey('approval-${request.id}'),
+                  request: request,
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  busy:
+                      _chat.isDeciding(request.id) ||
+                      (widget.attention?.isDeciding(request.id) ?? false),
+                  onAnswer: (answers) => _decide(
+                    request.withAnswers(answers),
+                    PermissionVerdict.allow,
+                  ),
+                  onDecline: () => _decide(request, PermissionVerdict.deny),
+                )
+              : ChatApprovalCard(
             key: ValueKey('approval-${request.id}'),
             request: request,
             busy:
@@ -1535,6 +1553,36 @@ class _ChatViewPageState extends State<ChatViewPage>
     );
   }
 
+  /// The transcript's question. While the companion holds it as a pending
+  /// request, it is answered on the request's card below; else, while the
+  /// agent waits on it, by typing an option's number into the terminal.
+  /// Otherwise it says why it cannot be answered here.
+  Widget _questionCard(
+    ChatQuestion item, {
+    required Key key,
+    required bool isLast,
+    required bool waiting,
+  }) {
+    final askedBelow = _chat.pending.any((request) => request.isQuestion);
+    final canType =
+        !item.answered &&
+        !askedBelow &&
+        isLast &&
+        waiting &&
+        !_chat.isAnswering(item.id);
+    return ChatQuestionCard(
+      key: key,
+      item: item,
+      onPick: canType ? (number) => _pick(item, number) : null,
+      note: item.answered || canType || _chat.isAnswering(item.id)
+          ? null
+          : askedBelow
+          ? 'Answer it below.'
+          : 'Not waiting for an answer here now. Open the terminal to see '
+                'the question.',
+    );
+  }
+
   Widget _row(ChatItem item, {required bool isLast, required bool waiting}) {
     final key = ValueKey(item.id);
     return decorateRow(item, switch (item) {
@@ -1547,13 +1595,11 @@ class _ChatViewPageState extends State<ChatViewPage>
       ChatToolCall() => ChatToolCard(key: key, item: item),
       ChatTodoList() => ChatTodoCard(key: key, item: item),
       ChatPlan() => ChatPlanCard(key: key, item: item),
-      ChatQuestion() => ChatQuestionCard(
+      ChatQuestion() => _questionCard(
+        item,
         key: key,
-        item: item,
-        onPick:
-            !item.answered && isLast && waiting && !_chat.isAnswering(item.id)
-            ? (number) => _pick(item, number)
-            : null,
+        isLast: isLast,
+        waiting: waiting,
       ),
       ChatNotice() => ChatNoticeRow(key: key, item: item),
     });

@@ -139,6 +139,111 @@ PendingApprovalInfo parsePendingApprovalInfo(Map<Object?, Object?> entry) {
   );
 }
 
+/// One option of a [PendingQuestion].
+@immutable
+class PendingQuestionOption {
+  const PendingQuestionOption({required this.label, this.description});
+
+  final String label;
+  final String? description;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PendingQuestionOption &&
+      other.label == label &&
+      other.description == description;
+
+  @override
+  int get hashCode => Object.hash(label, description);
+}
+
+/// One question of a pending AskUserQuestion, as the companion reports it
+/// (`pending[].questions`, capability `question-answers`). The answer is
+/// keyed by [question], exactly as asked.
+@immutable
+class PendingQuestion {
+  const PendingQuestion({
+    required this.question,
+    this.header,
+    this.kind = 'choice',
+    this.multiSelect = false,
+    this.options = const [],
+    this.description,
+    this.placeholder,
+    this.unit,
+  });
+
+  final String question;
+  final String? header;
+
+  /// `choice` (options), `text` (free text) or `number`; Claude Code may
+  /// add kinds, which take free text here.
+  final String kind;
+  final bool multiSelect;
+  final List<PendingQuestionOption> options;
+  final String? description;
+  final String? placeholder;
+  final String? unit;
+
+  /// Parses one `questions[]` entry; null when it has no question text.
+  static PendingQuestion? parse(Object? raw) {
+    if (raw is! Map) return null;
+    final question = raw['question'];
+    if (question is! String || question.isEmpty) return null;
+    String? text(Object? value) =>
+        value is String && value.trim().isNotEmpty ? value.trim() : null;
+    final options = raw['options'];
+    return PendingQuestion(
+      question: question,
+      header: text(raw['header']),
+      kind: text(raw['kind']) ?? 'choice',
+      multiSelect: raw['multiSelect'] == true,
+      options: [
+        if (options is List)
+          for (final option in options)
+            if (option is Map && text(option['label']) != null)
+              PendingQuestionOption(
+                label: option['label'] as String,
+                description: text(option['description']),
+              ),
+      ],
+      description: text(raw['description']),
+      placeholder: text(raw['placeholder']),
+      unit: text(raw['unit']),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is PendingQuestion &&
+      other.question == question &&
+      other.header == header &&
+      other.kind == kind &&
+      other.multiSelect == multiSelect &&
+      listEquals(other.options, options) &&
+      other.description == description &&
+      other.placeholder == placeholder &&
+      other.unit == unit;
+
+  @override
+  int get hashCode => Object.hash(
+    question,
+    header,
+    kind,
+    multiSelect,
+    Object.hashAll(options),
+    description,
+    placeholder,
+    unit,
+  );
+}
+
+/// The `questions` of one `pending[]` entry (empty when absent).
+List<PendingQuestion> parsePendingQuestions(Object? raw) => [
+  if (raw is List)
+    for (final question in raw) ?PendingQuestion.parse(question),
+];
+
 /// One tool call an agent is waiting to have approved, as reported by a
 /// provider that can relay permission prompts (the Conductore host
 /// companion). Herdr agents never carry these.
@@ -153,7 +258,12 @@ class PendingPermissionRequest {
     this.batchable = false,
     this.suggestedRules = const [],
     this.repo,
+    this.questions = const [],
+    this.answers,
   });
+
+  /// The Claude Code tool that asks the user questions.
+  static const questionTool = 'AskUserQuestion';
 
   /// Provider-issued request id, passed back verbatim with the decision.
   final String id;
@@ -181,9 +291,42 @@ class PendingPermissionRequest {
   /// The git work tree the agent works in (a rule's "this repo" scope).
   final String? repo;
 
+  /// The questions of an AskUserQuestion request; empty for other tools
+  /// and from a companion without `question-answers`.
+  final List<PendingQuestion> questions;
+
+  /// What the user picked, question -> answer: set on the copy handed to
+  /// `decide` ([withAnswers]); never reported by the companion.
+  final Map<String, String>? answers;
+
+  /// A question Claude asked (AskUserQuestion). Claude Code ignores a plain
+  /// Allow for it: it takes answers ([withAnswers]) or a Deny.
+  bool get isQuestion => toolName == questionTool;
+
+  /// Whether the phone can answer this question (the companion sent its
+  /// questions, so it takes `decide <id> answer`).
+  bool get answerable => isQuestion && questions.isNotEmpty;
+
   /// Whether a trust or rule may answer requests like this one (high risk
-  /// always asks).
-  bool get trustable => risk != null && risk!.level != PermissionRiskLevel.high;
+  /// always asks, and so does a question).
+  bool get trustable =>
+      !isQuestion && risk != null && risk!.level != PermissionRiskLevel.high;
+
+  /// This request with the user's [answers], for `decide`.
+  PendingPermissionRequest withAnswers(Map<String, String> answers) =>
+      PendingPermissionRequest(
+        id: id,
+        toolName: toolName,
+        summary: summary,
+        toolInput: toolInput,
+        createdAt: createdAt,
+        risk: risk,
+        batchable: batchable,
+        suggestedRules: suggestedRules,
+        repo: repo,
+        questions: questions,
+        answers: Map.unmodifiable(answers),
+      );
 
   /// Longest tool input kept on the phone; anything beyond is truncated
   /// with a marker so a huge file write cannot bloat the dashboard.
@@ -200,7 +343,9 @@ class PendingPermissionRequest {
         other.risk == risk &&
         other.batchable == batchable &&
         listEquals(other.suggestedRules, suggestedRules) &&
-        other.repo == repo;
+        other.repo == repo &&
+        listEquals(other.questions, questions) &&
+        mapEquals(other.answers, answers);
   }
 
   @override
@@ -214,6 +359,7 @@ class PendingPermissionRequest {
     batchable,
     Object.hashAll(suggestedRules),
     repo,
+    Object.hashAll(questions),
   );
 }
 

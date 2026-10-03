@@ -120,6 +120,7 @@ void main() {
       request: _request,
       busy: false,
       onDecide: (_) {},
+      onAnswer: (_) {},
       onTrust: () {},
     ),
   };
@@ -202,7 +203,12 @@ void main() {
         );
         await _pump(
           tester,
-          PendingRequestCard(request: request, busy: false, onDecide: (_) {}),
+          PendingRequestCard(
+            request: request,
+            busy: false,
+            onDecide: (_) {},
+            onAnswer: (_) {},
+          ),
           width: width,
         );
         expect(tester.takeException(), isNull);
@@ -226,7 +232,12 @@ void main() {
         );
         await _pump(
           tester,
-          PendingRequestCard(request: request, busy: false, onDecide: (_) {}),
+          PendingRequestCard(
+            request: request,
+            busy: false,
+            onDecide: (_) {},
+            onAnswer: (_) {},
+          ),
           width: width,
         );
         expect(tester.takeException(), isNull);

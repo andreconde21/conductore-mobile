@@ -410,6 +410,11 @@ class _NeedsYouCard extends StatelessWidget {
                     request: request,
                     busy: dashboard.isDeciding?.call(request.id) ?? false,
                     onDecide: (verdict) => onDecide(item, request, verdict),
+                    onAnswer: (answers) => onDecide(
+                      item,
+                      request.withAnswers(answers),
+                      PermissionVerdict.allow,
+                    ),
                   ),
                 ],
               const SizedBox(height: 6),

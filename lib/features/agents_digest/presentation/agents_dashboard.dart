@@ -829,6 +829,10 @@ class DigestAgentCard extends StatelessWidget {
                     request: request,
                     busy: isDeciding?.call(request.id) ?? false,
                     onDecide: (verdict) => onDecide(request, verdict),
+                    onAnswer: (answers) => onDecide(
+                      request.withAnswers(answers),
+                      PermissionVerdict.allow,
+                    ),
                   ),
                 ],
               if (interactive)
