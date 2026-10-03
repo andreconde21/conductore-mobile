@@ -33,7 +33,7 @@ const AUDIT_MAX_BYTES = 128 * 1024
 //   agent-messaging  `agents`, `agent-send`, `agent-wait`, `agent-read`
 //   herdr-sidebar    pending approvals and cost as Herdr sidebar tokens
 //   config           `config get|set`
-const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config']
+const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar']
 
 const rulesFile = () => path.join(paths.homeDir(), 'rules.json')
 const auditFile = () => path.join(paths.homeDir(), 'auto-approved.json')

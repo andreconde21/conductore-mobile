@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
@@ -48,6 +49,7 @@ class ThemeController extends ChangeNotifier {
   String _speechLanguage = '';
   VoicePreferences _voice = VoicePreferences.defaults;
   List<QuickAction> _quickActions = const [];
+  ProjectPrefs _projectPrefs = ProjectPrefs.defaults;
 
   /// The stored light/dark choice. Omarchy themes are dark or light
   /// themselves, so the app follows [effectiveThemeMode]; this stays for
@@ -122,6 +124,10 @@ class ThemeController extends ChangeNotifier {
   /// Personal quick actions (Settings; synced with the appearance).
   List<QuickAction> get quickActions => _quickActions;
 
+  /// The project view: the layout edited in the app, the view, the filter
+  /// and collapsed projects (synced with the appearance).
+  ProjectPrefs get projectPrefs => _projectPrefs;
+
   Future<void> load() async {
     final preferences = await _repository.load();
     _themeMode = preferences.themeMode;
@@ -148,6 +154,7 @@ class ThemeController extends ChangeNotifier {
     _speechLanguage = preferences.speechLanguage;
     _voice = preferences.voice;
     _quickActions = preferences.quickActions;
+    _projectPrefs = preferences.projectPrefs;
     _omarchySyncHostId = preferences.omarchySyncHostId;
     _omarchySyncedTheme = preferences.omarchySyncedTheme;
     notifyListeners();
@@ -446,6 +453,13 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setProjectPrefs(ProjectPrefs prefs) async {
+    if (_projectPrefs == prefs) return;
+    _projectPrefs = prefs;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -468,6 +482,7 @@ class ThemeController extends ChangeNotifier {
         speechLanguage: _speechLanguage,
         voice: _voice,
         quickActions: _quickActions,
+        projectPrefs: _projectPrefs,
         remoteClipboardEnabled: _remoteClipboardEnabled,
         pasteImagesAsFiles: _pasteImagesAsFiles,
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,

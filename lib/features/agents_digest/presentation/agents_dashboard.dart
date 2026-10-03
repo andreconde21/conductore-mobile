@@ -11,6 +11,9 @@ import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
@@ -142,8 +145,14 @@ class AgentsDashboardView extends StatefulWidget {
     this.shrinkWrap = false,
     this.inlineMenu = false,
     this.now,
+    this.projects,
     super.key,
   });
+
+  /// Grouping by project (CON-065); null uses the app's
+  /// ([ProjectLayoutController.instance]), and without one the dashboard
+  /// groups by state only.
+  final ProjectLayoutController? projects;
 
   final DigestController controller;
   final AgentAttentionController attention;
@@ -312,14 +321,116 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     }
   }
 
+  /// The project grouping's controller, if the app has one.
+  ProjectLayoutController? get _projects =>
+      widget.projects ?? ProjectLayoutController.instance;
+
+  /// The agents by project: layout projects in their order (pinned
+  /// first), then the others by urgency, then Other; inside each, the
+  /// state sections' order.
+  List<(ProjectGroup, List<DigestAgent>)> _byProject(
+    ProjectLayoutController projects,
+    DigestOverview overview,
+  ) {
+    final byName = <String, List<DigestAgent>>{};
+    final firstSection = <String, int>{};
+    for (final section in DigestSection.values) {
+      for (final agent in overview.section(section)) {
+        final host = _host(agent.hostId);
+        final name = host == null
+            ? (agent.project ?? ProjectGroup.otherKey)
+            : projects.projectOfAgent(
+                host,
+                live: _live(agent),
+                project: agent.project,
+              );
+        (byName[name] ??= []).add(agent);
+        firstSection.putIfAbsent(name, () => section.index);
+      }
+    }
+    final layout = projects.layout;
+    final order = [
+      for (final index in layout.displayOrder) layout.groups[index].name,
+    ];
+    final names = byName.keys.toList()
+      ..sort((a, b) {
+        if (a == ProjectGroup.otherKey || b == ProjectGroup.otherKey) {
+          return a == ProjectGroup.otherKey ? 1 : -1;
+        }
+        final ia = order.indexOf(a);
+        final ib = order.indexOf(b);
+        if (ia >= 0 || ib >= 0) {
+          if (ia < 0 || ib < 0) return ia < 0 ? 1 : -1;
+          return ia.compareTo(ib);
+        }
+        final bySection = firstSection[a]!.compareTo(firstSection[b]!);
+        return bySection != 0
+            ? bySection
+            : a.toLowerCase().compareTo(b.toLowerCase());
+      });
+    int count(List<DigestAgent> agents, Set<DigestSection> sections) => agents
+        .where((a) => sections.contains(a.sectionSince(overview.since)))
+        .length;
+    return [
+      for (final name in names)
+        (
+          ProjectGroup(
+            key: name == ProjectGroup.otherKey
+                ? ProjectGroup.otherKey
+                : name.toLowerCase(),
+            name: name == ProjectGroup.otherKey ? 'Other' : name,
+            members: const [],
+            isOther: name == ProjectGroup.otherKey,
+            pinned: layout.byName(name)?.pinned ?? false,
+            inLayout: layout.byName(name) != null,
+            needsYou: count(byName[name]!, {
+              DigestSection.needsYou,
+              DigestSection.stuck,
+            }),
+            working: count(byName[name]!, {DigestSection.working}),
+            done: count(byName[name]!, {DigestSection.done}),
+          ),
+          byName[name]!,
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
+    final projects = _projects;
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.controller, widget.attention]),
+      listenable: Listenable.merge([
+        widget.controller,
+        widget.attention,
+        ?projects,
+      ]),
       builder: (context, _) {
         final controller = widget.controller;
         final overview = controller.overview;
         final now = (widget.now ?? DateTime.now)();
+        Widget card(DigestAgent agent) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: DigestAgentCard(
+            key: ValueKey('digest-card-${agent.sessionId}'),
+            agent: agent,
+            live: _live(agent),
+            canAct: _host(agent.hostId) != null,
+            summarizing: controller.isSummarizing && agent.summaryPending,
+            isDeciding: widget.attention.isDeciding,
+            now: now,
+            onOpen: () => _open(agent),
+            onChat: () => _open(agent, chat: true),
+            onTerminal: () => _open(agent, chat: false),
+            onReview: _reviewAction(agent),
+            onHandOff: _handOffAction(agent),
+            onTell: (answer) => unawaited(_tell(agent, answer: answer)),
+            onDecide: (request, verdict) =>
+                unawaited(_decide(agent, request, verdict)),
+          ),
+        );
+        final byProject = projects != null && projects.groupByProject;
+        // The machines' sidebar.toml, at most every few minutes.
+        if (byProject) unawaited(projects.refresh());
         final children = <Widget>[
           _Header(
             controller: controller,
@@ -351,43 +462,49 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
               loading: controller.isLoading,
               machines: controller.machines,
             ),
-          for (final section in DigestSection.values)
-            if (overview.section(section) case final agents
-                when agents.isNotEmpty) ...[
-              _SectionTitle(
-                key: ValueKey('digest-section-${section.name}'),
-                section: section,
-                count: agents.length,
-                open: section != DigestSection.quiet || _quietOpen,
-                onToggle: section == DigestSection.quiet
-                    ? () => setState(() => _quietOpen = !_quietOpen)
-                    : null,
+          if (projects != null && !overview.isEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('digest-group-by-toggle'),
+                onPressed: () => projects.setGroupByProject(!byProject),
+                icon: Icon(
+                  byProject
+                      ? Icons.label_important_outline_rounded
+                      : Icons.folder_copy_outlined,
+                  size: 18,
+                ),
+                label: Text(byProject ? 'Group by state' : 'Group by project'),
               ),
-              if (section != DigestSection.quiet || _quietOpen)
-                for (final agent in agents)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: DigestAgentCard(
-                      key: ValueKey('digest-card-${agent.sessionId}'),
-                      agent: agent,
-                      live: _live(agent),
-                      canAct: _host(agent.hostId) != null,
-                      summarizing:
-                          controller.isSummarizing && agent.summaryPending,
-                      isDeciding: widget.attention.isDeciding,
-                      now: now,
-                      onOpen: () => _open(agent),
-                      onChat: () => _open(agent, chat: true),
-                      onTerminal: () => _open(agent, chat: false),
-                      onReview: _reviewAction(agent),
-                      onHandOff: _handOffAction(agent),
-                      onTell: (answer) =>
-                          unawaited(_tell(agent, answer: answer)),
-                      onDecide: (request, verdict) =>
-                          unawaited(_decide(agent, request, verdict)),
-                    ),
-                  ),
-            ],
+            ),
+          if (byProject)
+            for (final (project, agents) in _byProject(projects, overview)) ...[
+              ProjectHeaderTile(
+                key: ValueKey('digest-project-${project.key}'),
+                project: project,
+                collapsed: projects.isCollapsed(project),
+                count: agents.length,
+                onToggle: () => projects.toggleCollapsed(project),
+              ),
+              if (!projects.isCollapsed(project))
+                for (final agent in agents) card(agent),
+            ]
+          else
+            for (final section in DigestSection.values)
+              if (overview.section(section) case final agents
+                  when agents.isNotEmpty) ...[
+                _SectionTitle(
+                  key: ValueKey('digest-section-${section.name}'),
+                  section: section,
+                  count: agents.length,
+                  open: section != DigestSection.quiet || _quietOpen,
+                  onToggle: section == DigestSection.quiet
+                      ? () => setState(() => _quietOpen = !_quietOpen)
+                      : null,
+                ),
+                if (section != DigestSection.quiet || _quietOpen)
+                  for (final agent in agents) card(agent),
+              ],
         ];
         final list = ListView(
           key: const ValueKey('agents-dashboard'),

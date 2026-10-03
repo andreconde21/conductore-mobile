@@ -2,6 +2,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/this_computer/data/device_local_sync.dart';
@@ -38,6 +39,7 @@ abstract final class AppSettingsCodec {
     'speechLanguage',
     'voice',
     'quickActions',
+    'projects',
   ];
 
   static Map<String, Object?> encode(ThemeController theme) {
@@ -77,6 +79,8 @@ abstract final class AppSettingsCodec {
       'quickActions': [
         for (final action in theme.quickActions) action.toJson(),
       ],
+      // The project view's layout and choices (CON-065).
+      'projects': theme.projectPrefs.toJson(),
     };
   }
 
@@ -177,6 +181,10 @@ abstract final class AppSettingsCodec {
     final quickActions = json['quickActions'];
     if (quickActions is List) {
       await theme.setQuickActions(QuickAction.listFromJson(quickActions));
+    }
+    final projects = json['projects'];
+    if (projects is Map) {
+      await theme.setProjectPrefs(ProjectPrefs.fromJson(projects));
     }
   }
 

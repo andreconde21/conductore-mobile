@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- feat: `sidebar-layout` (capability `sheprd-sidebar`, CON-065): sheprd's project sidebar, `$XDG_CONFIG_HOME/herdr/sidebar.toml` else `~/.config/herdr/sidebar.toml`, read-only as JSON (`{found, path, mtimeMs, layout}`, `{found: false}`, or `{found: true, error}` for a file it cannot read), so the app groups workspaces into the same projects. Only `compact`, `active_only`, `show_hidden`, `other_collapsed`, `recent_hours`, `hidden`, `ungrouped` and `[[group]]` `name`/`pinned`/`collapsed`/`match`/`members`/`short` are passed on. Parsed by `lib/toml-lite.js`, a strict TOML subset (strings, integers, booleans, one-level arrays, tables and arrays of tables) that refuses anything else instead of guessing. The file is never written.
+
 ## 1.2.1 (2026-09-30)
 
 - fix: `usage` lists the live Claude login when cswap does not manage it (CON-057): with no managed account active, `cswap status --json` names it and it is added as an active row with `slot: null`, `managed: false` and no windows (a masked email as label). Before, a `/login` to an account never `cswap add`ed was missing and both managed accounts showed as inactive. Only asked when no managed account is live; for an unmanaged login cswap reads `~/.claude.json` alone.

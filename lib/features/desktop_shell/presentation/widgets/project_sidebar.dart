@@ -6,6 +6,8 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_sidebar.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_state_dot.dart';
 import 'package:flutter/material.dart';
@@ -199,6 +201,11 @@ class ProjectCounts extends StatelessWidget {
 /// workspaces and sessions on every machine. Rows open, drag onto panes
 /// and have the same right-click menu as in the Machines tab; a project's
 /// own right-click (or its ⋯) lists its quick actions.
+///
+/// With a [layout] (CON-065) it is sheprd's sidebar: the layout's projects
+/// (pinned first), then Other; the all / active filter, the needs-you
+/// counter and the detailed / compact view in a header; collapsed
+/// projects show their worst state and a count.
 class ProjectSidebar extends StatefulWidget {
   const ProjectSidebar({
     required this.controller,
@@ -211,8 +218,25 @@ class ProjectSidebar extends StatefulWidget {
     this.selectedKey,
     this.header,
     this.footer,
+    this.layout,
+    this.tokensToday = const {},
+    this.onNeedsYou,
+    this.onEntryMenu,
     super.key,
   });
+
+  /// A row's right-click in the layout view: its project actions with the
+  /// usual ones. Null uses [onContextMenu].
+  final void Function(ProjectEntry entry, ProjectGroup project, Offset at)?
+  onEntryMenu;
+
+  final ProjectLayoutController? layout;
+
+  /// Today's tokens per project key, when the usage reports tell.
+  final Map<String, int> tokensToday;
+
+  /// The needs-you counter's tap.
+  final VoidCallback? onNeedsYou;
 
   final DesktopShellController controller;
   final List<ProjectGroup> projects;
@@ -247,10 +271,12 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
     final filter = controller.filter.trim().toLowerCase();
+    final layout = widget.layout;
+    final all = layout == null ? projects : layout.visibleGroups(projects);
     final shown = filter.isEmpty
-        ? projects
+        ? all
         : [
-            for (final project in projects)
+            for (final project in all)
               if (project.name.toLowerCase().contains(filter) ||
                   project.members.any(
                     (node) => node.label.toLowerCase().contains(filter),
@@ -291,6 +317,21 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
               ),
             ),
           ),
+          if (layout != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+              child: ProjectViewBar(
+                controller: layout,
+                needsYou: ProjectLayoutController.needsYouCount(projects),
+                onNeedsYou: widget.onNeedsYou,
+                hiddenCount: projects.fold(
+                  0,
+                  (sum, project) =>
+                      sum + project.entries.where((e) => e.hidden).length,
+                ),
+                dense: true,
+              ),
+            ),
           Expanded(
             child: shown.isEmpty
                 ? Padding(
@@ -321,6 +362,8 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
   }
 
   List<Widget> _rows(BuildContext context, ProjectGroup project) {
+    final layout = widget.layout;
+    if (layout != null) return _layoutRows(context, layout, project);
     final expanded =
         controller.filter.trim().isNotEmpty ||
         controller.prefs.isExpanded(
@@ -350,6 +393,93 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
             onOpen: () => widget.onOpen(node),
             onContextMenu: (position) => widget.onContextMenu(node, position),
           ),
+    ];
+  }
+
+  void _entryMenu(ProjectEntry entry, ProjectGroup project, Offset at) {
+    final menu = widget.onEntryMenu;
+    if (menu != null) {
+      menu(entry, project, at);
+    } else {
+      widget.onContextMenu(entry.node, at);
+    }
+  }
+
+  /// sheprd's rows: the header (worst state and count when collapsed),
+  /// then one row per workspace (compact) or per agent (detailed).
+  List<Widget> _layoutRows(
+    BuildContext context,
+    ProjectLayoutController layout,
+    ProjectGroup project,
+  ) {
+    final entries = layout.visibleEntries(project);
+    final collapsed =
+        controller.filter.trim().isEmpty && layout.isCollapsed(project);
+    final names = widget.machineNames;
+    return [
+      ProjectHeaderTile(
+        key: ValueKey('project-row-${project.key}'),
+        project: project,
+        collapsed: collapsed,
+        count: entries.length,
+        tokensToday: widget.tokensToday[project.key],
+        leading: project.isOther
+            ? null
+            : ProjectIcon(
+                name: project.name,
+                icon: widget.iconFor(project),
+                size: 16,
+              ),
+        onToggle: () => layout.toggleCollapsed(project),
+        onMenu: (position) => widget.onProjectMenu(project, position),
+        trailing: project.isOther
+            ? null
+            : IconButton(
+                key: ValueKey('project-menu-${project.key}'),
+                tooltip: 'Quick actions and more',
+                iconSize: 16,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 26,
+                  height: 26,
+                ),
+                color: AppPalette.of(context).mutedForeground,
+                onPressed: () => widget.onProjectMenu(project, null),
+                icon: const Icon(Icons.more_horiz_rounded),
+              ),
+      ),
+      if (!collapsed)
+        for (final entry in entries)
+          if (layout.compact || entry.agentRows.isEmpty)
+            _MemberRow(
+              key: ValueKey('project-member-${project.key}-${entry.node.key}'),
+              node: entry.node,
+              machineName: names[entry.node.machineId] ?? '',
+              selected: entry.node.key == widget.selectedKey,
+              faded: !entry.active || entry.hidden,
+              onOpen: () => widget.onOpen(entry.node),
+              onContextMenu: (position) => _entryMenu(entry, project, position),
+            )
+          else
+            for (final agent in entry.agentRows)
+              if (!layout.activeOnly ||
+                  entry.active &&
+                      (agent.dot != SidebarDot.idle || entry.node.openInApp))
+                _MemberRow(
+                  key: ValueKey('project-agent-${project.key}-${agent.key}'),
+                  node: agent,
+                  machineName: [
+                    if (entry.node.label.toLowerCase() !=
+                        project.name.toLowerCase())
+                      entry.node.label,
+                    names[entry.node.machineId] ?? '',
+                  ].where((part) => part.isNotEmpty).join(' · '),
+                  selected: agent.key == widget.selectedKey,
+                  faded: !entry.active || entry.hidden,
+                  onOpen: () => widget.onOpen(agent),
+                  onContextMenu: (position) =>
+                      _entryMenu(entry, project, position),
+                ),
     ];
   }
 }
@@ -455,12 +585,16 @@ class _MemberRow extends StatelessWidget {
     required this.selected,
     required this.onOpen,
     required this.onContextMenu,
+    this.faded = false,
     super.key,
   });
 
   final SidebarNode node;
   final String machineName;
   final bool selected;
+
+  /// Idle for long, or hidden: dimmed, like sheprd's "all agents" view.
+  final bool faded;
   final VoidCallback onOpen;
   final ValueChanged<Offset> onContextMenu;
 
@@ -566,7 +700,7 @@ class _MemberRow extends StatelessWidget {
           ),
         ),
       ),
-      child: tile,
+      child: faded ? Opacity(opacity: 0.5, child: tile) : tile,
     );
   }
 }
