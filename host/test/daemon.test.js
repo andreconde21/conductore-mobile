@@ -49,7 +49,10 @@ const env = {
   PATH: `${fakeBin}:${process.env.PATH}`,
   CONDUCTORE_HOME: home,
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
-  CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json')
+  CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json'),
+  // `install` also registers the other agents present here (OpenCode's
+  // plugin goes to $XDG_CONFIG_HOME/opencode): never the real config.
+  XDG_CONFIG_HOME: path.join(home, 'config')
 }
 // Even a tmux call without -S (the fake on PATH aside) can only reach a
 // private "default" server, never the real one.
