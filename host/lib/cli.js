@@ -91,12 +91,12 @@ const USAGE = `usage: conductore-hostd <command>
                                   first appeared at; --since: only newer
   usage [--days 7] [--since <iso>] [--from YYYY-MM-DD] [--to YYYY-MM-DD]
         [--day YYYY-MM-DD] [--hourly] [--sessions] [--max-bytes N] [--max-ms N]
-                                  Claude Code / Codex limits, context per
+        [--fresh]                 Claude Code / Codex limits, context per
                                   session, tokens and estimated cost per
                                   day (--hourly: hour), project and model
                                   (incremental scan; --sessions: per
                                   session too); with cswap, every Claude
-                                  account's limits
+                                  account's limits (--fresh: not cached)
   cswap-switch <slot> | --best    switch the Claude account for new
                                   sessions (cswap switch)
   summarize [--max-words 45] [--timeout-ms 20000]
@@ -634,13 +634,16 @@ async function usageCmd (args) {
     // Every cswap account's limits; nothing at all without cswap. Read
     // first: the scan counts new messages for the account active now.
     let cswap = null
-    try { cswap = await cswapMod().accounts({ cacheFile: cswapCachePath() }) } catch {}
+    // --fresh (the phone opening its usage screen, pull to refresh): ask
+    // cswap now rather than answer from its 60 s cache.
+    try { cswap = await cswapMod().accounts({ cacheFile: cswapCachePath(), ttlMs: flags.fresh === true ? 0 : undefined }) } catch {}
     const active = cswap && Array.isArray(cswap.accounts) ? cswap.accounts.find(a => a && a.active) : null
     if (active && !cswap.stale) opts.activeAccount = active.label
     const result = usageMod().compute(opts)
     if (cswap) {
       const { accounts, ...meta } = cswap
-      result.claude.accounts = accounts
+      // Checked against what the running sessions report (CON-067).
+      result.claude.accounts = cswapMod().withLiveLimits(accounts, result.claude.limits, result.generatedAt)
       result.claude.cswap = meta
     }
     // The companion's own claude calls for `digest --summaries` (not in any

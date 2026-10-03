@@ -22,6 +22,15 @@
 // `cswap status --json` names that login and it is added as one more row:
 // `slot: null`, `managed: false`, active, no windows (CON-057). For an
 // unmanaged login cswap answers from ~/.claude.json alone, no network.
+// withLiveLimits() then checks both against the sessions' statusline
+// limits (CON-067): whether "not in cswap" holds, which account sessions
+// really run on, and that account's newest numbers.
+//
+// Every window is answered as of now: one that reset since it was measured
+// is `expired` at 0 %. Accounts whose login cswap lost (`relogin_required`)
+// are `needsLogin`, their numbers the last good ones (`stale`, `usageAt`).
+// `usage --fresh` (the phone opening the usage screen, or pulling to
+// refresh) asks cswap again instead of answering from the 60 s cache.
 // A new `cswap add` or `remove` rewrites cswap's sequence.json, which
 // drops the cache at once rather than after the TTL.
 
@@ -97,8 +106,26 @@ function isoMs (v) {
 function windowOf (w, now) {
   if (!w || typeof w !== 'object' || typeof w.pct !== 'number' || !Number.isFinite(w.pct)) return null
   const resetsAt = isoMs(w.resetsAt)
-  return { usedPct: Math.max(0, Math.min(100, w.pct)), resetsAt, expired: !!(resetsAt && resetsAt <= now) }
+  return settle({ usedPct: Math.max(0, Math.min(100, w.pct)), resetsAt, expired: false }, now)
 }
+
+// A window that reset since it was measured is `expired` and at 0 %: its
+// new use is unknown until cswap measures again. Rows are cached, so this
+// is applied again whenever they are answered.
+function settle (w, now) {
+  return w.resetsAt && w.resetsAt <= now ? { ...w, usedPct: 0, expired: true } : w
+}
+
+function settleRow (row, now) {
+  const out = { ...row, limits: {} }
+  for (const [k, w] of Object.entries(row.limits || {})) out.limits[k] = settle(w, now)
+  if (row.perModel) out.perModel = row.perModel.map(w => settle(w, now))
+  return out
+}
+
+// cswap's usageStatus values that mean the account's login is gone: its
+// numbers are the last good ones and stay so until `cswap` logs in again.
+const RELOGIN = new Set(['relogin_required', 'token_expired', 'unauthorized', 'revoked'])
 
 // `cswap list --json` (schemaVersion 1) -> { activeSlot, accounts }, or null
 // for anything else.
@@ -127,6 +154,7 @@ function parseList (obj, now = Date.now()) {
       limits
     }
     if (u && !fresh) row.stale = true
+    if (RELOGIN.has(row.status)) row.needsLogin = true
     const at = isoMs(fresh ? a.usageFetchedAt : a.lastGoodFetchedAt)
     if (at) row.usageAt = at
     const perModel = []
@@ -150,6 +178,60 @@ function unmanagedRow (obj) {
   const label = maskEmail(a.email)
   if (!label) return null
   return { slot: null, alias: null, label, active: true, disabled: false, managed: false, status: null, limits: {} }
+}
+
+const SAME_WINDOW_MS = 5 * 60 * 1000
+
+// The account rows next to what the running sessions report (`live`: the
+// Claude limits `usage` answers, from the statusline, with `at`). cswap
+// knows who the login in ~/.claude.json is, not which account sessions
+// actually run on; their weekly window tells (it resets at a time of its
+// own per account):
+// * the one managed account whose weekly window resets when the live one
+//   does is `live` (sessions use it), with the live numbers when they are
+//   newer than cswap's;
+// * the unmanaged login is `inCswap: false` only when the live window
+//   matches no managed account, and then carries the live numbers; with
+//   no live numbers, or when they match a managed account, it is
+//   `inCswap: null`: the current login, nothing claimed about cswap.
+function withLiveLimits (accounts, live, now = Date.now()) {
+  const rows = (accounts || []).map(a => settleRow(a, now))
+  const limits = Array.isArray(live) ? live : []
+  const week = limits.find(l => l && l.label === '7d' && l.resetsAt)
+  const at = Math.max(0, ...limits.map(l => l.at || 0)) || null
+  const matches = week
+    ? rows.filter(r => r.slot != null && r.limits['7d'] && r.limits['7d'].resetsAt && Math.abs(r.limits['7d'].resetsAt - week.resetsAt) <= SAME_WINDOW_MS)
+    : []
+  const liveRow = matches.length === 1 ? matches[0] : null
+  const windows = () => {
+    const out = {}
+    for (const l of limits) {
+      if (l.label === '5h' || l.label === '7d') out[l.label] = { usedPct: l.usedPct, resetsAt: l.resetsAt || null, expired: !!l.expired }
+    }
+    return out
+  }
+  if (liveRow) {
+    liveRow.live = true
+    if (at && !(liveRow.usageAt >= at) && !liveRow.needsLogin) {
+      liveRow.limits = { ...liveRow.limits, ...windows() }
+      liveRow.usageAt = at
+      delete liveRow.stale
+      liveRow.source = 'statusline'
+    }
+  }
+  for (const r of rows) {
+    if (r.managed !== false) continue
+    if (week && !liveRow && matches.length === 0) {
+      r.inCswap = false
+      r.live = true
+      r.limits = windows()
+      if (at) r.usageAt = at
+      r.source = 'statusline'
+    } else {
+      r.inCswap = null
+    }
+  }
+  return rows
 }
 
 // cswap's account store (Linux: $XDG_DATA_HOME/claude-swap, else
@@ -264,7 +346,7 @@ async function accounts (opts = {}) {
   const mtime = opts.listMtime !== undefined ? opts.listMtime : listMtime(env)
   const usable = cached && cached.bin === bin && cached.at <= now ? cached : null
   const lastGood = usable && usable.data && usable.goodAt && now - usable.goodAt < STALE_MAX_MS ? usable : null
-  const answer = (data, fetchedAt, extra) => ({ present: true, activeSlot: data.activeSlot, accounts: data.accounts, fetchedAt, ...extra })
+  const answer = (data, fetchedAt, extra) => ({ present: true, activeSlot: data.activeSlot, accounts: data.accounts.map(a => settleRow(a, now)), fetchedAt, ...extra })
   if (usable && now - usable.at < ttl && (usable.mtime || 0) === mtime) {
     if (!usable.failed) return answer(usable.data, usable.goodAt)
     if (lastGood) return answer(lastGood.data, lastGood.goodAt, { stale: true })
@@ -325,4 +407,4 @@ async function switchAccount (opts = {}) {
   }
 }
 
-module.exports = { findCswap, maskEmail, maskEmails, parseList, parseJson, unmanagedRow, sequenceFile, accounts, switchAccount, run, TTL_MS, STALE_MAX_MS }
+module.exports = { findCswap, maskEmail, maskEmails, parseList, parseJson, unmanagedRow, withLiveLimits, sequenceFile, accounts, switchAccount, run, TTL_MS, STALE_MAX_MS }
