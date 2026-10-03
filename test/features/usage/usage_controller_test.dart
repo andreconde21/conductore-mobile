@@ -262,6 +262,68 @@ void main() {
     detach();
   });
 
+  // CON-067: the numbers on a usage screen just opened, or pulled to
+  // refresh, were up to a minute old in the app and another minute in the
+  // companion's cswap cache.
+  testWidgets('a usage screen opening asks at once, cswap included', (
+    tester,
+  ) async {
+    final controller = build();
+    final bar = controller.attachView();
+    await tester.pump();
+    expect(runner.commands, hasLength(1));
+    expect(runner.commands.single, isNot(contains('--fresh')));
+    // A reply seconds old: the bar alone would wait for the interval.
+    now = now.add(const Duration(seconds: 5));
+    final screen = controller.attachView(refresh: true);
+    await tester.pump();
+    expect(runner.commands, hasLength(2));
+    expect(runner.commands.last, contains('--fresh'));
+    await controller.refresh();
+    expect(runner.commands, hasLength(3));
+    expect(runner.commands.last, contains('--fresh'));
+    // The regular poll stays cached.
+    now = now.add(const Duration(seconds: 60));
+    await tester.pump(const Duration(seconds: 60));
+    expect(runner.commands, hasLength(4));
+    expect(runner.commands.last, isNot(contains('--fresh')));
+    screen();
+    bar();
+  });
+
+  testWidgets('limits follow the newest report, not a later window of '
+      'another account', (tester) async {
+    final at = now.subtract(const Duration(minutes: 1));
+    runner.reply = () => FakeUsageRunner.ok(
+      usageReplyJson(
+        limits: [
+          {
+            'label': '7d',
+            'usedPct': 99,
+            'resetsAt': resets
+                .add(const Duration(days: 4))
+                .millisecondsSinceEpoch,
+            'at': now.subtract(const Duration(hours: 9)).millisecondsSinceEpoch,
+          },
+        ],
+      ),
+    );
+    source.live['box'] = [
+      UsageLimit(
+        label: '7d',
+        usedPct: 52,
+        resetsAt: resets.add(const Duration(days: 2)),
+        reportedAt: at,
+      ),
+    ];
+    final controller = build();
+    final detach = controller.attachView();
+    await tester.pump();
+    expect(controller.summary.weekly!.usedPct, 52);
+    expect(controller.summary.weekly!.reportedAt, at);
+    detach();
+  });
+
   testWidgets('remembers the collapsed bar', (tester) async {
     final controller = build();
     await tester.pump();

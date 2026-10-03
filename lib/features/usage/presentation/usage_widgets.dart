@@ -154,10 +154,14 @@ mixin UsageViewAttachment<T extends StatefulWidget> on State<T> {
   UsageController get usageController;
   VoidCallback? _detach;
 
+  /// A screen opened to look at usage asks every machine at once
+  /// ([UsageController.attachView] with `refresh`); the home bar does not.
+  bool get refreshUsageOnOpen => false;
+
   @override
   void initState() {
     super.initState();
-    _detach = usageController.attachView();
+    _detach = usageController.attachView(refresh: refreshUsageOnOpen);
   }
 
   @override
@@ -642,6 +646,9 @@ class _UsageBreakdownState extends State<UsageBreakdown>
   UsageController get usageController => widget.controller;
 
   @override
+  bool get refreshUsageOnOpen => true;
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.controller,
@@ -868,11 +875,15 @@ class UsageLimitBar extends StatelessWidget {
     final palette = AppPalette.of(context);
     final pct = limit.effectivePct(now);
     final reset = limit.resetsAt;
-    final resetText = reset == null
-        ? null
-        : !reset.isAfter(now)
-        ? 'reset'
-        : 'resets ${_resetsIn(reset.difference(now))}';
+    final reportedAt = limit.reportedAt;
+    final resetText = [
+      if (limit.expired || (reset != null && !reset.isAfter(now)))
+        'reset'
+      else if (reset != null)
+        'resets ${_resetsIn(reset.difference(now))}',
+      // How old the figure is: an idle session's report can be hours old.
+      if (reportedAt != null) 'updated ${formatUsageAge(now, reportedAt)}',
+    ].join(' · ');
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Column(
@@ -887,7 +898,7 @@ class UsageLimitBar extends StatelessWidget {
                 ),
               ),
               Text(
-                '${pct.round()}%${resetText == null ? '' : ' · $resetText'}',
+                '${pct.round()}%${resetText.isEmpty ? '' : ' · $resetText'}',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: palette.mutedForeground,
                 ),
@@ -922,6 +933,9 @@ String formatResetsIn(Duration delta) {
   }
   return 'in ${math.max(1, delta.inMinutes)}m';
 }
+
+/// How long before [now] [at] was: `11h ago`, `just now`.
+String formatUsageAge(DateTime now, DateTime at) => _ago(now.difference(at));
 
 /// `11h ago`, `3d ago`, `just now`.
 String _ago(Duration delta) {
@@ -1029,8 +1043,12 @@ class _AccountRow extends StatelessWidget {
     );
     String? reset(String name, UsageLimit? limit) {
       final at = limit?.resetsAt;
-      if (at == null || !at.isAfter(now)) {
+      if (limit == null || at == null) {
         return null;
+      }
+      // A window that ended since it was measured shows 0 %: say so.
+      if (limit.expired || !at.isAfter(now)) {
+        return '$name reset';
       }
       return '$name ${formatResetsIn(at.difference(now))}';
     }
@@ -1041,21 +1059,38 @@ class _AccountRow extends StatelessWidget {
     ];
     final usageAt = account.usageAt;
     final notes = [
+      if (account.needsLogin) 'Needs re-login',
+      if (account.unmanaged) 'Current login',
+      if (account.notInCswap) 'not in cswap (cswap add to switch)',
+      if (account.live && !account.active) 'in use by sessions',
       if (account.active && showMachines)
         'active on ${account.activeOn.join(', ')}',
       if (account.disabled) 'disabled',
-      if (account.unmanaged) 'not in cswap (cswap add to switch)',
-      if (account.stale && usageAt != null)
-        'as of ${_ago(now.difference(usageAt))}',
+      // Every figure's age, not only cswap's stale ones.
+      if (usageAt != null) 'updated ${formatUsageAge(now, usageAt)}',
       if (resets.isNotEmpty) 'resets ${resets.join(' · ')}',
     ];
+    // Numbers cswap cannot refresh are greyed.
+    final ringPair = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _LabeledRing(label: '5h', limit: account.fiveHour, now: now),
+        const SizedBox(width: 8),
+        _LabeledRing(label: 'Week', limit: account.weekly, now: now),
+      ],
+    );
+    final rings = account.needsLogin
+        ? Opacity(
+            key: ValueKey('usage-account-greyed-${account.label}'),
+            opacity: 0.4,
+            child: ringPair,
+          )
+        : ringPair;
     final row = Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
-          _LabeledRing(label: '5h', limit: account.fiveHour, now: now),
-          const SizedBox(width: 8),
-          _LabeledRing(label: 'Week', limit: account.weekly, now: now),
+          rings,
           const SizedBox(width: 12),
           Expanded(
             child: Column(

@@ -140,6 +140,9 @@ class _UsageExplorerViewState extends State<UsageExplorerView>
   UsageController get usageController => widget.usage;
 
   @override
+  bool get refreshUsageOnOpen => true;
+
+  @override
   void initState() {
     super.initState();
     Telemetry.instance.track(const TelemetryEvent.usageExplorerOpened());

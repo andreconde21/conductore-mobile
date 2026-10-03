@@ -268,7 +268,11 @@ class UsageExplorerController extends ChangeNotifier {
     _timer = null;
   }
 
-  Future<void> refresh() => _fetchAll(force: true);
+  /// Pull to refresh, the refresh button: the range and also the limits
+  /// and accounts above it.
+  Future<void> refresh() async {
+    await Future.wait([_fetchAll(force: true), usage.refresh()]);
+  }
 
   void setPreset(UsageRangePreset preset, {UsageDateRange? custom}) {
     if (preset == _preset && custom == null) {
