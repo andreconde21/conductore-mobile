@@ -13,9 +13,16 @@ const { pathToFileURL } = require('url')
 const { tempDir, cleanup } = require('./helpers/cleanup')
 
 const root = tempDir('conductore-ocplugin-')
+process.env.HOME = path.join(root, 'home')
+process.env.XDG_CONFIG_HOME = path.join(root, 'config')
+process.env.XDG_DATA_HOME = path.join(root, 'data')
+const realPlugins = path.join(require('os').userInfo().homedir, '.config', 'opencode', 'plugins')
+const listing = () => { try { return fs.readdirSync(realPlugins).sort() } catch { return null } }
+const realBefore = listing()
 const opencode = require('../lib/adapters/opencode')
 
 test.after(() => cleanup())
+test.after(() => assert.deepEqual(listing(), realBefore, `${realPlugins} changed`))
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const log = path.join(root, 'hook.log')

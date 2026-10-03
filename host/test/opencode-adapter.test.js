@@ -21,6 +21,27 @@ process.env.CONDUCTORE_SOCKET = path.join(root, 'none.sock')
 // Never near the real OpenCode data or config.
 process.env.XDG_DATA_HOME = path.join(root, 'data')
 process.env.XDG_CONFIG_HOME = path.join(root, 'config')
+process.env.HOME = path.join(root, 'home')
+
+// The real OpenCode config of whoever runs the tests: never written.
+const realConfig = path.join(require('os').userInfo().homedir, '.config', 'opencode')
+const snapshot = dir => {
+  const out = {}
+  const walk = d => {
+    let names = []
+    try { names = fs.readdirSync(d) } catch { return }
+    for (const n of names) {
+      if (n === 'node_modules') continue
+      const f = path.join(d, n)
+      const st = fs.lstatSync(f)
+      if (st.isDirectory()) walk(f)
+      else out[f] = `${st.size}:${st.mtimeMs}`
+    }
+  }
+  walk(dir)
+  return out
+}
+const realBefore = snapshot(realConfig)
 
 const adapters = require('../lib/adapters')
 const opencode = require('../lib/adapters/opencode')
@@ -30,6 +51,10 @@ const usage = require('../lib/usage')
 const { contract } = require('./helpers/adapter-contract')
 
 test.after(() => cleanup())
+
+test.after(() => {
+  assert.deepEqual(snapshot(realConfig), realBefore, `${realConfig} changed`)
+})
 
 const sqliteOk = !!opencode.sqlite()
 const FIXTURE = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'opencode', '1.18.34.json'), 'utf8'))
@@ -270,7 +295,10 @@ test('usage: an opencode section with tokens and cost per day, project and model
 })
 
 test('install drops our plugin file only; uninstall removes only ours', () => {
-  const env = { ...process.env, XDG_CONFIG_HOME: path.join(root, 'cfg') }
+  // Without XDG_CONFIG_HOME the plugin goes under HOME (a temp one here).
+  const homeOnly = { PATH: '/usr/bin:/bin', HOME: path.join(root, 'home2') }
+  assert.equal(opencode.pluginPath(homeOnly), path.join(root, 'home2', '.config', 'opencode', 'plugins', 'conductore.js'))
+  const env = { ...process.env, HOME: path.join(root, 'home'), XDG_CONFIG_HOME: path.join(root, 'cfg') }
   const hookBin = path.join(__dirname, '..', 'bin', 'conductore-hook')
   const dir = path.join(root, 'cfg', 'opencode')
   fs.mkdirSync(path.join(dir, 'plugins'), { recursive: true })
