@@ -275,6 +275,26 @@ void main() {
       expect(notification.reviewAll, isFalse);
     });
 
+    // CON-062: a question's Allow did nothing (Claude Code waits for the
+    // answers): no buttons, the tap opens the question instead.
+    test('a question: its text, no Allow / Deny buttons', () {
+      final notification = build(
+        _agent(
+          pending: [
+            const PendingPermissionRequest(
+              id: 'q1',
+              toolName: 'AskUserQuestion',
+              summary: 'Which DB?',
+              questions: [PendingQuestion(question: 'Which DB?')],
+            ),
+          ],
+        ),
+      );
+      expect(notification.text, 'Question: Which DB?');
+      expect(notification.action, isNull);
+      expect(notification.reviewAll, isFalse);
+    });
+
     test('several: the first item, "+N more", up to five lines, Review '
         'all', () {
       final notification = build(

@@ -1417,14 +1417,14 @@ class _ChatViewPageState extends State<ChatViewPage>
                   onDecline: () => _decide(request, PermissionVerdict.deny),
                 )
               : ChatApprovalCard(
-            key: ValueKey('approval-${request.id}'),
-            request: request,
-            busy:
-                _chat.isDeciding(request.id) ||
-                (widget.attention?.isDeciding(request.id) ?? false),
-            onDecide: (verdict) => _decide(request, verdict),
-            onTrust: _smartApprovals ? () => _trust(request) : null,
-          ),
+                  key: ValueKey('approval-${request.id}'),
+                  request: request,
+                  busy:
+                      _chat.isDeciding(request.id) ||
+                      (widget.attention?.isDeciding(request.id) ?? false),
+                  onDecide: (verdict) => _decide(request, verdict),
+                  onTrust: _smartApprovals ? () => _trust(request) : null,
+                ),
         ),
       for (final o in outgoing.reversed)
         _ThreadRow(

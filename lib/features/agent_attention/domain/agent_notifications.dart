@@ -502,7 +502,10 @@ abstract final class AgentNotificationPolicy {
       items.add(extra);
     }
     final first = requests.firstOrNull;
-    final actionable = first != null && !preferences.summaryOnly;
+    // A question has no Allow: its answer needs the app (the card's
+    // options), so a tap opens it instead.
+    final actionable =
+        first != null && !first.isQuestion && !preferences.summaryOnly;
     return AgentNotification(
       hostId: hostId,
       agentId: agent.id,
@@ -524,9 +527,13 @@ abstract final class AgentNotificationPolicy {
     );
   }
 
-  /// "Approve Bash: npm test -- due-date · High risk".
+  /// "Approve Bash: npm test -- due-date · High risk"; a question:
+  /// "Question: Which database?".
   static String itemLine(PendingPermissionRequest request) {
     final summary = _cap(request.summary.trim());
+    if (request.isQuestion) {
+      return 'Question${summary.isEmpty ? '' : ': $summary'}';
+    }
     final risk = request.risk?.level.label;
     return 'Approve ${request.toolName}'
         '${summary.isEmpty ? '' : ': $summary'}'
