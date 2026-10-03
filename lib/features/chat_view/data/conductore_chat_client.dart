@@ -50,18 +50,25 @@ class ConductoreChatClient {
       'from the Conductore Mobile repository there, then check with '
       '"conductore-hostd doctor".';
 
+  /// [cursor] / [beforeCursor] page a neutral transcript (agents other
+  /// than Claude Code); [since] / [before] are Claude Code's byte offsets.
   static String transcriptCommand(
     String sessionId, {
     int? since,
     int? before,
     int? tailBytes,
     int? maxBytes,
+    String? cursor,
+    String? beforeCursor,
   }) {
     final args = [
       'transcript',
       shellQuoteArgument(sessionId),
       if (since != null) '--since $since',
       if (before != null) '--before $before',
+      if (cursor != null) '--cursor ${shellQuoteArgument(cursor)}',
+      if (beforeCursor != null)
+        '--before-cursor ${shellQuoteArgument(beforeCursor)}',
       if (tailBytes != null) '--tail-bytes $tailBytes',
       if (maxBytes != null) '--max-bytes $maxBytes',
       // Last: an older companion would read a word after it as its value.
@@ -122,6 +129,8 @@ class ConductoreChatClient {
     int? before,
     int? tailBytes,
     int? maxBytes,
+    String? cursor,
+    String? beforeCursor,
   }) async {
     final result = await _runner.run(
       transcriptCommand(
@@ -130,6 +139,8 @@ class ConductoreChatClient {
         before: before,
         tailBytes: tailBytes,
         maxBytes: maxBytes,
+        cursor: cursor,
+        beforeCursor: beforeCursor,
       ),
       timeout: _timeout,
     );

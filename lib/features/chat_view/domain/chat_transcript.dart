@@ -183,6 +183,10 @@ class TranscriptPage {
     required this.entries,
     this.reset = false,
     this.agent,
+    this.items,
+    this.cursor,
+    this.startCursor,
+    this.more = false,
   });
 
   /// Byte offset to continue from with `--since` (or, for a `--before`
@@ -199,6 +203,22 @@ class TranscriptPage {
   /// The file was replaced; this page is a fresh tail read.
   final bool reset;
   final ChatAgentStatus? agent;
+
+  /// A neutral page (`format: "items"`, every agent but Claude Code): its
+  /// items as sent (`NeutralChatItems` turns them into chat rows), null
+  /// for Claude Code's entries.
+  final List<Map<Object?, Object?>>? items;
+
+  /// Opaque cursors of a neutral page: `--cursor` continues after it,
+  /// `--before-cursor` [startCursor] reads the page before it (null: this
+  /// page starts the session).
+  final String? cursor;
+  final String? startCursor;
+
+  /// Another neutral page follows at once.
+  final bool more;
+
+  bool get isNeutral => items != null;
 }
 
 /// Parses `conductore-hostd transcript` JSON. Unknown line and block types
@@ -215,6 +235,7 @@ class TranscriptParser {
       if (decoded['entries'] case final List<Object?> list)
         for (final item in list) ?parseEntry(item),
     ];
+    final neutral = decoded['format'] == 'items';
     return TranscriptPage(
       offset: _int(decoded['offset']) ?? 0,
       size: _int(decoded['size']) ?? 0,
@@ -222,6 +243,16 @@ class TranscriptParser {
       reset: decoded['reset'] == true,
       entries: entries,
       agent: _agent(decoded['agent']),
+      items: neutral
+          ? [
+              if (decoded['items'] case final List<Object?> list)
+                for (final item in list)
+                  if (item is Map<Object?, Object?>) item,
+            ]
+          : null,
+      cursor: neutral ? _string(decoded['cursor']) : null,
+      startCursor: neutral ? _string(decoded['startCursor']) : null,
+      more: neutral && decoded['more'] == true,
     );
   }
 

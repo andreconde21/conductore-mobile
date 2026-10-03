@@ -92,13 +92,14 @@ void main() {
           'claude': {'chat': 'entries'},
           'codex': {'chat': 'items'},
           'gemini': {'chat': 'entries'},
+          'future': {'chat': 'other-format'},
         })!;
         expect(supportsChatView(agent('claude'), catalog), isTrue);
         expect(supportsChatView(agent('gemini'), catalog), isTrue);
-        // The neutral format is parsed (NeutralChatItems) but the Chat View
-        // does not page it yet.
-        expect(renderableChatFormats.contains('items'), isFalse);
-        expect(supportsChatView(agent('codex'), catalog), isFalse);
+        // The neutral format, paged by cursor (CON-068).
+        expect(renderableChatFormats.contains('items'), isTrue);
+        expect(supportsChatView(agent('codex'), catalog), isTrue);
+        expect(supportsChatView(agent('future'), catalog), isFalse);
         expect(
           supportsChatView(agent('claude', id: 'herdr/w1:p2'), catalog),
           isFalse,

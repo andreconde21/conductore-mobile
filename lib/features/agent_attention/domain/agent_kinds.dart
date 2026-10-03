@@ -205,7 +205,7 @@ String normalizeAgentKind(String kind) {
   return key;
 }
 
-/// Transcript formats the Chat View renders today. `items` (the neutral
-/// format, `NeutralChatItems`) joins once the chat client pages by the
-/// companion's opaque cursor (CON-068).
-const renderableChatFormats = {'entries'};
+/// Transcript formats the Chat View renders: Claude Code's `entries` and
+/// the neutral `items` (`NeutralChatItems`, paged by the companion's opaque
+/// cursor, CON-068).
+const renderableChatFormats = {'entries', 'items'};

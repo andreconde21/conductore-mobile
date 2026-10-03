@@ -532,3 +532,12 @@ test('a Codex permission request waits in the daemon and the decision reaches th
     clearInterval(d.probeTimer)
   }
 })
+
+test("the app's Codex chat fixture is what the adapter reads from the real session today", () => {
+  const file = path.join(__dirname, '..', '..', 'test', 'fixtures', 'agent_adapters', 'codex_chat_page.json')
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const { sessionId, agent, ...page } = saved
+  assert.equal(sessionId, SID)
+  assert.equal(agent.state, 'waiting_input')
+  assert.deepEqual(page, JSON.parse(JSON.stringify(codex.readTranscript(fixtures.agent, {}))))
+})
