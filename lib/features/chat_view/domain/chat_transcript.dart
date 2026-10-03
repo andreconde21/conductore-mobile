@@ -337,6 +337,7 @@ class TranscriptParser {
       batchable: info.batchable,
       suggestedRules: info.suggestedRules,
       repo: info.repo,
+      questions: parsePendingQuestions(entry['questions']),
     );
   }
 

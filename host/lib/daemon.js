@@ -19,7 +19,7 @@ const state = require('./state')
 const spool = require('./spool')
 const context = require('./context')
 const proc = require('./proc')
-const { permissionOutput } = require('./permission')
+const { permissionOutput, answerInput } = require('./permission')
 const { Approvals, CAPABILITIES } = require('./approvals')
 const approvalOps = require('./approval-ops')
 const { usageFrom } = require('./statusline')
@@ -452,17 +452,18 @@ class Daemon {
     this.probeTimer.unref()
   }
 
-  // Resolves a waiting hook. decision: allow | deny | always | timeout | gone.
-  // `rule`: the approval rule that answered it (logged as auto-approved).
+  // Resolves a waiting hook. decision: allow | deny | always | answer |
+  // timeout | gone. `rule`: the approval rule that answered it (logged as
+  // auto-approved). `answers`: an AskUserQuestion's answers ('answer').
   // Returns whether the hook received the answer.
-  settle (id, decision, message, rule = null) {
+  settle (id, decision, message, rule = null, answers = null) {
     const waiter = this.waiters.get(id)
     if (!waiter) return false
     this.waiters.delete(id)
     clearTimeout(waiter.timer)
     let delivered = false
     if (decision !== 'gone') {
-      const out = permissionOutput(waiter.event, decision, message)
+      const out = permissionOutput(waiter.event, decision, message, answers)
       delivered = writeFifo(waiter.fifo, out ? JSON.stringify(out) + '\n' : '\n')
     }
     if (!delivered) {
@@ -762,18 +763,30 @@ class Daemon {
 
   handleDecide (req, c) {
     const { requestId, decision, message } = req
-    if (!['allow', 'deny', 'always'].includes(decision)) {
-      this.reply(c, { error: 'decision must be allow, deny or always' }); c.end(); return
+    if (!['allow', 'deny', 'always', 'answer'].includes(decision)) {
+      this.reply(c, { error: 'decision must be allow, deny, always or answer' }); c.end(); return
     }
     const found = state.findPending(this.state, requestId)
     if (!found) { this.reply(c, { error: `unknown request ${requestId}` }); c.end(); return }
-    if (!this.waiters.has(requestId)) {
+    const waiter = this.waiters.get(requestId)
+    if (!waiter) {
       // Pending but nobody waiting: the hook died; clean up.
       this.commit(state.resolvePermission(this.state, requestId, 'gone'))
       this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
     }
+    // A question takes answers or a deny. Claude Code ignores a plain allow
+    // for it (the dialog stays in the terminal), so one is refused here and
+    // the request stays pending for a real answer.
+    const isQuestion = found.request.toolName === 'AskUserQuestion'
+    if (isQuestion && decision !== 'answer' && decision !== 'deny') {
+      this.reply(c, { error: 'a question takes an answer: decide <id> answer --answers <json>' }); c.end(); return
+    }
+    if (decision === 'answer') {
+      const checked = answerInput(waiter.event, req.answers)
+      if (checked.error) { this.reply(c, { error: checked.error }); c.end(); return }
+    }
     const verdict = approvalOps.decideVerdict(found.request, decision)
-    if (!this.settle(requestId, verdict.decision, message)) {
+    if (!this.settle(requestId, verdict.decision, message, null, decision === 'answer' ? req.answers : null)) {
       this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
     }
     this.reply(c, { ok: true, requestId, decision: verdict.decision, sessionId: found.agent.sessionId, ...(verdict.note ? { note: verdict.note } : {}) }); c.end()

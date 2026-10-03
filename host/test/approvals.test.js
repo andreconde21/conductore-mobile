@@ -81,8 +81,8 @@ const median = xs => { const s = [...xs].sort((a, b) => a - b); return s[Math.fl
 test('status reports the capability and a risk label on every pending request', async () => {
   await hook({ session_id: 'a1', cwd: repo, hook_event_name: 'SessionStart' })
   const st = await status()
-  assert.deepEqual(st.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar'])
-  assert.deepEqual((await cli('version')).json.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar'])
+  assert.deepEqual(st.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'question-answers'])
+  assert.deepEqual((await cli('version')).json.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'question-answers'])
   const p = hook(bash('a1', 'rm -rf node_modules'))
   const [req] = await pendingOf('a1')
   assert.deepEqual(req.risk, { level: 'high', reason: 'Deletes recursively (rm -rf): node_modules' })
@@ -165,6 +165,24 @@ test('high risk is never auto-approved, whatever the rules say', async () => {
   assert.deepEqual(out, { behavior: 'allow' })
   // Medium is covered by the catch-all Bash rule.
   assert.ok(allowed(await hook(bash('h1', 'npm install left-pad'))))
+  await cli('rules', 'remove', add.json.rule.id)
+})
+
+test('a question is never answered by a rule, nor trusted (CON-062)', async () => {
+  // An allow without answers would run AskUserQuestion with no answers (or
+  // be ignored, leaving the dialog in the terminal): the user answers it.
+  const add = await cli('rules', 'add', 'AskUserQuestion', '--scope', 'any')
+  assert.equal(add.code, 0)
+  const input = { questions: [{ question: 'Ship it?', header: 'Ship', multiSelect: false, options: [{ label: 'Yes' }, { label: 'No' }] }] }
+  const p = hook(perm('qa', 'AskUserQuestion', input))
+  const [req] = await pendingOf('qa')
+  assert.equal(req.toolName, 'AskUserQuestion')
+  const t = await cli('trust', req.id, '--minutes', '60')
+  assert.equal(t.code, 1)
+  assert.match(t.json.error, /question takes an answer/)
+  const d = await cli('decide', req.id, 'answer', '--answers', JSON.stringify({ 'Ship it?': 'Yes' }))
+  assert.equal(d.code, 0)
+  assert.deepEqual(JSON.parse((await p).stdout).hookSpecificOutput.decision.updatedInput.answers, { 'Ship it?': 'Yes' })
   await cli('rules', 'remove', add.json.rule.id)
 })
 

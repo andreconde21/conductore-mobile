@@ -865,6 +865,14 @@ class AgentAttentionController extends ChangeNotifier {
     PermissionVerdict verdict,
   ) async {
     final command = provider.decideCommand(request, verdict);
+    if (command == null && request.isQuestion) {
+      throw AppFailure(
+        request.answerable
+            ? 'Pick an answer to the question.'
+            : 'Update the Conductore companion on this machine to answer '
+                  'questions from the phone, or answer it in the terminal.',
+      );
+    }
     if (command == null) {
       throw AppFailure(
         '${provider.label} cannot answer permission requests from the phone.',

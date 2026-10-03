@@ -30,7 +30,10 @@ import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 ///   was not covered; replace everything).
 /// - `decide <requestId> allow|deny|always` → `{"ok": true, ...}` or exit 1
 ///   with `unknown request <id>` / `request expired; answer it in the
-///   terminal`.
+///   terminal`. An AskUserQuestion request (capability `question-answers`,
+///   its `pending[]` entry carries `questions`) takes
+///   `decide <requestId> answer --answers '{"<question>": "<answer>"}'` or
+///   deny; Claude Code ignores a plain allow for it.
 /// - `focus <sessionId>`, `version`, `doctor`.
 ///
 /// Agent: `{"sessionId", "name", "cwd", "tmux": {"session", "window",
@@ -206,6 +209,18 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     PermissionVerdict verdict,
   ) {
     if (request.id.isEmpty) {
+      return null;
+    }
+    final answers = request.answers;
+    if (answers != null && verdict != PermissionVerdict.deny) {
+      return remoteCommand(
+        'decide ${shellQuoteArgument(request.id)} answer '
+        '--answers ${shellQuoteArgument(jsonEncode(answers))}',
+      );
+    }
+    // A question takes answers: an allow without them would leave the
+    // dialog in the terminal while the phone dropped the request.
+    if (request.isQuestion && verdict != PermissionVerdict.deny) {
       return null;
     }
     return remoteCommand(
@@ -532,6 +547,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       batchable: info.batchable,
       suggestedRules: info.suggestedRules,
       repo: info.repo,
+      questions: parsePendingQuestions(entry['questions']),
     );
   }
 

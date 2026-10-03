@@ -447,8 +447,11 @@ Future<void> openChatView({
       request,
       verdict,
     );
+    if (command == null) {
+      throw const AppFailure('Pick an answer to the question.');
+    }
     final result = await runner.run(
-      command!,
+      command,
       timeout: const Duration(seconds: 15),
     );
     if (result.exitCode != null && result.exitCode != 0) {

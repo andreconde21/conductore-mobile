@@ -21,7 +21,11 @@ import 'package:flutter/material.dart';
 /// * with [herdrActions] (this device may not move Herdr's focus), a
 ///   banner while Herdr shows another workspace than the session's own,
 ///   with what to do about held keys, and a "Take focus" button on the
-///   split pane cover instead of taking it on a click.
+///   split pane cover instead of taking it on a click;
+/// * with [showAgentView] (an agent opened here while this device may not
+///   move Herdr's focus), the session's own screen over the live one,
+///   which mirrors another workspace, with "Show here" (the focus moves
+///   once, to the agent's pane) and the banner above it.
 class SessionFocusFrame extends StatelessWidget {
   const SessionFocusFrame({
     required this.session,
@@ -30,6 +34,7 @@ class SessionFocusFrame extends StatelessWidget {
     required this.fontFamily,
     required this.child,
     this.showSharedView = false,
+    this.showAgentView = false,
     this.herdrActions,
     super.key,
   });
@@ -39,16 +44,18 @@ class SessionFocusFrame extends StatelessWidget {
   final Brightness brightness;
   final String fontFamily;
   final bool showSharedView;
+  final bool showAgentView;
   final HerdrFocusActions? herdrActions;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
+    final cover = showSharedView || (showAgentView && herdrActions != null);
     return Stack(
       fit: StackFit.expand,
       children: [
         child,
-        if (showSharedView)
+        if (cover)
           ValueListenableBuilder<SharedViewSnapshot?>(
             valueListenable: session.sharedView,
             builder: (context, shared, _) => shared == null
@@ -59,6 +66,7 @@ class SessionFocusFrame extends StatelessWidget {
                     brightness: brightness,
                     fontFamily: fontFamily,
                     onTakeFocus: herdrActions?.takeFocusOnce,
+                    agentView: !showSharedView,
                   ),
           ),
         if (!showSharedView && herdrActions != null)
@@ -99,10 +107,14 @@ class _SharedViewCover extends StatelessWidget {
     required this.brightness,
     required this.fontFamily,
     this.onTakeFocus,
+    this.agentView = false,
   });
 
   /// Offered instead of focusing on a click, when set.
   final Future<void> Function()? onTakeFocus;
+
+  /// An agent opened here: its own screen, and "Show here".
+  final bool agentView;
   final SharedViewSnapshot shared;
   final AppPalette palette;
   final Brightness brightness;
@@ -153,14 +165,23 @@ class _SharedViewCover extends StatelessWidget {
                         spacing: 8,
                         children: [
                           Text(
-                            'Shared Herdr view$when.',
+                            agentView
+                                ? "The agent's screen$when (read-only)."
+                                : 'Shared Herdr view$when.',
                             style: TextStyle(color: muted, fontSize: 12),
                           ),
-                          TextButton(
-                            key: const ValueKey('shared-view-take-focus'),
-                            onPressed: () => unawaited(onTakeFocus!()),
-                            child: const Text('Take focus'),
-                          ),
+                          if (agentView)
+                            FilledButton(
+                              key: const ValueKey('agent-view-show-here'),
+                              onPressed: () => unawaited(onTakeFocus!()),
+                              child: const Text('Show here'),
+                            )
+                          else
+                            TextButton(
+                              key: const ValueKey('shared-view-take-focus'),
+                              onPressed: () => unawaited(onTakeFocus!()),
+                              child: const Text('Take focus'),
+                            ),
                         ],
                       ),
               ),

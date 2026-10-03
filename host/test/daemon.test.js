@@ -22,8 +22,10 @@ fs.writeFileSync(path.join(fakeBin, 'tmux'), `#!/bin/sh
 printf '%s\n' "$*" >> '${tmuxLog}'
 printf 'main\t2\t%s\t/work/t\tfixer\t4242\n' "$6"
 `, { mode: 0o755 })
-// A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9.
-// It also logs which Herdr server (HERDR_SOCKET_PATH) each call went to.
+// A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9;
+// `pane get w5:p1` answers for a pane moved since to w6:p3 (Herdr keeps
+// answering for a moved pane's old id). It also logs which Herdr server
+// (HERDR_SOCKET_PATH) each call went to.
 // A fake claude: `install` registers the newer hooks for this version.
 fs.writeFileSync(path.join(fakeBin, 'claude'), '#!/bin/sh\necho "2.1.280 (Claude Code)"\n', { mode: 0o755 })
 const herdrLog = path.join(fakeBin, 'herdr.log')
@@ -31,6 +33,10 @@ const herdrSocketLog = path.join(fakeBin, 'herdr-sockets.log')
 fs.writeFileSync(path.join(fakeBin, 'herdr'), `#!/bin/sh
 printf '%s\n' "$*" >> '${herdrLog}'
 printf '%s\n' "\${HERDR_SOCKET_PATH:-default}" >> '${herdrSocketLog}'
+if [ "$1 $2 $3" = "pane get w5:p1" ]; then
+  echo '{"id":"cli:pane:get","result":{"pane":{"pane_id":"w6:p3","tab_id":"w6:t2","workspace_id":"w6","cwd":"/work/m1"}}}'
+  exit 0
+fi
 [ "$1 $2" = "pane list" ] || exit 1
 cat <<'JSON'
 {"id":"cli:pane:list","result":{"type":"pane_list","panes":[
@@ -162,16 +168,19 @@ test('tmux location is resolved by the daemon from the variables in the spool he
 
 test("an agent in a named Herdr session records that session's socket", async () => {
   const sock = path.join(home, 'herdr-other.sock')
+  fs.writeFileSync(herdrSocketLog, '')
   await hook(ev('t3', 'SessionStart'), { HERDR_WORKSPACE_ID: 'w1', HERDR_TAB_ID: 'w1:t1', HERDR_PANE_ID: 'w1:p1', HERDR_SOCKET_PATH: sock })
   const a = (await status()).agents.find(a => a.sessionId === 't3')
   assert.deepEqual(a.herdr, { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p1', name: null, socket: sock })
 
   // Only the pane id known: its location is asked of that session's server.
-  fs.writeFileSync(herdrSocketLog, '')
   await hook(ev('t4', 'SessionStart'), { HERDR_PANE_ID: 'w3:p9', HERDR_SOCKET_PATH: sock })
   const b = (await status()).agents.find(a => a.sessionId === 't4')
   assert.deepEqual(b.herdr, { workspaceId: 'w3', tabId: 'w3:t4', paneId: 'w3:p9', name: null, socket: sock })
-  assert.equal(fs.readFileSync(herdrSocketLog, 'utf8'), `${sock}\n`)
+  // Every lookup (the checked header and the pane id) asked that server only.
+  const asked = fs.readFileSync(herdrSocketLog, 'utf8').split('\n').filter(Boolean)
+  assert.ok(asked.length >= 1)
+  assert.deepEqual([...new Set(asked)], [sock])
 })
 
 test('Herdr location without HERDR_* comes from one cached `herdr pane list`, never from the cwd', async () => {
@@ -194,6 +203,19 @@ test('Herdr location without HERDR_* comes from one cached `herdr pane list`, ne
   assert.equal(byId('h1').name, 'h1') // cwd basename is a name, not a location
   // Nine events, at most one herdr call (none if an earlier test's list is still cached).
   assert.ok(['', 'pane list\n'].includes(fs.readFileSync(herdrLog, 'utf8')))
+})
+
+test('a moved Herdr pane: the location follows the pane, not the stale HERDR_* of its processes (CON-062)', async () => {
+  // `herdr pane move` gives the pane a new id while Claude Code keeps the
+  // HERDR_* it started with: opening that old place landed on another
+  // workspace.
+  await hook(ev('m1', 'SessionStart'), { HERDR_WORKSPACE_ID: 'w5', HERDR_TAB_ID: 'w5:t1', HERDR_PANE_ID: 'w5:p1' })
+  const moved = (await status()).agents.find(a => a.sessionId === 'm1')
+  assert.deepEqual(moved.herdr, { workspaceId: 'w6', tabId: 'w6:t2', paneId: 'w6:p3', name: null, socket: null })
+  // Herdr names the pane holding the session: that wins over the header.
+  await hook(ev('h1', 'PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/x' } }), { HERDR_WORKSPACE_ID: 'w1', HERDR_TAB_ID: 'w1:t1', HERDR_PANE_ID: 'w1:p7' })
+  const h1 = (await status()).agents.find(a => a.sessionId === 'h1')
+  assert.deepEqual(h1.herdr, { workspaceId: 'w3', tabId: 'w3:t2', paneId: 'w3:p2', name: null, socket: null })
 })
 
 test('concurrent hooks do not start two daemons', async () => {
@@ -264,6 +286,78 @@ test('decide always answers allow with updatedPermissions (suggestion preferred,
   const recorded = JSON.parse(fs.readFileSync(path.join(home, 'always-rules.json'), 'utf8'))
   assert.equal(recorded.length, 2)
   assert.equal(recorded[1].toolName, 'Bash')
+})
+
+const QUESTIONS = [
+  { question: 'Which database?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: 'the usual' }, { label: 'SQLite' }] },
+  { question: 'Which checks?', header: 'CI', multiSelect: true, options: [{ label: 'lint' }, { label: 'tests' }, { label: 'e2e', preview: 'x'.repeat(5000) }] }
+]
+
+test('AskUserQuestion: the pending request carries its questions; answers go back in updatedInput (CON-062)', async () => {
+  const input = { questions: QUESTIONS }
+  const pending = hook(ev('q1', 'PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: input }), { CONDUCTORE_PERMISSION_TIMEOUT: '20' })
+  const req = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 'q1') || {}).pending?.[0])
+  assert.equal(req.summary, 'Which database? (+1 more)')
+  // toolInput was cut at 4 KB by the preview; the questions are whole.
+  assert.equal(req.toolInput._truncated, true)
+  assert.deepEqual(req.questions, [
+    { question: 'Which database?', header: 'DB', kind: 'choice', multiSelect: false, options: [{ label: 'Postgres', description: 'the usual' }, { label: 'SQLite' }] },
+    { question: 'Which checks?', header: 'CI', kind: 'choice', multiSelect: true, options: [{ label: 'lint' }, { label: 'tests' }, { label: 'e2e' }] }
+  ])
+  // A plain allow is ignored by Claude Code for a question (the dialog
+  // stayed in the terminal while the phone dropped the request): refused,
+  // and the request stays answerable.
+  const allow = await cli('decide', req.id, 'allow')
+  assert.equal(allow.code, 1)
+  assert.match(allow.json.error, /takes an answer/)
+  const bad = await cli('decide', req.id, 'answer', '--answers', JSON.stringify({ 'Not asked?': 'x' }))
+  assert.equal(bad.code, 1)
+  assert.match(bad.json.error, /no such question/)
+  assert.equal((await status()).agents.find(a => a.sessionId === 'q1').pending.length, 1)
+  const d = await cli('decide', req.id, 'answer', '--answers', JSON.stringify({ 'Which database?': 'SQLite', 'Which checks?': ['lint', 'Run only the fast ones'] }))
+  assert.equal(d.code, 0, JSON.stringify(d.json))
+  const out = JSON.parse((await pending).stdout)
+  // Exactly the input it got, plus answers: Claude Code refuses changed questions.
+  assert.deepEqual(out, {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: { behavior: 'allow', updatedInput: { questions: QUESTIONS, answers: { 'Which database?': 'SQLite', 'Which checks?': 'lint, Run only the fast ones' } } }
+    }
+  })
+  const a = (await status()).agents.find(a => a.sessionId === 'q1')
+  assert.equal(a.pending.length, 0)
+  assert.equal(a.state, 'working')
+})
+
+test('a question the phone did not answer in time waits in the terminal as a question (CON-062)', async () => {
+  await hook(ev('q2', 'PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: QUESTIONS } }))
+  const r = await hook(ev('q2', 'PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: { questions: QUESTIONS } }), { CONDUCTORE_PERMISSION_TIMEOUT: '1' })
+  assert.equal(r.stdout, '')
+  const a = (await status()).agents.find(a => a.sessionId === 'q2')
+  assert.equal(a.pending.length, 0)
+  // Not "needs_permission with nothing pending": the phone shows the
+  // question as waiting in the terminal, where the dialog still is.
+  assert.equal(a.state, 'waiting_input')
+  assert.equal(a.lastMessage, 'Question is waiting in the terminal: Which database? (+1 more)')
+})
+
+test('plan approval: allow echoes the plan as updatedInput; always switches to acceptEdits (CON-062)', async () => {
+  // Claude Code ignores a plain allow for ExitPlanMode (its dialog is the
+  // input), so the phone's "Approve" never reached it.
+  const plan = { plan: '1. do it' }
+  const p1 = hook(ev('p1', 'PermissionRequest', { tool_name: 'ExitPlanMode', tool_input: plan }), { CONDUCTORE_PERMISSION_TIMEOUT: '20' })
+  const r1 = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 'p1') || {}).pending?.[0])
+  await cli('decide', r1.id, 'allow')
+  assert.deepEqual(JSON.parse((await p1).stdout).hookSpecificOutput.decision, { behavior: 'allow', updatedInput: plan })
+  const p2 = hook(ev('p1', 'PermissionRequest', { tool_name: 'ExitPlanMode', tool_input: plan }), { CONDUCTORE_PERMISSION_TIMEOUT: '20' })
+  const r2 = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 'p1') || {}).pending?.[0])
+  await cli('decide', r2.id, 'always')
+  // "Approve, auto-edit" is a mode for this session, not a rule approving every later plan.
+  assert.deepEqual(JSON.parse((await p2).stdout).hookSpecificOutput.decision, {
+    behavior: 'allow',
+    updatedInput: plan,
+    updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]
+  })
 })
 
 test('PermissionRequest timeout prints nothing and leaves the terminal prompt to Claude Code', async () => {

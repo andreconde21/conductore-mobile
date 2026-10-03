@@ -124,20 +124,57 @@ function herdrPanes (socket = null, now = Date.now()) {
   return paneList.pending
 }
 
-// The Herdr location of a hook event: the header's, completed (or found)
-// from Herdr's pane list when parts are missing. Never uses the cwd.
+// `herdr pane get <id>` (read-only): Herdr still answers for a pane's old
+// id after `herdr pane move` gave it a new one, with the pane as it is now.
+// Cached per old id like the pane list; null when Herdr does not know it.
+const moved = new Map() // `${socket}\0${paneId}` -> { at, pane }
+
+function herdrPane (paneId, socket = null, now = Date.now()) {
+  const key = `${socket || ''}\0${paneId}`
+  const hit = moved.get(key)
+  if (hit && now - hit.at < PANE_LIST_TTL_MS) return Promise.resolve(hit.pane)
+  return new Promise(resolve => {
+    execFile('herdr', ['pane', 'get', paneId], { timeout: 2000, encoding: 'utf8', env: herdrEnv(socket) }, (err, stdout) => {
+      let pane = null
+      if (!err) {
+        try {
+          const p = JSON.parse(stdout).result.pane
+          if (p && typeof p.pane_id === 'string') pane = parsePaneList(JSON.stringify({ result: { panes: [p] } }))[0] || null
+        } catch {}
+      }
+      moved.delete(key)
+      moved.set(key, { at: Date.now(), pane })
+      if (moved.size > CACHE_MAX) moved.delete(moved.keys().next().value)
+      resolve(pane)
+    })
+  })
+}
+
+// The Herdr location of a hook event, checked against Herdr's pane list
+// (one cached `herdr pane list` per server every PANE_LIST_TTL_MS, only
+// while events arrive). $HERDR_* are fixed when the pane's shell starts: a
+// pane moved since (`herdr pane move` to another tab or workspace) has a new
+// id while Claude Code still reports the old one, and opening that old
+// place lands on another workspace. So the pane that holds this Claude
+// session wins, then the header's pane (followed through a move), then the
+// header as is. Never uses the cwd.
 async function herdrLocation (header, event) {
   const fromEnv = herdrContext(header)
-  if (fromEnv && fromEnv.workspaceId && fromEnv.tabId && fromEnv.paneId) return fromEnv
   const sid = event.session_id
   if (event.hook_event_name === 'SessionStart') notInHerdr.delete(sid)
   if (!fromEnv && (header.tmux || notInHerdr.has(sid))) return null
   const socket = header.herdr_socket || null
   const panes = await herdrPanes(socket)
   if (!panes) return fromEnv
-  const pane = fromEnv && fromEnv.paneId
-    ? panes.find(p => p.paneId === fromEnv.paneId)
-    : panes.find(p => p.sessionId === sid)
+  let pane = panes.find(p => p.sessionId === sid)
+  if (!pane && fromEnv && fromEnv.paneId) {
+    // A pane known to hold another session is not this agent's any more.
+    pane = panes.find(p => p.paneId === fromEnv.paneId && (!p.sessionId || p.sessionId === sid))
+    if (!pane && !panes.some(p => p.paneId === fromEnv.paneId)) {
+      const now = await herdrPane(fromEnv.paneId, socket)
+      if (now && (!now.sessionId || now.sessionId === sid)) pane = now
+    }
+  }
   if (!pane) {
     if (!fromEnv) notInHerdr.add(sid)
     return fromEnv
@@ -162,6 +199,7 @@ async function enrich (event, header) {
 
 function _reset () {
   paneLists.clear()
+  moved.clear()
   notInHerdr.clear()
   cache.clear()
 }

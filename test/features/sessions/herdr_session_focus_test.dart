@@ -139,21 +139,34 @@ void main() {
       },
     );
 
-    test('a tab on another workspace is moved there', () async {
-      final one = openTarget(const ConnectTarget.herdr(workspaceId: 'w1'));
-      await settle();
+    // CON-062: re-pointing the open tab of another workspace made that tab
+    // show the agent's workspace, and opening its own workspace again then
+    // landed on the agent's: the user could not get back to it.
+    test(
+      'a tab on another workspace is left alone: the agent gets its own',
+      () async {
+        final one = openTarget(const ConnectTarget.herdr(workspaceId: 'w1'));
+        await settle();
 
-      final shown = await focus.openAgentLocation(
-        host,
-        workspaceId: 'w3',
-        paneId: 'w3:p1',
-      );
-      await settle();
+        final shown = await focus.openAgentLocation(
+          host,
+          workspaceId: 'w3',
+          paneId: 'w3:p1',
+          open: openTarget,
+        );
+        await settle();
 
-      expect(shown, one);
-      expect(server.focusedPane, 'w3:p1');
-      expect(focus.workspaceOf(one), 'w3');
-    });
+        expect(shown, isNot(one));
+        expect(focus.workspaceOf(shown!), 'w3');
+        expect(focus.workspaceOf(one), 'w1');
+        expect(server.focusedWorkspace, 'w3');
+
+        // Its own workspace is still one tap away.
+        workspace.activate(one);
+        await settle();
+        expect(server.focusedWorkspace, 'w1');
+      },
+    );
 
     test(
       'opens a new tab that focuses the exact place before attaching',

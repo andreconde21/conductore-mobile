@@ -328,6 +328,85 @@ void main() {
     );
   });
 
+  // CON-062: Claude Code ignores a plain allow for AskUserQuestion; the
+  // phone sends the answers, which the companion hands back as updatedInput.
+  test('a question carries its questions and is answered with answers', () {
+    final snapshot = ConductoreHostAttentionProvider.parseSnapshot(
+      jsonEncode({
+        'version': 1,
+        'seq': 3,
+        'agents': [
+          {
+            'sessionId': 's1',
+            'state': 'needs_permission',
+            'pending': [
+              {
+                'id': 'req-q',
+                'toolName': 'AskUserQuestion',
+                'summary': 'Which DB? (+1 more)',
+                'toolInput': {'_truncated': true, 'preview': '{'},
+                'questions': [
+                  {
+                    'question': 'Which DB?',
+                    'header': 'DB',
+                    'kind': 'choice',
+                    'multiSelect': false,
+                    'options': [
+                      {'label': 'Postgres', 'description': 'usual'},
+                      {'label': 'SQLite'},
+                    ],
+                  },
+                  {
+                    'question': 'How many?',
+                    'kind': 'number',
+                    'unit': 'slides',
+                    'options': <Object>[],
+                  },
+                  {'header': 'no question text'},
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    final request = snapshot.agents.single.pendingRequests.single;
+    expect(request.isQuestion, isTrue);
+    expect(request.answerable, isTrue);
+    expect(request.trustable, isFalse);
+    expect(request.questions, hasLength(2));
+    expect(request.questions.first.header, 'DB');
+    expect(request.questions.first.options.first.description, 'usual');
+    expect(request.questions.last.kind, 'number');
+    expect(request.questions.last.unit, 'slides');
+
+    // No plain allow (or always) for a question: it would do nothing.
+    expect(provider.decideCommand(request, PermissionVerdict.allow), isNull);
+    expect(provider.decideCommand(request, PermissionVerdict.always), isNull);
+    expect(
+      provider.decideCommand(request, PermissionVerdict.deny),
+      contains('decide req-q deny'),
+    );
+    final answer = provider.decideCommand(
+      request.withAnswers({'Which DB?': 'SQLite', 'How many?': '12'}),
+      PermissionVerdict.allow,
+    )!;
+    expect(answer, contains('decide req-q answer --answers'));
+    expect(answer, contains('"Which DB?":"SQLite"'));
+    expect(answer, contains('"How many?":"12"'));
+  });
+
+  test('a question from a companion without questions is not answerable', () {
+    const request = PendingPermissionRequest(
+      id: 'req-old',
+      toolName: 'AskUserQuestion',
+      summary: '{"questions":[...',
+    );
+    expect(request.isQuestion, isTrue);
+    expect(request.answerable, isFalse);
+    expect(provider.decideCommand(request, PermissionVerdict.allow), isNull);
+  });
+
   group('status etag and gzip', () {
     String withEtag(String etag) => statusFixture.trim().replaceFirst(
       '"seq":7,',

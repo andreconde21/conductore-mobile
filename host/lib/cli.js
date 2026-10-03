@@ -60,6 +60,7 @@ const USAGE = `usage: conductore-hostd <command>
                                   herdr-sidebar on|off, tmux-live off|on,
                                   worktree-location
   decide <requestId> allow|deny|always [--message "..."]
+  decide <requestId> answer --answers '{"<question>":"<answer>"}'
   approve-low [--ids <id,id,...>] [--session <sessionId>]
                                   allow every waiting low-risk request (only
                                   the listed ones with --ids); others skipped
@@ -246,9 +247,13 @@ async function events (args) {
 async function decide (args) {
   const { flags, positional } = parseFlags(args)
   const [requestId, decision] = positional
-  if (!requestId || !decision) return fail('usage: decide <requestId> allow|deny|always [--message "..."]')
+  if (!requestId || !decision) return fail('usage: decide <requestId> allow|deny|always [--message "..."] | answer --answers <json>')
+  let answers = null
+  if (decision === 'answer') {
+    try { answers = JSON.parse(String(flags.answers)) } catch { return fail('answer needs --answers <json>: {"<question>": "<answer>"}') }
+  }
   try {
-    const [res] = await client.request({ op: 'decide', requestId, decision, message: flags.message || null }, { timeoutMs: 5000 })
+    const [res] = await client.request({ op: 'decide', requestId, decision, message: flags.message || null, answers }, { timeoutMs: 5000 })
     if (!res || res.error) return fail(res ? res.error : 'no reply')
     return out(res)
   } catch (err) {

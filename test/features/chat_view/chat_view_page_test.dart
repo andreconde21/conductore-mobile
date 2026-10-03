@@ -224,6 +224,83 @@ void main() {
     );
   });
 
+  // CON-062: Claude Code asks a PermissionRequest for AskUserQuestion, so the
+  // agent was in needs_permission: the transcript's options were disabled
+  // (they need waiting_input) and the request showed as "Allow
+  // AskUserQuestion?", whose Allow Claude Code ignores.
+  final askLine = assistantLine('a1', [
+    toolUse('q1', 'AskUserQuestion', {
+      'questions': [
+        {
+          'question': 'Which DB?',
+          'options': [
+            {'label': 'Postgres'},
+            {'label': 'SQLite'},
+          ],
+        },
+      ],
+    }),
+  ]);
+
+  testWidgets('a pending question is answered on its card with the options', (
+    tester,
+  ) async {
+    final decided = <(PendingPermissionRequest, PermissionVerdict)>[];
+    await pumpPage(tester, [
+      ok(
+        page(
+          [askLine],
+          state: 'needs_permission',
+          pending: [
+            {
+              'id': 'req-q',
+              'toolName': 'AskUserQuestion',
+              'summary': 'Which DB?',
+              'questions': [
+                {
+                  'question': 'Which DB?',
+                  'kind': 'choice',
+                  'multiSelect': false,
+                  'options': [
+                    {'label': 'Postgres'},
+                    {'label': 'SQLite', 'description': 'one file'},
+                  ],
+                },
+              ],
+            },
+          ],
+        ),
+      ),
+      ok(page([askLine], state: 'working')),
+    ], decide: (request, verdict) async => decided.add((request, verdict)));
+    expect(find.text('Allow AskUserQuestion?'), findsNothing);
+    expect(find.text('Answer it below.'), findsOneWidget);
+    expect(find.text('one file'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('question-option-SQLite')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(decided, hasLength(1));
+    expect(decided.single.$1.id, 'req-q');
+    expect(decided.single.$1.answers, {'Which DB?': 'SQLite'});
+    expect(decided.single.$2, PermissionVerdict.allow);
+  });
+
+  testWidgets('a question the agent no longer waits on says so', (
+    tester,
+  ) async {
+    await pumpPage(tester, [
+      ok(page([askLine], state: 'working')),
+    ]);
+    final option = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '2. SQLite'),
+    );
+    expect(option.onPressed, isNull);
+    expect(
+      find.textContaining('Not waiting for an answer here now.'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('Esc interrupts and Terminal leaves the chat', (tester) async {
     var toTerminal = 0;
     final (_, runner) = await pumpPage(tester, [

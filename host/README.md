@@ -231,9 +231,17 @@ word as its value) and answer plain JSON, so check for `encoding`.
   once the daemon identified it (Linux).
 * `lastMessage`: last assistant text (Stop), notification text, or the
   question of an AskUserQuestion; capped at 500 chars.
-* `pending[].summary`: one line (command, file path, URL, …) capped at 200
-  chars. `toolInput` is the raw input; above 4 KB it is replaced by
-  `{"_truncated":true,"preview":"…"}`.
+* `pending[].summary`: one line (command, file path, URL, the first
+  question, …) capped at 200 chars. `toolInput` is the raw input; above
+  4 KB it is replaced by `{"_truncated":true,"preview":"…"}`.
+* `pending[].questions` (AskUserQuestion only, capability
+  `question-answers`): `[{question, header?, kind, multiSelect, options:
+  [{label, description?}], description?, placeholder?, min?, max?, step?,
+  defaultValue?, unit?}]`, every question whole whatever the toolInput cap
+  (option previews left out). Answer with `decide <id> answer`.
+* `herdr`: where the agent's pane is now. The hook's `HERDR_*` are checked
+  against Herdr's pane list (cached 10 s per server): a pane moved with
+  `herdr pane move` has a new id while Claude Code keeps the old one.
 * `usage` is present only once the statusline reported something for the
   session (see Usage).
 * `pending[].risk` (`low` / `medium` / `high` and a one-line reason),
@@ -299,6 +307,24 @@ decided, timed out, or never existed) and `request expired; answer it in the
 terminal` (the hook process is gone). `--message` is passed to Claude on deny.
 `always` on a high-risk request is answered as a one-time `allow` (no rule
 for Claude Code either), with `"note": "high-risk requests always ask: …"`.
+
+### `conductore-hostd decide <requestId> answer --answers '{"<question>": "<answer>"}'`
+
+Answers an AskUserQuestion request (capability `question-answers`). Keys are
+the question texts exactly as in `pending[].questions`; a value is the
+chosen label, the user's own text, or a list (a multiSelect question's
+labels and text), joined with ", ". The hook prints `allow` with
+`updatedInput` = the tool input unchanged plus `answers`: Claude Code
+ignores a plain `allow` for a question (its dialog is the input) and
+refuses an `updatedInput` that changes the questions. So `allow` and
+`always` on a question are refused (exit 1, the request stays pending);
+`deny` works as for any request. Errors: `no such question: …`,
+`no answer given`.
+
+ExitPlanMode is the other tool whose dialog is the input: `allow` carries
+the plan unchanged as `updatedInput`, and `always` switches the session to
+`acceptEdits` (`{"type":"setMode","mode":"acceptEdits","destination":"session"}`)
+rather than saving a rule.
 
 ### `conductore-hostd approve-low [--ids <id,id,…>] [--session <sessionId>]`
 

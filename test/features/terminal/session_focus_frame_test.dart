@@ -26,6 +26,7 @@ void main() {
   Future<({List<int> paneDowns, List<int> terminalTaps})> pumpPane(
     WidgetTester tester, {
     required bool showSharedView,
+    bool showAgentView = false,
     HerdrFocusActions? herdrActions,
   }) async {
     final paneDowns = <int>[];
@@ -40,6 +41,7 @@ void main() {
             brightness: Brightness.dark,
             fontFamily: 'monospace',
             showSharedView: showSharedView,
+            showAgentView: showAgentView,
             herdrActions: herdrActions,
             child: GestureDetector(
               key: const ValueKey('terminal'),
@@ -100,6 +102,40 @@ void main() {
       await pumpPane(tester, showSharedView: false);
       expect(find.byKey(const ValueKey('shared-view-cover')), findsNothing);
     });
+  });
+
+  // CON-062: an agent opened while this device may not move Herdr's focus
+  // showed the live screen, which mirrors another workspace.
+  testWidgets('an agent opened here shows its own screen and "Show here", '
+      'with the banner above', (tester) async {
+    session.terminal.write('agent screen');
+    session
+      ..sharedViewSnapshot = SharedViewSnapshot.capture(
+        session.terminal,
+        label: 'api',
+        at: DateTime(2026, 10, 3, 8, 15),
+      )
+      ..focusElsewhereLabel = 'Projects';
+    var taken = 0;
+    final taps = await pumpPane(
+      tester,
+      showSharedView: false,
+      showAgentView: true,
+      herdrActions: HerdrFocusActions(
+        typeInComposer: (_) {},
+        takeFocusOnce: () async => taken += 1,
+        useShownWorkspace: () async {},
+      ),
+    );
+    expect(find.byKey(const ValueKey('shared-view-cover')), findsOneWidget);
+    expect(
+      find.textContaining('agent screen', findRichText: true),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('herdr-focus-banner')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('agent-view-show-here')));
+    expect(taken, 1);
+    expect(taps.terminalTaps, isEmpty);
   });
 
   testWidgets('held input shows "switching", then says what was not sent', (

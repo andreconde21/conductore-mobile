@@ -303,10 +303,13 @@ Future<void> answerPermissionRequest(
     }
     await controller.decide(hostId, request, verdict);
   } catch (error) {
+    final what = request.answers != null
+        ? 'send the answer'
+        : '${verdict.label.toLowerCase()} ${request.toolName}';
     messenger?.showSnackBar(
       SnackBar(
         content: Text(
-          'Could not ${verdict.label.toLowerCase()} ${request.toolName}: '
+          'Could not $what: '
           '${error is AppFailure ? error.userMessage : error}',
         ),
       ),
