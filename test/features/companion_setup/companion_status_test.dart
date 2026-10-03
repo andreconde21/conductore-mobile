@@ -329,4 +329,16 @@ void main() {
       expect(status.errorDetail, contains('Connection refused'));
     });
   });
+
+  test('checks the companion marks optional (agent adapters) never count '
+      'as a failure', () {
+    final checks = parseDoctorChecks(
+      '{"ok":true,"checks":[{"name":"OpenCode plugin","ok":false,'
+      '"detail":"missing: run install","optional":true},'
+      '{"name":"hooks registered","ok":true,"detail":"11"}]}',
+    );
+    expect(checks.first.optional, isTrue);
+    expect(checks.first.reportedOptional, isTrue);
+    expect(checks.last.optional, isFalse);
+  });
 }

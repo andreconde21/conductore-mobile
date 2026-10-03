@@ -1,7 +1,6 @@
 // ignore_for_file: prefer_initializing_formals
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -10,7 +9,7 @@ import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
-import 'package:conduit/features/chat_view/domain/neutral_chat_items.dart';
+import 'package:conduit/features/chat_view/domain/neutral_chat_window.dart';
 import 'package:conduit/features/voice/domain/speech_summary.dart';
 import 'package:flutter/foundation.dart';
 
@@ -103,17 +102,13 @@ class ChatViewController extends ChangeNotifier {
   static const _maxCatchUpReads = 8;
 
   final List<TranscriptEntry> _entries = [];
+
+  /// Set once the companion answers in the neutral format (every agent but
+  /// Claude Code): the window it pages by cursor instead of [_offset].
+  NeutralChatWindow? _neutral;
   List<ChatItem> _items = const [];
   int? _offset;
   int _start = 0;
-
-  /// A neutral transcript (every agent but Claude Code): its items as
-  /// sent, in order, and the opaque cursors. An item read again (a tool
-  /// call with its result now) replaces the one with its id.
-  bool _neutral = false;
-  final List<Map<Object?, Object?>> _rawItems = [];
-  String? _cursor;
-  String? _startCursor;
   bool _olderExhausted = false;
   bool _loading = true;
   bool _loadingOlder = false;
@@ -200,13 +195,14 @@ class ChatViewController extends ChangeNotifier {
   /// Whether [unsupported] means missing or outdated.
   ChatUnsupportedKind? get unsupportedKind => _unsupportedKind;
 
-  bool get _olderExist => _neutral ? _startCursor != null : _start > 0;
-
   /// Whether older lines exist before the loaded window.
-  bool get hasOlder => _olderExist && !_olderExhausted;
+  bool get hasOlder => _neutral != null
+      ? _neutral!.startCursor != null
+      : _start > 0 && !_olderExhausted;
 
   /// Older lines exist but cannot be shown here (they only fit the TUI).
-  bool get olderOnlyInTerminal => _olderExist && _olderExhausted;
+  bool get olderOnlyInTerminal =>
+      _neutral == null && _start > 0 && _olderExhausted;
 
   bool isDeciding(String requestId) => _deciding.contains(requestId);
 
@@ -217,13 +213,7 @@ class ChatViewController extends ChangeNotifier {
   /// When the session started: the first line when the whole transcript is
   /// loaded, else when the companion first saw it.
   DateTime? get startedAt {
-    if (_neutral && _startCursor == null) {
-      for (final item in _items) {
-        if (item case ChatUserMessage(:final timestamp?)) {
-          return timestamp;
-        }
-      }
-    } else if (!_neutral && _start == 0) {
+    if (_start == 0) {
       for (final entry in _entries) {
         if (entry.timestamp != null) {
           return entry.timestamp;
@@ -333,22 +323,27 @@ class ChatViewController extends ChangeNotifier {
     try {
       var reads = 0;
       while (true) {
+        if (_neutral case final neutral?) {
+          final more = await _pollNeutral(neutral);
+          if (_disposed || !more || ++reads >= _maxCatchUpReads) {
+            break;
+          }
+          continue;
+        }
         final offset = _offset;
-        final cursor = _cursor;
-        final page = cursor != null
-            ? await _client.transcript(sessionId, cursor: cursor)
-            : offset == null
+        final page = offset == null
             ? await _client.transcript(sessionId, tailBytes: _tailBytes)
             : await _client.transcript(sessionId, since: offset);
         if (_disposed) {
           return;
         }
         if (page.isNeutral) {
-          final more = _neutralPage(page, first: cursor == null);
-          reads += 1;
-          if (!more || reads >= _maxCatchUpReads) {
+          // The first page says which format this agent's transcript has.
+          final neutral = _neutral = NeutralChatWindow();
+          if (!_applyNeutral(neutral, page)) {
             break;
           }
+          reads += 1;
           continue;
         }
         if (offset == null || page.reset) {
@@ -398,25 +393,25 @@ class ChatViewController extends ChangeNotifier {
     }
   }
 
-  /// Applies one neutral page; returns whether another follows at once.
-  bool _neutralPage(TranscriptPage page, {required bool first}) {
-    _neutral = true;
-    final fresh = first || page.reset;
-    if (fresh) {
-      _rawItems.clear();
-      _startCursor = page.startCursor;
-      _olderExhausted = false;
+  /// One neutral read from the window's cursor; whether another page
+  /// follows at once.
+  Future<bool> _pollNeutral(NeutralChatWindow neutral) async {
+    final page = await _client.transcript(sessionId, cursor: neutral.cursor);
+    if (_disposed) {
+      return false;
     }
-    final grew = _mergeItems(page.items!, prepend: false) || fresh;
-    final advanced = page.cursor != null && page.cursor != _cursor;
-    _cursor = page.cursor ?? _cursor;
+    return _applyNeutral(neutral, page);
+  }
+
+  bool _applyNeutral(NeutralChatWindow neutral, TranscriptPage page) {
+    final grew = neutral.apply(page);
     var changed = grew || _error != null || _loading;
     if (page.agent case final agent? when agent != _agent) {
       _agent = agent;
       changed = true;
     }
     if (grew) {
-      _items = NeutralChatItems.parse(_rawItems);
+      _items = neutral.build();
       _confirmOutgoing();
     }
     _error = null;
@@ -424,34 +419,7 @@ class ChatViewController extends ChangeNotifier {
     _quietPolls = changed ? 0 : _quietPolls + 1;
     _retime();
     if (changed) notifyListeners();
-    return page.more && advanced;
-  }
-
-  /// Adds [items] (replacing those with a known id in place); returns
-  /// whether anything changed.
-  bool _mergeItems(List<Map<Object?, Object?>> items, {required bool prepend}) {
-    final index = <String, int>{
-      for (final (i, item) in _rawItems.indexed)
-        if (item['id'] case final String id) id: i,
-    };
-    final added = <Map<Object?, Object?>>[];
-    var changed = false;
-    for (final item in items) {
-      final id = item['id'];
-      final at = id is String ? index[id] : null;
-      if (at == null) {
-        added.add(item);
-      } else if (!prepend && jsonEncode(_rawItems[at]) != jsonEncode(item)) {
-        // A newer read of the same item (a tool's result arrived).
-        _rawItems[at] = item;
-        changed = true;
-      }
-    }
-    if (added.isEmpty) {
-      return changed;
-    }
-    prepend ? _rawItems.insertAll(0, added) : _rawItems.addAll(added);
-    return true;
+    return page.more;
   }
 
   /// Loads the lines before the current window. No-op when there are none
@@ -462,26 +430,24 @@ class ChatViewController extends ChangeNotifier {
     }
     _loadingOlder = true;
     notifyListeners();
-    try {
-      if (_neutral) {
-        final before = _startCursor;
+    if (_neutral case final neutral?) {
+      try {
         final page = await _client.transcript(
           sessionId,
-          beforeCursor: before,
-          maxBytes: _tailBytes,
+          beforeCursor: neutral.startCursor,
         );
-        if (_disposed) {
-          return;
+        if (!_disposed && neutral.applyOlder(page)) {
+          _items = neutral.build();
         }
-        final grew = _mergeItems(page.items ?? const [], prepend: true);
-        if (!grew && page.startCursor == before) {
-          _olderExhausted = true;
-        } else {
-          _startCursor = page.startCursor;
-          _items = NeutralChatItems.parse(_rawItems);
-        }
-        return;
+      } catch (error) {
+        _error = _describe(error);
+      } finally {
+        _loadingOlder = false;
+        if (!_disposed) notifyListeners();
       }
+      return;
+    }
+    try {
       final page = await _client.transcript(
         sessionId,
         before: _start,

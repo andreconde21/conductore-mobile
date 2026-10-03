@@ -14,7 +14,8 @@
 // runner, `install`): Claude Code first, as before adapters existed.
 const MODULES = {
   claude: './claude',
-  codex: './codex'
+  codex: './codex',
+  opencode: './opencode'
 }
 
 // Events and records with no agent id are Claude Code's: hooks registered

@@ -306,26 +306,27 @@ function trustState (env = process.env, doc = null) {
   return { registered: ours.length, trusted: ours.length > 0 && !missing.length && !disabled.length, missing, disabled }
 }
 
+// Informative only (`optional`: the phone never counts them as a failure).
 async function doctor () {
   const found = detect()
   const checks = []
-  checks.push({ name: 'codex', ok: found.present, detail: found.present ? `${found.bin}${found.version ? ` (${found.version})` : ''}` : 'not found on PATH (optional)' })
+  checks.push({ name: 'codex', optional: true, ok: found.present, detail: found.present ? `${found.bin}${found.version ? ` (${found.version})` : ''}` : 'not found on PATH (optional)' })
   if (!found.present) return checks
   let doc = {}
   try { doc = readHooks(hooksPath()) } catch (err) {
-    checks.push({ name: 'codex hooks', ok: false, detail: err.message })
+    checks.push({ name: 'codex hooks', optional: true, ok: false, detail: err.message })
     return checks
   }
   const ours = installed(doc)
   const events = [...new Set(ours.map(h => h.event))]
   const absent = EVENTS.filter(e => !events.includes(e))
-  checks.push({ name: 'codex hooks', ok: !absent.length, detail: absent.length ? `missing ${absent.join(', ')} in ${hooksPath()}; run install` : `${events.length} registered in ${hooksPath()}` })
+  checks.push({ name: 'codex hooks', optional: true, ok: !absent.length, detail: absent.length ? `missing ${absent.join(', ')} in ${hooksPath()}; run install` : `${events.length} registered in ${hooksPath()}` })
   if (ours.length) {
     const t = trustState(process.env, doc)
     let detail = 'trusted in Codex'
     if (t.missing.length) detail = `not trusted yet (${t.missing.join(', ')}): start Codex and choose "Trust all" when it asks, or open /hooks and press t`
     else if (t.disabled.length) detail = `turned off in Codex /hooks: ${t.disabled.join(', ')}`
-    checks.push({ name: 'codex hooks trusted', ok: t.trusted, detail })
+    checks.push({ name: 'codex hooks trusted', optional: true, ok: t.trusted, detail })
   }
   return checks
 }

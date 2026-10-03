@@ -65,11 +65,16 @@ class CompanionDoctorCheck {
     required this.name,
     required this.ok,
     required this.detail,
+    this.reportedOptional = false,
   });
 
   final String name;
   final bool ok;
   final String detail;
+
+  /// The companion marked the check informative (`optional: true`, e.g. an
+  /// agent adapter's own checks).
+  final bool reportedOptional;
 
   /// Checks `doctor` itself does not count against `ok` (see host/lib/cli.js).
   static const optionalNames = {
@@ -81,10 +86,12 @@ class CompanionDoctorCheck {
   };
 
   /// Other agents' checks (`codex`, `codex hooks`, ...): informative, an
-  /// agent the machine lacks is no failure.
+  /// agent the machine lacks is no failure (older companions do not mark
+  /// them `optional`).
   static const otherAgents = {'codex'};
 
   bool get optional =>
+      reportedOptional ||
       optionalNames.contains(name) ||
       otherAgents.any((id) => name == id || name.startsWith('$id '));
 }
@@ -256,6 +263,7 @@ List<CompanionDoctorCheck> parseDoctorChecks(String stdout) {
           name: check['name']?.toString() ?? '?',
           ok: check['ok'] == true,
           detail: check['detail']?.toString() ?? '',
+          reportedOptional: check['optional'] == true,
         ),
   ];
 }

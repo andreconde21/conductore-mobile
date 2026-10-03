@@ -1,0 +1,117 @@
+{
+  "bash": {
+    "sessionId": "ses_efe4c03aeffeJy1cx2ySs40V0H",
+    "agent": {
+      "name": "proj",
+      "state": "waiting_input",
+      "lastEvent": "Stop",
+      "lastToolName": "Bash",
+      "lastMessage": "All done.",
+      "startedAt": 1791029935186,
+      "updatedAt": 1791029936749,
+      "endedAt": null,
+      "pending": []
+    },
+    "format": "items",
+    "items": [
+      {
+        "id": "msg_101b3fcad001h6uDxfFpfabNBZ",
+        "type": "user",
+        "at": "2026-10-03T12:18:55.277Z",
+        "text": "do it"
+      },
+      {
+        "id": "prt_101b40156001aZr67XtiV7BHFZ",
+        "type": "assistant",
+        "at": "2026-10-03T12:18:56.470Z",
+        "text": "Running a command."
+      },
+      {
+        "id": "prt_101b40159001baffJknYRkFE8R",
+        "type": "tool",
+        "at": "2026-10-03T12:18:56.479Z",
+        "tool": "Bash",
+        "toolKind": "bash",
+        "input": {
+          "command": "echo hello-from-mock",
+          "description": "Say hello"
+        },
+        "title": "echo hello-from-mock",
+        "result": {
+          "ok": true,
+          "text": "hello-from-mock\n"
+        }
+      },
+      {
+        "id": "prt_101b40236001RO93G0XX6RH7Ft",
+        "type": "assistant",
+        "at": "2026-10-03T12:18:56.694Z",
+        "text": "All done."
+      }
+    ],
+    "cursor": "msg_101b401fc001MxFcDx0tLOdCXM",
+    "startCursor": null,
+    "more": false
+  },
+  "question": {
+    "sessionId": "ses_efe4bd03effeOO2FCxpssSh4m3",
+    "agent": {
+      "name": "proj",
+      "state": "waiting_input",
+      "lastEvent": "Stop",
+      "lastToolName": "AskUserQuestion",
+      "lastMessage": "All done.",
+      "startedAt": 1791029948353,
+      "updatedAt": 1791029950074,
+      "endedAt": null,
+      "pending": []
+    },
+    "format": "items",
+    "items": [
+      {
+        "id": "msg_101b42ff6001xMfI26IgMSCnLc",
+        "type": "user",
+        "at": "2026-10-03T12:19:08.406Z",
+        "text": "do it"
+      },
+      {
+        "id": "prt_101b435c1001rN1YdPA9EulXKl",
+        "type": "assistant",
+        "at": "2026-10-03T12:19:09.889Z",
+        "text": "Running a command."
+      },
+      {
+        "id": "prt_101b435c5001VdzFN7VIUMncin",
+        "type": "question",
+        "at": "2026-10-03T12:19:09.900Z",
+        "questions": [
+          {
+            "question": "Which colour?",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Blue",
+                "description": "b"
+              },
+              {
+                "label": "Red",
+                "description": "r"
+              }
+            ],
+            "header": "Colour"
+          }
+        ],
+        "answer": "Blue"
+      },
+      {
+        "id": "prt_101b43648001ajtgaRTJVvSVuY",
+        "type": "assistant",
+        "at": "2026-10-03T12:19:10.024Z",
+        "text": "All done."
+      }
+    ],
+    "cursor": "msg_101b436100016Dh1JxovIEx83D",
+    "startCursor": null,
+    "more": false
+  }
+}

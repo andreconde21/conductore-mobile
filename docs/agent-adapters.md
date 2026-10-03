@@ -14,6 +14,7 @@ is the code as it is.
 | Registry (`get`, `forHeader`, `of`, `capabilityMap`, `brain`) | `host/lib/adapters/index.js` |
 | Interface and shapes (JSDoc) | `host/lib/adapters/types.js` |
 | Claude Code adapter (the reference) | `host/lib/adapters/claude.js` |
+| OpenCode adapter and its plugin | `host/lib/adapters/opencode.js`, `host/lib/adapters/opencode-plugin.mjs` |
 | Neutral chat format for new agents | `host/lib/adapters/chat-items.js` |
 | Contract every adapter must pass | `host/test/helpers/adapter-contract.js` |
 | Claude Code's contract run, byte-compat checks, a fake second adapter through the daemon | `host/test/adapters.test.js` |
@@ -170,7 +171,21 @@ legacy `response_item`, into `chat-items.js`. Usage: already in `usage.js`
 --ignore-user-config -m <model>`. Accounts: show the active account and its
 limits only (decision 8).
 
-**OpenCode (CON-069, plugin only, no --port).**
+**OpenCode (CON-069, built).** As built, differing from the plan below:
+the plugin does not write spool files itself but runs `conductore-hook
+--agent opencode <event>` (so the spool format, the daemon wake-up and the
+PermissionRequest FIFO wait are shared); a permission or question runs the
+hook as `PermissionRequest`, and the plugin replies through `ctx.client`
+with the line `hookAnswer()` printed, so `approvals` is `'hook'` and no
+daemon op was needed. When OpenCode answers first (`permission.replied`),
+the plugin kills the waiting hook's process group. The transcript is read
+with `node:sqlite` (read-only; `opencode db` takes ~4 s per call and may
+migrate the database), `transcriptPath` is `opencode:<db path>` (not a
+file the Claude readers would parse). Usage goes through the adapter's
+`usageReport()` (a generic hook in `usage.js`). Verified live with
+1.18.34: `opencode run`, `opencode serve` and the TUI in tmux (Docker).
+
+**OpenCode (CON-069, plugin only, no --port), the plan.**
 `install()`: drop `~/.config/opencode/plugins/conductore.js`, a file we
 own, exporting `{ id, server, setup }` (both loader shapes, like Herdr's);
 never touch `opencode.json`. The plugin writes spool files itself with

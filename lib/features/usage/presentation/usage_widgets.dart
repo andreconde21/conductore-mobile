@@ -859,6 +859,17 @@ class _MachineLimits extends StatelessWidget {
               key: ValueKey('usage-codex-account-${machine.hostId}'),
               style: muted,
             ),
+        // OpenCode has no plan limits: the model it runs on, and that its
+        // cost is its own figure, not our estimate.
+        if (report != null && report.opencode.present)
+          Text(
+            [
+              'OpenCode: ${report.opencode.activeModel ?? 'no answers yet'}',
+              if (report.opencode.costReported) 'cost as reported by OpenCode',
+            ].join(' · '),
+            key: ValueKey('usage-opencode-${machine.hostId}'),
+            style: muted,
+          ),
         if (report != null && report.partial)
           Text('Still counting older transcripts…', style: muted),
       ],

@@ -79,7 +79,7 @@ test('events and records without an agent belong to Claude Code; an unknown agen
   assert.equal(adapters.of({ sessionId: 'x' }), claude)
   assert.equal(adapters.of({ kind: 'nope' }), claude)
   assert.equal(adapters.of({ agent_kind: 'claude' }), claude)
-  // Claude Code first (the default brain); every other agent after it.
+  // Claude Code first (the default brain and install order).
   assert.equal(adapters.ids()[0], 'claude')
 })
 

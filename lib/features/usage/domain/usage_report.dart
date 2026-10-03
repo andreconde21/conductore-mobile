@@ -7,7 +7,8 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 /// Which coding agent a number belongs to.
 enum UsageAgent {
   claude('Claude'),
-  codex('Codex');
+  codex('Codex'),
+  opencode('OpenCode');
 
   const UsageAgent(this.label);
 
@@ -537,6 +538,8 @@ class UsageSection {
     this.bySession = const [],
     this.accounts = const [],
     this.cswap = false,
+    this.costReported = false,
+    this.activeModel,
   });
 
   final UsageAgent agent;
@@ -559,6 +562,14 @@ class UsageSection {
   /// Claude only: the companion found cswap, so it can switch accounts.
   final bool cswap;
 
+  /// The agent reports its own cost (OpenCode), instead of the
+  /// companion's API-price estimate.
+  final bool costReported;
+
+  /// OpenCode: the provider/model of its latest answer, the one account
+  /// it runs on now (agents without plans show only that).
+  final String? activeModel;
+
   static UsageSection fromJson(Object? json, UsageAgent agent) {
     if (json is! Map) {
       return UsageSection(agent: agent, present: false);
@@ -579,6 +590,12 @@ class UsageSection {
       bySession: list('bySession', (item) => UsageRow.fromJson(item, agent)),
       accounts: list('accounts', UsageAccount.fromJson),
       cswap: json['cswap'] is Map && (json['cswap'] as Map)['present'] == true,
+      costReported: json['costSource'] == 'reported',
+      activeModel: switch (json['active']) {
+        {'provider': final String provider, 'model': final String model} =>
+          '$provider/$model',
+        _ => null,
+      },
     );
   }
 }
@@ -591,6 +608,10 @@ class UsageReport {
     required this.from,
     required this.claude,
     required this.codex,
+    this.opencode = const UsageSection(
+      agent: UsageAgent.opencode,
+      present: false,
+    ),
     this.generatedAt,
     this.companionVersion,
     this.pricingAsOf,
@@ -613,6 +634,9 @@ class UsageReport {
   final String from;
   final UsageSection claude;
   final UsageSection codex;
+
+  /// From companions with the OpenCode adapter (CON-069); absent before.
+  final UsageSection opencode;
   final DateTime? generatedAt;
   final String? companionVersion;
   final String? pricingAsOf;
@@ -644,7 +668,7 @@ class UsageReport {
   /// The companion understands `--from`, `--to`, `--hourly`.
   bool get supportsRanges => to != null;
 
-  Iterable<UsageSection> get agents => [claude, codex];
+  Iterable<UsageSection> get agents => [claude, codex, opencode];
 }
 
 /// A `conductore-hostd cswap-switch` reply.
@@ -767,6 +791,7 @@ UsageReport? parseUsageReport(String stdout) {
     from: text0('from') ?? '',
     claude: UsageSection.fromJson(decoded['claude'], UsageAgent.claude),
     codex: UsageSection.fromJson(decoded['codex'], UsageAgent.codex),
+    opencode: UsageSection.fromJson(decoded['opencode'], UsageAgent.opencode),
     generatedAt: generated is num
         ? DateTime.fromMillisecondsSinceEpoch(generated.toInt(), isUtc: true)
         : null,

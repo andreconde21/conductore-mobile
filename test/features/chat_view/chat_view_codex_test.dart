@@ -60,7 +60,7 @@ void main() {
   test('the real Codex page parses as a neutral transcript page', () {
     final page = TranscriptParser.parsePage(jsonEncode(real));
     expect(page.isNeutral, isTrue);
-    expect(page.items, hasLength(15));
+    expect(page.neutralItems, hasLength(15));
     expect(page.cursor, real['cursor']);
     expect(page.startCursor, isNull);
     expect(page.more, isFalse);
@@ -217,7 +217,7 @@ void main() {
 
   test("Codex's tools read as a shell command and a patch", () {
     final page = TranscriptParser.parsePage(jsonEncode(real));
-    final controllerItems = page.items!;
+    final controllerItems = page.neutralItems!;
     final shell = controllerItems.firstWhere((i) => i['id'] == 'call_5');
     final patch = controllerItems.firstWhere((i) => i['id'] == 'call_7');
     ChatToolCall call(Map<Object?, Object?> raw) => ChatToolCall(

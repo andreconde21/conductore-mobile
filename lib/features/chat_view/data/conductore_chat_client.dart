@@ -50,8 +50,6 @@ class ConductoreChatClient {
       'from the Conductore Mobile repository there, then check with '
       '"conductore-hostd doctor".';
 
-  /// [cursor] / [beforeCursor] page a neutral transcript (agents other
-  /// than Claude Code); [since] / [before] are Claude Code's byte offsets.
   static String transcriptCommand(
     String sessionId, {
     int? since,
@@ -66,6 +64,7 @@ class ConductoreChatClient {
       shellQuoteArgument(sessionId),
       if (since != null) '--since $since',
       if (before != null) '--before $before',
+      // Neutral pages (every agent but Claude Code) page by opaque cursor.
       if (cursor != null) '--cursor ${shellQuoteArgument(cursor)}',
       if (beforeCursor != null)
         '--before-cursor ${shellQuoteArgument(beforeCursor)}',

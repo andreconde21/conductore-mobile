@@ -183,7 +183,7 @@ class TranscriptPage {
     required this.entries,
     this.reset = false,
     this.agent,
-    this.items,
+    this.neutralItems,
     this.cursor,
     this.startCursor,
     this.more = false,
@@ -204,21 +204,22 @@ class TranscriptPage {
   final bool reset;
   final ChatAgentStatus? agent;
 
-  /// A neutral page (`format: "items"`, every agent but Claude Code): its
-  /// items as sent (`NeutralChatItems` turns them into chat rows), null
-  /// for Claude Code's entries.
-  final List<Map<Object?, Object?>>? items;
+  /// The page's items when it is in the neutral format (`format: "items"`,
+  /// every agent but Claude Code; `NeutralChatItems`), else null. An item
+  /// may come again with the same id, updated: it replaces the old one.
+  final List<Map<Object?, Object?>>? neutralItems;
 
-  /// Opaque cursors of a neutral page: `--cursor` continues after it,
-  /// `--before-cursor` [startCursor] reads the page before it (null: this
-  /// page starts the session).
+  /// Neutral pages: the opaque cursor to read on from (`--cursor`).
   final String? cursor;
+
+  /// Neutral pages: the cursor of the page before this one
+  /// (`--before-cursor`), null at the start of the session.
   final String? startCursor;
 
-  /// Another neutral page follows at once.
+  /// Neutral pages: another page follows at once.
   final bool more;
 
-  bool get isNeutral => items != null;
+  bool get isNeutral => neutralItems != null;
 }
 
 /// Parses `conductore-hostd transcript` JSON. Unknown line and block types
@@ -231,11 +232,28 @@ class TranscriptParser {
     if (decoded is! Map) {
       throw const FormatException('transcript output is not an object');
     }
+    if (decoded['format'] == 'items') {
+      return TranscriptPage(
+        offset: 0,
+        size: 0,
+        start: 0,
+        reset: decoded['reset'] == true,
+        entries: const [],
+        agent: _agent(decoded['agent']),
+        neutralItems: [
+          if (decoded['items'] case final List<Object?> list)
+            for (final item in list)
+              if (item case final Map<Object?, Object?> map) map,
+        ],
+        cursor: _string(decoded['cursor']),
+        startCursor: _string(decoded['startCursor']),
+        more: decoded['more'] == true,
+      );
+    }
     final entries = <TranscriptEntry>[
       if (decoded['entries'] case final List<Object?> list)
         for (final item in list) ?parseEntry(item),
     ];
-    final neutral = decoded['format'] == 'items';
     return TranscriptPage(
       offset: _int(decoded['offset']) ?? 0,
       size: _int(decoded['size']) ?? 0,
@@ -243,16 +261,6 @@ class TranscriptParser {
       reset: decoded['reset'] == true,
       entries: entries,
       agent: _agent(decoded['agent']),
-      items: neutral
-          ? [
-              if (decoded['items'] case final List<Object?> list)
-                for (final item in list)
-                  if (item is Map<Object?, Object?>) item,
-            ]
-          : null,
-      cursor: neutral ? _string(decoded['cursor']) : null,
-      startCursor: neutral ? _string(decoded['startCursor']) : null,
-      more: neutral && decoded['more'] == true,
     );
   }
 

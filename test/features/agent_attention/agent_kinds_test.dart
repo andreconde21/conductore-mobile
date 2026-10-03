@@ -93,7 +93,9 @@ void main() {
           'codex': {'chat': 'items'},
           'gemini': {'chat': 'entries'},
           'future': {'chat': 'other-format'},
+          'cursor': {'chat': 'jsonl'},
         })!;
+        expect(supportsChatView(agent('cursor'), catalog), isFalse);
         expect(supportsChatView(agent('claude'), catalog), isTrue);
         expect(supportsChatView(agent('gemini'), catalog), isTrue);
         // The neutral format, paged by cursor (CON-068).
