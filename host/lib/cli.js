@@ -23,7 +23,6 @@ const usageMod = lazy('./usage')
 const summarizeMod = lazy('./summarize')
 const guideMod = lazy('./guide')
 const digestMod = lazy('./digest')
-const cswapMod = lazy('./cswap')
 const rulesMod = lazy('./rules')
 const riskMod = lazy('./risk')
 const reviewMod = lazy('./review')
@@ -31,6 +30,8 @@ const agentsMod = lazy('./agents')
 const configMod = lazy('./config')
 const talkbawtCliMod = lazy('./talkbawt-cli')
 const sheprdMod = lazy('./sheprd')
+const adaptersMod = lazy('./adapters')
+const claudeAdapter = () => adaptersMod().get('claude')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -80,8 +81,10 @@ const USAGE = `usage: conductore-hostd <command>
                                   stdin when no --tool); runs no daemon
   focus <sessionId>               select the agent's tmux window / Herdr pane
   transcript <sessionId> [--since <offset> | --before <offset>]
-             [--tail-bytes N] [--max-bytes 262144]
+             [--tail-bytes N] [--max-bytes 262144] [--cursor <cursor>]
                                   chat entries from the session's transcript
+                                  (Claude Code: its own entries; other
+                                  agents: neutral items, paged by --cursor)
   send <sessionId> [--text "..." | --text-b64 <base64>] [--no-enter]
                                   type a prompt into the agent's pane (text
                                   from stdin when neither flag is given)
@@ -509,20 +512,18 @@ async function transcriptCmd (args) {
     if (n !== undefined) opts[key] = n
   }
   if (opts.since !== undefined && opts.before !== undefined) return fail('use --since or --before, not both')
+  // An opaque page cursor (agents whose transcript is not a byte stream).
+  if (typeof flags.cursor === 'string') opts.cursor = flags.cursor
   const found = await findAgent(sessionId)
   if (found.error) return fail(found.error)
-  const file = found.agent.transcriptPath
-  if (!file) return fail('no transcript recorded for this session yet (it appears with the next hook event)')
-  if (!path.isAbsolute(file) || !file.endsWith('.jsonl')) return fail('transcript path is not an absolute .jsonl file')
-  try {
-    const a = found.agent
-    // The agent's live status rides along so one poll refreshes the whole view.
-    const agent = { name: a.name, state: a.state, lastEvent: a.lastEvent || null, lastToolName: a.lastToolName || null, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
-    return out({ sessionId, agent, ...transcriptMod().readTranscript(file, opts) })
-  } catch (err) {
-    if (err.code === 'ENOENT') return fail(`transcript not found: ${file}`)
-    return fail(`cannot read transcript: ${err.message}`)
-  }
+  const a = found.agent
+  const adapter = adaptersMod().of(a)
+  if (!adapter.readTranscript) return fail(`${adapter.label} sessions have no chat view`)
+  const page = adapter.readTranscript(a, opts)
+  if (page.error) return fail(page.error)
+  // The agent's live status rides along so one poll refreshes the whole view.
+  const agent = { name: a.name, state: a.state, lastEvent: a.lastEvent || null, lastToolName: a.lastToolName || null, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
+  return out({ sessionId, agent, ...page })
 }
 
 function readStdin () {
@@ -570,7 +571,10 @@ async function send (args) {
   if (text.length > paneMod().MAX_TEXT) return fail(`text too long (${text.length} > ${paneMod().MAX_TEXT} characters)`)
   const found = await inputAgent(sessionId)
   if (found.error) return fail(found.error)
-  const r = await paneMod().sendText(found.agent, text, { enter })
+  // An agent with its own input channel (a server or plugin) takes the
+  // prompt there; every other one is typed into its pane.
+  const adapter = adaptersMod().of(found.agent)
+  const r = adapter.sendPrompt ? await adapter.sendPrompt(found.agent, text, { enter }) : await paneMod().sendText(found.agent, text, { enter })
   if (r.error) return fail(r.error)
   return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, chars: text.length, enter })
 }
@@ -581,9 +585,15 @@ async function interrupt (args) {
   // Escape also dismisses a permission prompt, so it is allowed then.
   const found = await inputAgent(sessionId, { allowPermission: true })
   if (found.error) return fail(found.error)
-  const r = await paneMod().sendKey(found.agent, 'escape')
+  const adapter = adaptersMod().of(found.agent)
+  if (adapter.interrupt) {
+    const r = await adapter.interrupt(found.agent)
+    return r.error ? fail(r.error) : out({ ok: true, sessionId, ...r })
+  }
+  const key = adapter.interruptKey || 'escape'
+  const r = await paneMod().sendKey(found.agent, key)
   if (r.error) return fail(r.error)
-  return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: 'Escape' })
+  return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: key === 'escape' ? 'Escape' : key })
 }
 
 // The agents the daemon knows (their statusline usage), without starting
@@ -634,7 +644,7 @@ async function usageCmd (args) {
     // Every cswap account's limits; nothing at all without cswap. Read
     // first: the scan counts new messages for the account active now.
     let cswap = null
-    try { cswap = await cswapMod().accounts({ cacheFile: cswapCachePath() }) } catch {}
+    try { cswap = await claudeAdapter().accounts({ cacheFile: cswapCachePath() }) } catch {}
     const active = cswap && Array.isArray(cswap.accounts) ? cswap.accounts.find(a => a && a.active) : null
     if (active && !cswap.stale) opts.activeAccount = active.label
     const result = usageMod().compute(opts)
@@ -665,7 +675,7 @@ async function cswapSwitchCmd (args) {
   try { os.setPriority(0, 10) } catch {}
   try {
     paths.ensureDirs()
-    const r = await cswapMod().switchAccount({ slot: best ? undefined : Number(slot), best, cacheFile: cswapCachePath() })
+    const r = await claudeAdapter().switchAccount({ slot: best ? undefined : Number(slot), best, cacheFile: cswapCachePath() })
     if (!r.ok) return fail(r.message)
     return out(r)
   } catch (err) {
@@ -817,8 +827,7 @@ async function digestCmd (args) {
     const data = await digestData()
     // The newer hooks this machine has registered; without them failures
     // and API errors are read from the transcripts.
-    let registered = []
-    try { registered = settingsMod().installed(settingsMod().readSettings()) } catch {}
+    const registered = claudeAdapter().registeredEvents()
     return out({
       version: paths.VERSION,
       ...await dm.digest({
@@ -961,58 +970,38 @@ function recordNodePath () {
 // The local Claude Code's version, for the hooks only newer versions
 // know: { bin, version } or null (not found, no answer in 5 s, unreadable).
 function claudeVersion () {
-  const bin = summarizeMod().findClaude()
-  if (!bin) return null
-  const env = { ...process.env }
-  delete env.CLAUDECODE
-  try {
-    const text = require('child_process').execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], env })
-    const version = settingsMod().parseVersion(text)
-    return version ? { bin, version: version.join('.') } : null
-  } catch { return null }
+  const found = claudeAdapter().detect()
+  return found.version ? { bin: found.bin, version: found.version } : null
 }
 
-function install () {
-  const settings = settingsMod()
-  const statusline = statuslineMod()
-  const file = settings.settingsPath()
-  let current
-  try { current = settings.readSettings(file) } catch (err) { return fail(err.message) }
-  const hookBin = hookBinPath()
-  const slBin = statuslineBinPath()
-  for (const bin of [hookBin, slBin]) if (!fs.existsSync(bin)) return fail(`client not found at ${bin}`)
-  // Replaces every earlier conductore handler (any path, the Node hook of
-  // 0.3 and older) and moves a `conductore-hostd statusline` line to the sh
-  // statusline, keeping the command it wraps.
-  // The newer events only where this Claude Code knows them; a merge also
-  // takes ours off optional events a downgraded one would not know.
-  const claude = claudeVersion()
-  const { events, skipped } = settings.eventsFor(claude && claude.version)
-  const merged = settings.merge(current, hookBin, events)
-  const sl = statusline.merge(merged, slBin)
-  const before = JSON.stringify(current)
-  if (JSON.stringify(sl.settings) !== before) {
-    try { settings.writeSettings(sl.settings, file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
+// The other agents this machine has (Claude Code's hooks are always
+// registered, as before adapters): each present one registers its own
+// hooks or plugin. Their results go under `agents`, only when there are any.
+async function installOthers (action) {
+  const results = {}
+  for (const adapter of adaptersMod().all()) {
+    if (adapter.id === adaptersMod().DEFAULT_KIND || !adapter[action]) continue
+    if (action === 'install' && !adapter.detect().present) continue
+    try { results[adapter.id] = await adapter[action]({ hookBin: hookBinPath() }) } catch (err) { results[adapter.id] = { error: err.message } }
   }
+  return Object.keys(results).length ? { agents: results } : {}
+}
+
+async function install () {
+  const r = claudeAdapter().install({ hookBin: hookBinPath(), statuslineBin: statuslineBinPath() })
+  if (r.error) return fail(r.error)
   paths.ensureDirs()
   try { recordNodePath() } catch (err) { return fail(`cannot write ${paths.nodePathFile()}: ${err.message}`) }
-  return out({ ok: true, settings: file, hook: hookBin, statusline: slBin, events, skipped, claudeVersion: claude ? claude.version : null, statusLine: sl.action })
+  return out({ ok: true, ...r, ...await installOthers('install') })
 }
 
 async function uninstall () {
-  const settings = settingsMod()
-  const statusline = statuslineMod()
-  const file = settings.settingsPath()
-  let current
-  try { current = settings.readSettings(file) } catch (err) { return fail(err.message) }
-  const before = settings.installed(current)
-  const hadStatusLine = statusline.isOurs(current.statusLine)
-  if (before.length || hadStatusLine) {
-    try { settings.writeSettings(statusline.unmerge(settings.unmerge(current)), file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
-  }
+  const r = claudeAdapter().uninstall()
+  if (r.error) return fail(r.error)
+  const others = await installOthers('uninstall')
   let stopped = false
   try { await client.request({ op: 'stop' }, { timeoutMs: 3000 }); stopped = true } catch {}
-  return out({ ok: true, settings: file, removed: before, statusLineRestored: hadStatusLine, daemonStopped: stopped })
+  return out({ ok: true, ...r, daemonStopped: stopped, ...others })
 }
 
 async function stop () {
@@ -1104,6 +1093,14 @@ async function doctor () {
   const claude = await run('claude', ['--version'])
   add('claude', !claude.err, claude.err ? 'not found on PATH' : claude.stdout.trim())
   const optional = ['herdr', 'tmux', 'daemon', 'daemon memory', 'state file', 'claude', 'statusline (usage)', 'hook latency', 'node for hooks']
+  // The other agents' own checks (hooks registered, trusted, version
+  // tested): informative, an agent this machine lacks is no failure.
+  for (const adapter of adaptersMod().all()) {
+    if (adapter.id === adaptersMod().DEFAULT_KIND || !adapter.doctor) continue
+    let found = []
+    try { found = await adapter.doctor() } catch (err) { found = [{ name: adapter.label, ok: false, detail: err.message }] }
+    for (const c of found) { checks.push(c); optional.push(c.name) }
+  }
   const ok = checks.filter(c => !c.ok && !optional.includes(c.name)).length === 0
   return out({ ok, user: os.userInfo().username, checks })
 }
@@ -1170,7 +1167,7 @@ async function main (argv) {
     case 'uninstall': return uninstall()
     case 'doctor': return doctor()
     case 'stop': return stop()
-    case 'version': return out({ version: paths.VERSION, protocol: paths.PROTOCOL_VERSION, node: process.versions.node, capabilities: require('./approvals').CAPABILITIES })
+    case 'version': return out({ version: paths.VERSION, protocol: paths.PROTOCOL_VERSION, node: process.versions.node, capabilities: require('./approvals').CAPABILITIES, adapters: adaptersMod().capabilityMap() })
     case 'help': case '--help': case '-h': case undefined:
       process.stdout.write(USAGE); return cmd === undefined ? 1 : 0
     default: return fail(`unknown command ${cmd}\n${USAGE}`)
