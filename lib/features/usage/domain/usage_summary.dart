@@ -48,8 +48,10 @@ class MachineUsage {
   final bool needsUpdate;
   final DateTime? fetchedAt;
 
+  /// The live login's limits: the companion's and the agent monitor's
+  /// reports, of the account the newest one is for ([currentLoginLimits]).
   List<UsageLimit> get claudeLimits =>
-      mergeUsageLimits([report?.claude.limits ?? const [], liveLimits]);
+      currentLoginLimits([report?.claude.limits ?? const [], liveLimits]);
 
   List<UsageLimit> get codexLimits => report?.codex.limits ?? const [];
 
@@ -127,8 +129,20 @@ class UsageAccountSummary {
       if (p.account.active) p.hostName,
   ];
 
-  /// Not managed by cswap on any machine: a live login never `cswap add`ed.
+  /// Not managed by cswap on any machine: the live login cswap names, never
+  /// `cswap add`ed.
   bool get unmanaged => placements.every((p) => !p.account.managed);
+
+  /// [unmanaged], and the sessions' limits confirm it is none of cswap's
+  /// accounts. Otherwise it is only "the current login".
+  bool get notInCswap =>
+      unmanaged && placements.any((p) => p.account.inCswap == false);
+
+  /// cswap lost its login wherever it is configured: "Needs re-login".
+  bool get needsLogin => placements.every((p) => p.account.needsLogin);
+
+  /// Running sessions use it on at least one machine.
+  bool get live => placements.any((p) => p.account.live);
 
   /// Machines where it can be made the active account.
   List<UsageAccountPlacement> get switchTargets => [
@@ -204,9 +218,10 @@ class UsageSummary {
   bool get hasData =>
       machines.any((m) => m.report != null || m.liveLimits.isNotEmpty);
 
-  /// The freshest Claude limit windows across machines.
+  /// The Claude limit windows of the account in use: the machine that
+  /// reported last decides which ([currentLoginLimits]).
   List<UsageLimit> get claudeLimits =>
-      mergeUsageLimits([for (final m in machines) m.claudeLimits]);
+      currentLoginLimits([for (final m in machines) m.claudeLimits]);
 
   List<UsageLimit> get codexLimits =>
       mergeUsageLimits([for (final m in machines) m.codexLimits]);
@@ -234,7 +249,11 @@ class UsageSummary {
           account: account,
           canSwitch: machine.canSwitchAccounts,
         );
-        if (!account.managed && account.active) {
+        // Not when the sessions run on one of cswap's accounts: the
+        // machine's limits are that account's then.
+        if (!account.managed &&
+            account.active &&
+            !machine.accounts.any((a) => a.managed && a.live)) {
           liveLimits[placement] = machine.claudeLimits;
         }
         (byLabel[account.label] ??= []).add(placement);

@@ -271,7 +271,8 @@ void main() {
         find.textContaining('resets 5h in 3h 0m · week in 3d 3h'),
         findsOneWidget,
       );
-      expect(find.textContaining('as of 11h ago'), findsOneWidget);
+      // Every account's age (CON-067), not only stale ones.
+      expect(find.textContaining('updated 11h ago'), findsOneWidget);
       // Disabled: greyed, no switch.
       expect(
         find.descendant(
@@ -402,16 +403,104 @@ void main() {
         find.byKey(const ValueKey('usage-account-active-a***@o***.com')),
         findsOneWidget,
       );
-      expect(
-        find.textContaining('not in cswap', findRichText: true),
-        findsOneWidget,
-      );
+      // An older companion cannot tell whether cswap is right that this
+      // login is none of its accounts (CON-067): only "Current login".
+      expect(find.textContaining('Current login'), findsOneWidget);
+      expect(find.textContaining('not in cswap'), findsNothing);
       expect(
         find.byKey(const ValueKey('usage-account-switch-a***@o***.com')),
         findsNothing,
       );
       expect(
         find.byKey(const ValueKey('usage-account-switch-outsmartis')),
+        findsOneWidget,
+      );
+    });
+
+    // CON-067: accounts cswap lost the login of, windows that ended, and
+    // the unmanaged login only "not in cswap" when confirmed.
+    testWidgets('needs re-login is labelled and greyed; ended windows say '
+        'reset; ages show', (tester) async {
+      runner.reply = () => FakeUsageRunner.ok(
+        usageReplyJson(
+          limits: [
+            {
+              'label': '7d',
+              'usedPct': 52,
+              'resetsAt': resets
+                  .add(const Duration(days: 2))
+                  .millisecondsSinceEpoch,
+              'at': now
+                  .subtract(const Duration(hours: 3))
+                  .millisecondsSinceEpoch,
+            },
+          ],
+          accounts: [
+            usageAccount(
+              1,
+              'outsmartis',
+              weekly: 100,
+              weeklyResets: resets.add(const Duration(hours: 10)),
+              status: 'relogin_required',
+              stale: true,
+              usageAt: now.subtract(const Duration(hours: 20)),
+            ),
+            usageAccount(
+              3,
+              'carol',
+              weekly: 100,
+              // Ended an hour ago, measured before.
+              weeklyResets: now.subtract(const Duration(hours: 1)),
+              usageAt: now.subtract(const Duration(hours: 2)),
+            ),
+            usageUnmanagedAccount(
+              'g***@t***.pt',
+              inCswap: false,
+              limits: {
+                '7d': {
+                  'usedPct': 52,
+                  'resetsAt': resets
+                      .add(const Duration(days: 2))
+                      .millisecondsSinceEpoch,
+                  'expired': false,
+                },
+              },
+              usageAt: now.subtract(const Duration(minutes: 8)),
+            ),
+          ],
+        ),
+      );
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+      await tester.pump();
+      expect(find.textContaining('Needs re-login'), findsOneWidget);
+      expect(
+        tester
+            .widget<Opacity>(
+              find.byKey(const ValueKey('usage-account-greyed-outsmartis')),
+            )
+            .opacity,
+        lessThan(1),
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-greyed-carol')),
+        findsNothing,
+      );
+      expect(find.textContaining('updated 20h ago'), findsOneWidget);
+      // Carol's week ended: 0 %, "reset", never the old 100 %.
+      final carolRings = find.descendant(
+        of: find.byKey(const ValueKey('usage-account-carol')),
+        matching: find.byType(UsageRing),
+      );
+      expect(tester.widget<UsageRing>(carolRings.last).percent, 0);
+      expect(find.textContaining('week reset'), findsOneWidget);
+      // Confirmed by the sessions' limits.
+      expect(find.textContaining('Current login'), findsOneWidget);
+      expect(find.textContaining('not in cswap'), findsOneWidget);
+      expect(find.textContaining('updated 8m ago'), findsOneWidget);
+      // The machine's limit bar says how old its figure is.
+      expect(
+        find.textContaining('52% · resets in 2d 3h · updated 3h ago'),
         findsOneWidget,
       );
     });

@@ -204,10 +204,59 @@ test('Claude limits: the later window wins, then the higher use; past windows ar
   const r = run(t, { agents })
   assert.deepEqual(r.claude.limits, [{ label: '5h', usedPct: 55, resetsAt: now + HOUR, expired: false }])
   assert.deepEqual(r.claude.sessions, [{ sessionId: 'a', name: 'api', project: 'api', state: 'working', contextUsedPct: 41, contextTokens: 82000, windowLabel: '200k' }])
-  // Remembered after the session is gone; expired once the window passed.
+  // Remembered after the session is gone; once the window passed it is
+  // expired and at 0 %, never the old figure as if current (CON-067).
   const later = run(t, { agents: [], now: now + 2 * HOUR })
-  assert.equal(later.claude.limits[0].usedPct, 55)
-  assert.equal(later.claude.limits[0].expired, true)
+  assert.deepEqual(later.claude.limits, [{ label: '5h', usedPct: 0, resetsAt: now + HOUR, expired: true }])
+})
+
+// CON-067: sessions left open on another account (a /login since, or
+// `cswap run`) kept reporting that account's windows. "The later window
+// wins" let them override the live login's numbers, for days.
+test('Claude limits: the account of the newest report decides; other accounts\' sessions are ignored', () => {
+  const now = NOW
+  const current = { sessionId: 'new', state: 'working', updatedAt: now - 60000, usage: { at: now - 60000, limits: [{ label: '5h', usedPct: 14, resetsAt: now + 4 * HOUR }, { label: '7d', usedPct: 52, resetsAt: now + 40 * HOUR }] } }
+  // Idle since yesterday, on an account whose windows reset later.
+  const other = { sessionId: 'old', state: 'waiting_input', updatedAt: now - 20 * HOUR, usage: { at: now - 20 * HOUR, limits: [{ label: '5h', usedPct: 90, resetsAt: now + 4.5 * HOUR }, { label: '7d', usedPct: 95, resetsAt: now + 60 * HOUR }] } }
+  // Same account as the newest, a little behind: the higher use counts.
+  const sibling = { sessionId: 'sib', state: 'waiting_input', updatedAt: now - 2 * HOUR, usage: { at: now - 2 * HOUR, limits: [{ label: '7d', usedPct: 50, resetsAt: now + 40 * HOUR + 1000 }] } }
+  const live = usage.liveClaudeLimits([other, current, sibling])
+  assert.equal(live.at, now - 60000)
+  assert.deepEqual(live.limits, [
+    { label: '5h', usedPct: 14, resetsAt: now + 4 * HOUR, at: now - 60000 },
+    { label: '7d', usedPct: 52, resetsAt: now + 40 * HOUR, at: now - 60000 }
+  ])
+  // Before CON-067 the other account won both windows.
+  const t = tmpHome()
+  const r = run(t, { agents: [other, current, sibling] })
+  assert.deepEqual(r.claude.limits.map(l => [l.label, l.usedPct, l.at]), [['5h', 14, now - 60000], ['7d', 52, now - 60000]])
+  // A daemon before CON-067 sends no `at`: the last hook event dates it.
+  const legacy = usage.liveClaudeLimits([{ ...other, usage: { limits: other.usage.limits } }, { ...current, usage: { limits: current.usage.limits } }])
+  assert.equal(legacy.limits.find(l => l.label === '7d').usedPct, 52)
+})
+
+test('Claude limits: remembered ones give way to newer reports, of any account, and keep their age', () => {
+  const now = NOW
+  const t = tmpHome()
+  const before = { sessionId: 'a', state: 'working', updatedAt: now - 3 * HOUR, usage: { at: now - 3 * HOUR, limits: [{ label: '5h', usedPct: 70, resetsAt: now + HOUR }, { label: '7d', usedPct: 99, resetsAt: now + 90 * HOUR }] } }
+  run(t, { agents: [before] })
+  // The session ended; nothing newer: the remembered numbers, with their age.
+  const alone = run(t, { agents: [] })
+  assert.deepEqual(alone.claude.limits.map(l => [l.label, l.usedPct, l.at]), [['5h', 70, now - 3 * HOUR], ['7d', 99, now - 3 * HOUR]])
+  // A newer report on another account (a /login since) replaces them all,
+  // also a window it does not report yet.
+  const after = { sessionId: 'b', state: 'working', updatedAt: now - 60000, usage: { at: now - 60000, limits: [{ label: '7d', usedPct: 10, resetsAt: now + 30 * HOUR }] } }
+  const switched = run(t, { agents: [after] })
+  assert.deepEqual(switched.claude.limits.map(l => [l.label, l.usedPct]), [['7d', 10]])
+  // On the same account a window it does not report is kept (expired here).
+  const t2 = tmpHome()
+  run(t2, { agents: [before] })
+  const same = { ...after, usage: { at: now - 60000, limits: [{ label: '7d', usedPct: 99.5, resetsAt: now + 90 * HOUR }] } }
+  const kept = run(t2, { agents: [same], now: now + 2 * HOUR })
+  assert.deepEqual(kept.claude.limits.map(l => [l.label, l.usedPct, l.expired]), [['5h', 0, true], ['7d', 99.5, false]])
+  // An older live report never overrides newer remembered numbers.
+  const stale = { sessionId: 'c', state: 'waiting_input', updatedAt: now - 10 * HOUR, usage: { at: now - 10 * HOUR, limits: [{ label: '7d', usedPct: 3, resetsAt: now + 20 * HOUR }] } }
+  assert.deepEqual(run(t2, { agents: [stale], now: now + 2 * HOUR }).claude.limits.map(l => [l.label, l.usedPct]), [['5h', 0], ['7d', 99.5]])
 })
 
 test('project names: repository root, linked worktree, home', () => {

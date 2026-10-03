@@ -48,6 +48,8 @@ const DEFAULT_MAX_MS = 2500
 const CHUNK = 4 * 1024 * 1024
 const MAX_LINE = 16 * 1024 * 1024
 const LOCK_STALE_MS = 60 * 1000
+// Two reports of one limit window reset within this of each other.
+const SAME_WINDOW_MS = 5 * 60 * 1000
 
 // Bucket value slots.
 const IN = 0; const OUT = 1; const CW5 = 2; const CW1H = 3; const CR = 4; const MSGS = 5
@@ -493,14 +495,16 @@ function scanAgent (agent, roots, ctx) {
 // --- limits -------------------------------------------------------------------
 
 // Rate limits are per account: of two reports for one window, the one for
-// the later window wins, then the higher use (it only grows in a window).
+// the later window wins, then the higher use (it only grows in a window),
+// then the newer report.
 function fresher (a, b) {
   if (!a) return b
   if (!b) return a
   const ra = a.resetsAt || 0
   const rb = b.resetsAt || 0
-  if (Math.abs(ra - rb) > 5 * 60 * 1000) return rb > ra ? b : a
-  return b.usedPct > a.usedPct ? b : a
+  if (Math.abs(ra - rb) > SAME_WINDOW_MS) return rb > ra ? b : a
+  if (b.usedPct !== a.usedPct) return b.usedPct > a.usedPct ? b : a
+  return (b.at || 0) > (a.at || 0) ? b : a
 }
 
 function mergeLimits (lists) {
@@ -508,15 +512,78 @@ function mergeLimits (lists) {
   for (const list of lists) {
     for (const l of list || []) {
       if (!l || typeof l.label !== 'string' || typeof l.usedPct !== 'number') continue
-      byLabel.set(l.label, fresher(byLabel.get(l.label), { label: l.label, usedPct: l.usedPct, resetsAt: l.resetsAt || null }))
+      const entry = { label: l.label, usedPct: l.usedPct, resetsAt: l.resetsAt || null }
+      if (l.at) entry.at = l.at
+      byLabel.set(l.label, fresher(byLabel.get(l.label), entry))
     }
   }
   const order = { '5h': 0, '7d': 1 }
   return [...byLabel.values()].sort((a, b) => (order[a.label] ?? 9) - (order[b.label] ?? 9))
 }
 
-function publicLimits (list, now) {
-  return list.map(l => ({ ...l, expired: !!(l.resetsAt && l.resetsAt <= now) }))
+// Which account a set of limits belongs to: when its weekly window resets
+// (null when unknown). Two sets with weekly resets within SAME_WINDOW_MS
+// are taken for one account.
+function weekOf (limits) {
+  const w = (limits || []).find(l => l && l.label === '7d')
+  return w && w.resetsAt ? w.resetsAt : null
+}
+
+function sameAccount (a, b) {
+  return a != null && b != null && Math.abs(a - b) <= SAME_WINDOW_MS
+}
+
+// When a session last reported its limits: its statusline record's `at`,
+// or its last hook event when later (a session at the same numbers does not
+// stamp a new record) or when the daemon is older.
+function reportedAt (agent) {
+  const at = Number(agent.usage && agent.usage.at)
+  const updated = typeof agent.updatedAt === 'number' ? agent.updatedAt : Date.parse(agent.updatedAt)
+  return Math.max(Number.isFinite(at) ? at : 0, Number.isFinite(updated) ? updated : 0)
+}
+
+// The live Claude login's limits from the sessions' statusline reports.
+// Sessions can be on different accounts (a login changed under a session
+// left open, `cswap run`): the most recent report decides the account, and
+// only reports for that account's weekly window count. Each limit keeps
+// when it was reported (`at`).
+function liveClaudeLimits (agents) {
+  const reports = []
+  for (const a of agents || []) {
+    if (!a || a.state === 'ended' || !a.usage || !Array.isArray(a.usage.limits) || !a.usage.limits.length) continue
+    reports.push({ at: reportedAt(a), limits: a.usage.limits })
+  }
+  if (!reports.length) return { at: 0, limits: [] }
+  reports.sort((x, y) => y.at - x.at)
+  const week = weekOf(reports[0].limits)
+  const same = reports.filter((r, i) => i === 0 || sameAccount(weekOf(r.limits), week))
+  return { at: reports[0].at, limits: mergeLimits(same.map(r => r.limits.map(l => ({ ...l, at: r.at || undefined })))) }
+}
+
+// The Claude limits to remember: the live login's, unless the remembered
+// ones were reported later (every session that knew newer numbers ended).
+// A window the live reports lack is kept from the remembered ones of the
+// same account (a 5-hour window not started again yet).
+function claudeLimits (cached, agents) {
+  const live = liveClaudeLimits(agents)
+  const cachedAt = Math.max(0, ...(cached || []).map(l => l.at || 0))
+  if (!live.limits.length || live.at < cachedAt) return mergeLimits([cached])
+  const week = weekOf(live.limits)
+  const labels = new Set(live.limits.map(l => l.label))
+  const kept = (cached || []).filter(l => !labels.has(l.label) && sameAccount(weekOf(cached), week))
+  return mergeLimits([live.limits, kept])
+}
+
+// What `usage` answers: a window that reset since it was reported is
+// `expired` and at 0 % (its new use is unknown until the next report),
+// with the reset time it had.
+function publicLimits (list, now, at) {
+  return list.map(l => {
+    const expired = !!(l.resetsAt && l.resetsAt <= now)
+    const out = { label: l.label, usedPct: expired ? 0 : l.usedPct, resetsAt: l.resetsAt || null, expired }
+    if (l.at || at) out.at = l.at || at
+    return out
+  })
 }
 
 // --- report -------------------------------------------------------------------
@@ -690,13 +757,13 @@ function compute (opts = {}) {
       if (cache.legacy && !budget.partial && !stats.pendingFiles) delete cache.legacy
       prune(cache, retentionFrom, historyFrom)
       if (cache.legacy) for (const agent of ['claude', 'codex']) for (const day of Object.keys(cache.legacy[agent] || {})) if (day < historyFrom) delete cache.legacy[agent][day]
-      cache.limits.claude = mergeLimits([cache.limits.claude, ...(opts.agents || []).map(a => a && a.usage && a.usage.limits)])
+      cache.limits.claude = claudeLimits(cache.limits.claude, opts.agents)
       if (cacheFile) saveCache(cacheFile, cache)
     } finally {
       unlock()
     }
   } else {
-    cache.limits.claude = mergeLimits([cache.limits.claude, ...(opts.agents || []).map(a => a && a.usage && a.usage.limits)])
+    cache.limits.claude = claudeLimits(cache.limits.claude, opts.agents)
   }
 
   const unpriced = new Set()
@@ -710,7 +777,7 @@ function compute (opts = {}) {
     ...report('claude', cache.claude, daysOf('claude'), range, detail, unpriced)
   }
   const codex = codexDirs.length
-    ? { present: true, limits: publicLimits(cache.limits.codex, now), ...report('codex', cache.codex, daysOf('codex'), range, detail, unpriced) }
+    ? { present: true, limits: publicLimits(cache.limits.codex, now, cache.codexLimitsAt), ...report('codex', cache.codex, daysOf('codex'), range, detail, unpriced) }
     : { present: false }
   let cacheBytes = null
   try { cacheBytes = fs.statSync(cacheFile).size } catch {}
@@ -752,4 +819,4 @@ function compute (opts = {}) {
   }
 }
 
-module.exports = { compute, localDate, addDays, resolveProject, mergeLimits, fresher, accountAt, DATE_RE, RETENTION_DAYS, HISTORY_DAYS, SCHEMA }
+module.exports = { compute, localDate, addDays, resolveProject, mergeLimits, fresher, liveClaudeLimits, claudeLimits, publicLimits, weekOf, sameAccount, accountAt, DATE_RE, RETENTION_DAYS, HISTORY_DAYS, SCHEMA }

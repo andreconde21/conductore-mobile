@@ -21,6 +21,7 @@ class UsageLimit {
     required this.usedPct,
     this.resetsAt,
     this.expired = false,
+    this.reportedAt,
   });
 
   final String label;
@@ -32,6 +33,9 @@ class UsageLimit {
   /// The window reset after the last report: its use is unknown, shown as
   /// 0 until the next report.
   final bool expired;
+
+  /// When it was reported (companion 1.3.1+): how old the figure is.
+  final DateTime? reportedAt;
 
   bool get isFiveHour => label == '5h';
   bool get isWeekly => label == '7d';
@@ -63,6 +67,7 @@ class UsageLimit {
       return null;
     }
     final resets = json['resetsAt'];
+    final at = json['at'];
     return UsageLimit(
       label: label,
       usedPct: used.toDouble(),
@@ -70,13 +75,26 @@ class UsageLimit {
           ? DateTime.fromMillisecondsSinceEpoch(resets.toInt(), isUtc: true)
           : null,
       expired: json['expired'] == true,
+      reportedAt: at is num && at > 0
+          ? DateTime.fromMillisecondsSinceEpoch(at.toInt(), isUtc: true)
+          : null,
     );
   }
 
-  static UsageLimit fromAgent(AgentRateLimit limit) => UsageLimit(
-    label: limit.label,
-    usedPct: limit.usedPct,
-    resetsAt: limit.resetsAt,
+  static UsageLimit fromAgent(AgentRateLimit limit, {DateTime? reportedAt}) =>
+      UsageLimit(
+        label: limit.label,
+        usedPct: limit.usedPct,
+        resetsAt: limit.resetsAt,
+        reportedAt: reportedAt,
+      );
+
+  UsageLimit withReportedAt(DateTime? at) => UsageLimit(
+    label: label,
+    usedPct: usedPct,
+    resetsAt: resetsAt,
+    expired: expired,
+    reportedAt: at,
   );
 
   @override
@@ -85,24 +103,91 @@ class UsageLimit {
       other.label == label &&
       other.usedPct == usedPct &&
       other.resetsAt == resetsAt &&
-      other.expired == expired;
+      other.expired == expired &&
+      other.reportedAt == reportedAt;
 
   @override
-  int get hashCode => Object.hash(label, usedPct, resetsAt, expired);
+  int get hashCode =>
+      Object.hash(label, usedPct, resetsAt, expired, reportedAt);
 
   @override
   String toString() => 'UsageLimit($label, $usedPct, $resetsAt)';
 }
 
+/// Two reports of one window reset within this of each other.
+const _sameWindow = Duration(minutes: 5);
+
 /// Of two reports for one window, the one for the later window wins, then
-/// the higher use (it only grows within a window). Mirrors the companion.
+/// the higher use (it only grows within a window), then the newer report.
+/// Mirrors the companion. Only for reports of one account: see
+/// [currentLoginLimits].
 UsageLimit fresherLimit(UsageLimit a, UsageLimit b) {
   final ra = a.resetsAt?.millisecondsSinceEpoch ?? 0;
   final rb = b.resetsAt?.millisecondsSinceEpoch ?? 0;
-  if ((ra - rb).abs() > const Duration(minutes: 5).inMilliseconds) {
+  if ((ra - rb).abs() > _sameWindow.inMilliseconds) {
     return rb > ra ? b : a;
   }
-  return b.usedPct > a.usedPct ? b : a;
+  if (b.usedPct != a.usedPct) {
+    return b.usedPct > a.usedPct ? b : a;
+  }
+  final ta = a.reportedAt?.millisecondsSinceEpoch ?? 0;
+  final tb = b.reportedAt?.millisecondsSinceEpoch ?? 0;
+  return tb > ta ? b : a;
+}
+
+/// The newest report time among [limits]; null when none says.
+DateTime? newestReport(Iterable<UsageLimit> limits) {
+  DateTime? newest;
+  for (final limit in limits) {
+    final at = limit.reportedAt;
+    if (at != null && (newest == null || at.isAfter(newest))) {
+      newest = at;
+    }
+  }
+  return newest;
+}
+
+/// When the weekly window of [limits] resets: it tells accounts apart.
+DateTime? weeklyResetOf(Iterable<UsageLimit> limits) =>
+    limits.where((l) => l.isWeekly).firstOrNull?.resetsAt;
+
+bool _sameAccount(DateTime? a, DateTime? b) =>
+    a != null && b != null && a.difference(b).abs() <= _sameWindow;
+
+/// The live Claude login's limits from several reports (sessions,
+/// machines, the companion's remembered ones). Limits are per account, and
+/// reports can be of different accounts (a session left open since a
+/// `/login`, another machine): the newest report decides the account, and
+/// only reports of its weekly window count, merged by [fresherLimit].
+/// Without report times (older companions) every report counts, as before
+/// CON-067.
+List<UsageLimit> currentLoginLimits(Iterable<Iterable<UsageLimit>> reports) {
+  final all = [
+    for (final report in reports)
+      if (report.isNotEmpty) report.toList(),
+  ];
+  if (all.isEmpty) {
+    return const [];
+  }
+  DateTime? newestAt;
+  List<UsageLimit>? newest;
+  for (final report in all) {
+    final at = newestReport(report);
+    if (at != null && (newestAt == null || at.isAfter(newestAt))) {
+      newestAt = at;
+      newest = report;
+    }
+  }
+  if (newest == null) {
+    return mergeUsageLimits(all);
+  }
+  final week = weeklyResetOf(newest);
+  return mergeUsageLimits([
+    for (final report in all)
+      if (identical(report, newest) ||
+          _sameAccount(weeklyResetOf(report), week))
+        report,
+  ]);
 }
 
 /// The freshest report per window label across [lists], 5h then 7d first.
@@ -321,6 +406,9 @@ class UsageAccount {
     this.weekly,
     this.perModel = const [],
     this.usageAt,
+    this.needsLogin = false,
+    this.inCswap,
+    this.live = false,
   });
 
   /// cswap's account number on that machine (`cswap switch <slot>`);
@@ -330,6 +418,19 @@ class UsageAccount {
 
   /// cswap manages it, so it can be switched to.
   final bool managed;
+
+  /// cswap lost its login (`relogin_required`, `token_expired`): its
+  /// numbers are the last good ones until `cswap` logs in again.
+  final bool needsLogin;
+
+  /// For the unmanaged login: false when the sessions' limits confirm no
+  /// managed account is the one in use, null when that is not known (no
+  /// live limits, they match a managed account, or an older companion).
+  /// True for managed accounts.
+  final bool? inCswap;
+
+  /// The running sessions use it (their limits match it).
+  final bool live;
   final String? alias;
 
   /// The account new Claude sessions on the machine use.
@@ -380,10 +481,21 @@ class UsageAccount {
     final alias = json['alias'];
     final status = json['status'];
     final usageAt = json['usageAt'];
+    final managed = slot is num && json['managed'] != false;
     return UsageAccount(
       slot: slot is num ? slot.toInt() : null,
       label: label,
-      managed: slot is num && json['managed'] != false,
+      managed: managed,
+      needsLogin:
+          json['needsLogin'] == true ||
+          status == 'relogin_required' ||
+          status == 'token_expired',
+      inCswap: managed
+          ? true
+          : json['inCswap'] is bool
+          ? json['inCswap'] as bool
+          : null,
+      live: json['live'] == true,
       alias: alias is String && alias.isNotEmpty ? alias : null,
       active: json['active'] == true,
       disabled: json['disabled'] == true,
@@ -592,13 +704,15 @@ UsageAccountSwitchResult parseAccountSwitchResult(String stdout) {
 
 /// The command that asks for [days] of usage, or the days [from] to [to]
 /// (`YYYY-MM-DD`; [days] then only tells an older companion, which ignores
-/// the range, how much to send), per hour and per session on request.
+/// the range, how much to send), per hour and per session on request,
+/// with cswap asked again on [fresh].
 String companionUsageArguments({
   int days = 7,
   String? from,
   String? to,
   bool hourly = false,
   bool sessions = false,
+  bool fresh = false,
 }) => [
   'usage --days $days',
   if (from != null && from == to)
@@ -609,6 +723,9 @@ String companionUsageArguments({
   ],
   if (hourly) '--hourly',
   if (sessions) '--sessions',
+  // Ask cswap now, not from the companion's 60 s cache (older companions
+  // ignore it).
+  if (fresh) '--fresh',
   // Last: an older companion would read a word after it as its value.
   companionGzipFlag,
 ].join(' ');
