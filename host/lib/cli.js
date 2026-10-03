@@ -81,7 +81,8 @@ const USAGE = `usage: conductore-hostd <command>
                                   stdin when no --tool); runs no daemon
   focus <sessionId>               select the agent's tmux window / Herdr pane
   transcript <sessionId> [--since <offset> | --before <offset>]
-             [--tail-bytes N] [--max-bytes 262144] [--cursor <cursor>]
+             [--tail-bytes N] [--max-bytes 262144]
+             [--cursor <cursor> | --before-cursor <cursor>]
                                   chat entries from the session's transcript
                                   (Claude Code: its own entries; other
                                   agents: neutral items, paged by --cursor)
@@ -512,8 +513,10 @@ async function transcriptCmd (args) {
     if (n !== undefined) opts[key] = n
   }
   if (opts.since !== undefined && opts.before !== undefined) return fail('use --since or --before, not both')
-  // An opaque page cursor (agents whose transcript is not a byte stream).
+  // Opaque page cursors (agents whose transcript is not a byte stream:
+  // adapters/chat-items.js).
   if (typeof flags.cursor === 'string') opts.cursor = flags.cursor
+  if (typeof flags['before-cursor'] === 'string') opts.beforeCursor = flags['before-cursor']
   const found = await findAgent(sessionId)
   if (found.error) return fail(found.error)
   const a = found.agent
