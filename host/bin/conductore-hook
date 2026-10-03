@@ -1,5 +1,8 @@
 #!/bin/sh
-# conductore-hook <Event>: Claude Code hook client. POSIX sh, no Node.
+# conductore-hook [--agent <id>] <Event>: the hook client of Claude Code
+# (no --agent) and of other agents whose hooks take the same stdin JSON and
+# stdout decision (lib/adapters: the adapter named by --agent reads the
+# event). POSIX sh, no Node.
 #
 # Hands the hook JSON (stdin) to conductore-hostd through the spool
 # directory and exits: one `cat` and one `ln` per event (a hard link
@@ -20,6 +23,12 @@
 exec 2>/dev/null
 umask 077
 d=${CONDUCTORE_HOME:-$HOME/.conductore}
+agent=
+if [ "${1:-}" = --agent ]; then
+  case ${2:-} in '' | *[!a-z0-9-]*) exit 0 ;; esac
+  agent=$2
+  shift 2
+fi
 ev=${1:-}
 [ -d "$d/spool" ] && [ -d "$d/tmp" ] || mkdir -p "$d/spool" "$d/tmp" || exit 0
 
@@ -73,6 +82,8 @@ fi
 # Header, then Claude Code's JSON untouched.
 header() {
   printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\nclaude_pid=%s\ntmp=%s\n' "$ev" "$$" "$cpid" "${tmp##*/}"
+  # Another agent's event (none: Claude Code, as before adapters).
+  if [ -n "$agent" ]; then printf 'agent=%s\n' "$agent"; fi
   if [ -n "${TMUX:-}" ]; then printf 'tmux=%s\ntmux_pane=%s\n' "$TMUX" "${TMUX_PANE:-}"; fi
   if [ -n "${HERDR_WORKSPACE_ID:-}${HERDR_PANE_ID:-}" ]; then
     printf 'herdr_workspace=%s\nherdr_tab=%s\nherdr_pane=%s\nherdr_name=%s\n' \

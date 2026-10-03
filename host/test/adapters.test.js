@@ -261,3 +261,29 @@ test('a second adapter: its events become agents of its kind, an unknown agent i
     adapters.unregister('fakeagent')
   }
 })
+
+test('the sh hook names another agent with --agent and Claude Code with nothing', () => {
+  const hookHome = path.join(root, 'hookhome')
+  fs.mkdirSync(path.join(hookHome, 'spool'), { recursive: true })
+  fs.mkdirSync(path.join(hookHome, 'tmp'), { recursive: true })
+  const spoolMod = require('../lib/spool')
+  const run = args => {
+    // A start attempt just now: the hook spools without starting a daemon.
+    fs.writeFileSync(path.join(hookHome, 'spawn.at'), `${Math.floor(Date.now() / 1000)}\n`)
+    const env = { PATH: process.env.PATH, HOME: root, CONDUCTORE_HOME: hookHome }
+    execFileSync(path.join(__dirname, '..', 'bin', 'conductore-hook'), args, { env, input: JSON.stringify({ session_id: 'h1' }) })
+    const entries = spoolMod.list(path.join(hookHome, 'spool'))
+    const out = entries.map(e => spoolMod.take(e, path.join(hookHome, 'tmp')))
+    return out
+  }
+  const [codex] = run(['--agent', 'codex', 'Stop'])
+  assert.equal(codex.header.agent, 'codex')
+  assert.equal(codex.header.event, 'Stop')
+  assert.equal(codex.body.session_id, 'h1')
+  const [plain] = run(['Stop'])
+  assert.equal(plain.header.agent, undefined)
+  assert.equal(plain.header.event, 'Stop')
+  assert.equal(adapters.forHeader(plain.header), claude)
+  assert.deepEqual(run(['--agent', '../x', 'Stop']), [])
+  assert.deepEqual(run(['--agent']), [])
+})

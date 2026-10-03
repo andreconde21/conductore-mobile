@@ -15,6 +15,8 @@
 //   claude_pid=12340          Claude Code's pid (the hook's parent, or its
 //                             grandparent through `sh -c`)
 //   tmp=h.12345               the staging name in tmp/
+//   agent=codex               the agent adapter (lib/adapters) that reads
+//                             the event; absent for Claude Code
 //   tmux=/tmp/tmux-1000/default,123,0      only when set
 //   tmux_pane=%5
 //   herdr_workspace=w1 / herdr_tab / herdr_pane / herdr_name

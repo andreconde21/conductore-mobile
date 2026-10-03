@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- refactor: agent adapters (CON-045 step 2). Everything Claude Code-specific (hook registration, events, liveness, the PermissionRequest answer, the transcript reader, dashboard tails, live usage, the `claude -p` brain, cswap accounts) now sits behind `lib/adapters/claude.js`, and the daemon, the CLI, `summarize`, `guide` and `digest` reach it through the registry in `lib/adapters/index.js`, so Codex and OpenCode adapters can be added beside it (`docs/agent-adapters.md`). No behaviour change for Claude Code: every command prints the same JSON, plus `kind: "claude"` on agent records and an `adapters` capability map in full `status` replies and `version`. A spool entry may name its agent (`agent=<id>`, none = Claude Code); an agent the companion does not know is dropped and its waiting hook let go. New: the neutral chat format for other agents (`lib/adapters/chat-items.js`, decision 7) and `transcript --cursor/--before-cursor` for it; pending requests may carry `toolKind` and `answerable: false` (never for Claude Code).
+
 ## 1.3.0 (2026-10-03)
 
 - feat: `sidebar-layout` (capability `sheprd-sidebar`, CON-065): sheprd's project sidebar, `$XDG_CONFIG_HOME/herdr/sidebar.toml` else `~/.config/herdr/sidebar.toml`, read-only as JSON (`{found, path, mtimeMs, layout}`, `{found: false}`, or `{found: true, error}` for a file it cannot read), so the app groups workspaces into the same projects. Only `compact`, `active_only`, `show_hidden`, `other_collapsed`, `recent_hours`, `hidden`, `ungrouped` and `[[group]]` `name`/`pinned`/`collapsed`/`match`/`members`/`short` are passed on. Parsed by `lib/toml-lite.js`, a strict TOML subset (strings, integers, booleans, one-level arrays, tables and arrays of tables) that refuses anything else instead of guessing. The file is never written.
