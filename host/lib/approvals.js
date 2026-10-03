@@ -33,7 +33,9 @@ const AUDIT_MAX_BYTES = 128 * 1024
 //   agent-messaging  `agents`, `agent-send`, `agent-wait`, `agent-read`
 //   herdr-sidebar    pending approvals and cost as Herdr sidebar tokens
 //   config           `config get|set`
-const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config']
+//   question-answers `decide <id> answer --answers <json>` answers an
+//                    AskUserQuestion; pending ones carry `questions`
+const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'question-answers']
 
 const rulesFile = () => path.join(paths.homeDir(), 'rules.json')
 const auditFile = () => path.join(paths.homeDir(), 'auto-approved.json')
@@ -144,8 +146,11 @@ class Approvals {
   }
 
   // The rule that answers this request by itself, or null. High risk always
-  // asks, whatever the rules say.
+  // asks, whatever the rules say, and so does a question.
   match (event, now = Date.now()) {
+    // A question is the user's to answer: no rule answers it (an allow
+    // would run it with no answers).
+    if (event.tool_name === 'AskUserQuestion') return null
     if (!event.risk) this.assess(event)
     if (!event.risk || event.risk.level === 'high') return null
     const active = this.rules(now)

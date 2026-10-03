@@ -87,6 +87,7 @@ function trust (daemon, req) {
   const found = state.findPending(daemon.state, req.requestId)
   if (!found) return { error: `unknown request ${req.requestId}` }
   const { agent, request } = found
+  if (request.toolName === 'AskUserQuestion') return { error: 'a question takes an answer; nothing was trusted' }
   if (!request.risk || request.risk.level === 'high') {
     return { error: `high-risk requests always ask (${request.risk ? request.risk.reason : 'not rated'}); nothing was trusted` }
   }

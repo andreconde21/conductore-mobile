@@ -11,8 +11,10 @@
 //   until the next prompt
 //   process = { pid, startTime } of Claude Code when the daemon could identify it
 //   PendingRequest = { id, toolName, summary, toolInput, createdAt,
-//                      risk: { level, reason }, batchable, suggestedRules, repo }
-//   (the last four only when the daemon assessed the request, see approvals.js)
+//                      risk: { level, reason }, batchable, suggestedRules, repo,
+//                      questions? }
+//   (risk to repo only when the daemon assessed the request, see approvals.js;
+//   questions only for AskUserQuestion, see questionsOf)
 //
 // Every mutation bumps `seq` and yields a change record
 //   { seq, type: 'change' | 'remove', sessionId, agent, reason }
@@ -73,6 +75,13 @@ function capToolInput (input) {
 // One line describing a tool call, for the phone's list row.
 function summarize (toolName, input) {
   if (!input || typeof input !== 'object') return toolName || ''
+  if (toolName === 'AskUserQuestion' && Array.isArray(input.questions)) {
+    const q = input.questions.find(q => q && typeof q.question === 'string' && q.question)
+    if (q) {
+      const more = input.questions.length - 1
+      return truncate(q.question.replace(/\s+/g, ' ').trim() + (more > 0 ? ` (+${more} more)` : ''), SUMMARY_MAX)
+    }
+  }
   const first = (...keys) => {
     for (const k of keys) if (typeof input[k] === 'string' && input[k]) return input[k]
     return null
@@ -156,7 +165,9 @@ function reduce (state, event, now = Date.now()) {
       break
     case 'PreToolUse':
       if (!isSubagent && QUESTION_TOOLS.has(event.tool_name)) {
-        next = 'waiting_input'
+        // A request already pending (its PermissionRequest was spooled
+        // first) keeps the agent in needs_permission.
+        if (agent.pending.length === 0) next = 'waiting_input'
         agent.lastMessage = questionText(event)
       } else if (agent.pending.length === 0) {
         next = 'working'
@@ -176,6 +187,8 @@ function reduce (state, event, now = Date.now()) {
           toolInput: capToolInput(event.tool_input),
           createdAt: now
         }
+        const questions = questionsOf(event.tool_name, event.tool_input)
+        if (questions) request.questions = questions
         if (event.risk) {
           request.risk = event.risk
           request.batchable = !!event.batchable
@@ -226,6 +239,50 @@ function reduce (state, event, now = Date.now()) {
   return changes
 }
 
+// The questions of an AskUserQuestion request, for the phone to answer
+// (`decide <id> answer`): every question with its kind, header and options
+// (label and description; previews left out), whatever toolInput's cap cut.
+// Question texts stay whole: Claude Code keys the answers by them.
+const QUESTIONS_MAX = 12
+const OPTIONS_MAX = 16
+const OPTION_TEXT_MAX = 300
+
+function questionsOf (toolName, input) {
+  if (toolName !== 'AskUserQuestion' || !input || !Array.isArray(input.questions)) return null
+  const text = (v, max = OPTION_TEXT_MAX) => (typeof v === 'string' && v ? truncate(v, max) : undefined)
+  const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+  const out = []
+  for (const q of input.questions.slice(0, QUESTIONS_MAX)) {
+    if (!q || typeof q !== 'object' || typeof q.question !== 'string' || !q.question) continue
+    const options = []
+    if (Array.isArray(q.options)) {
+      for (const o of q.options.slice(0, OPTIONS_MAX)) {
+        if (o && typeof o.label === 'string' && o.label) options.push(clean({ label: o.label, description: text(o.description) }))
+      }
+    }
+    out.push(clean({
+      question: q.question,
+      header: text(q.header, 60),
+      kind: typeof q.kind === 'string' && q.kind ? q.kind : 'choice',
+      multiSelect: q.multiSelect === true,
+      options,
+      description: text(q.description),
+      placeholder: text(q.placeholder),
+      min: num(q.min),
+      max: num(q.max),
+      step: num(q.step),
+      defaultValue: num(q.defaultValue),
+      unit: text(q.unit, 20)
+    }))
+  }
+  return out.length ? out : null
+}
+
+function clean (o) {
+  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k]
+  return o
+}
+
 function questionText (event) {
   const input = event.tool_input || {}
   if (Array.isArray(input.questions) && input.questions[0] && input.questions[0].question) {
@@ -256,15 +313,23 @@ function autoApproved (state, event, now = Date.now()) {
   return [record(state, 'change', agent, 'decision:auto')]
 }
 
-// Remove a pending request; `resolution` is 'allow' | 'deny' | 'always' | 'auto' | 'timeout' | 'gone'.
+// Remove a pending request; `resolution` is 'allow' | 'deny' | 'always' |
+// 'answer' | 'auto' | 'timeout' | 'gone'.
 function resolvePermission (state, requestId, resolution, now = Date.now()) {
   for (const agent of Object.values(state.agents)) {
     const idx = agent.pending.findIndex(p => p.id === requestId)
     if (idx === -1) continue
-    agent.pending.splice(idx, 1)
+    const [request] = agent.pending.splice(idx, 1)
     if (agent.state !== 'ended') {
       if (agent.pending.length) agent.state = 'needs_permission'
-      else if (resolution === 'timeout') {
+      else if (resolution === 'timeout' && QUESTION_TOOLS.has(request.toolName)) {
+        // The question (or plan) is still on screen in the terminal: the
+        // agent waits for an answer there, like after its PreToolUse.
+        agent.state = 'waiting_input'
+        agent.lastMessage = request.toolName === 'AskUserQuestion'
+          ? `Question is waiting in the terminal: ${request.summary}`
+          : 'Plan approval is waiting in the terminal'
+      } else if (resolution === 'timeout') {
         agent.state = 'needs_permission'
         agent.lastMessage = 'Permission prompt is waiting in the terminal'
       } else agent.state = 'working'
@@ -373,6 +438,8 @@ module.exports = {
   expire,
   snapshot,
   summarize,
+  questionsOf,
+  QUESTION_TOOLS,
   cleanName,
   clone
 }
