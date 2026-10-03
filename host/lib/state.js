@@ -341,6 +341,10 @@ function resolvePermission (state, requestId, resolution, now = Date.now()) {
       } else if (resolution === 'timeout') {
         agent.state = 'needs_permission'
         agent.lastMessage = 'Permission prompt is waiting in the terminal'
+      } else if (resolution === 'gone' && (agent.lastEvent === 'Stop' || agent.lastEvent === 'StopFailure')) {
+        // Answered in the terminal and the turn ended before the daemon
+        // noticed the hook was gone: the agent is idle, not working.
+        agent.state = 'waiting_input'
       } else agent.state = 'working'
     }
     if (resolution === 'auto') agent.lastAutoApprovedAt = now
