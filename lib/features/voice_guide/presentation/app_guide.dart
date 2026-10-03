@@ -313,7 +313,7 @@ class AppGuideNavigator implements GuideNavigator {
     if (host == null) return null;
     final info = agent.info;
     final canChat =
-        isClaudeAgent(info) &&
+        supportsChatView(info, attention.agentKinds(host.id)) &&
         !agent.ended &&
         chatViewAvailable(attention, host);
     final wantChat =

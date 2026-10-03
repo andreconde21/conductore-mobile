@@ -7,6 +7,7 @@ import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 
 /// Reads agent state from the Conductore host companion daemon
@@ -157,6 +158,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
                   if (c is String) c,
               }
             : copy.snapshot.capabilities,
+        kinds: copy.snapshot.kinds,
       );
     }
     final snapshot = parseSnapshot(text);
@@ -399,6 +401,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     return AgentAttentionSnapshot(
       agents: agents,
       sequence: _int(decoded['seq']),
+      kinds: AgentKindCatalog.fromJson(decoded['adapters']),
       capabilities: capabilities is List
           ? {
               for (final name in capabilities)

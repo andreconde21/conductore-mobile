@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:flutter/foundation.dart';
@@ -43,6 +44,20 @@ bool isClaudeAgent(AgentInfo agent) {
   if (isHerdrOnlyAgent(agent)) return false;
   final kind = agent.kind.trim().toLowerCase();
   return kind.isEmpty || kind.startsWith('claude');
+}
+
+/// Whether [agent] has a Chat View: its kind reports a transcript format
+/// the app renders ([catalog]: the companion's per-kind capabilities,
+/// `AgentAttentionController.agentKinds`). With the legacy catalog this is
+/// exactly [isClaudeAgent].
+bool supportsChatView(
+  AgentInfo agent, [
+  AgentKindCatalog catalog = AgentKindCatalog.legacy,
+]) {
+  // Seen only by Herdr: no hooks, so no transcript for a chat view.
+  if (isHerdrOnlyAgent(agent)) return false;
+  final chat = catalog.of(agent.kind).chat;
+  return chat != null && renderableChatFormats.contains(chat);
 }
 
 /// The global "Open Claude sessions in" setting and the per-session
