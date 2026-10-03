@@ -415,6 +415,10 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
                       hostId: host.id,
                       request: request,
                       verdict: verdict,
+                      nativeAlways: controller
+                          .agentKinds(host.id)
+                          .of(agent.kind)
+                          .always,
                     ),
                     onAnswer: (answers) => answerPermissionRequest(
                       context,

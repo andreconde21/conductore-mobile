@@ -261,12 +261,17 @@ class _TrustSheetState extends State<TrustSheet> {
 /// "Always" opens the rule sheet instead of writing Claude Code's rule, and
 /// "Always" on a high-risk request is a one-time allow. Errors show as a
 /// snack bar.
+///
+/// [nativeAlways]: the agent has its own "always allow" (Claude Code's
+/// rule in settings.local.json), offered as an alternative in the sheet.
+/// Agents without one (Codex) only get the Conductore rule.
 Future<void> answerPermissionRequest(
   BuildContext context, {
   required AgentAttentionController controller,
   required String hostId,
   required PendingPermissionRequest request,
   required PermissionVerdict verdict,
+  bool nativeAlways = true,
 }) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   final smart =
@@ -289,7 +294,7 @@ Future<void> answerPermissionRequest(
         context,
         request: request,
         initialDuration: const TrustDuration.forever(),
-        offerClaudeCodeAlways: true,
+        offerClaudeCodeAlways: nativeAlways,
       );
       switch (choice) {
         case null:

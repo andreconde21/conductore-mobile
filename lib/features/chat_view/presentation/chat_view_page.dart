@@ -893,12 +893,16 @@ class _ChatViewPageState extends State<ChatViewPage>
   ) async {
     _quiet();
     if (verdict == PermissionVerdict.always && _smartApprovals) {
+      final agent = _reviewAgent;
       await answerPermissionRequest(
         context,
         controller: widget.attention!,
         hostId: widget.hostId!,
         request: request,
         verdict: verdict,
+        nativeAlways:
+            agent == null ||
+            widget.attention!.agentKinds(widget.hostId!).of(agent.kind).always,
       );
       if (mounted) unawaited(_chat.refresh());
       return;
