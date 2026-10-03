@@ -162,6 +162,16 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
   /// Text sent to each pane by id (`pane send-text`, `agent prompt`).
   final Map<String, String> paneTyped = {};
 
+  /// What `pane split`, `tab create` and `workspace create` made, and
+  /// where: "split w1:p1", "tab w1", "workspace w4".
+  final List<String> created = [];
+
+  /// [args]'s value after [flag], if any.
+  static String? _flag(List<String> args, String flag) {
+    final at = args.indexOf(flag);
+    return at == -1 || at + 1 >= args.length ? null : args[at + 1];
+  }
+
   /// The herdr arguments of [command] (an `sh -c` wrapped `exec herdr`),
   /// unquoted, or null when it is not a herdr command.
   static List<String>? herdrWords(String command) {
@@ -259,7 +269,35 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
         case 'send-keys':
           events.add('keys ${words[2]}: ${words.sublist(3).join(' ')}');
           return _ok;
+        case 'split':
+          created.add('split ${words[2]}');
+          if (words.contains('--focus')) {
+            focusedWorkspace = words[2].split(':').first;
+          }
+          return _ok;
       }
+    }
+    if (words.length >= 2 && words[0] == 'tab' && words[1] == 'create') {
+      commands.add(command);
+      final where = _flag(words, '--workspace') ?? focusedWorkspace;
+      created.add('tab $where');
+      if (words.contains('--focus')) focusedWorkspace = where;
+      return _ok;
+    }
+    if (words.length >= 2 && words[0] == 'workspace' && words[1] == 'create') {
+      commands.add(command);
+      final id = 'w${workspaces.length + 1}';
+      workspaces.add(id);
+      created.add('workspace $id');
+      if (words.contains('--focus')) focusedWorkspace = id;
+      return AgentCommandResult(
+        stdout:
+            '{"result":{"root_pane":{"pane_id":"$id:p1","workspace_id":"$id"},'
+            '"type":"workspace_created","workspace":{"label":"W$id",'
+            '"workspace_id":"$id"}}}',
+        stderr: '',
+        exitCode: 0,
+      );
     }
     if (words.length >= 3 && words[0] == 'agent' && words[1] == 'prompt') {
       commands.add(command);

@@ -39,11 +39,13 @@ class QuickSwitcherShowGrid extends QuickSwitcherChoice {
   const QuickSwitcherShowGrid();
 }
 
-/// Whether the search field takes the focus at once: on a desktop, or when
-/// a hardware keyboard opened the switcher. On a phone the soft keyboard
-/// would cover the list.
-bool _focusSearchFirst(bool fromKeyboard) =>
+/// Whether the search field takes the focus at once: on a desktop, when a
+/// hardware keyboard opened the switcher, or when it was opened to search
+/// ([focusSearch], the home's search button). Otherwise, on a phone, the
+/// soft keyboard would cover the list.
+bool _focusSearchFirst(bool fromKeyboard, {bool focusSearch = false}) =>
     fromKeyboard ||
+    focusSearch ||
     switch (defaultTargetPlatform) {
       TargetPlatform.linux ||
       TargetPlatform.macOS ||
@@ -55,12 +57,14 @@ bool _focusSearchFirst(bool fromKeyboard) =>
 /// with a search field and, in order, the agents waiting on the user, the
 /// open sessions (live thumbnails), the other workspaces on the machines
 /// and the recent targets. Resolves with the choice (null when dismissed);
-/// the caller opens it, see [openSwitcherItem].
+/// the caller opens it, see [openSwitcherItem]. With [focusSearch] the
+/// search field takes the focus (and the keyboard comes up) at once.
 Future<QuickSwitcherChoice?> showQuickSwitcher(
   BuildContext context, {
   required QuickSwitcherSource source,
   String fontFamily = 'monospace',
   bool fromKeyboard = false,
+  bool focusSearch = false,
   bool canCreate = false,
   bool canShowGrid = false,
   Duration previewRefreshInterval = const Duration(seconds: 2),
@@ -75,7 +79,10 @@ Future<QuickSwitcherChoice?> showQuickSwitcher(
     builder: (context) => QuickSwitcherSheet(
       source: source,
       fontFamily: fontFamily,
-      autofocusSearch: _focusSearchFirst(fromKeyboard),
+      autofocusSearch: _focusSearchFirst(
+        fromKeyboard,
+        focusSearch: focusSearch,
+      ),
       canCreate: canCreate,
       canShowGrid: canShowGrid,
       previewRefreshInterval: previewRefreshInterval,
@@ -263,7 +270,7 @@ class _QuickSwitcherSheetState extends State<QuickSwitcherSheet> {
                       decoration: InputDecoration(
                         isDense: true,
                         prefixIcon: const Icon(Icons.search_rounded),
-                        hintText: 'Workspace, pane, machine, project…',
+                        hintText: 'Workspace, folder, agent, machine, project…',
                         border: OutlineInputBorder(
                           borderRadius: AppTheme.borderRadius,
                         ),

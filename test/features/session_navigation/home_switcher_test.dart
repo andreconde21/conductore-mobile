@@ -4,6 +4,7 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
@@ -39,13 +40,15 @@ void main() {
   late SessionConnectFlow flow;
 
   Future<(TerminalWorkspaceController, SessionViewController)> pumpHome(
-    WidgetTester tester,
-  ) async {
+    WidgetTester tester, {
+    List<SavedHost>? machines,
+    Set<String> filter = const {},
+  }) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.6;
     addTearDown(tester.view.reset);
     final hostsController = HostsController(
-      FakeHostsRepository()..persisted = [machine],
+      FakeHostsRepository()..persisted = machines ?? [machine],
     );
     final workspace = TerminalWorkspaceController(
       ImmediateTerminalRepository(TrackableTerminalSession()),
@@ -60,8 +63,12 @@ void main() {
     );
     addTearDown(agentAttention.dispose);
     final runner = HerdrFakeRunner();
+    // Machine b runs tmux only.
+    final tmuxOnly = HerdrFakeRunner.tmuxOnly(
+      tmuxSessions: 'deploy-b\t0\t1\t1790229500\n',
+    );
     final boards = HomeBoards(
-      runnerFactory: (_) => runner,
+      runnerFactory: (host) => host.id == 'b' ? tmuxOnly : runner,
       pollInterval: const Duration(days: 1),
     );
     addTearDown(boards.dispose);
@@ -107,7 +114,9 @@ void main() {
             ),
             fileExport: RecordingFileExport(),
             homeBoards: boards,
-            homePreferences: InMemoryHomePreferencesRepository(),
+            homePreferences: InMemoryHomePreferencesRepository(
+              HomePreferences(machineFilter: filter),
+            ),
             connectFlow: flow,
             previewRefreshInterval: const Duration(days: 1),
           ),
@@ -153,6 +162,51 @@ void main() {
     expect(find.byType(TerminalPage), findsOneWidget);
     // Herdr's re-focus after attaching.
     await flow.herdr.dispose();
+  });
+
+  testWidgets('the search button opens it with the keyboard up, and it '
+      'searches every machine, not only the filtered one', (tester) async {
+    final other = buildHost('b').copyWith(lastConnectedAt: DateTime.utc(2026));
+    await pumpHome(tester, machines: [machine, other], filter: {'a'});
+
+    await tester.tap(find.byKey(const ValueKey('home-search')));
+    await settle(tester);
+
+    expect(switcher, findsOneWidget);
+    final field = find.byKey(const ValueKey('quick-switcher-search'));
+    expect(
+      tester
+          .widget<EditableText>(
+            find.descendant(of: field, matching: find.byType(EditableText)),
+          )
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    // Machine b is filtered out of the home page, yet its tmux session is
+    // found; an agent's topic finds the workspace it runs in.
+    await tester.enterText(field, 'deploy-b');
+    await settle(tester);
+    expect(
+      find.byKey(const ValueKey('switcher-workspace-b-tmux-deploy-b')),
+      findsOneWidget,
+    );
+    await tester.enterText(field, 'proofing');
+    await settle(tester);
+    expect(
+      find.byKey(const ValueKey('switcher-workspace-a-herdr-w1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('switcher-workspace-b-tmux-deploy-b')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byTooltip('Close'));
+    await settle(tester);
+    expect(switcher, findsNothing);
   });
 
   testWidgets('Ctrl+K opens it on the home page', (tester) async {

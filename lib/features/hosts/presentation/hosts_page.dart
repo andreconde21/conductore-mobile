@@ -459,8 +459,16 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   void _syncBoards() {
     if (!mounted) return;
+    // While the switcher is open it searches every machine, not only the
+    // ones the filter shows.
+    final hosts = _switcherOpen && !_isShell
+        ? [
+            for (final host in widget.hostsController.sortedMachines)
+              if (!host.isLocal) host,
+          ]
+        : _shownHosts;
     _boards?.sync([
-      for (final host in _shownHosts)
+      for (final host in hosts)
         HomeBoardEntry(host, connectedBefore: _connectedBefore(host)),
     ]);
   }
@@ -562,6 +570,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                             onLock: _lock,
                             onSettings: _openSettings,
                             onSwitcher: () => unawaited(_openSwitcher()),
+                            onSearch: () =>
+                                unawaited(_openSwitcher(focusSearch: true)),
                             onGuide: _guideButton(context),
                             onAgents: DigestScope.maybeOf(context) == null
                                 ? null
@@ -930,9 +940,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   bool _switcherOpen = false;
 
-  /// The quick switcher from home (the top bar's button, Ctrl+K): what is
-  /// picked opens in the terminal (or Chat View, per session).
-  Future<void> _openSwitcher({bool fromKeyboard = false}) async {
+  /// The quick switcher from home (the top bar's buttons, Ctrl+K): what is
+  /// picked opens in the terminal (or Chat View, per session). It lists
+  /// the workspaces of every machine, whatever the filter; [focusSearch]
+  /// (the search button) brings the keyboard up at once.
+  Future<void> _openSwitcher({
+    bool fromKeyboard = false,
+    bool focusSearch = false,
+  }) async {
     // The desktop shell's command palette lists the same and more.
     if (_isShell) {
       final home = _desktopHomeKey.currentState;
@@ -943,6 +958,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     }
     if (_switcherOpen) return;
     _switcherOpen = true;
+    _syncBoards();
     final source = QuickSwitcherSource(
       workspace: widget.workspaceController,
       attention: widget.agentAttention,
@@ -956,10 +972,12 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         source: source,
         fontFamily: widget.themeController.terminalFont.fontFamily,
         fromKeyboard: fromKeyboard,
+        focusSearch: focusSearch,
         canCreate: true,
       );
     } finally {
       _switcherOpen = false;
+      _syncBoards();
     }
     if (!mounted) return;
     switch (choice) {

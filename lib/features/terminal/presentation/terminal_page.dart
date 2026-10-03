@@ -748,6 +748,9 @@ class _TerminalPageState extends State<TerminalPage>
       backend = HerdrTabsBackend(
         control: control,
         fallbackWorkspaceId: () => flow.herdr.workspaceOf(session) ?? '',
+        createTab: () =>
+            session.herdrPaneCreator?.call(HerdrNewPane.newTab) ??
+            Future.value(false),
       );
     } else if (tmuxSession != null) {
       backend = TmuxTabsBackend(
@@ -1641,10 +1644,32 @@ class _TerminalPageState extends State<TerminalPage>
         session.sendText(tmuxNewWindowCommand(pick.directory));
         _sendEnterSoon(session);
       case RecentDirectoryAction.herdrTab:
+        // In this session's own workspace, whatever Herdr's shared focus
+        // shows; focused only when this device may move it.
+        final herdr = widget.connectFlow?.herdr;
+        final mayFocus = herdr?.mayMoveFocus ?? true;
+        final ownWorkspace = herdr?.workspaceOf(session) ?? '';
+        if (!mayFocus && ownWorkspace.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "This tab's Herdr workspace is not known: take the focus "
+                'first, then open the folder in a new tab.',
+              ),
+            ),
+          );
+          return;
+        }
+        final herdrSession =
+            HerdrSessionFocus.herdrTargetOf(session)?.session ?? '';
         final runner = runnerFactory!(host);
         try {
           final result = await runner.run(
-            remoteToolCommand('herdr', herdrNewTabArguments(pick.directory)),
+            remoteToolCommand(
+              'herdr',
+              '${herdrSession.isEmpty ? '' : '--session ${shellQuoteArgument(herdrSession)} '}'
+                  '${herdrNewTabArguments(pick.directory, workspaceId: ownWorkspace, focus: mayFocus)}',
+            ),
             timeout: const Duration(seconds: 10),
           );
           if (result.exitCode != 0 && mounted) {

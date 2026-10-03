@@ -105,13 +105,21 @@ String cdCommand(String directory) => 'cd ${quoteDirectory(directory)}';
 String tmuxNewWindowCommand(String directory) =>
     'new-window -c ${quoteDirectory(directory)}';
 
-/// Arguments for `herdr tab create` opening a focused tab in [directory],
-/// labelled with its last path segment.
-String herdrNewTabArguments(String directory) {
+/// Arguments for `herdr tab create` opening a tab in [directory],
+/// labelled with its last path segment: in [workspaceId] (the session's
+/// own workspace) when given, else the focused one; focused only with
+/// [focus] (Herdr's focus is shared with the laptop).
+String herdrNewTabArguments(
+  String directory, {
+  String workspaceId = '',
+  bool focus = true,
+}) {
   final segments = directory.split('/').where((s) => s.isNotEmpty);
   final label = segments.isEmpty ? '/' : segments.last;
-  return 'tab create --cwd ${quoteDirectory(directory)} '
-      '--label ${quoteDirectory(label)} --focus';
+  return 'tab create'
+      '${workspaceId.isEmpty ? '' : ' --workspace ${quoteDirectory(workspaceId)}'}'
+      ' --cwd ${quoteDirectory(directory)} '
+      '--label ${quoteDirectory(label)} ${focus ? '--focus' : '--no-focus'}';
 }
 
 /// The last path segment, for compact display.

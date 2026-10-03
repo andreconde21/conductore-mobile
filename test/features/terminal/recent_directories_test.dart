@@ -63,6 +63,11 @@ void main() {
         herdrNewTabArguments('/home/a/Projects/Foo'),
         'tab create --cwd /home/a/Projects/Foo --label Foo --focus',
       );
+      // In the session's own workspace, without moving Herdr's focus.
+      expect(
+        herdrNewTabArguments('/srv/api', workspaceId: 'w1', focus: false),
+        'tab create --workspace w1 --cwd /srv/api --label api --no-focus',
+      );
       expect(directoryBasename('/'), '/');
     });
   });

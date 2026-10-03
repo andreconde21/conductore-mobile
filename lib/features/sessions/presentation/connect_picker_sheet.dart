@@ -10,9 +10,11 @@ import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/data/remote_session_lister.dart';
+import 'package:conduit/features/sessions/data/workspace_creator.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
+import 'package:conduit/features/sessions/presentation/new_workspace_dialog.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -41,6 +43,7 @@ Future<ConnectPickerResult?> showConnectPicker({
   Set<String> activeTargetKeys = const {},
   ConnectPickerTab initialTab = ConnectPickerTab.tmux,
   List<String> recentDirectories = const [],
+  bool mayMoveHerdrFocus = false,
 }) {
   return showAdaptiveModal<ConnectPickerResult>(
     kind: AdaptiveModalKind.dialog,
@@ -62,6 +65,7 @@ Future<ConnectPickerResult?> showConnectPicker({
           activeTargetKeys: activeTargetKeys,
           initialTab: initialTab,
           recentDirectories: recentDirectories,
+          mayMoveHerdrFocus: mayMoveHerdrFocus,
           scrollController: scrollController,
           onPicked: (result) => Navigator.of(context).pop(result),
         ),
@@ -79,6 +83,7 @@ class ConnectPickerSheet extends StatefulWidget {
     this.activeTargetKeys = const {},
     this.initialTab = ConnectPickerTab.tmux,
     this.recentDirectories = const [],
+    this.mayMoveHerdrFocus = false,
     this.scrollController,
     super.key,
   });
@@ -94,8 +99,13 @@ class ConnectPickerSheet extends StatefulWidget {
   final ConnectPickerTab initialTab;
 
   /// The host's recent working directories, most recent first; shown in
-  /// the Recent tab as "Recent dirs", each opening a shell there.
+  /// the Recent tab as "Recent dirs", each opening a shell there, and
+  /// suggested as a new workspace's starting folder.
   final List<String> recentDirectories;
+
+  /// "Phone may move Herdr focus": whether a new Herdr workspace is
+  /// focused as it is created (see [WorkspaceCreator]).
+  final bool mayMoveHerdrFocus;
   final ScrollController? scrollController;
 
   @override
@@ -160,19 +170,22 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
     widget.onPicked(ConnectPickerResult(target: target, remember: _remember));
   }
 
-  Future<void> _newTmuxSession() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => const _TmuxSessionNameDialog(),
+  /// "New session" / "New workspace": name, folder and Claude, created
+  /// over the picker's channel, then opened.
+  Future<void> _create(MultiplexerKind kind) async {
+    final target = await showNewWorkspaceDialog(
+      context,
+      kind: kind,
+      create: WorkspaceCreator(
+        widget.runner,
+        mayMoveHerdrFocus: widget.mayMoveHerdrFocus,
+      ).create,
+      folders: widget.recentDirectories,
     );
-    if (name == null || !mounted) {
+    if (target == null || !mounted) {
       return;
     }
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) {
-      return;
-    }
-    _pick(ConnectTarget.tmux(trimmed));
+    _pick(target);
   }
 
   @override
@@ -326,8 +339,8 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
       ListTile(
         leading: const Icon(Icons.add_circle_outline_rounded),
         title: const Text('New session'),
-        subtitle: const Text('Create a named tmux session'),
-        onTap: _newTmuxSession,
+        subtitle: const Text('A named tmux session, in a folder you pick'),
+        onTap: () => unawaited(_create(MultiplexerKind.tmux)),
       ),
       if (pending == null)
         _LoadOnRequest(onLoad: _load)
@@ -451,82 +464,91 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
               failed,
               'Could not list Herdr workspaces.',
             ),
-            RemoteListingAvailable(:final items) =>
-              items.isEmpty
-                  ? const _Message(
-                      icon: Icons.inbox_outlined,
-                      message: 'Herdr has no workspaces yet.',
-                    )
-                  : Column(
-                      children: [
-                        for (final workspace in items.where(
-                          (workspace) => _matches([
-                            workspace.displayLabel,
-                            for (final (position, tab)
-                                in workspace.tabs.indexed)
-                              tab.displayLabel(position + 1),
-                          ]),
-                        )) ...[
-                          _TargetTile(
-                            key: ValueKey(
-                              'herdr-workspace-${workspace.session}:'
-                              '${workspace.id}',
-                            ),
-                            title: workspace.displayLabel,
-                            subtitle: _herdrSubtitle(workspace),
-                            focused: workspace.focused,
-                            active: widget.activeTargetKeys.contains(
-                              ConnectTarget.herdr(
-                                workspaceId: workspace.id,
-                                session: workspace.session,
-                              ).key,
-                            ),
-                            trailingLabel: _agentStatusLabel(
-                              workspace.agentStatus,
-                            ),
-                            onTap: () => _pick(
-                              ConnectTarget.herdr(
-                                workspaceId: workspace.id,
-                                label: workspace.displayLabel,
-                                session: workspace.session,
-                              ),
+            RemoteListingAvailable(:final items) => Column(
+              children: [
+                ListTile(
+                  key: const ValueKey('herdr-new-workspace'),
+                  leading: const Icon(Icons.add_circle_outline_rounded),
+                  title: const Text('New workspace'),
+                  subtitle: const Text(
+                    'A Herdr workspace in a folder you pick',
+                  ),
+                  onTap: () => unawaited(_create(MultiplexerKind.herdr)),
+                ),
+                if (items.isEmpty)
+                  const _Message(
+                    icon: Icons.inbox_outlined,
+                    message: 'Herdr has no workspaces yet.',
+                  )
+                else
+                  Column(
+                    children: [
+                      for (final workspace in items.where(
+                        (workspace) => _matches([
+                          workspace.displayLabel,
+                          for (final (position, tab) in workspace.tabs.indexed)
+                            tab.displayLabel(position + 1),
+                        ]),
+                      )) ...[
+                        _TargetTile(
+                          key: ValueKey(
+                            'herdr-workspace-${workspace.session}:'
+                            '${workspace.id}',
+                          ),
+                          title: workspace.displayLabel,
+                          subtitle: _herdrSubtitle(workspace),
+                          focused: workspace.focused,
+                          active: widget.activeTargetKeys.contains(
+                            ConnectTarget.herdr(
+                              workspaceId: workspace.id,
+                              session: workspace.session,
+                            ).key,
+                          ),
+                          trailingLabel: _agentStatusLabel(
+                            workspace.agentStatus,
+                          ),
+                          onTap: () => _pick(
+                            ConnectTarget.herdr(
+                              workspaceId: workspace.id,
+                              label: workspace.displayLabel,
+                              session: workspace.session,
                             ),
                           ),
-                          if (workspace.tabs.length > 1)
-                            for (final (position, tab)
-                                in workspace.tabs.indexed)
-                              _TargetTile(
-                                key: ValueKey('herdr-tab-${tab.id}'),
-                                title: tab.displayLabel(position + 1),
-                                subtitle: tab.summary.isEmpty
-                                    ? null
-                                    : tab.summary,
-                                indented: true,
-                                active: widget.activeTargetKeys.contains(
-                                  ConnectTarget.herdr(
-                                    workspaceId: workspace.id,
-                                    tabId: tab.id,
-                                    session: workspace.session,
-                                  ).key,
-                                ),
-                                trailingLabel: _agentStatusLabel(
-                                  tab.agentStatus,
-                                ),
-                                onTap: () => _pick(
-                                  ConnectTarget.herdr(
-                                    workspaceId: workspace.id,
-                                    label: tab.label.isEmpty
-                                        ? workspace.displayLabel
-                                        : '${workspace.displayLabel} / '
-                                              '${tab.label}',
-                                    tabId: tab.id,
-                                    session: workspace.session,
-                                  ),
+                        ),
+                        if (workspace.tabs.length > 1)
+                          for (final (position, tab) in workspace.tabs.indexed)
+                            _TargetTile(
+                              key: ValueKey('herdr-tab-${tab.id}'),
+                              title: tab.displayLabel(position + 1),
+                              subtitle: tab.summary.isEmpty
+                                  ? null
+                                  : tab.summary,
+                              indented: true,
+                              active: widget.activeTargetKeys.contains(
+                                ConnectTarget.herdr(
+                                  workspaceId: workspace.id,
+                                  tabId: tab.id,
+                                  session: workspace.session,
+                                ).key,
+                              ),
+                              trailingLabel: _agentStatusLabel(tab.agentStatus),
+                              onTap: () => _pick(
+                                ConnectTarget.herdr(
+                                  workspaceId: workspace.id,
+                                  label: tab.label.isEmpty
+                                      ? workspace.displayLabel
+                                      : '${workspace.displayLabel} / '
+                                            '${tab.label}',
+                                  tabId: tab.id,
+                                  session: workspace.session,
                                 ),
                               ),
-                        ],
+                            ),
                       ],
-                    ),
+                    ],
+                  ),
+              ],
+            ),
           };
         },
       ),
@@ -838,49 +860,6 @@ class _Message extends StatelessWidget {
           ],
         ],
       ),
-    );
-  }
-}
-
-class _TmuxSessionNameDialog extends StatefulWidget {
-  const _TmuxSessionNameDialog();
-
-  @override
-  State<_TmuxSessionNameDialog> createState() => _TmuxSessionNameDialogState();
-}
-
-class _TmuxSessionNameDialogState extends State<_TmuxSessionNameDialog> {
-  final _controller = TextEditingController(text: defaultTmuxSessionName);
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() => Navigator.of(context).pop(_controller.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('New tmux session'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _submit(),
-        decoration: const InputDecoration(
-          labelText: 'Session name',
-          helperText: 'Attaches to it if it already exists.',
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Connect')),
-      ],
     );
   }
 }

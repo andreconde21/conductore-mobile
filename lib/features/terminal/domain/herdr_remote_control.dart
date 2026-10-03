@@ -154,28 +154,43 @@ class HerdrCommands {
   /// `herdr pane split <pane> --direction right|down --cwd <dir> --focus`.
   /// Herdr 0.9.1 needs the pane id: without one (and outside a Herdr pane)
   /// it answers `pane_not_found`. The new pane inherits the source pane's
-  /// directory anyway; [cwd] makes that explicit.
-  String paneSplit(String paneId, {required bool down, String cwd = ''}) =>
-      _herdr(
-        'pane split ${shellQuoteArgument(paneId)} '
-        '--direction ${down ? 'down' : 'right'}${_cwd(cwd)} --focus',
-      );
+  /// directory anyway; [cwd] makes that explicit. Without [focus],
+  /// `--no-focus`: Herdr's focus is shared with the laptop.
+  String paneSplit(
+    String paneId, {
+    required bool down,
+    String cwd = '',
+    bool focus = true,
+  }) => _herdr(
+    'pane split ${shellQuoteArgument(paneId)} '
+    '--direction ${down ? 'down' : 'right'}${_cwd(cwd)}${_focus(focus)}',
+  );
 
   /// `herdr tab create [--workspace <id>] [--cwd <dir>] --focus`.
-  String tabCreate({String workspaceId = '', String cwd = ''}) => _herdr(
+  String tabCreate({
+    String workspaceId = '',
+    String cwd = '',
+    bool focus = true,
+  }) => _herdr(
     'tab create'
     '${workspaceId.isEmpty ? '' : ' --workspace ${shellQuoteArgument(workspaceId)}'}'
-    '${_cwd(cwd)} --focus',
+    '${_cwd(cwd)}${_focus(focus)}',
   );
 
   /// `herdr workspace create [--cwd <dir>] --focus`; Herdr labels it after
   /// the directory.
-  String workspaceCreate({String cwd = ''}) =>
-      _herdr('workspace create${_cwd(cwd)} --focus');
+  String workspaceCreate({String cwd = '', bool focus = true}) =>
+      _herdr('workspace create${_cwd(cwd)}${_focus(focus)}');
 
   /// The command that opens [kind] next to [focused]; null when it needs a
-  /// focused pane and there is none.
-  String? newPane(HerdrNewPane kind, HerdrFocusedPane? focused) {
+  /// focused pane and there is none. [focused] may also be a session's own
+  /// pane, wherever Herdr's focus is; then [focus] says whether the new
+  /// one takes Herdr's (shared) focus.
+  String? newPane(
+    HerdrNewPane kind,
+    HerdrFocusedPane? focused, {
+    bool focus = true,
+  }) {
     final cwd = focused?.cwd ?? '';
     return switch (kind) {
       HerdrNewPane.splitRight || HerdrNewPane.splitDown =>
@@ -185,17 +200,21 @@ class HerdrCommands {
                 focused.paneId,
                 down: kind == HerdrNewPane.splitDown,
                 cwd: cwd,
+                focus: focus,
               ),
       HerdrNewPane.newTab => tabCreate(
         workspaceId: focused?.workspaceId ?? '',
         cwd: cwd,
+        focus: focus,
       ),
-      HerdrNewPane.newWorkspace => workspaceCreate(cwd: cwd),
+      HerdrNewPane.newWorkspace => workspaceCreate(cwd: cwd, focus: focus),
     };
   }
 
   static String _cwd(String cwd) =>
       cwd.isEmpty ? '' : ' --cwd ${shellQuoteArgument(cwd)}';
+
+  static String _focus(bool focus) => focus ? ' --focus' : ' --no-focus';
 }
 
 /// Drives one Herdr server over a dedicated command channel (never the
