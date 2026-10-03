@@ -38,7 +38,7 @@ const _notRunning =
 
 void main() {
   group('NewWorkspaceCommands', () {
-    test('herdr creates in the folder, labelled, focused, every user word '
+    test('herdr creates in the folder, labelled, unfocused, every user word '
         'quoted', () {
       final script = scriptOf(
         NewWorkspaceCommands.herdrCreate(
@@ -55,7 +55,7 @@ void main() {
         script,
         endsWith(
           'exec herdr workspace create --cwd "\$dir" '
-          "--label 'it'\\''s \$(touch /tmp/x)' --focus",
+          "--label 'it'\\''s \$(touch /tmp/x)' --no-focus",
         ),
       );
     });
@@ -63,7 +63,18 @@ void main() {
     test('herdr without a folder or name leaves both to Herdr', () {
       final script = scriptOf(NewWorkspaceCommands.herdrCreate(label: ''));
       expect(script, isNot(contains('dir=')));
-      expect(script, endsWith('exec herdr workspace create --focus'));
+      expect(script, endsWith('exec herdr workspace create --no-focus'));
+    });
+
+    test('herdr focuses it only when the phone may move Herdr focus', () {
+      expect(
+        scriptOf(NewWorkspaceCommands.herdrCreate(label: 'a', focus: true)),
+        endsWith('exec herdr workspace create --label a --focus'),
+      );
+      expect(
+        scriptOf(NewWorkspaceCommands.herdrCreate(label: 'a')),
+        endsWith('exec herdr workspace create --label a --no-focus'),
+      );
     });
 
     test('tmux creates detached in the folder, then types claude', () {
@@ -136,6 +147,18 @@ void main() {
       // Named after the folder when no name was given.
       expect(scriptOf(runner.commands.first), contains("--label 'my proj'"));
       expect(runner.commands.last, contains('pane run w2:p1 claude'));
+      // "Phone may move Herdr focus" is off by default.
+      expect(scriptOf(runner.commands.first), endsWith('--no-focus'));
+    });
+
+    test('with the setting on, the new workspace is focused', () async {
+      final runner = ScriptedAgentCommandRunner([
+        const AgentCommandResult(stdout: _created, stderr: '', exitCode: 0),
+      ]);
+      await WorkspaceCreator(runner, mayMoveHerdrFocus: true).create(
+        const NewWorkspaceRequest(kind: MultiplexerKind.herdr, name: 'api'),
+      );
+      expect(scriptOf(runner.commands.single), endsWith("--label api --focus"));
     });
 
     test('Herdr not running reads as such', () async {

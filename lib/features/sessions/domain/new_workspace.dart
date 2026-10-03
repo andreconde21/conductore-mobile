@@ -92,17 +92,21 @@ abstract final class NewWorkspaceCommands {
     return posixShellCommand(lines.join('\n'));
   }
 
-  /// `herdr workspace create` in [folder] labelled [label], focused: the
-  /// user asked for it, and it opens on their screen at once.
-  static String herdrCreate({required String label, String folder = ''}) =>
-      _script(folder, [
-        [
-          'exec herdr workspace create',
-          if (folder.isNotEmpty) '--cwd "\$dir"',
-          if (label.isNotEmpty) '--label ${shellQuoteArgument(label)}',
-          '--focus',
-        ].join(' '),
-      ]);
+  /// `herdr workspace create` in [folder] labelled [label]. Focused only
+  /// with [focus] ("Phone may move Herdr focus" on): Herdr's focus is
+  /// shared, so focusing it would move the laptop's view too.
+  static String herdrCreate({
+    required String label,
+    String folder = '',
+    bool focus = false,
+  }) => _script(folder, [
+    [
+      'exec herdr workspace create',
+      if (folder.isNotEmpty) '--cwd "\$dir"',
+      if (label.isNotEmpty) '--label ${shellQuoteArgument(label)}',
+      if (focus) '--focus' else '--no-focus',
+    ].join(' '),
+  ]);
 
   /// Types Claude's command into the new workspace's first pane.
   static String herdrStartClaude(String paneId) => remoteToolCommand(

@@ -7,11 +7,16 @@ import 'package:conduit/features/sessions/domain/new_workspace.dart';
 /// Creates Herdr workspaces and tmux sessions on a host over an
 /// [AgentCommandRunner] (a dedicated SSH exec channel, never the PTY).
 class WorkspaceCreator {
-  const WorkspaceCreator(this._runner);
+  const WorkspaceCreator(this._runner, {this.mayMoveHerdrFocus = false});
 
   static const _timeout = Duration(seconds: 15);
 
   final AgentCommandRunner _runner;
+
+  /// "Phone may move Herdr focus": a new Herdr workspace is focused only
+  /// then. Otherwise it opens by id like any workspace, and the session
+  /// offers "Take focus once" while Herdr shows another one.
+  final bool mayMoveHerdrFocus;
 
   /// Creates what [request] asks for and returns the target that opens
   /// it. Throws a [NewWorkspaceFailure] that says what went wrong.
@@ -39,7 +44,11 @@ class WorkspaceCreator {
     NewWorkspaceRequest request,
   ) async {
     final result = await _runner.run(
-      NewWorkspaceCommands.herdrCreate(label: label, folder: folder),
+      NewWorkspaceCommands.herdrCreate(
+        label: label,
+        folder: folder,
+        focus: mayMoveHerdrFocus,
+      ),
       timeout: _timeout,
     );
     _checkFolder(result);

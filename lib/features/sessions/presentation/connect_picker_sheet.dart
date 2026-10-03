@@ -43,6 +43,7 @@ Future<ConnectPickerResult?> showConnectPicker({
   Set<String> activeTargetKeys = const {},
   ConnectPickerTab initialTab = ConnectPickerTab.tmux,
   List<String> recentDirectories = const [],
+  bool mayMoveHerdrFocus = false,
 }) {
   return showAdaptiveModal<ConnectPickerResult>(
     kind: AdaptiveModalKind.dialog,
@@ -64,6 +65,7 @@ Future<ConnectPickerResult?> showConnectPicker({
           activeTargetKeys: activeTargetKeys,
           initialTab: initialTab,
           recentDirectories: recentDirectories,
+          mayMoveHerdrFocus: mayMoveHerdrFocus,
           scrollController: scrollController,
           onPicked: (result) => Navigator.of(context).pop(result),
         ),
@@ -81,6 +83,7 @@ class ConnectPickerSheet extends StatefulWidget {
     this.activeTargetKeys = const {},
     this.initialTab = ConnectPickerTab.tmux,
     this.recentDirectories = const [],
+    this.mayMoveHerdrFocus = false,
     this.scrollController,
     super.key,
   });
@@ -99,6 +102,10 @@ class ConnectPickerSheet extends StatefulWidget {
   /// the Recent tab as "Recent dirs", each opening a shell there, and
   /// suggested as a new workspace's starting folder.
   final List<String> recentDirectories;
+
+  /// "Phone may move Herdr focus": whether a new Herdr workspace is
+  /// focused as it is created (see [WorkspaceCreator]).
+  final bool mayMoveHerdrFocus;
   final ScrollController? scrollController;
 
   @override
@@ -169,7 +176,10 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
     final target = await showNewWorkspaceDialog(
       context,
       kind: kind,
-      create: WorkspaceCreator(widget.runner).create,
+      create: WorkspaceCreator(
+        widget.runner,
+        mayMoveHerdrFocus: widget.mayMoveHerdrFocus,
+      ).create,
       folders: widget.recentDirectories,
     );
     if (target == null || !mounted) {

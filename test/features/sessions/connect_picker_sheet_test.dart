@@ -494,6 +494,8 @@ void main() {
     );
     // No Claude asked for: no pane command after the create.
     expect(runner.commands, hasLength(5));
+    // "Phone may move Herdr focus" is off: created without moving it.
+    expect(runner.commands.last, contains('--no-focus'));
   });
 
   testWidgets('does not list automatically for hardware-key logins', (

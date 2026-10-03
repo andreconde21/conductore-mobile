@@ -214,6 +214,7 @@ class SessionConnectFlow {
               ? ConnectPickerTab.herdr
               : ConnectPickerTab.tmux,
           recentDirectories: directories,
+          mayMoveHerdrFocus: herdr.mayMoveFocus,
         );
       } finally {
         unawaited(runner.close());
