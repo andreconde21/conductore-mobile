@@ -287,3 +287,11 @@ test('the sh hook names another agent with --agent and Claude Code with nothing'
   assert.deepEqual(run(['--agent', '../x', 'Stop']), [])
   assert.deepEqual(run(['--agent']), [])
 })
+
+test("the app's neutral chat fixture is what chat-items.js builds today", () => {
+  const file = path.join(__dirname, '..', '..', 'test', 'fixtures', 'agent_adapters', 'neutral_chat_page.json')
+  const built = require('./fixtures/neutral-chat-page').page()
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), JSON.parse(JSON.stringify(built)))
+  // Every known item is valid; the future type is there to be skipped.
+  for (const item of built.items.filter(i => i.type !== 'future-type')) assert.equal(chatItems.validate(item), null, item.id)
+})

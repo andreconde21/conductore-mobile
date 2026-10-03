@@ -48,7 +48,10 @@ class AgentKindCapabilities {
 
   /// One `adapters` entry; unknown or malformed fields keep their
   /// conservative defaults (the feature stays hidden).
-  factory AgentKindCapabilities.fromJson(String kind, Map<Object?, Object?> raw) {
+  factory AgentKindCapabilities.fromJson(
+    String kind,
+    Map<Object?, Object?> raw,
+  ) {
     String? text(Object? value) =>
         value is String && value.isNotEmpty ? value : null;
     bool flag(Object? value) => value == true;
