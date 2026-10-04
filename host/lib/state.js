@@ -179,6 +179,9 @@ function reduce (state, event, now = Date.now()) {
       break
     case 'PostToolUse':
     case 'PostToolUseFailure':
+      // A request the phone only watches (answerable: false; no hook
+      // waits for it) was allowed in the terminal once its tool ran.
+      dropObserved(agent, p => p.toolName === (event.tool_name || null))
       next = agent.pending.length ? 'needs_permission' : 'working'
       break
     case 'PermissionRequest': {
@@ -221,12 +224,14 @@ function reduce (state, event, now = Date.now()) {
       break
     }
     case 'Stop':
+      dropObserved(agent)
       if (typeof event.last_assistant_message === 'string') agent.lastMessage = truncate(event.last_assistant_message, MESSAGE_MAX)
       next = agent.pending.length ? 'needs_permission' : 'waiting_input'
       break
     case 'StopFailure':
       // The turn ended on an API error (rate limit, auth, overload, ...).
       if (isSubagent) break
+      dropObserved(agent)
       agent.lastError = { type: typeof event.error === 'string' ? truncate(event.error, 40) : 'unknown', at: now }
       if (typeof event.last_assistant_message === 'string' && event.last_assistant_message.trim()) agent.lastMessage = truncate(event.last_assistant_message, MESSAGE_MAX)
       next = agent.pending.length ? 'needs_permission' : 'waiting_input'
@@ -246,6 +251,12 @@ function reduce (state, event, now = Date.now()) {
   agent.updatedAt = now
   changes.push(record(state, 'change', agent, reason))
   return changes
+}
+
+// Removes the observe-only requests (answerable: false) that `match`
+// (all of them without one): the terminal answered them.
+function dropObserved (agent, match = () => true) {
+  if (agent.pending.some(p => p.answerable === false && match(p))) agent.pending = agent.pending.filter(p => !(p.answerable === false && match(p)))
 }
 
 // The questions of an AskUserQuestion request, for the phone to answer
