@@ -184,7 +184,7 @@ void main() {
       controller.setPath('/about');
       controller.setViewport(PreviewViewport.tablet);
       await tester.pump();
-      await tester.tap(find.byTooltip('Screenshot to Claude'));
+      await tester.tap(find.byTooltip('Screenshot to the agent'));
       await tester.pump();
       expect(capture.calls, 1);
       expect(shots.single.png, png);
@@ -205,7 +205,7 @@ void main() {
       );
       await controller.start(5173);
       await tester.pump();
-      await tester.tap(find.byTooltip('Screenshot to Claude'));
+      await tester.tap(find.byTooltip('Screenshot to the agent'));
       await tester.pump();
       expect(shots, isEmpty);
     });
@@ -221,7 +221,7 @@ void main() {
       );
       await controller.start(5173);
       await tester.pump();
-      await tester.tap(find.byTooltip('Screenshot to Claude'));
+      await tester.tap(find.byTooltip('Screenshot to the agent'));
       await tester.pump();
       expect(
         find.text('Could not capture the page: blank on this device'),
@@ -233,7 +233,7 @@ void main() {
       await tester.pumpWidget(app());
       await controller.start(5173);
       await tester.pump();
-      expect(find.byTooltip('Screenshot to Claude'), findsNothing);
+      expect(find.byTooltip('Screenshot to the agent'), findsNothing);
     });
 
     test('isBlank spots a transparent capture', () {

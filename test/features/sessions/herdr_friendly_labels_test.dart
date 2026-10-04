@@ -52,7 +52,7 @@ void main() {
       '"5a57ee59-db0f-4964-9590-21c324d8da54","state":"working",'
       '"pending":[]}]}',
     );
-    expect(snapshot.agents.single.name, 'Claude session');
+    expect(snapshot.agents.single.name, 'Claude Code session');
   });
 
   test('the navigator names an unlabelled tab by its number', () {
