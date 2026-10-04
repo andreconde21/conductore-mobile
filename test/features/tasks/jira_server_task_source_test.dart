@@ -1,6 +1,7 @@
 import 'package:conduit/features/tasks/data/jira_task_source.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 import 'http_recorder.dart';
 
@@ -33,7 +34,7 @@ void main() {
 
   test('searches v2 by startAt with a Bearer token', () async {
     final r = HttpRecorder({
-      'GET /jira/rest/api/2/search': (request) {
+      'GET /jira/rest/api/2/search': (http.Request request) {
         final start = int.parse(request.url.queryParameters['startAt']!);
         return {
           'startAt': start,
