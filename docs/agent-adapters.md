@@ -165,7 +165,7 @@ Differences from the design doc:
   when the agent moves on (PostToolUse, PostToolUseFailure, Stop, ...);
   `decide`, `trust` and `approve-low` refuse it. The app shows "Answer it
   in the terminal" instead of the buttons and sends no Allow action in the
-  notification. Gemini's observe-only requests use the same path.
+  notification. Any other watch-only agent (Gemini) can use the same path.
 * **Cursor runs Claude Code's hooks too** (`~/.claude/settings.json`,
   user and project), with Cursor's payload. The Claude Code adapter drops
   anything carrying `cursor_version`; without that, every Cursor session
