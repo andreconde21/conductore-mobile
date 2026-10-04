@@ -133,6 +133,26 @@ Uri joinUri(String base, List<String> segments, [Map<String, String>? query]) {
   );
 }
 
+/// The most tasks one source loads (newest first).
+const maxTasksPerSource = 500;
+
+/// Calls [fetch] with the cursor of the page before (null first) until it
+/// returns no next cursor, or [max] items are in.
+Future<List<T>> collectPages<T>(
+  Future<(List<T> items, Object? next)> Function(Object? cursor) fetch, {
+  int max = maxTasksPerSource,
+}) async {
+  final out = <T>[];
+  Object? cursor;
+  for (var page = 0; page < 100; page++) {
+    final (items, next) = await fetch(cursor);
+    out.addAll(items);
+    if (next == null || items.isEmpty || out.length >= max) break;
+    cursor = next;
+  }
+  return out.length > max ? out.sublist(0, max) : out;
+}
+
 DateTime? parseTime(Object? value) =>
     value is String ? DateTime.tryParse(value) : null;
 

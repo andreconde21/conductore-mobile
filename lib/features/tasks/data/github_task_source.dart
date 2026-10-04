@@ -75,16 +75,23 @@ class GitHubTaskSource implements TaskSource {
   }
 
   @override
-  Future<List<TaskItem>> list() async {
+  Future<List<TaskItem>> list() => collectPages((cursor) async {
+    final page = (cursor as int?) ?? 1;
     final json = await _http.get(
-      _uri(['issues'], {'state': 'all', 'sort': 'updated', 'per_page': '100'}),
+      _uri(
+        ['issues'],
+        {'state': 'all', 'sort': 'updated', 'per_page': '100', 'page': '$page'},
+      ),
     );
-    return [
-      if (json is List)
-        for (final issue in json)
+    final raw = json is List ? json : const <Object?>[];
+    return (
+      [
+        for (final issue in raw)
           if (issue is Map && issue['pull_request'] == null) _task(issue),
-    ];
-  }
+      ],
+      raw.length < 100 ? null : page + 1,
+    );
+  });
 
   @override
   Future<TaskItem> read(TaskItem task) async {

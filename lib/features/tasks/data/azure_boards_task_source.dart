@@ -91,7 +91,7 @@ class AzureBoardsTaskSource implements TaskSource {
   Future<List<TaskItem>> list() async {
     final wiql = await _http.send(
       'POST',
-      _uri(['wiql'], {'api-version': _api, r'$top': '100'}),
+      _uri(['wiql'], {'api-version': _api, r'$top': '$maxTasksPerSource'}),
       body: {
         'query':
             'SELECT [System.Id] FROM WorkItems '
@@ -102,25 +102,28 @@ class AzureBoardsTaskSource implements TaskSource {
     );
     final ids = [
       if (wiql case {'workItems': final List<Object?> items})
-        for (final item in items.take(100))
+        for (final item in items.take(maxTasksPerSource))
           if (item case {'id': final num id}) id.toInt(),
     ];
-    if (ids.isEmpty) return const [];
-    final json = await _http.get(
-      _uri(
-        ['workitems'],
-        {
-          'ids': ids.join(','),
-          'fields': _fields.join(','),
-          'api-version': _api,
-        },
-      ),
-    );
-    final byId = {
-      if (json case {'value': final List<Object?> items})
-        for (final item in items)
-          if (item is Map) '${item['id']}': _task(item),
-    };
+    // The batch read takes at most 200 ids.
+    final byId = <String, TaskItem>{};
+    for (var i = 0; i < ids.length; i += 200) {
+      final json = await _http.get(
+        _uri(
+          ['workitems'],
+          {
+            'ids': ids.skip(i).take(200).join(','),
+            'fields': _fields.join(','),
+            'api-version': _api,
+          },
+        ),
+      );
+      if (json case {'value': final List<Object?> items}) {
+        for (final item in items) {
+          if (item is Map) byId['${item['id']}'] = _task(item);
+        }
+      }
+    }
     return [for (final id in ids) ?byId['$id']];
   }
 

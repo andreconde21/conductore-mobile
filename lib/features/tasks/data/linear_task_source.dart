@@ -85,11 +85,12 @@ class LinearTaskSource implements TaskSource {
   );
 
   @override
-  Future<List<TaskItem>> list() async {
+  Future<List<TaskItem>> list() => collectPages((cursor) async {
     final team = config['team'];
     final data = await _query(
-      'query Issues(\$filter: IssueFilter) { issues(first: 100, '
-      'filter: \$filter, orderBy: updatedAt) { nodes { $_issueFields } } }',
+      'query Issues(\$filter: IssueFilter, \$after: String) { issues('
+      'first: 100, after: \$after, filter: \$filter, orderBy: updatedAt) '
+      '{ nodes { $_issueFields } pageInfo { hasNextPage endCursor } } }',
       {
         if (team != null)
           'filter': {
@@ -97,14 +98,26 @@ class LinearTaskSource implements TaskSource {
               'key': {'eq': team},
             },
           },
+        'after': ?cursor,
       },
     );
-    return [
-      if (data case {'issues': {'nodes': final List<Object?> nodes}})
-        for (final issue in nodes)
-          if (issue is Map) _task(issue),
-    ];
-  }
+    return (
+      [
+        if (data case {'issues': {'nodes': final List<Object?> nodes}})
+          for (final issue in nodes)
+            if (issue is Map) _task(issue),
+      ],
+      switch (data) {
+        {
+          'issues': {
+            'pageInfo': {'hasNextPage': true, 'endCursor': final String end},
+          },
+        } =>
+          end,
+        _ => null,
+      },
+    );
+  });
 
   @override
   Future<TaskItem> read(TaskItem task) async {

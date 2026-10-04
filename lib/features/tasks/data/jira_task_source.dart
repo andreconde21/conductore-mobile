@@ -97,18 +97,29 @@ class JiraTaskSource implements TaskSource {
   }
 
   @override
-  Future<List<TaskItem>> list() async {
+  Future<List<TaskItem>> list() => collectPages((cursor) async {
     final json = await _http.send(
       'POST',
       _uri(['search', 'jql']),
-      body: {'jql': jql, 'maxResults': 100, 'fields': _fields.split(',')},
+      body: {
+        'jql': jql,
+        'maxResults': 100,
+        'fields': _fields.split(','),
+        'nextPageToken': ?cursor,
+      },
     );
-    return [
-      if (json case {'issues': final List<Object?> issues})
-        for (final issue in issues)
-          if (issue is Map) _task(issue),
-    ];
-  }
+    return (
+      [
+        if (json case {'issues': final List<Object?> issues})
+          for (final issue in issues)
+            if (issue is Map) _task(issue),
+      ],
+      switch (json) {
+        {'nextPageToken': final String next} => next,
+        _ => null,
+      },
+    );
+  });
 
   @override
   Future<TaskItem> read(TaskItem task) async {
