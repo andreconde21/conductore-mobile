@@ -140,4 +140,28 @@ void main() {
     );
     expect(find.byKey(const ValueKey('question-send-q1')), findsNothing);
   });
+
+  testWidgets('the title names the asking agent, never a favourite '
+      '(CON-071)', (tester) async {
+    Future<void> show(String? agentName) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: PendingRequestCard(
+              request: request(const [single]),
+              agentName: agentName,
+              busy: false,
+              onDecide: (_) {},
+              onAnswer: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await show('Codex');
+    expect(find.text('Codex asks'), findsOneWidget);
+    await show(null);
+    expect(find.text('The agent asks'), findsOneWidget);
+    expect(find.textContaining('Claude'), findsNothing);
+  });
 }

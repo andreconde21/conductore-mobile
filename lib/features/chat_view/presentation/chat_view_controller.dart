@@ -206,7 +206,16 @@ class ChatViewController extends ChangeNotifier {
 
   bool isDeciding(String requestId) => _deciding.contains(requestId);
 
-  String get name => _agent?.name ?? fallbackName ?? 'Claude';
+  String get name => _agent?.name ?? fallbackName ?? 'Agent session';
+
+  /// Whether the companion answers in the neutral format (every agent but
+  /// Claude Code), or Claude Code's own entries; null before the first
+  /// page.
+  bool? get neutralFormat => _neutral != null
+      ? true
+      : _offset != null
+      ? false
+      : null;
 
   List<PendingPermissionRequest> get pending => _agent?.pending ?? const [];
 

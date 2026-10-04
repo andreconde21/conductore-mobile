@@ -227,7 +227,7 @@ void main() {
     await settle(tester);
     expect(
       tts.spoken.single,
-      'Claude needs your approval to run npm test. '
+      'The agent needs your approval to run npm test. '
       'Say allow, deny, or always.',
     );
     tts.done();

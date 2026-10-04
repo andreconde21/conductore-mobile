@@ -1,6 +1,7 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_state_dot.dart';
@@ -408,6 +409,7 @@ class _NeedsYouCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   PendingRequestCard(
                     request: request,
+                    agentName: agentKindLabel(agent!.kind),
                     busy: dashboard.isDeciding?.call(request.id) ?? false,
                     onDecide: (verdict) => onDecide(item, request, verdict),
                     onAnswer: (answers) => onDecide(

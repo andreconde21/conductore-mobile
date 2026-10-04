@@ -161,7 +161,7 @@ void main() {
           summary: 'npm test',
         ),
       ),
-      'Claude needs your approval to run npm test.',
+      'The agent needs your approval to run npm test.',
     );
     expect(
       SpeechText.approval(
@@ -172,8 +172,40 @@ void main() {
         ),
         hint: true,
       ),
-      'Claude needs your approval to edit src/app.ts. '
+      'The agent needs your approval to edit src/app.ts. '
       'Say allow, deny, or always.',
+    );
+  });
+
+  test('announcements name the agent when its kind is known (CON-071)', () {
+    expect(
+      SpeechText.approval(
+        const PendingPermissionRequest(
+          id: 'r1',
+          toolName: 'Bash',
+          summary: 'npm test',
+        ),
+        agent: 'Codex',
+      ),
+      'Codex needs your approval to run npm test.',
+    );
+    expect(
+      SpeechText.question(
+        const ChatQuestion(
+          'q',
+          questions: [ChatQuestionPrompt(question: 'Ship it?')],
+        ),
+        agent: 'OpenCode',
+      ),
+      'OpenCode is asking: Ship it?',
+    );
+    expect(
+      SpeechText.planReady(agent: 'Claude Code'),
+      'Claude Code has a plan ready for your review.',
+    );
+    expect(
+      SpeechText.planReady(),
+      'The agent has a plan ready for your review.',
     );
   });
 
@@ -193,7 +225,7 @@ void main() {
           ],
         ),
       ),
-      'Claude is asking: Which database? Options: Postgres, or SQLite.',
+      'The agent is asking: Which database? Options: Postgres, or SQLite.',
     );
     expect(
       SpeechText.question(
@@ -211,7 +243,7 @@ void main() {
         ),
         hint: true,
       ),
-      'Claude is asking: Which database? Options: 1, Postgres; 2, SQLite. '
+      'The agent is asking: Which database? Options: 1, Postgres; 2, SQLite. '
       'Say the number or the name.',
     );
   });

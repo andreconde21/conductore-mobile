@@ -181,7 +181,7 @@ void main() {
     ]);
     await chat.refresh();
     await tester.pump();
-    expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+    expect(tts.spoken, ['Claude Code needs your approval to run npm test.']);
   });
 
   testWidgets('screen off keeps reading; leaving the app stops', (
@@ -297,7 +297,7 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
     expect(runner.commands.any((c) => c.contains('send s-1')), isTrue);
     await tester.pump();
-    expect(find.text('Claude is working…'), findsOneWidget);
+    expect(find.text('Claude Code is working…'), findsOneWidget);
 
     // Sending polled at once: Claude works, nothing is read.
     expect(tts.spoken, isEmpty);
@@ -347,7 +347,7 @@ void main() {
     await chat.refresh();
     await tester.pump();
     expect(tts.spoken, [
-      'Claude needs your approval to run npm test. '
+      'Claude Code needs your approval to run npm test. '
           'Say allow, deny, or always.',
     ]);
     expect(dictation.isActive, isFalse, reason: 'the mic closes to hear it');
@@ -651,7 +651,7 @@ void main() {
       ]);
       await chat.refresh();
       await tester.pump();
-      expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+      expect(tts.spoken, ['Claude Code needs your approval to run npm test.']);
 
       // Another agent's chat opens on top.
       final other = ChatViewController(
@@ -678,7 +678,7 @@ void main() {
       await chat.refresh();
       tts.done();
       await tester.pump();
-      expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+      expect(tts.spoken, ['Claude Code needs your approval to run npm test.']);
       navigator.pop();
       await tester.pumpAndSettle();
     });

@@ -381,6 +381,15 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('transcript not found'), findsNothing);
+    // Which agent is not known yet: no name is guessed (CON-071).
+    expect(find.text('Message the agent…'), findsOneWidget);
+  });
+
+  testWidgets("Claude Code's own transcript names it in the composer", (
+    tester,
+  ) async {
+    await pumpPage(tester, [ok(page([]))]);
+    expect(find.text('Message Claude Code…'), findsOneWidget);
   });
 
   testWidgets('an old companion offers the update', (tester) async {

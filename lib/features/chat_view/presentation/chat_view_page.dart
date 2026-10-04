@@ -6,6 +6,7 @@ import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/question_request_card.dart';
@@ -244,6 +245,7 @@ class _ChatViewPageState extends State<ChatViewPage>
         onNotice: (note) {
           if (mounted) _tell(note, long: true);
         },
+        agentName: () => mounted ? _agentName : null,
       )..addListener(_onSpeakerChanged);
       unawaited(_readAloud!.checkAvailability());
       _chat.addListener(_feedReadAloud);
@@ -502,6 +504,24 @@ class _ChatViewPageState extends State<ChatViewPage>
   }
 
   /// The monitor's record of this agent (Review needs its cwd and name).
+  /// The agent's name for people ("Claude Code", "Codex"): its kind's
+  /// label when the companion lists the agent, else what the transcript's
+  /// format says (only Claude Code's is its own entries); null while
+  /// unknown.
+  String? get _agentName {
+    final agent = _reviewAgent;
+    final attention = widget.attention;
+    if (agent != null && attention != null) {
+      return agentKindLabel(
+        agent.kind,
+        attention.agentKinds(widget.hostId ?? ''),
+      );
+    }
+    return _chat.neutralFormat == false
+        ? agentKindLabel(defaultAgentKind)
+        : null;
+  }
+
   AgentInfo? get _reviewAgent => widget.attention
       ?.statusFor(widget.hostId ?? '')
       ?.agents
@@ -1271,7 +1291,11 @@ class _ChatViewPageState extends State<ChatViewPage>
                   ListenableBuilder(
                     listenable: talk,
                     builder: (context, _) => talk.active
-                        ? TalkPanel(controller: talk, onStop: _stopTalk)
+                        ? TalkPanel(
+                            controller: talk,
+                            onStop: _stopTalk,
+                            agentName: _agentName,
+                          )
                         : _composer(activity),
                   )
                 else
@@ -1290,6 +1314,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     onTalk: _talk == null ? null : _startTalk,
     onGuide: GuideScope.maybeOf(context) == null ? null : _startGuide,
     enabled: _chat.canSend,
+    agentName: _agentName,
     disabledHint: _chat.unsupported != null
         ? 'Chat unavailable'
         : _chat.agent?.state == 'ended'
@@ -1400,6 +1425,7 @@ class _ChatViewPageState extends State<ChatViewPage>
             maintainState: true,
             child: ChatWorkingIndicator(
               key: const ValueKey('chat-working-indicator'),
+              agentName: _agentName,
               working: shownWorking,
               since: shownWorking.since ?? _workingShownAt ?? DateTime.now(),
             ),
@@ -1412,6 +1438,7 @@ class _ChatViewPageState extends State<ChatViewPage>
               ? QuestionRequestCard(
                   key: ValueKey('approval-${request.id}'),
                   request: request,
+                  agentName: _agentName,
                   margin: const EdgeInsets.symmetric(vertical: 6),
                   busy:
                       _chat.isDeciding(request.id) ||

@@ -1,4 +1,5 @@
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
 import 'package:conduit/features/voice/presentation/talk_controller.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +7,15 @@ import 'package:flutter/material.dart';
 /// Replaces the composer while the Talk loop runs: what the loop is doing,
 /// what was heard, the send countdown with Cancel, and Stop.
 class TalkPanel extends StatelessWidget {
-  const TalkPanel({required this.controller, required this.onStop, super.key});
+  const TalkPanel({
+    required this.controller,
+    required this.onStop,
+    this.agentName,
+    super.key,
+  });
+
+  /// The agent's name for people; null when its kind is not known.
+  final String? agentName;
 
   final TalkController controller;
 
@@ -32,7 +41,7 @@ class TalkPanel extends StatelessWidget {
           TalkPhase.confirming =>
             'Sending in ${(controller.countdown.inMilliseconds / 1000).ceil()}s',
           TalkPhase.sending => 'Sending…',
-          TalkPhase.waiting => 'Claude is working…',
+          TalkPhase.waiting => '${agentSubject(agentName)} is working…',
           TalkPhase.speaking => 'Speaking…',
           TalkPhase.off => '',
         };
@@ -42,7 +51,8 @@ class TalkPanel extends StatelessWidget {
                   (phase == TalkPhase.listening
                       ? 'Speak; a pause sends it.'
                       : phase == TalkPhase.waiting
-                      ? 'The answer is read when Claude is done.'
+                      ? 'The answer is read when '
+                            '${agentObject(agentName)} is done.'
                       : '');
         final icon = switch (phase) {
           TalkPhase.listening => Icons.mic_rounded,

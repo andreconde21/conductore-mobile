@@ -254,6 +254,13 @@ String agentKindLabel(String kind, [AgentKindCatalog? catalog]) {
   return key;
 }
 
+/// [label] (an [agentKindLabel]) to start a sentence with, or "The agent"
+/// when the kind is not known.
+String agentSubject(String? label) => label ?? 'The agent';
+
+/// [label] inside a sentence, or "the agent" when the kind is not known.
+String agentObject(String? label) => label ?? 'the agent';
+
 /// A person's name for an agent kind other than Claude Code (`Codex`), for
 /// texts that must say which agent it is; null for Claude Code.
 String? otherAgentKindName(String kind) {

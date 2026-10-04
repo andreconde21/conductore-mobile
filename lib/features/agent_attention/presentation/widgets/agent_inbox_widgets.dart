@@ -480,12 +480,17 @@ class PendingRequestCard extends StatefulWidget {
     required this.onDecide,
     required this.onAnswer,
     this.onTrust,
+    this.agentName,
     super.key,
   });
 
   final PendingPermissionRequest request;
   final bool busy;
   final ValueChanged<PermissionVerdict> onDecide;
+
+  /// The agent's name for people ("Claude Code", "Codex"); null when its
+  /// kind is not known.
+  final String? agentName;
 
   /// A question's answers, question -> answer.
   final ValueChanged<Map<String, String>> onAnswer;
@@ -503,10 +508,11 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
     final theme = Theme.of(context);
     final request = widget.request;
     if (request.isQuestion) {
-      // Allow / Always mean nothing to a question: Claude Code waits for
-      // the answers themselves.
+      // Allow / Always mean nothing to a question: the agent waits for the
+      // answers themselves.
       return QuestionRequestCard(
         request: request,
+        agentName: widget.agentName,
         busy: widget.busy,
         onAnswer: widget.onAnswer,
         onDecline: () => widget.onDecide(PermissionVerdict.deny),

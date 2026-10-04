@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/markdown_table.dart';
 
@@ -231,11 +232,13 @@ abstract final class SpeechText {
 
   static const _maxSummary = 160;
 
-  /// "Claude needs your approval to run npm test." With [hint], adds how
-  /// to answer by voice.
+  /// "Codex needs your approval to run npm test." ([agent]: the agent's
+  /// name for people, "The agent" when unknown). With [hint], adds how to
+  /// answer by voice.
   static String approval(
     PendingPermissionRequest request, {
     bool hint = false,
+    String? agent,
   }) {
     final summary = _clip(inline(request.summary));
     final tool = request.toolName.startsWith('mcp__')
@@ -248,13 +251,17 @@ abstract final class SpeechText {
       'WebFetch' => 'to fetch $summary',
       _ => 'to use $tool: $summary',
     };
-    final sentence = _end('Claude needs your approval $what');
+    final sentence = _end('${agentSubject(agent)} needs your approval $what');
     return hint ? '$sentence Say allow, deny, or always.' : sentence;
   }
 
-  /// "Claude is asking: Which database? Options: Postgres, or SQLite."
+  /// "Codex is asking: Which database? Options: Postgres, or SQLite."
   /// With [hint], options are numbered and it says how to answer.
-  static String? question(ChatQuestion question, {bool hint = false}) {
+  static String? question(
+    ChatQuestion question, {
+    bool hint = false,
+    String? agent,
+  }) {
     final prompts = question.questions;
     if (prompts.isEmpty) return null;
     final parts = <String>[];
@@ -277,12 +284,13 @@ abstract final class SpeechText {
         );
       }
     }
-    final spoken = 'Claude is asking: ${parts.join(' ')}';
+    final spoken = '${agentSubject(agent)} is asking: ${parts.join(' ')}';
     return hint ? '$spoken Say the number or the name.' : spoken;
   }
 
   /// A pending ExitPlanMode.
-  static const planReady = 'Claude has a plan ready for your review.';
+  static String planReady({String? agent}) =>
+      '${agentSubject(agent)} has a plan ready for your review.';
 
   static String _clip(String text) => text.length <= _maxSummary
       ? text

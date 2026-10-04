@@ -955,6 +955,7 @@ class DigestAgentCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   PendingRequestCard(
                     request: request,
+                    agentName: agentKindLabel(agent.kind),
                     busy: isDeciding?.call(request.id) ?? false,
                     onDecide: (verdict) => onDecide(request, verdict),
                     onAnswer: (answers) => onDecide(
