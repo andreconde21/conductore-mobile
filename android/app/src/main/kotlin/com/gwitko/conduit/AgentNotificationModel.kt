@@ -52,6 +52,13 @@ object AgentNotificationModel {
         val open: AgentNotificationStore.OpenTarget?,
         /** When it was first posted for its current need (shade order). */
         val postedAt: Long = 0,
+        /** Answer buttons: option labels answering [question] (CON-074). */
+        val answers: List<String> = emptyList(),
+        val question: String = "",
+        /** A Reply button with an inline text field. */
+        val reply: Boolean = false,
+        /** An Open button (opens the agent like the body). */
+        val openButton: Boolean = false,
     ) {
         val key: String get() = key(hostId, agentId)
 
@@ -67,6 +74,10 @@ object AgentNotificationModel {
             .put("alertKey", alertKey)
             .put("reviewAll", reviewAll)
             .put("postedAt", postedAt)
+            .put("answers", JSONArray(answers))
+            .put("question", question)
+            .put("reply", reply)
+            .put("openButton", openButton)
             .apply {
                 action?.let {
                     put("requestId", it.requestId)
@@ -106,6 +117,10 @@ object AgentNotificationModel {
                         tabId = string("openTabId"),
                         paneId = string("openPaneId"),
                     ),
+                    answers = (map["answers"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    question = string("question"),
+                    reply = map["reply"] as? Boolean ?: false,
+                    openButton = map["openButton"] as? Boolean ?: false,
                 )
             }
 
@@ -132,17 +147,74 @@ object AgentNotificationModel {
                     reviewAll = json.optBoolean("reviewAll"),
                     open = AgentNotificationStore.OpenTarget.fromJson(json.optJSONObject("open")),
                     postedAt = json.optLong("postedAt"),
+                    answers = json.optJSONArray("answers")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+                        ?: emptyList(),
+                    question = json.optString("question"),
+                    reply = json.optBoolean("reply"),
+                    openButton = json.optBoolean("openButton"),
                 )
             }
         }
     }
 
-    /** The buttons of [spec]: Allow / Deny, and Always when allowed. */
+    /** The verdict of an answer button; the payload's text is the option. */
+    const val ANSWER = "answer"
+
+    /** The verdict of the Reply button; the payload's text is what was typed. */
+    const val REPLY = "reply"
+
+    /** What a Reply's token is issued for when no request is pending. */
+    const val REPLY_REQUEST = "reply"
+
+    /** The most action buttons Android shows on one notification. */
+    const val MAX_BUTTONS = 3
+
+    /**
+     * The decision buttons of [spec]: Allow / Deny, and Always when allowed.
+     * None when it offers answers instead.
+     */
     fun verdicts(spec: Spec): List<Pair<String, String>> {
         val action = spec.action ?: return emptyList()
+        if (spec.answers.isNotEmpty()) return emptyList()
         return listOf("allow" to "Allow", "deny" to "Deny") +
             if (action.allowAlways) listOf("always" to "Always") else emptyList()
     }
+
+    /** One button per answer of [spec]'s question, at most [MAX_BUTTONS]. */
+    fun answerPayloads(spec: Spec): List<ButtonPayload> {
+        val action = spec.action ?: return emptyList()
+        return spec.answers.take(MAX_BUTTONS).map { label ->
+            ButtonPayload(
+                notificationId = spec.key,
+                hostId = spec.hostId,
+                agentId = spec.agentId,
+                requestId = action.requestId,
+                verdict = ANSWER,
+                text = label,
+                question = spec.question,
+            )
+        }
+    }
+
+    /** What the Reply button carries (the text comes from the inline field). */
+    fun replyPayload(spec: Spec): ButtonPayload? {
+        if (!spec.reply) return null
+        return ButtonPayload(
+            notificationId = spec.key,
+            hostId = spec.hostId,
+            agentId = spec.agentId,
+            requestId = tokenRequestId(spec) ?: return null,
+            verdict = REPLY,
+        )
+    }
+
+    /**
+     * What the buttons' token is issued for: the first request, or
+     * [REPLY_REQUEST] for a Reply alone; null without buttons that decide or
+     * send anything.
+     */
+    fun tokenRequestId(spec: Spec): String? =
+        spec.action?.requestId ?: if (spec.reply) REPLY_REQUEST else null
 
     /** What one button of [spec] carries: always its first request. */
     data class ButtonPayload(
@@ -151,6 +223,8 @@ object AgentNotificationModel {
         val agentId: String,
         val requestId: String,
         val verdict: String,
+        val text: String = "",
+        val question: String = "",
     )
 
     fun buttonPayload(spec: Spec, verdict: String): ButtonPayload? {
@@ -166,8 +240,8 @@ object AgentNotificationModel {
 
     /** What a token of [spec]'s buttons is issued for. */
     fun issued(spec: Spec, token: String): PermissionActionGuard.Issued? {
-        val action = spec.action ?: return null
-        return PermissionActionGuard.Issued(token = token, hostId = spec.hostId, requestId = action.requestId)
+        val requestId = tokenRequestId(spec) ?: return null
+        return PermissionActionGuard.Issued(token = token, hostId = spec.hostId, requestId = requestId)
     }
 
     /** How a post goes out. */
