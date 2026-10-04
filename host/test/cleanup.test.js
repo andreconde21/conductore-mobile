@@ -10,7 +10,7 @@ const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
 const proc = require('../lib/proc')
-const { tempDir, cleanup, daemonsIn } = require('./helpers/cleanup')
+const { tempDir, cleanup, daemonsIn, guardRealConfigs } = require('./helpers/cleanup')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -62,6 +62,34 @@ test('cleanup passes when the tests stopped their daemons', async () => {
   await d.exited
   await cleanup()
   assert.equal(fs.existsSync(home), false)
+})
+
+test('the real-config guard sees changes to our hooks only, by content, never ~/.claude.json', () => {
+  const home = tempDir('conductore-guard-')
+  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true }); fs.writeFileSync(path.join(home, rel), text) }
+  w('.claude/settings.json', JSON.stringify({ hooks: { Stop: [] }, model: 'opus' }))
+  w('.claude.json', '{"numStartups":1}')
+  w('.gemini/settings.json', '{"hooks":{},"theme":"dark"}')
+  w('.config/opencode/plugins/other.js', 'x')
+  let check = guardRealConfigs(home)
+  // What the agents rewrite themselves: mtimes, other keys, ~/.claude.json.
+  w('.claude.json', '{"numStartups":2,"tips":[1,2,3]}')
+  w('.claude/settings.json', JSON.stringify({ hooks: { Stop: [] }, model: 'sonnet' }))
+  w('.gemini/settings.json', '{"hooks":{},"theme":"light"}')
+  fs.utimesSync(path.join(home, '.config/opencode/plugins/other.js'), new Date(1), new Date(1))
+  check()
+  // What an install writes.
+  for (const [rel, text] of [
+    ['.claude/settings.json', JSON.stringify({ hooks: { Stop: [{ hooks: [] }] }, model: 'sonnet' })],
+    ['.cursor/hooks.json', '{"version":1,"hooks":{}}'],
+    ['.codex/hooks.json', '{}'],
+    ['.gemini/settings.json', '{"hooks":{"AfterAgent":[]},"theme":"light"}'],
+    ['.config/opencode/plugins/conductore.js', 'export default {}']
+  ]) {
+    check = guardRealConfigs(home)
+    w(rel, text)
+    assert.throws(() => check(), /touched the real agent config/, rel)
+  }
 })
 
 test.after(() => cleanup())
