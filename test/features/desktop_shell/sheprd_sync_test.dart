@@ -7,10 +7,12 @@ import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sync/data/app_settings_codec.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
@@ -373,6 +375,87 @@ void main() {
         'laptop/w1:notes',
         'dev/w2:sf',
       ]);
+    });
+
+    testWidgets('a row offers sheprd\'s marks instead of project edits, '
+        'and they go back', (tester) async {
+      Future<ProjectEntryAction?> sheet(
+        ProjectEntry entry,
+        ProjectGroup project, {
+        SidebarNode? row,
+      }) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () => showProjectEntrySheet(
+                    context,
+                    controller,
+                    entry,
+                    project: project,
+                    row: row,
+                  ),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        return null;
+      }
+
+      ProjectGroup store() => controller
+          .build(tree(), hosts: [laptop, dev])
+          .firstWhere((g) => g.name == 'Storefront');
+
+      // Off: the app's own project edits.
+      var project = controller.build(tree(), hosts: [laptop, dev]).first;
+      await sheet(project.entries.first, project);
+      expect(find.byKey(const ValueKey('project-entry-move')), findsOneWidget);
+      expect(find.text('Mark as unread'), findsNothing);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      await tester.runAsync(() => controller.setSheprdSync(true));
+      controller
+        ..applyViewReply(
+          laptop,
+          _reply(
+            'local',
+            agents: {
+              'dev-box/w2:p1': {'presence': 'done', 'state_seq': 41},
+            },
+          ),
+        )
+        ..applyViewReply(dev, _reply('dev-box'));
+      project = store();
+      final sf = project.entries.firstWhere((e) => e.node.label == 'sf');
+      final row = sf.agentRows.firstWhere((r) => r.label == 'agent w2:p1');
+      expect(
+        projectGroupMenuItems<ProjectGroupAction>(
+          project,
+          value: (a) => a,
+          editable: controller.canEditLayout,
+        ),
+        isEmpty,
+      );
+      await sheet(sf, project, row: row);
+      expect(find.byKey(const ValueKey('project-entry-move')), findsNothing);
+      expect(find.text('Mark as unread'), findsOneWidget);
+      expect(find.text('Keep in active'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('project-entry-dismiss')));
+      await tester.pumpAndSettle();
+      expect(sent.single.$2, contains('--op dismiss'));
+      expect(
+        store().entries
+            .firstWhere((e) => e.node.label == 'sf')
+            .sheprdOf(row)!
+            .dismissed,
+        isTrue,
+      );
     });
   });
 }
