@@ -5,13 +5,18 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 const { execFile } = require('child_process')
-const { tempDir, cleanup } = require('./helpers/cleanup')
+const { tempDir, cleanup, guardRealConfigs } = require('./helpers/cleanup')
 const toml = require('../lib/toml-lite')
 const sheprd = require('../lib/sheprd')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 
-test.after(cleanup)
+const realConfigs = guardRealConfigs()
+
+test.after(async () => {
+  await cleanup()
+  realConfigs()
+})
 
 // What sheprd writes (toml::to_string_pretty after its header line).
 const WRITTEN = `# herdr (andreconde fork) sidebar projects. Hand-editable; see projects.rs.
@@ -160,4 +165,140 @@ test('CLI sidebar-layout: none, found, broken; never writes the file', async () 
   const viaXdg = await hostd(['sidebar-layout'], { ...env, XDG_CONFIG_HOME: xdg })
   assert.deepEqual(viaXdg.layout.group, [{ name: 'x', members: [], match: [] }])
   assert.equal(fs.existsSync(path.join(home, '.conductore', 'hostd.pid')), false, 'no daemon')
+})
+
+// sheprd's view (CON-077, docs/sheprd-view-sync.md).
+
+const NOW = 1759612400 * 1000
+const VIEW = {
+  version: 1,
+  updated: 1759612390,
+  source: 'sheprd 0.6.2',
+  hub: 'laptop',
+  self: 'dev',
+  layout: { active_only: true, hidden: ['dev/w3:scratch'], unread: ['x/p1'], group: [{ name: 'Storefront', members: ['local/w1:notes', 'dev/w2:sf'], match: ['storefront'] }] },
+  agents: {
+    'dev/w2:p1': { presence: 'unread', state_seq: 41, unread: true, dismissed: false, kept: false },
+    'local/w1:p2': { presence: 'idle', state_seq: 7, dismissed: true, kept: true },
+    'bad key': { presence: 'idle' },
+    'dev/w2:p9': { presence: 'sleeping' }
+  },
+  order: ['local/w1:notes', 'dev/w2:sf', 3],
+  focus: 'local/w1:p2',
+  future: { anything: true }
+}
+
+test('readView: none, checked v1, stale, refusals', () => {
+  const dir = path.join(tempDir('hl-sheprd-view-'), 'sheprd')
+  assert.deepEqual(sheprd.readView({ dir, now: NOW }), { found: false })
+  fs.mkdirSync(dir)
+  const file = path.join(dir, 'view.json')
+  fs.writeFileSync(file, JSON.stringify(VIEW))
+  const r = sheprd.readView({ dir, now: NOW })
+  assert.equal(r.stale, false)
+  assert.equal(r.view.self, 'dev')
+  assert.equal(r.view.hub, 'laptop')
+  assert.deepEqual(Object.keys(r.view.agents), ['dev/w2:p1', 'local/w1:p2'])
+  assert.deepEqual(r.view.agents['local/w1:p2'], { presence: 'idle', state_seq: 7, unread: false, dismissed: true, kept: true })
+  assert.equal(r.view.layout.unread, undefined, 'marks never come through the layout')
+  assert.deepEqual(r.view.layout.group[0].members, ['local/w1:notes', 'dev/w2:sf'])
+  assert.deepEqual(r.view.order, ['local/w1:notes', 'dev/w2:sf'])
+  assert.equal(r.view.focus, 'local/w1:p2')
+  assert.equal(r.view.future, undefined)
+  assert.equal(sheprd.readView({ dir, now: NOW + 200 * 1000 }).stale, true)
+
+  fs.writeFileSync(file, JSON.stringify({ ...VIEW, version: 2 }))
+  assert.match(sheprd.readView({ dir, now: NOW }).error, /unsupported version 2/)
+  fs.writeFileSync(file, JSON.stringify({ ...VIEW, self: undefined }))
+  assert.match(sheprd.readView({ dir, now: NOW }).error, /self is missing/)
+  fs.writeFileSync(file, '{"version": 1,')
+  assert.match(sheprd.readView({ dir, now: NOW }).error, /^view\.json: /)
+  fs.writeFileSync(file, ' '.repeat(1024 * 1024 + 1))
+  assert.match(sheprd.readView({ dir, now: NOW }).error, /too large/)
+  fs.rmSync(file)
+  const elsewhere = path.join(path.dirname(dir), 'elsewhere.json')
+  fs.writeFileSync(elsewhere, JSON.stringify(VIEW))
+  fs.symlinkSync(elsewhere, file)
+  assert.match(sheprd.readView({ dir, now: NOW }).error, /not a regular file/)
+})
+
+test('appendUpdate: validated lines, appended, nothing else touched', () => {
+  const root = tempDir('hl-sheprd-upd-')
+  const dir = path.join(root, 'state', 'sheprd')
+  for (const [input, error] of [
+    [{ op: 'toggle', agent: 'dev/w2:p1' }, /op must be/],
+    [{ op: 'unread', agent: 'dev' }, /machine\/pane_id/],
+    [{ op: 'unread', agent: 'dev/w2:p1\n{"op":"x"}' }, /machine\/pane_id/],
+    [{ op: 'unread', agent: '../x/p1' }, /machine\/pane_id/],
+    [{ op: 'dismiss', agent: 'dev/w2:p1' }, /needs --state-seq/],
+    [{ op: 'dismiss', agent: 'dev/w2:p1', stateSeq: -1 }, /whole number/]
+  ]) {
+    assert.throws(() => sheprd.appendUpdate({ dir, ...input, now: NOW }), error)
+  }
+  assert.equal(fs.existsSync(dir), false, 'a refused update creates nothing')
+
+  const a = sheprd.appendUpdate({ dir, op: 'unread', agent: 'dev/w2:p1', now: NOW })
+  const b = sheprd.appendUpdate({ dir, op: 'dismiss', agent: 'local/w1:p2', stateSeq: 7, now: NOW })
+  assert.match(a.id, /^[A-Za-z0-9_-]{8,64}$/)
+  assert.notEqual(a.id, b.id)
+  const file = path.join(dir, 'view-updates.jsonl')
+  const lines = fs.readFileSync(file, 'utf8').split('\n')
+  assert.equal(lines.pop(), '')
+  assert.deepEqual(lines.map(JSON.parse), [
+    { v: 1, id: a.id, at: 1759612400, from: 'conductore', op: 'unread', agent: 'dev/w2:p1' },
+    { v: 1, id: b.id, at: 1759612400, from: 'conductore', op: 'dismiss', agent: 'local/w1:p2', state_seq: 7 }
+  ])
+  assert.deepEqual(fs.readdirSync(dir), ['view-updates.jsonl'], 'the lock is gone, nothing else written')
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700)
+
+  // A full file means sheprd is not draining: refused, unchanged.
+  fs.writeFileSync(file, 'x'.repeat(sheprd.UPDATES_MAX_BYTES))
+  assert.throws(() => sheprd.appendUpdate({ dir, op: 'keep', agent: 'dev/w2:p1' }), /is full/)
+  assert.equal(fs.statSync(file).size, sheprd.UPDATES_MAX_BYTES)
+
+  // Never through a symlink.
+  fs.rmSync(file)
+  const target = path.join(root, 'target')
+  fs.writeFileSync(target, '')
+  fs.symlinkSync(target, file)
+  assert.throws(() => sheprd.appendUpdate({ dir, op: 'keep', agent: 'dev/w2:p1' }), /not a regular file/)
+  assert.equal(fs.readFileSync(target, 'utf8'), '')
+})
+
+test('the lock: held means wait then refuse; stale is taken over', () => {
+  const dir = tempDir('hl-sheprd-lock-')
+  const lock = path.join(dir, 'view-updates.lock')
+  fs.writeFileSync(lock, '1')
+  assert.throws(() => sheprd.withLock(dir, () => 1, { waitMs: 120 }), /is held/)
+  assert.equal(fs.existsSync(lock), true, 'someone else\'s lock stays')
+  const old = (Date.now() - 60_000) / 1000
+  fs.utimesSync(lock, old, old)
+  assert.equal(sheprd.withLock(dir, () => 42), 42)
+  assert.equal(fs.existsSync(lock), false)
+})
+
+test('CLI sheprd-view and sheprd-view-update under a temp HOME', async () => {
+  const home = tempDir('hl-sheprd-cli-')
+  const env = envFor(home)
+  assert.deepEqual(await hostd(['sheprd-view'], env), { ok: true, found: false })
+  const dir = path.join(home, '.local', 'state', 'sheprd')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'view.json'), JSON.stringify({ ...VIEW, updated: Math.floor(Date.now() / 1000) }))
+  const r = await hostd(['sheprd-view'], env)
+  assert.equal(r.found, true)
+  assert.equal(r.path, '~/.local/state/sheprd/view.json')
+  assert.equal(r.stale, false)
+  assert.equal(r.view.agents['dev/w2:p1'].presence, 'unread')
+
+  const ok = await hostd(['sheprd-view-update', '--op', 'dismiss', '--agent', 'dev/w2:p1', '--state-seq', '41'], env)
+  assert.equal(ok.ok, true)
+  const line = JSON.parse(fs.readFileSync(path.join(dir, 'view-updates.jsonl'), 'utf8'))
+  assert.equal(line.id, ok.id)
+  assert.equal(line.state_seq, 41)
+  assert.match((await hostd(['sheprd-view-update', '--op', 'dismiss', '--agent', 'dev/w2:p1', '--state-seq', '4x'], env)).error, /whole number/)
+  assert.match((await hostd(['sheprd-view-update', '--op', 'keep'], env)).error, /machine\/pane_id/)
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['view-updates.jsonl', 'view.json'])
+  const version = await hostd(['version'], env)
+  assert.ok(version.capabilities.includes('sheprd-view'))
 })

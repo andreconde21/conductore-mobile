@@ -116,7 +116,7 @@ Each line is one JSON object, UTF-8, at most 1024 bytes, ending in `\n`:
 | `at` | int | Unix seconds. |
 | `from` | string ≤ 32 | `conductore`, for logs. |
 | `op` | enum | See the table below. |
-| `agent` | string | Matches `^[a-z0-9._-]{1,64}/[A-Za-z0-9:_-]{1,64}$`, the hub-view key, as in `view.json` `agents`. |
+| `agent` | string | Matches `^[^/\x00-\x1f\x7f]{1,64}/[A-Za-z0-9:._-]{1,64}$`, the hub-view key, as in `view.json` `agents`. |
 | `state_seq` | int ≥ 0 | Required for `dismiss`; not used by the other ops. |
 
 | op | sheprd applies |
