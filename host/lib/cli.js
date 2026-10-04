@@ -127,6 +127,9 @@ const USAGE = `usage: conductore-hostd <command>
   redo <sessionId> <turn> [--dry-run]
                                   put back what the last undo of that turn
                                   changed
+  tasks <list|read|status|comment> -
+                                  a markdown tasks folder (open format,
+                                  docs/task-sources.md); JSON on stdin
   talkbawt <command>              Talkbawt threads and handoffs: create,
                                   read, post, watch, revoke, mine, deliver
                                   to an agent, the bundled server (serve);
@@ -1172,6 +1175,7 @@ async function main (argv) {
     case 'digest': return digestCmd(args)
     case 'cswap-switch': return cswapSwitchCmd(args)
     case 'talkbawt': return talkbawtCmd(args)
+    case 'tasks': return require('./tasks-folder').cli(args, { readStdin })
     case 'turns': case 'diff': case 'undo': case 'redo': return reviewCmd(cmd, args)
     case 'agents': return agentsCmd()
     case 'agent-send': return agentSendCmd(args)
