@@ -156,6 +156,7 @@ class _TaskSourcesPageState extends State<TaskSourcesPage> {
       TaskSourceKind.jiraServer => s['project'] ?? s['jql'],
       TaskSourceKind.linear => s['team'] ?? 'every team',
       TaskSourceKind.trello => s['board'],
+      TaskSourceKind.clickup => s['list'],
       TaskSourceKind.azureBoards => [
         s['organization'],
         s['project'],

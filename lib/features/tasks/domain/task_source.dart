@@ -402,6 +402,14 @@ enum TaskSourceKind {
       ),
     ],
   ),
+  clickup(
+    'clickup',
+    'ClickUp',
+    'Tasks of a ClickUp list, with its statuses.',
+    TaskSourceCapabilities(),
+    'Personal API token (Settings › Apps, starts with pk_)',
+    [TaskSourceField('list', 'List id', hint: 'the number in …/li/<id>')],
+  ),
   azureBoards(
     'azure-boards',
     'Azure Boards',
