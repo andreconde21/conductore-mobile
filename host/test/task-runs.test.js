@@ -256,3 +256,14 @@ test('the daemon hook finishes runs and starts the next, and reads nothing when 
   assert.equal(data.runs.find(r => r.id === a.id).outcome, 'error', 'ended without working')
   assert.equal(data.runs.find(r => r.id === b.id).status, 'running')
 })
+
+test('a linked agent that disappears ends its run', async () => {
+  reset()
+  const dir = repo()
+  const wtRoot = tempDir('cnd-runs-wt-')
+  const { runs: [a] } = await runs.start({ repo: dir, agent: 'claude', place: 'none', location: `${wtRoot}/<branch>`, tasks: [task('G-1')] })
+  await runs.list([{ sessionId: 'g', cwd: a.worktree, state: 'working', startedAt: Date.now() }])
+  const { runs: [after] } = await runs.list([])
+  assert.equal(after.status, 'finished')
+  assert.equal(after.outcome, 'gone')
+})

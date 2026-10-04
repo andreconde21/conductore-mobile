@@ -148,18 +148,39 @@ Future<Map<String, Object?>> runCompanionTasks(
   AgentCommandRunner runner,
   String op,
   Map<String, Object?> input,
-) async {
-  if (runner is! StdinAgentCommandRunner) {
-    throw const TaskSourceFailure(
-      'unsupported',
-      'This connection cannot pass data on stdin.',
+) => runCompanionJson(
+  runner,
+  'tasks $op -',
+  stdin: input,
+  outdated: 'Update the companion on that machine: it predates task folders.',
+);
+
+/// `conductore-hostd <args>` on [runner], [stdin] as JSON on its input;
+/// the decoded reply, or a [TaskSourceFailure] with the companion's code.
+Future<Map<String, Object?>> runCompanionJson(
+  AgentCommandRunner runner,
+  String args, {
+  Map<String, Object?>? stdin,
+  String outdated = 'Update the companion on that machine.',
+  Duration timeout = const Duration(seconds: 20),
+}) async {
+  final command = ConductoreHostAttentionProvider.remoteCommand(args);
+  final AgentCommandResult result;
+  if (stdin != null) {
+    if (runner is! StdinAgentCommandRunner) {
+      throw const TaskSourceFailure(
+        'unsupported',
+        'This connection cannot pass data on stdin.',
+      );
+    }
+    result = await runner.runWithStdin(
+      command,
+      stdin: jsonEncode(stdin),
+      timeout: timeout,
     );
+  } else {
+    result = await runner.run(command, timeout: timeout);
   }
-  final result = await runner.runWithStdin(
-    ConductoreHostAttentionProvider.remoteCommand('tasks $op -'),
-    stdin: jsonEncode(input),
-    timeout: const Duration(seconds: 20),
-  );
   final stderr = result.stderr.trim();
   if (result.exitCode == 127 || stderr.contains('not found')) {
     throw const TaskSourceFailure(
@@ -180,10 +201,7 @@ Future<Map<String, Object?>> runCompanionTasks(
   }
   if (json['error'] case final String message) {
     if (message.startsWith('unknown command')) {
-      throw const TaskSourceFailure(
-        'outdated',
-        'Update the companion on that machine: it predates task folders.',
-      );
+      throw TaskSourceFailure('outdated', outdated);
     }
     throw TaskSourceFailure(str(json['code']) ?? 'failed', message);
   }

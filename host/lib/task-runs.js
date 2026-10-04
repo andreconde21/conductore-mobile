@@ -334,7 +334,16 @@ function link (data, agents) {
     const wt = realpath(r.worktree)
     const mine = list.filter(a => a && a.cwd && (a.sessionId === r.sessionId || (!r.sessionId && (realpath(a.cwd) === wt || realpath(a.cwd).startsWith(wt + path.sep)))))
     const agent = mine.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0]
-    if (!agent) continue
+    if (!agent) {
+      // Its agent was linked and is gone from the list (pruned): over.
+      if (r.sessionId) {
+        r.status = 'finished'
+        r.finishedAt = Date.now()
+        r.outcome = r.sawWorking ? 'gone' : 'error'
+        changed = true
+      }
+      continue
+    }
     const before = JSON.stringify([r.sessionId, r.agentState, r.sawWorking, r.status])
     r.sessionId = agent.sessionId
     r.agentKind = agent.kind || 'claude'
