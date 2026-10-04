@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SHA-256 digests of the signing certificates allowed to read
+         LauncherDetailsProvider through knownSigner (API 31+): the hex
+         SHA-256 digest apksigner verify with print-certs prints. -->
+    <!-- TODO(CON-075): add com.outsmartis.launcher's certificate SHA-256
+         once it is known. Until then only same-signature apps may read. -->
+    <string-array name="launcher_details_known_certs" translatable="false">
+    </string-array>
+</resources>

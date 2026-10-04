@@ -95,10 +95,7 @@ class AgentStatusWidgetPusher {
     final at = now ?? DateTime.now();
     final facts = digest == null ? null : cachedDigest(digest);
     return AgentStatusSnapshot.build(
-      hosts: [
-        for (final host in hosts)
-          (hostName: host.hostName, agents: host.agents),
-      ],
+      hosts: hosts,
       monitoring: hosts.isNotEmpty,
       now: at,
       limits: usage == null

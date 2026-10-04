@@ -16,6 +16,7 @@ void main() {
     final snapshot = AgentStatusSnapshot.build(
       hosts: [
         (
+          hostId: 'host-dev',
           hostName: 'dev',
           agents: [
             agent('idle-1', AgentAttentionState.idle),
@@ -24,6 +25,7 @@ void main() {
           ],
         ),
         (
+          hostId: 'host-prod',
           hostName: 'prod',
           agents: [
             agent('worker-b', AgentAttentionState.working),
@@ -44,9 +46,11 @@ void main() {
       'stuck',
       'done',
       'worker-a',
+      'worker-b',
+      'idle-1',
     ]);
     expect(snapshot.agents.first.host, 'prod');
-    expect(snapshot.agents, hasLength(AgentStatusSnapshot.maxAgents));
+    expect(snapshot.agents, hasLength(6));
   });
 
   test('a companion permission prompt counts as attention', () {
@@ -56,7 +60,7 @@ void main() {
       '"summary":"ls"}]},{"sessionId":"t","name":"web","state":"working"}]}',
     );
     final snapshot = AgentStatusSnapshot.build(
-      hosts: [(hostName: 'dev', agents: parsed.agents)],
+      hosts: [(hostId: 'host-dev', hostName: 'dev', agents: parsed.agents)],
       monitoring: true,
       now: now,
     );
@@ -69,9 +73,10 @@ void main() {
     final snapshot = AgentStatusSnapshot.build(
       hosts: [
         (
+          hostId: 'host-dev',
           hostName: 'dev',
           agents: [
-            for (var i = 0; i < 6; i++)
+            for (var i = 0; i < AgentStatusSnapshot.maxAgents + 2; i++)
               agent('a$i', AgentAttentionState.needsInput),
           ],
         ),
@@ -79,8 +84,47 @@ void main() {
       monitoring: true,
       now: now,
     );
-    expect(snapshot.attentionCount, 6);
-    expect(snapshot.agents, hasLength(4));
+    expect(snapshot.attentionCount, AgentStatusSnapshot.maxAgents + 2);
+    expect(snapshot.agents, hasLength(AgentStatusSnapshot.maxAgents));
+  });
+
+  test('agents carry where they live and when their state changed', () {
+    final changed = DateTime.utc(2026, 9, 24, 10, 12);
+    final snapshot = AgentStatusSnapshot.build(
+      hosts: [
+        (
+          hostId: 'host-dev',
+          hostName: 'dev',
+          agents: [
+            AgentInfo(
+              id: 's1',
+              name: 'api',
+              state: AgentAttentionState.needsInput,
+              workspace: 'w1',
+              tab: 'main:1',
+              pane: '%3',
+              stateChangedAt: changed,
+            ),
+          ],
+        ),
+      ],
+      monitoring: true,
+      now: now,
+    );
+    final json = jsonDecode(snapshot.encode()) as Map<String, Object?>;
+    expect((json['agents']! as List).single, {
+      'name': 'api',
+      'host': 'dev',
+      'state': 'needsInput',
+      'label': 'Needs input',
+      'hostId': 'host-dev',
+      'agentId': 's1',
+      'workspace': 'w1',
+      'tab': 'main:1',
+      'pane': '%3',
+      'changedAt': changed.millisecondsSinceEpoch,
+    });
+    expect(AgentStatusSnapshot.decode(snapshot.encode()), snapshot);
   });
 
   test('empty snapshot is not monitoring', () {
@@ -94,6 +138,7 @@ void main() {
     final snapshot = AgentStatusSnapshot.build(
       hosts: [
         (
+          hostId: 'host-box',
           hostName: 'dev box',
           agents: [agent('builder', AgentAttentionState.needsInput)],
         ),
@@ -114,6 +159,8 @@ void main() {
           'host': 'dev box',
           'state': 'needsInput',
           'label': 'Needs input',
+          'hostId': 'host-box',
+          'agentId': 'builder',
         },
       ],
       'limits': <Object?>[],
@@ -150,6 +197,7 @@ void main() {
     final snapshot = AgentStatusSnapshot.build(
       hosts: [
         (
+          hostId: 'host-dev',
           hostName: 'dev',
           agents: [
             agent('a', AgentAttentionState.working),
