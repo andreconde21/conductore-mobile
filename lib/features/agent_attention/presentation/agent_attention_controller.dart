@@ -623,7 +623,11 @@ class AgentAttentionController extends ChangeNotifier {
   /// what is known now (no state counts as newly entered).
   Future<void> resyncNotifications() async {
     for (final monitor in _monitors.values.toList()) {
-      await _syncNotifications(monitor, entered: const {});
+      // Before its first snapshot a host has nothing to say yet (and an
+      // empty list would clear what an earlier run left showing).
+      if (monitor.sawInitialSnapshot) {
+        await _syncNotifications(monitor, entered: const {});
+      }
     }
     _syncStatus();
   }

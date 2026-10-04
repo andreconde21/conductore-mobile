@@ -130,6 +130,7 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
     this.factsTimeout = const Duration(seconds: 20),
     this.summaryTimeout = const Duration(seconds: 50),
     this.unavailableRetry = const Duration(minutes: 10),
+    this.freshFactsInterval = const Duration(minutes: 5),
     DateTime Function()? clock,
     bool observeLifecycle = true,
   }) : _source = source,
@@ -162,6 +163,9 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
   /// next try (it may have been updated).
   final Duration unavailableRetry;
 
+  /// How often [keepFactsFresh] asks for the facts.
+  final Duration freshFactsInterval;
+
   final Map<String, MachineDigest> _machines = {};
   final Map<String, SavedHost> _hosts = {};
   final Set<String> _inFlight = {};
@@ -172,6 +176,7 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
   bool _appActive = true;
   bool _disposed = false;
   Timer? _timer;
+  Timer? _freshTimer;
 
   /// The window start fixed while a view is open: "since last check"
   /// means the check before this one.
@@ -202,6 +207,53 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
   /// The start of the counted window.
   DateTime get since =>
       _openSince ?? _preferences.window.since(_clock(), _preferences.lastSeen);
+
+  /// The first stuck flag's reason ("`npm test` failed 3 times") of
+  /// [agentId] on [hostId] from the companion's digest, for the urgent
+  /// "looks stuck" notification; null when it is not flagged.
+  String? cachedStuckFor(String hostId, String agentId) {
+    final base = baseHostId(hostId);
+    for (final machine in machines) {
+      final report = machine.report;
+      if (report == null || report.fromStatus) {
+        continue;
+      }
+      for (final agent in report.agents) {
+        if (agent.sessionId == agentId &&
+            agent.live &&
+            baseHostId(agent.hostId) == base) {
+          return agent.stuck.firstOrNull?.reason;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Keeps the facts (and so the stuck flags) at most
+  /// [freshFactsInterval] old while [on], with no view open and in the
+  /// background too (Android keeps the connections then): the urgent
+  /// notifications' "looks stuck" reads them. Facts only, never summaries:
+  /// one `digest` call per machine and interval, no model call.
+  void keepFactsFresh(bool on) {
+    if (_disposed || (_freshTimer != null) == on) return;
+    _freshTimer?.cancel();
+    _freshTimer = null;
+    if (!on) return;
+    _freshTimer = Timer.periodic(freshFactsInterval, (_) {
+      final now = _clock();
+      for (final host in _hosts.values.toList()) {
+        final at = _machines[host.id]?.fetchedAt;
+        final needsUpdate = _machines[host.id]?.needsUpdate ?? false;
+        final age = at == null ? null : now.difference(at);
+        final due =
+            age == null ||
+            (needsUpdate
+                ? age >= unavailableRetry
+                : age >= freshFactsInterval - const Duration(seconds: 1));
+        if (due) unawaited(_fetch(host));
+      }
+    });
+  }
 
   /// Every machine's agents in sections.
   /// The cached summary (else headline) of [agentId] on [hostId] from the
@@ -552,6 +604,7 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     _disposed = true;
+    _freshTimer?.cancel();
     _timer?.cancel();
     _source.removeListener(_onSourceChanged);
     if (_observesLifecycle) {
