@@ -424,6 +424,23 @@ enum TaskSourceKind {
       ),
     ],
   ),
+  notion(
+    'notion',
+    'Notion database',
+    'Pages of a Notion database, with a status or select property.',
+    TaskSourceCapabilities(),
+    'Internal integration secret (share the database with the integration)',
+    [
+      TaskSourceField('database', 'Database', hint: 'its id, or its URL'),
+      TaskSourceField(
+        'statusProperty',
+        'Status property',
+        hint: 'Status',
+        required: false,
+        help: 'A status or select property of the database.',
+      ),
+    ],
+  ),
   azureBoards(
     'azure-boards',
     'Azure Boards',

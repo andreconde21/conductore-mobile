@@ -158,6 +158,7 @@ class _TaskSourcesPageState extends State<TaskSourcesPage> {
       TaskSourceKind.trello => s['board'],
       TaskSourceKind.clickup => s['list'],
       TaskSourceKind.asana => s['project'],
+      TaskSourceKind.notion => s['database'],
       TaskSourceKind.azureBoards => [
         s['organization'],
         s['project'],
