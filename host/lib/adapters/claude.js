@@ -135,6 +135,10 @@ function registeredEvents () {
 // (the header) when the JSON lacks it.
 function normalize (event, header = {}) {
   if (!event || typeof event !== 'object' || Array.isArray(event)) return null
+  // Cursor runs the hooks in ~/.claude/settings.json too, with its own
+  // payload (`cursor_version`, camelCase events): its own hooks report
+  // those sessions (adapters/cursor.js), so these copies are dropped.
+  if (typeof event.cursor_version === 'string') return null
   if (!event.hook_event_name && header.event) event.hook_event_name = header.event
   event.agent_kind = ID
   return event

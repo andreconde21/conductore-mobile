@@ -1,0 +1,59 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(ls)"
+    ],
+    "deny": []
+  },
+  "version": 1,
+  "editor": {
+    "vimMode": false
+  },
+  "display": {
+    "showLineNumbers": false,
+    "showThinkingBlocks": false,
+    "showStatusIndicators": false,
+    "showStatusLineRunningTime": false,
+    "mode": "zen"
+  },
+  "notifications": true,
+  "hints": true,
+  "modelSlashCommands": true,
+  "steering": true,
+  "rewind": true,
+  "model": {
+    "modelId": "mock-model",
+    "displayModelId": "mock-model",
+    "displayName": "Mock Model",
+    "displayNameShort": "Mock",
+    "aliases": []
+  },
+  "hasChangedDefaultModel": false,
+  "maxMode": false,
+  "exploreSubagentModel": "default",
+  "privacyCache": {
+    "ghostMode": true,
+    "privacyMode": 0,
+    "updatedAt": 1791138094014
+  },
+  "authInfo": {
+    "email": "t@example.com",
+    "displayName": "",
+    "userId": 1,
+    "authId": "auth0|user_1"
+  },
+  "network": {
+    "useHttp1ForAgent": true
+  },
+  "approvalMode": "allowlist",
+  "autoAcceptWebSearch": false,
+  "sandbox": {
+    "mode": "disabled",
+    "networkAccess": "user_config_with_defaults"
+  },
+  "runEverythingSettingsPromptStreak": 0,
+  "attribution": {
+    "attributeCommitsToAgent": true,
+    "attributePRsToAgent": true
+  }
+}
