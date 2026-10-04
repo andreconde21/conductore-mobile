@@ -235,10 +235,20 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
   /// notifications' "looks stuck" reads them. Facts only, never summaries:
   /// one `digest` call per machine and interval, no model call.
   void keepFactsFresh(bool on) {
-    if (_disposed || (_freshTimer != null) == on) return;
+    _keepFresh = on;
+    _syncFreshTimer();
+  }
+
+  bool _keepFresh = false;
+
+  /// The [keepFactsFresh] timer runs only while it is wanted and there is a
+  /// machine to ask.
+  void _syncFreshTimer() {
+    final run = _keepFresh && !_disposed && _hosts.isNotEmpty;
+    if ((_freshTimer != null) == run) return;
     _freshTimer?.cancel();
     _freshTimer = null;
-    if (!on) return;
+    if (!run) return;
     _freshTimer = Timer.periodic(freshFactsInterval, (_) {
       final now = _clock();
       for (final host in _hosts.values.toList()) {
@@ -408,6 +418,7 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
   void _onSourceChanged() {
     if (_disposed) return;
     final added = _syncMachines();
+    _syncFreshTimer();
     if (isVisible) {
       for (final host in added) {
         unawaited(_fetch(host, summaries: true));
