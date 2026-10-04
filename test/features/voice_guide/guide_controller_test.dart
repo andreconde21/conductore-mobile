@@ -181,7 +181,6 @@ void main() {
         agents: [
           agent('s-gem', project: 'proj', pending: const [write]),
         ],
-        screen: GuideScreen.home,
       ),
       approvalActions: FakeApprovals(
         risks: {'req-gem': ApprovalRisk.low},
