@@ -8,6 +8,7 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/data/remote_session_lister.dart';
 import 'package:conduit/features/sessions/data/workspace_creator.dart';
@@ -21,12 +22,20 @@ import 'package:flutter/services.dart';
 
 /// What the user picked in the connect picker.
 class ConnectPickerResult {
-  const ConnectPickerResult({required this.target, required this.remember});
+  const ConnectPickerResult({
+    required this.target,
+    required this.remember,
+    this.agent,
+  });
 
   final ConnectTarget target;
 
   /// Whether to skip the picker next time and reuse [target].
   final bool remember;
+
+  /// The agent kind a new workspace or session was started with (`''`:
+  /// none), to offer first next time; null when nothing was created.
+  final String? agent;
 }
 
 enum ConnectPickerTab { tmux, herdr, recent }
@@ -44,6 +53,7 @@ Future<ConnectPickerResult?> showConnectPicker({
   ConnectPickerTab initialTab = ConnectPickerTab.tmux,
   List<String> recentDirectories = const [],
   bool mayMoveHerdrFocus = false,
+  AgentKindCatalog? agentKinds,
 }) {
   return showAdaptiveModal<ConnectPickerResult>(
     kind: AdaptiveModalKind.dialog,
@@ -66,6 +76,7 @@ Future<ConnectPickerResult?> showConnectPicker({
           initialTab: initialTab,
           recentDirectories: recentDirectories,
           mayMoveHerdrFocus: mayMoveHerdrFocus,
+          agentKinds: agentKinds,
           scrollController: scrollController,
           onPicked: (result) => Navigator.of(context).pop(result),
         ),
@@ -84,6 +95,7 @@ class ConnectPickerSheet extends StatefulWidget {
     this.initialTab = ConnectPickerTab.tmux,
     this.recentDirectories = const [],
     this.mayMoveHerdrFocus = false,
+    this.agentKinds,
     this.scrollController,
     super.key,
   });
@@ -106,6 +118,10 @@ class ConnectPickerSheet extends StatefulWidget {
   /// "Phone may move Herdr focus": whether a new Herdr workspace is
   /// focused as it is created (see [WorkspaceCreator]).
   final bool mayMoveHerdrFocus;
+
+  /// What the machine's companion reported about agent kinds (labels and
+  /// launch commands for the new workspace's agent choice); null without.
+  final AgentKindCatalog? agentKinds;
   final ScrollController? scrollController;
 
   @override
@@ -166,26 +182,39 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
     };
   }
 
-  void _pick(ConnectTarget target) {
-    widget.onPicked(ConnectPickerResult(target: target, remember: _remember));
+  void _pick(ConnectTarget target, {String? agent}) {
+    widget.onPicked(
+      ConnectPickerResult(target: target, remember: _remember, agent: agent),
+    );
   }
 
-  /// "New session" / "New workspace": name, folder and Claude, created
-  /// over the picker's channel, then opened.
+  /// "New session" / "New workspace": name, folder and an agent (one of
+  /// those installed on the machine), created over the picker's channel,
+  /// then opened.
   Future<void> _create(MultiplexerKind kind) async {
+    final creator = WorkspaceCreator(
+      widget.runner,
+      mayMoveHerdrFocus: widget.mayMoveHerdrFocus,
+    );
+    String? agent;
     final target = await showNewWorkspaceDialog(
       context,
       kind: kind,
-      create: WorkspaceCreator(
-        widget.runner,
-        mayMoveHerdrFocus: widget.mayMoveHerdrFocus,
-      ).create,
+      create: (request) {
+        agent = request.agent?.kind ?? '';
+        return creator.create(request);
+      },
       folders: widget.recentDirectories,
+      agents: creator.installedAgents(
+        widget.host.id,
+        agentLaunchCandidates(widget.agentKinds),
+      ),
+      initialAgent: widget.preferences.lastAgent,
     );
     if (target == null || !mounted) {
       return;
     }
-    _pick(target);
+    _pick(target, agent: agent);
   }
 
   @override

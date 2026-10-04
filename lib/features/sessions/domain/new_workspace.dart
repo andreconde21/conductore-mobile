@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 
 /// A Herdr workspace or tmux session to create on a machine (the connect
 /// picker's "New workspace" and "New session").
@@ -10,7 +11,7 @@ class NewWorkspaceRequest {
     required this.kind,
     required this.name,
     this.folder = '',
-    this.startClaude = false,
+    this.agent,
   });
 
   final MultiplexerKind kind;
@@ -22,8 +23,8 @@ class NewWorkspaceRequest {
   /// default.
   final String folder;
 
-  /// Whether to start Claude in it once it is created.
-  final bool startClaude;
+  /// The agent to start in it once it is created; null for a plain shell.
+  final KnownAgentKind? agent;
 }
 
 /// Why a workspace could not be created, in words for the user.
@@ -52,8 +53,27 @@ abstract final class NewWorkspaceCommands {
   /// Exit status of a create script whose folder does not exist.
   static const missingFolderExit = 3;
 
-  /// The agent "start Claude" runs.
-  static const claudeCommand = 'claude';
+  /// One agent's [KnownAgentKind.command] as one sh word (it is a plain
+  /// word already; quoting keeps it one if a companion said otherwise).
+  static String _agentWord(String command) => shellQuoteArgument(command);
+
+  /// Which of [commands] are on the machine's PATH (with the usual
+  /// user-local install folders, see [remoteToolExtraPathDirs]): one line
+  /// per command found, read by [parseInstalledAgents].
+  static String detectAgents(Iterable<String> commands) => posixShellCommand(
+    [
+      'PATH="${remoteToolExtraPathDirs.join(':')}:\$PATH"',
+      'for c in ${commands.map(_agentWord).join(' ')}; do '
+          'command -v "\$c" >/dev/null 2>&1 && printf \'%s\\n\' "\$c"; '
+          'done; exit 0',
+    ].join('\n'),
+  );
+
+  /// The commands [detectAgents] found.
+  static Set<String> parseInstalledAgents(String stdout) => {
+    for (final line in const LineSplitter().convert(stdout))
+      if (line.trim().isNotEmpty) line.trim(),
+  };
 
   /// [folder] as one sh word: quoted, with a leading `~` read as the home
   /// folder.
@@ -108,18 +128,19 @@ abstract final class NewWorkspaceCommands {
     ].join(' '),
   ]);
 
-  /// Types Claude's command into the new workspace's first pane.
-  static String herdrStartClaude(String paneId) => remoteToolCommand(
-    'herdr',
-    'pane run ${shellQuoteArgument(paneId)} $claudeCommand',
-  );
+  /// Types an agent's [command] into the new workspace's first pane.
+  static String herdrStartAgent(String paneId, String command) =>
+      remoteToolCommand(
+        'herdr',
+        'pane run ${shellQuoteArgument(paneId)} ${_agentWord(command)}',
+      );
 
-  /// `tmux new-session -d` named [name] in [folder], then Claude typed into
-  /// it when [startClaude].
+  /// `tmux new-session -d` named [name] in [folder], then [agentCommand]
+  /// typed into it when given.
   static String tmuxCreate({
     required String name,
     String folder = '',
-    bool startClaude = false,
+    String? agentCommand,
   }) {
     final session = shellQuoteArgument(name);
     return _script(folder, [
@@ -127,9 +148,9 @@ abstract final class NewWorkspaceCommands {
         'tmux new-session -d -s $session',
         if (folder.isNotEmpty) '-c "\$dir"',
       ].join(' '),
-      if (startClaude)
+      if (agentCommand != null)
         'tmux send-keys -t ${shellQuoteArgument('=$name:')} '
-            '$claudeCommand Enter',
+            '${_agentWord(agentCommand)} Enter',
     ]);
   }
 

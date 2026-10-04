@@ -2,6 +2,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/data/workspace_creator.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
@@ -14,6 +15,8 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/test_doubles.dart';
 
 void main() {
+  setUp(WorkspaceCreator.clearDetectedAgents);
+
   const tmuxOutput = AgentCommandResult(
     stdout: 'root\t1\t2\t1790229500\nbuild\t0\t1\t1790229600\n',
     stderr: '',
@@ -395,18 +398,25 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('new-workspace-create')));
     await tester.pumpAndSettle();
-    // Only a name: attach-or-create, as before, with no extra command.
+    // Only a name: attach-or-create, as before, with no extra command
+    // (the last one asked which agents the machine has).
     expect(picked.single.target, const ConnectTarget.tmux('agents'));
-    expect(runner.commands, hasLength(3));
+    expect(runner.commands, hasLength(4));
+    expect(runner.commands.last, contains('command -v'));
   });
 
-  testWidgets('new tmux session in a suggested folder with Claude', (
-    tester,
-  ) async {
+  testWidgets('new tmux session in a suggested folder with an installed '
+      'agent', (tester) async {
     final runner = ScriptedAgentCommandRunner([
       tmuxOutput,
       herdrOutput,
       herdrOutput,
+      // Which agents the machine has (CON-071).
+      const AgentCommandResult(
+        stdout: 'claude\ncodex\ncursor-agent\n',
+        stderr: '',
+        exitCode: 0,
+      ),
       const AgentCommandResult(stdout: '', stderr: '', exitCode: 0),
     ]);
     final picked = <ConnectPickerResult>[];
@@ -430,18 +440,65 @@ void main() {
         const ValueKey('new-workspace-folder-/home/a/Projects/TheCalendar'),
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('new-workspace-claude')));
+    // No favourite: None and only what this machine has, None first.
+    expect(find.text('Start Claude in it'), findsNothing);
+    expect(
+      tester
+          .widget<ChoiceChip>(
+            find.byKey(const ValueKey('new-workspace-agent-none')),
+          )
+          .selected,
+      isTrue,
+    );
+    expect(find.text('Claude Code'), findsOneWidget);
+    expect(find.text('Codex'), findsOneWidget);
+    expect(find.text('Cursor'), findsOneWidget);
+    expect(find.text('OpenCode'), findsNothing);
+    expect(find.text('Gemini CLI'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('new-workspace-agent-codex')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('new-workspace-create')));
     await tester.pumpAndSettle();
 
-    // Named after the folder, created there, Claude typed in; then opened.
+    // Named after the folder, created there, Codex typed in; then opened,
+    // remembering Codex for this machine.
     expect(picked.single.target, const ConnectTarget.tmux('TheCalendar'));
-    expect(runner.commands, hasLength(4));
+    expect(picked.single.agent, 'codex');
+    expect(runner.commands, hasLength(5));
+    expect(runner.commands[3], contains('command -v'));
     final create = runner.commands.last;
     expect(create, startsWith("sh -c 'eval"));
     expect(create, contains('new-session'));
     expect(create, contains('send-keys'));
+  });
+
+  testWidgets('the last agent chosen on the machine is preselected, and '
+      'kept out when no longer installed', (tester) async {
+    for (final (installed, selected) in [
+      ('opencode\ngemini\n', 'gemini'),
+      ('opencode\n', 'none'),
+    ]) {
+      WorkspaceCreator.clearDetectedAgents();
+      final (_, picked) = await pumpPicker(tester, [
+        tmuxOutput,
+        herdrOutput,
+        herdrOutput,
+        AgentCommandResult(stdout: installed, stderr: '', exitCode: 0),
+      ], preferences: const ConnectPreferences(lastAgent: 'gemini'));
+      await tester.tap(find.text('New session'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ChoiceChip>(
+              find.byKey(ValueKey('new-workspace-agent-$selected')),
+            )
+            .selected,
+        isTrue,
+      );
+      expect(picked, isEmpty);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+    }
   });
 
   testWidgets('new Herdr workspace: created, then picked by id; a failure '
@@ -458,6 +515,8 @@ void main() {
       tmuxOutput,
       herdrOutput,
       herdrOutput,
+      // No agents on this machine.
+      const AgentCommandResult(stdout: '', stderr: '', exitCode: 0),
       const AgentCommandResult(
         stdout: '',
         stderr: 'No such folder: /nope',
@@ -492,8 +551,9 @@ void main() {
       picked.single.target,
       const ConnectTarget.herdr(workspaceId: 'w9', label: 'api'),
     );
-    // No Claude asked for: no pane command after the create.
-    expect(runner.commands, hasLength(5));
+    // No agent asked for: no pane command after the create.
+    expect(find.text('No coding agents found on this machine.'), findsNothing);
+    expect(runner.commands, hasLength(6));
     // "Phone may move Herdr focus" is off: created without moving it.
     expect(runner.commands.last, contains('--no-focus'));
   });

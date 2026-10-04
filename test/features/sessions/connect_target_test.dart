@@ -222,5 +222,19 @@ void main() {
       expect(restored.recents, preferences.recents);
       expect(ConnectPreferences.fromJson(null).recents, isEmpty);
     });
+
+    test('the last agent started is kept per machine (CON-071)', () {
+      final preferences = const ConnectPreferences(
+        lastAgent: 'codex',
+      ).withChoice(const ConnectTarget.tmux('a'), remember: false);
+      expect(preferences.lastAgent, 'codex');
+      expect(
+        ConnectPreferences.fromJson(preferences.toJson()).lastAgent,
+        'codex',
+      );
+      expect(preferences.copyWith(lastAgent: '').lastAgent, '');
+      expect(const ConnectPreferences().toJson(), isNot(contains('lastAgent')));
+      expect(ConnectPreferences.fromJson(const {}).lastAgent, isNull);
+    });
   });
 }

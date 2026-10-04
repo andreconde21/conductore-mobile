@@ -224,6 +224,7 @@ void main() {
     runnerFactory: hostChannels.runner,
     preferences: const SecureConnectPreferencesRepository(secureStorage),
     recentDirectories: recentDirectories,
+    agentKinds: agentAttention.agentKinds,
     // The app coming back re-focuses the Herdr workspace in use (or, when
     // this device may not move Herdr's focus, checks where it is).
     watchLifecycle: true,

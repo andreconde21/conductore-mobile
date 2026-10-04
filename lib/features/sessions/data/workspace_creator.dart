@@ -1,13 +1,21 @@
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/new_workspace.dart';
+import 'package:flutter/foundation.dart';
 
 /// Creates Herdr workspaces and tmux sessions on a host over an
 /// [AgentCommandRunner] (a dedicated SSH exec channel, never the PTY).
 class WorkspaceCreator {
-  const WorkspaceCreator(this._runner, {this.mayMoveHerdrFocus = false});
+  WorkspaceCreator(
+    this._runner, {
+    this.mayMoveHerdrFocus = false,
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
+
+  final DateTime Function() _clock;
 
   static const _timeout = Duration(seconds: 15);
 
@@ -17,6 +25,47 @@ class WorkspaceCreator {
   /// then. Otherwise it opens by id like any workspace, and the session
   /// offers "Take focus once" while Herdr shows another one.
   final bool mayMoveHerdrFocus;
+
+  /// Which of [candidates] are installed on the machine (their command on
+  /// PATH), in [candidates]' order. Remembered per [hostId] for
+  /// [detectionTtl], so reopening the dialog asks nothing. Throws when the
+  /// machine cannot be asked.
+  Future<List<KnownAgentKind>> installedAgents(
+    String hostId,
+    List<KnownAgentKind> candidates,
+  ) async {
+    final commands = [for (final agent in candidates) agent.command];
+    final key = '$hostId\u0000${commands.join(' ')}';
+    final cached = _detected[key];
+    final Set<String> found;
+    if (cached != null && _clock().difference(cached.at) < detectionTtl) {
+      found = cached.found;
+    } else {
+      final result = await _runner.run(
+        NewWorkspaceCommands.detectAgents(commands),
+        timeout: _timeout,
+      );
+      if (result.exitCode != null && result.exitCode != 0) {
+        throw NewWorkspaceFailure(
+          _failure(result, 'Could not check which agents are installed.'),
+        );
+      }
+      found = NewWorkspaceCommands.parseInstalledAgents(result.stdout);
+      _detected[key] = (at: _clock(), found: found);
+    }
+    return [
+      for (final agent in candidates)
+        if (found.contains(agent.command)) agent,
+    ];
+  }
+
+  /// How long a machine's installed agents are remembered.
+  static const detectionTtl = Duration(minutes: 10);
+
+  static final _detected = <String, ({DateTime at, Set<String> found})>{};
+
+  @visibleForTesting
+  static void clearDetectedAgents() => _detected.clear();
 
   /// Creates what [request] asks for and returns the target that opens
   /// it. Throws a [NewWorkspaceFailure] that says what went wrong.
@@ -60,11 +109,11 @@ class WorkspaceCreator {
             _failure(result, 'Herdr could not create the workspace.'),
       );
     }
-    if (request.startClaude && created.paneId.isNotEmpty) {
+    if (request.agent case final agent? when created.paneId.isNotEmpty) {
       // The workspace is there either way: a failure here leaves a shell.
       try {
         await _runner.run(
-          NewWorkspaceCommands.herdrStartClaude(created.paneId),
+          NewWorkspaceCommands.herdrStartAgent(created.paneId, agent.command),
           timeout: _timeout,
         );
       } catch (_) {}
@@ -84,16 +133,16 @@ class WorkspaceCreator {
     if (session.isEmpty) {
       throw const NewWorkspaceFailure('Give the session a name.');
     }
-    // Neither a folder nor Claude: attach to it, creating it if needed,
+    // Neither a folder nor an agent: attach to it, creating it if needed,
     // as the picker always did.
-    if (folder.isEmpty && !request.startClaude) {
+    if (folder.isEmpty && request.agent == null) {
       return ConnectTarget.tmux(session);
     }
     final result = await _runner.run(
       NewWorkspaceCommands.tmuxCreate(
         name: session,
         folder: folder,
-        startClaude: request.startClaude,
+        agentCommand: request.agent?.command,
       ),
       timeout: _timeout,
     );
