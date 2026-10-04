@@ -130,6 +130,13 @@ const USAGE = `usage: conductore-hostd <command>
   tasks <list|read|status|comment> -
                                   a markdown tasks folder (open format,
                                   docs/task-sources.md); JSON on stdin
+  worktree <create|list|remove> - a new branch in a fresh git worktree
+                                  (worktree-location); JSON on stdin
+  task-start -                    start tasks as agents: worktree, branch,
+                                  Herdr tab / tmux window, agent with the
+                                  prompt; queued past the cap
+  task-runs [list | cancel <id> | forget <id> | cap <n>]
+                                  started tasks, linked to their agents
   talkbawt <command>              Talkbawt threads and handoffs: create,
                                   read, post, watch, revoke, mine, deliver
                                   to an agent, the bundled server (serve);
@@ -229,6 +236,15 @@ async function status (args) {
     if (err.code === 'ENOENT') return out({ version: paths.PROTOCOL_VERSION, seq: 0, agents: [], source: 'none' })
     return fail(`cannot read snapshot: ${err.message}`)
   }
+}
+
+// The agents now: the daemon's, else the last snapshot; null when neither.
+async function currentAgents () {
+  try {
+    const [res] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+    if (res && !res.error) return res.agents || []
+  } catch {}
+  try { return readSnapshotFile().agents || [] } catch { return null }
 }
 
 async function events (args) {
@@ -1176,6 +1192,9 @@ async function main (argv) {
     case 'cswap-switch': return cswapSwitchCmd(args)
     case 'talkbawt': return talkbawtCmd(args)
     case 'tasks': return require('./tasks-folder').cli(args, { readStdin })
+    case 'worktree': return require('./worktree').cli(args, { readStdin })
+    case 'task-start': return require('./task-runs').startCli(args, { readStdin })
+    case 'task-runs': return require('./task-runs').runsCli(args, { agents: currentAgents })
     case 'turns': case 'diff': case 'undo': case 'redo': return reviewCmd(cmd, args)
     case 'agents': return agentsCmd()
     case 'agent-send': return agentSendCmd(args)

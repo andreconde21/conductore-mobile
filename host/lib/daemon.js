@@ -582,6 +582,8 @@ class Daemon {
     for (const p of [...this.pollers]) this.servePoller(p)
     this.live.companionChanged()
     this.sidebar.update(this.state.agents)
+    // Started tasks (CON-037): finish runs, start queued ones under the cap.
+    require('./task-runs').onAgents(this.state.agents)
     if (pruneRelevant) this.schedulePrune()
     if (!this.snapshotTimer) {
       this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
