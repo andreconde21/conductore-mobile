@@ -225,7 +225,7 @@ async function advance (deps = {}) {
       patch.status = 'running'
     } catch (err) {
       log('task-runs', `run ${run.id} failed: ${err.message}`)
-      patch = { status: 'failed', error: err.message, errorCode: err.code || 'failed', finishedAt: Date.now() }
+      patch = { ...(err.patch || {}), status: 'failed', error: err.message, errorCode: err.code || 'failed', finishedAt: Date.now() }
     }
     await locked(data => {
       const r = data.runs.find(x => x.id === run.id)
@@ -258,23 +258,44 @@ async function launch (run, deps) {
   const command = launchLine(run.agent, wt.path, run.promptFile)
   const label = `${run.task.key || 'task'}${run.attempts > 1 ? ` #${run.attempt}` : ''}`.slice(0, 60)
   const out = { branch, worktree: wt.path, repo: wt.repo, head: wt.head, command }
-  if (run.place === 'herdr') out.herdr = await (deps.openHerdr || openHerdr)(run, wt.path, label, command)
-  else if (run.place === 'tmux') out.tmux = await (deps.openTmux || openTmux)(wt.path, label, command)
+  try {
+    if (run.place === 'herdr') out.herdr = await (deps.openHerdr || openHerdr)(run, wt.path, label, command)
+    else if (run.place === 'tmux') out.tmux = await (deps.openTmux || openTmux)(wt.path, label, command)
+  } catch (err) {
+    // The worktree stays (nothing here removes one): say where it is.
+    err.patch = { branch, worktree: wt.path, repo: wt.repo, command }
+    throw err
+  }
   return out
 }
 
+// The batch's Herdr workspace: the one asked for, else the one an earlier
+// run of the batch created (runs of a batch start one after the other).
+function batchWorkspace (run) {
+  if (run.workspaceId) return run.workspaceId
+  const other = load().runs.find(r => r.batchId === run.batchId && r.id !== run.id && r.herdr && r.herdr.workspaceId)
+  return other ? other.herdr.workspaceId : null
+}
+
+// A tab in the batch's workspace; the batch's first run creates the
+// workspace (unfocused) and uses its first pane.
 async function openHerdr (run, cwd, label, command) {
   const api = require('./herdr-api')
   const server = run.herdrServer ? api.serverById(run.herdrServer) : api.discover()[0]
   if (!server) throw new RunError('no-herdr', 'no Herdr server')
-  const params = { cwd, label, focus: false }
-  if (run.workspaceId) params.workspace_id = run.workspaceId
-  const res = await api.request(server.socket, 'tab.create', params)
+  const workspaceId = batchWorkspace(run)
+  const res = workspaceId
+    ? await api.request(server.socket, 'tab.create', { cwd, label, focus: false, workspace_id: workspaceId })
+    : await api.request(server.socket, 'workspace.create', { cwd, label: `Tasks ${new Date().toISOString().slice(5, 16).replace('T', ' ')}`, focus: false })
   const pane = res && res.root_pane && res.root_pane.pane_id
-  if (!pane) throw new RunError('herdr-failed', 'Herdr made no pane for the tab')
+  if (!pane) throw new RunError('herdr-failed', 'Herdr made no pane for the task')
+  if (!workspaceId && res.tab && res.tab.tab_id) {
+    try { await api.request(server.socket, 'tab.rename', { tab_id: res.tab.tab_id, label }) } catch {}
+  }
   await api.request(server.socket, 'pane.send_text', { pane_id: pane, text: command })
   await api.request(server.socket, 'pane.send_keys', { pane_id: pane, keys: ['enter'] })
-  return { server: server.id, socket: server.socket, workspaceId: res.tab && res.tab.workspace_id, tabId: res.tab && res.tab.tab_id, paneId: pane }
+  const ws = (res.workspace && res.workspace.workspace_id) || (res.tab && res.tab.workspace_id) || workspaceId
+  return { server: server.id, socket: server.socket, workspaceId: ws, tabId: res.tab && res.tab.tab_id, paneId: pane }
 }
 
 function tmux (args) {
@@ -286,11 +307,14 @@ function tmux (args) {
 // A new window in the default tmux server (a detached `conductore` session
 // when none runs), never selected: the user's current window stays.
 async function openTmux (cwd, label, command) {
-  const fmt = '#{session_name}\t#{window_id}\t#{pane_id}'
+  // tmux prints control characters as '_': spaces, the session name last.
+  const fmt = '#{pane_id} #{window_id} #{session_name}'
   let r = await tmux(['new-window', '-d', '-P', '-F', fmt, '-n', label, '-c', cwd])
   if (!r.ok) r = await tmux(['new-session', '-d', '-P', '-F', fmt, '-s', `conductore-tasks-${process.pid}`, '-n', label, '-c', cwd])
   if (!r.ok) throw new RunError('tmux-failed', `tmux: ${r.stderr}`)
-  const [session, windowId, paneId] = r.stdout.split('\t')
+  const [paneId, windowId, ...name] = r.stdout.split(' ')
+  const session = name.join(' ')
+  if (!/^%\d+$/.test(paneId || '')) throw new RunError('tmux-failed', `tmux gave no pane: ${r.stdout}`)
   const typed = await tmux(['send-keys', '-t', paneId, '-l', '--', command])
   if (!typed.ok) throw new RunError('tmux-failed', `tmux send-keys: ${typed.stderr}`)
   const enter = await tmux(['send-keys', '-t', paneId, 'Enter'])
