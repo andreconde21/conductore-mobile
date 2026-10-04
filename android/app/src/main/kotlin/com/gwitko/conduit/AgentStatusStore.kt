@@ -73,6 +73,7 @@ data class AgentStatusSnapshot(
     val version: Int = 3,
     val dashboard: WidgetDashboard = WidgetDashboard.legacy(attentionCount, agents),
     val theme: WidgetTheme? = null,
+    val pcTheme: LauncherPcTheme? = null,
 ) {
     fun limit(label: String): AgentStatusLimitRing? = limits.firstOrNull { it.label == label }
 
@@ -117,6 +118,7 @@ data class AgentStatusSnapshot(
                 dashboard = (if (version >= 3) parseDashboard(root.optJSONObject("dashboard")) else null)
                     ?: WidgetDashboard.legacy(attentionCount, agents),
                 theme = if (version >= 3) parseTheme(root.optJSONObject("theme")) else null,
+                pcTheme = LauncherPcTheme.parse(root.optJSONObject("pcTheme")),
             )
         } catch (_: Exception) {
             null
@@ -173,7 +175,7 @@ data class AgentStatusSnapshot(
          * [json] as it is stored once the engine went away: not monitoring,
          * no agents or dashboard (they no longer reflect a live session).
          * The version, the limit rings (per account, 0 once their window
-         * resets) and the theme stay. Null when [json] is not a payload.
+         * resets), the theme and the PC theme stay. Null when [json] is not a payload.
          */
         fun notMonitoring(json: String): String? = try {
             val root = JSONObject(json)
@@ -236,7 +238,9 @@ object AgentStatusStore {
      */
     @Synchronized
     fun save(context: Context, json: String) {
-        val lines = AgentStatusSnapshot.parse(json)?.tappableLines().orEmpty()
+        val previousPcTheme = load(context)?.pcTheme
+        val snapshot = AgentStatusSnapshot.parse(json)
+        val lines = snapshot?.tappableLines().orEmpty()
         val tokens = WidgetLineGuard.reissue(lineTokens(context), lines.map { it.key }, ::newToken)
         prefs(context).edit()
             .putString(KEY_SNAPSHOT, json)
@@ -244,7 +248,7 @@ object AgentStatusStore {
             .apply()
         // apply() updates the in-memory prefs at once, so the provider
         // (same process) already reads the new snapshot.
-        LauncherDetailsProvider.notifyChanged(context)
+        LauncherDetailsProvider.notifyChanged(context, pcThemeChanged = snapshot?.pcTheme != previousPcTheme)
     }
 
     /** Every line a token may open: the dashboard's, then each agent's. */

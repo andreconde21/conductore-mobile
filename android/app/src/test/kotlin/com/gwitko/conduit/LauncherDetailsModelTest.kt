@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class LauncherDetailsModelTest {
     private val pkg = "com.outsmartis.conductore"
@@ -116,5 +117,64 @@ class LauncherDetailsModelTest {
         assertEquals("host-1/s1", line.key)
         assertEquals(listOf("w1", "t1", "p1"), listOf(line.workspace, line.tab, line.pane))
         assertEquals(1789999000000L, api.changedAtMillis)
+    }
+
+    // The catalog the app ships (Gradle runs unit tests in android/app).
+    private val catalog = File("src/main/res/raw/launcher_themes.json").readText()
+
+    @Test
+    fun themesListTheShippedCatalogInItsOrderWithEveryRole() {
+        val rows = LauncherDetailsModel.themes(catalog)
+        assertEquals(22, rows.size)
+        assertEquals("catppuccin", rows.first()[0])
+        // Dark ones first, then light ones, as the theme picker shows them.
+        val modes = rows.map { it[2] }
+        assertEquals(modes.sortedBy { if (it == "dark") 0 else 1 }, modes)
+        assertTrue(modes.contains("light"))
+        val catppuccin = rows.first()
+        assertArrayEquals(
+            arrayOf<Any?>(
+                "catppuccin", "Catppuccin", "dark",
+                "#89B4FA", "#1E1E2E", "#CDD6F4", "#585B70", "#45475A", "#313244",
+                "#F38BA8", "#A6E3A1", "#F9E2AF", "#89B4FA", "#F5C2E7", "#94E2D5", "#F6B6AB",
+            ),
+            catppuccin,
+        )
+        assertEquals(LauncherDetailsModel.THEMES_COLUMNS.size, catppuccin.size)
+        assertTrue(rows.all { row -> row.drop(3).all { (it as String).matches(Regex("#[0-9A-F]{6}")) } })
+    }
+
+    @Test
+    fun pcThemeIsTheSyncedMachineThemeOrNulls() {
+        assertArrayEquals(
+            (listOf<Any?>(null, null, 0L, null, null) + LauncherDetailsModel.THEME_ROLES.map { null }).toTypedArray(),
+            LauncherDetailsModel.pcTheme(AgentStatusSnapshot.parse(payload)),
+        )
+        val withPc = payload.replaceFirst(
+            "{",
+            """{"pcTheme":{"name":"tokyo-night","label":"Tokyo Night","mode":"dark","machine":"omarchy-pc",
+               "updatedAt":1789990000000,"colors":{"accent":"#7AA2F7","background":"#1A1B26"}},""",
+        )
+        val row = LauncherDetailsModel.pcTheme(AgentStatusSnapshot.parse(withPc))
+        assertEquals(LauncherDetailsModel.PC_THEME_COLUMNS.size, row.size)
+        assertEquals(listOf("tokyo-night", "omarchy-pc", 1789990000000L, "Tokyo Night", "dark"), row.take(5))
+        assertEquals("#7AA2F7", row[5])
+        assertEquals("#1A1B26", row[6])
+        // A role the payload lacks is null, not an empty string.
+        assertNull(row[7])
+        // A snapshot without a machine name keeps the theme.
+        val noMachine = AgentStatusSnapshot.parse(withPc.replace(""""machine":"omarchy-pc",""", ""))
+        assertNull(LauncherDetailsModel.pcTheme(noMachine)[1])
+    }
+
+    @Test
+    fun notMonitoringKeepsThePcTheme() {
+        val withPc = payload.replaceFirst(
+            "{",
+            """{"pcTheme":{"name":"nord","mode":"dark","updatedAt":1,"colors":{}},""",
+        )
+        val stored = AgentStatusSnapshot.parse(AgentStatusSnapshot.notMonitoring(withPc)!!)!!
+        assertEquals("nord", stored.pcTheme!!.name)
+        assertTrue(stored.agents.isEmpty())
     }
 }

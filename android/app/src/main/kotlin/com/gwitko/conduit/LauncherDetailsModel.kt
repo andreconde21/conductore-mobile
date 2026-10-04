@@ -1,5 +1,37 @@
 package com.gwitko.conduit
 
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * The followed Omarchy machine's theme as Dart stored it in the snapshot
+ * (`pcTheme`): never the theme picked in the app. [colors] are
+ * [LauncherDetailsModel.THEME_ROLES] as `#RRGGBB`.
+ */
+data class LauncherPcTheme(
+    val name: String,
+    val label: String,
+    val mode: String,
+    val colors: Map<String, String>,
+    val machine: String?,
+    val updatedAtMillis: Long,
+) {
+    companion object {
+        fun parse(json: JSONObject?): LauncherPcTheme? {
+            if (json == null || !json.has("name") || !json.has("updatedAt")) return null
+            val colors = json.optJSONObject("colors") ?: return null
+            return LauncherPcTheme(
+                name = json.optString("name"),
+                label = json.optString("label"),
+                mode = if (json.optString("mode") == "light") "light" else "dark",
+                colors = colors.keys().asSequence().associateWith { colors.optString(it) },
+                machine = if (json.isNull("machine")) null else json.optString("machine"),
+                updatedAtMillis = json.optLong("updatedAt", 0L),
+            )
+        }
+    }
+}
+
 /**
  * The rows [LauncherDetailsProvider] serves, from the stored
  * [AgentStatusSnapshot]. Plain Kotlin so the mapping and the order are
@@ -8,6 +40,14 @@ package com.gwitko.conduit
 object LauncherDetailsModel {
     val ITEM_COLUMNS = arrayOf("id", "title", "subtitle", "state", "progress", "updated_at", "deep_link")
     val SUMMARY_COLUMNS = arrayOf("monitoring", "attention_count", "updated_at", "limit_5h_pct", "limit_7d_pct")
+
+    /** The Omarchy roles of a theme row, each `#RRGGBB`. */
+    val THEME_ROLES = listOf(
+        "accent", "background", "foreground", "muted", "selection", "lighter_background",
+        "red", "green", "yellow", "blue", "magenta", "cyan", "orange",
+    )
+    val THEMES_COLUMNS = (listOf("name", "label", "mode") + THEME_ROLES).toTypedArray()
+    val PC_THEME_COLUMNS = (listOf("name", "machine", "updated_at", "label", "mode") + THEME_ROLES).toTypedArray()
 
     /** No source reports an agent's progress yet. */
     const val PROGRESS_UNKNOWN = -1
@@ -55,6 +95,32 @@ object LauncherDetailsModel {
             limit("5h"),
             limit("7d"),
         )
+    }
+
+    /**
+     * One row per theme of [catalogJson] (res/raw/launcher_themes.json,
+     * which Dart generates from the theme picker), in its order.
+     */
+    fun themes(catalogJson: String): List<Array<Any?>> {
+        val catalog = JSONArray(catalogJson)
+        return (0 until catalog.length()).map { index ->
+            val theme = catalog.getJSONObject(index)
+            val colors = theme.optJSONObject("colors") ?: JSONObject()
+            (
+                listOf<Any?>(theme.optString("name"), theme.optString("label"), theme.optString("mode")) +
+                    THEME_ROLES.map { role -> if (colors.has(role)) colors.optString(role) else null }
+            ).toTypedArray()
+        }
+    }
+
+    /** The single pc_theme row: all null but updated_at (0) when unknown. */
+    fun pcTheme(snapshot: AgentStatusSnapshot?): Array<Any?> {
+        val theme = snapshot?.pcTheme
+            ?: return (listOf<Any?>(null, null, 0L, null, null) + THEME_ROLES.map { null }).toTypedArray()
+        return (
+            listOf<Any?>(theme.name, theme.machine, theme.updatedAtMillis, theme.label, theme.mode) +
+                THEME_ROLES.map { theme.colors[it] }
+        ).toTypedArray()
     }
 
     /**

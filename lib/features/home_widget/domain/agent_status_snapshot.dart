@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
+import 'package:conduit/features/home_widget/domain/launcher_themes.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 
 /// One agent line as the home-screen widget and quick-settings tile show
@@ -173,12 +174,14 @@ class AgentStatusSnapshot {
     this.limits = const [],
     this.dashboard,
     this.theme,
+    this.pcTheme,
   });
 
   /// Payload format version; bump when the shape changes. 2: [limits].
   /// 3: [dashboard] and [theme]. The native side reads every version.
   /// The agents' ids and `changedAt` (CON-075) are optional additions to 3:
-  /// both readers default them, so they did not need a bump.
+  /// both readers default them, so they did not need a bump; the same
+  /// goes for [pcTheme].
   static const version = 3;
 
   /// Most agents listed. The widget draws [dashboard], not these; the
@@ -209,6 +212,10 @@ class AgentStatusSnapshot {
   /// the widget's own Everforest.
   final AgentStatusTheme? theme;
 
+  /// The followed Omarchy machine's theme, for the launcher; null when the
+  /// app follows none or has not read it yet.
+  final AgentStatusPcTheme? pcTheme;
+
   /// Builds the snapshot for every monitored host, sorting agents so the
   /// ones a human should look at come first.
   factory AgentStatusSnapshot.build({
@@ -221,6 +228,7 @@ class AgentStatusSnapshot {
     List<AgentStatusLimit> limits = const [],
     AgentStatusDashboard? dashboard,
     AgentStatusTheme? theme,
+    AgentStatusPcTheme? pcTheme,
   }) {
     final entries = <AgentStatusEntry>[
       for (final host in hosts)
@@ -254,6 +262,7 @@ class AgentStatusSnapshot {
       limits: limits,
       dashboard: monitoring ? dashboard : null,
       theme: theme,
+      pcTheme: pcTheme,
     );
   }
 
@@ -284,6 +293,7 @@ class AgentStatusSnapshot {
     'limits': [for (final limit in limits) limit.toJson()],
     if (dashboard case final dashboard?) 'dashboard': dashboard.toJson(),
     if (theme case final theme?) 'theme': theme.toJson(),
+    if (pcTheme case final pcTheme?) 'pcTheme': pcTheme.toJson(),
   };
 
   String encode() => jsonEncode(toJson());
@@ -312,6 +322,7 @@ class AgentStatusSnapshot {
       ],
       dashboard: v3 ? AgentStatusDashboard.fromJson(json['dashboard']) : null,
       theme: v3 ? AgentStatusTheme.fromJson(json['theme']) : null,
+      pcTheme: AgentStatusPcTheme.fromJson(json['pcTheme']),
     );
   }
 
@@ -327,7 +338,8 @@ class AgentStatusSnapshot {
       _listEquals(other.agents, agents) &&
       _listEquals(other.limits, limits) &&
       other.dashboard == dashboard &&
-      other.theme == theme;
+      other.theme == theme &&
+      other.pcTheme == pcTheme;
 
   @override
   int get hashCode => Object.hash(
@@ -338,6 +350,7 @@ class AgentStatusSnapshot {
     Object.hashAll(limits),
     dashboard,
     theme,
+    pcTheme,
   );
 
   static bool _listEquals<T>(List<T> a, List<T> b) {

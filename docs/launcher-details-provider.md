@@ -74,6 +74,43 @@ Exactly one row.
 | `limit_5h_pct` | int | Claude's 5-hour window used, 0-100 (0 once it reset); -1 unknown. |
 | `limit_7d_pct` | int | Claude's weekly window, the same way. |
 
+## `content://<authority>/themes`
+
+One row per theme Conductore offers: the Omarchy themes it bundles (22), in
+its theme picker's order (dark themes, then light ones, each alphabetical as
+Omarchy orders them). It changes only when Conductore is updated, so it
+sends no change notifications.
+
+| column | type | meaning |
+| --- | --- | --- |
+| `name` | string | The Omarchy theme directory name, e.g. `tokyo-night`. |
+| `label` | string | The display name, e.g. `Tokyo Night`. |
+| `mode` | string | `dark` or `light`. |
+| `accent`, `background`, `foreground`, `muted`, `selection`, `lighter_background`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `orange` | string | `#RRGGBB` (uppercase), the theme's resolved Omarchy role. |
+
+The catalog ships as `res/raw/launcher_themes.json`, generated from the
+app's theme list: `test/features/home_widget/launcher_themes_test.dart` fails
+when it is out of date, and `flutter test --update-goldens` on that file
+rewrites it.
+
+## `content://<authority>/pc_theme`
+
+Exactly one row: the theme active on the user's Omarchy PC, as Conductore's
+"follow a machine's theme" sync last read it. It is never the theme picked
+in the app.
+
+| column | type | meaning |
+| --- | --- | --- |
+| `name` | string or null | The PC's theme directory name (`tokyo-night`). Null while the app follows no machine or has not read it yet. A theme the app does not bundle keeps its own name, so it may be missing from `/themes`. |
+| `machine` | string or null | The saved machine's name in Conductore; null when unknown. |
+| `updated_at` | long | Epoch ms the app read that theme; 0 when `name` is null. It moves only when the theme changes or the snapshot is rewritten for another reason, not on every unchanged re-read. |
+| `label` | string or null | Display name. |
+| `mode` | string or null | `dark` or `light`. |
+| the 13 roles | string or null | `#RRGGBB`, as in `/themes`; for a theme the app does not bundle, the colours read from the PC. |
+
+Conductore calls `notifyChange` on `/pc_theme` when the stored PC theme
+changes (another theme, another machine, sync turned off).
+
 A projection is honoured (unknown column: `IllegalArgumentException`);
 selection and sort order are ignored. Any other path throws
 `IllegalArgumentException`.
@@ -109,6 +146,7 @@ stopped monitoring) opens the agents dashboard instead.
   when something changed). Each write calls
   `notifyChange(content://<authority>/items)` and `/summary`, and the
   returned cursors carry their URI as notification URI, so a
-  `ContentObserver` or a re-query on change keeps the sheet live.
+  `ContentObserver` or a re-query on change keeps the sheet live. The PC
+  theme travels in the same snapshot.
 - When Conductore's engine goes away, the snapshot is marked not monitoring:
-  `items` is empty and `monitoring` is 0, the limits stay.
+  `items` is empty and `monitoring` is 0, the limits and the PC theme stay.
