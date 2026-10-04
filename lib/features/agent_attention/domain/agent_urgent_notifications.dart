@@ -50,6 +50,11 @@ abstract final class UrgentNotificationPolicy {
       return AgentWaitKind.question;
     }
     final event = agent.lastEvent;
+    // A permission prompt that timed out on the phone waits in the
+    // terminal.
+    if (event == 'PermissionRequest') {
+      return AgentWaitKind.question;
+    }
     if (questionTools.contains(agent.lastToolName) &&
         event != 'Stop' &&
         event != 'SessionStart') {
@@ -59,13 +64,13 @@ abstract final class UrgentNotificationPolicy {
         .split('\n')
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty);
-    if (lines.isNotEmpty && _asks.hasMatch(lines.last)) {
+    if (lines.isNotEmpty && _asksLine.hasMatch(lines.last)) {
       return AgentWaitKind.question;
     }
     return AgentWaitKind.turnEnded;
   }
 
-  static final _asks = RegExp(r'''\?[\s*_)"'`]*$''');
+  static final _asksLine = RegExp(r'''\?[\s*_)"'`]*$''');
 
   /// The urgent need of [agent], or null when nothing about it is urgent
   /// (its alert, if any, goes).
@@ -103,6 +108,14 @@ abstract final class UrgentNotificationPolicy {
               held(AgentNeed.question) ? AgentNeed.question : null,
             AgentWaitKind.error =>
               held(AgentNeed.error) ? AgentNeed.error : null,
+            // Still waiting after a request or question went away without
+            // the turn ending (it timed out here): the terminal asks now.
+            AgentWaitKind.turnEnded
+                when (previous?.need == AgentNeed.approval ||
+                        previous?.need == AgentNeed.question) &&
+                    agent.lastEvent != 'Stop' &&
+                    agent.lastEvent != 'StopFailure' =>
+              AgentNeed.question,
             AgentWaitKind.turnEnded => _finished(
               previous: previous,
               entered: entered,
@@ -156,7 +169,8 @@ abstract final class UrgentNotificationPolicy {
   }
 
   /// Whether posting [need] (listing [requestIds]) alerts: a new urgent
-  /// state does, any switch between urgent states does, the same state
+  /// state does, a switch to another urgent state does (an approval that
+  /// became a question in the terminal is the same ask), the same state
   /// never does, unless the agent [entered] it again (answered, then asked
   /// again between two polls) or a new request arrives after every earlier
   /// one was answered (with [quietUpdates] off: any new request). A stuck
@@ -174,7 +188,8 @@ abstract final class UrgentNotificationPolicy {
       return !initial || need == AgentNeed.approval;
     }
     if (previous.need != need) {
-      return true;
+      // A request that timed out into the terminal is the same ask.
+      return !(_asks(previous.need) && _asks(need));
     }
     switch (need) {
       case AgentNeed.approval:
@@ -192,6 +207,9 @@ abstract final class UrgentNotificationPolicy {
         return entered;
     }
   }
+
+  static bool _asks(AgentNeed need) =>
+      need == AgentNeed.approval || need == AgentNeed.question;
 
   /// [agent]'s urgent alert for [need], with its actions:
   /// - an approval: Allow and Deny, plus Open (Review all for several);
@@ -386,6 +404,7 @@ abstract final class AgentStatusSummary {
     var needsYou = 0;
     var working = 0;
     var stuck = 0;
+    var done = 0;
     var idle = 0;
     for (final entry in entries) {
       final agent = entry.agent;
@@ -398,7 +417,11 @@ abstract final class AgentStatusSummary {
         case 2:
           working += 1;
         default:
-          idle += 1;
+          if (label == _done) {
+            done += 1;
+          } else {
+            idle += 1;
+          }
       }
       final name = _name(agent);
       final where = hosts.length > 1 ? ' @ ${entry.hostName}' : '';
@@ -421,6 +444,7 @@ abstract final class AgentStatusSummary {
       if (needsYou > 0) '$needsYou ${needsYou == 1 ? 'needs' : 'need'} you',
       if (stuck > 0) '$stuck stuck',
       if (working > 0) '$working working',
+      if (done > 0) '$done done',
       if (idle > 0) '$idle idle',
     ];
     final lines = ordered.length > maxLines
@@ -445,8 +469,10 @@ abstract final class AgentStatusSummary {
     return kind == null ? label : '$label ($kind)';
   }
 
-  /// Rank (0 needs you, 1 stuck, 2 working, 3 idle), state label and
-  /// progress text.
+  static const _done = 'Done';
+
+  /// Rank (0 needs you, 1 stuck, 2 working, 3 done or idle), state label
+  /// and progress text.
   static (int, String, String?) _describe(AgentStatusEntry entry) {
     final agent = entry.agent;
     final message = _firstLine(agent.lastMessage);
@@ -471,7 +497,10 @@ abstract final class AgentStatusSummary {
               error == null ? message : error.replaceAll('_', ' '),
             );
           case AgentWaitKind.turnEnded:
-            break;
+            if (stuck != null && stuck.isNotEmpty) {
+              return (1, 'Stuck', stuck);
+            }
+            return (3, _done, entry.detail ?? message);
         }
       case AgentAttentionState.working:
         if (stuck != null && stuck.isNotEmpty) {
@@ -491,7 +520,11 @@ abstract final class AgentStatusSummary {
     if (stuck != null && stuck.isNotEmpty) {
       return (1, 'Stuck', stuck);
     }
-    return (3, 'Idle', entry.detail ?? message);
+    return (
+      3,
+      agent.state == AgentAttentionState.finished ? _done : 'Idle',
+      entry.detail ?? message,
+    );
   }
 
   static String? _firstLine(String? message) {

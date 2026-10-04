@@ -596,9 +596,9 @@ class AgentAttentionController extends ChangeNotifier {
     _notificationPreferences = preferences;
     notifyListeners();
     if (modeChanged) {
-      // Another mode's notifications follow other rules: start over.
+      // Another mode posts other notifications; what was notified stays
+      // known, so the same need does not alert again.
       _sentNotifications.clear();
-      _notices.clear();
     }
     await resyncNotifications();
     await _notificationStore.save(preferences);

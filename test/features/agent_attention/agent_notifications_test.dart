@@ -40,6 +40,12 @@ AgentInfo _agent({
   lastMessage: lastMessage,
 );
 
+/// The "Everything" mode: one notification per agent for every need, as
+/// before CON-074.
+const _everything = AgentNotificationPreferences(
+  mode: AgentNotificationMode.everything,
+);
+
 void main() {
   group('policy: what the agent needs', () {
     AgentNeed? need(
@@ -50,8 +56,7 @@ void main() {
       bool ended = false,
       bool initial = false,
       AgentNotifyLevel level = AgentNotifyLevel.all,
-      AgentNotificationPreferences preferences =
-          const AgentNotificationPreferences(),
+      AgentNotificationPreferences preferences = _everything,
     }) => AgentNotificationPolicy.needFor(
       agent: agent,
       previous: previous,
@@ -125,6 +130,7 @@ void main() {
 
     test('settings and the machine level filter events', () {
       const off = AgentNotificationPreferences(
+        mode: AgentNotificationMode.everything,
         approvals: false,
         questions: false,
         finished: false,
@@ -444,7 +450,8 @@ void main() {
         provider: const HerdrAttentionProvider(),
         companionProvider: const ConductoreHostAttentionProvider(),
         notifier: notifier,
-        notificationPreferences: preferences,
+        notificationPreferences:
+            preferences ?? MemoryAgentNotificationPreferencesStore(_everything),
         pollInterval: const Duration(days: 1),
       );
       controller.setAppForeground(false);
@@ -549,7 +556,10 @@ void main() {
       final (controller, notifier) = await run(
         [version, status('working'), status('idle', seq: 2)],
         preferences: MemoryAgentNotificationPreferencesStore(
-          const AgentNotificationPreferences(finished: false),
+          const AgentNotificationPreferences(
+            mode: AgentNotificationMode.everything,
+            finished: false,
+          ),
         ),
       );
       await controller.pollNow('h');
@@ -568,7 +578,10 @@ void main() {
       expect(notifier.agents.values.single.action, isNotNull);
 
       await controller.setNotificationPreferences(
-        const AgentNotificationPreferences(summaryOnly: true),
+        const AgentNotificationPreferences(
+          mode: AgentNotificationMode.everything,
+          summaryOnly: true,
+        ),
       );
       final updated = notifier.agents.values.single;
       expect(updated.action, isNull);
@@ -577,7 +590,10 @@ void main() {
       expect(store.value.summaryOnly, isTrue);
 
       await controller.setNotificationPreferences(
-        const AgentNotificationPreferences(approvals: false),
+        const AgentNotificationPreferences(
+          mode: AgentNotificationMode.everything,
+          approvals: false,
+        ),
       );
       expect(notifier.agents, isEmpty);
     });
@@ -586,12 +602,18 @@ void main() {
       final (controller, _) = await run(
         [version, status('working')],
         preferences: MemoryAgentNotificationPreferencesStore(
-          const AgentNotificationPreferences(errors: false),
+          const AgentNotificationPreferences(
+            mode: AgentNotificationMode.everything,
+            errors: false,
+          ),
         ),
       );
       expect(
         controller.notificationPreferences,
-        const AgentNotificationPreferences(errors: false),
+        const AgentNotificationPreferences(
+          mode: AgentNotificationMode.everything,
+          errors: false,
+        ),
       );
     });
 
