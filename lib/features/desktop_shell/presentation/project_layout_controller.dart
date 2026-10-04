@@ -494,17 +494,13 @@ class ProjectLayoutController extends ChangeNotifier {
     SidebarNode row,
     SheprdMark mark,
   ) async {
-    final attention = this.attention;
     final key = entry.sheprdKeys[row.key];
-    if (attention == null || key == null || !sheprdSync) {
-      return 'Not synced with sheprd.';
-    }
+    if (key == null || !sheprdSync) return 'Not synced with sheprd.';
     final senders = [
       for (final MapEntry(key: id, value: (host, _)) in _views.entries)
-        if (attention.companionSupports(host.id, sheprdViewCapability))
-          (id == baseHostId(row.machineId) ? 0 : 1, host),
+        if (_canSend(host)) (id == baseHostId(row.machineId) ? 0 : 1, host),
     ]..sort((a, b) => a.$1.compareTo(b.$1));
-    if (senders.isEmpty) return 'No machine has sheprd\'s view.';
+    if (senders.isEmpty) return "No machine has sheprd's view.";
     final host = senders.first.$2;
     final view = entry.sheprdOf(row);
     final seq = view?.stateSeq ?? _liveSequence(row);
@@ -519,13 +515,12 @@ class ProjectLayoutController extends ChangeNotifier {
       shellQuoteArgument(_sheprdKey(key)),
       if (mark == SheprdMark.dismiss) ...['--state-seq', '$seq'],
     ].join(' ');
-    final (runner, :owned) = attention.runnerFor(host);
     try {
-      final result = await runner.run(
+      final stdout = await _run(
+        host,
         ConductoreHostAttentionProvider.remoteCommand(args),
-        timeout: const Duration(seconds: 15),
       );
-      final reply = jsonDecode(result.stdout.trim().split('\n').last);
+      final reply = jsonDecode(stdout.trim().split('\n').last);
       if (reply is Map && reply['ok'] == true) {
         _showMark(key, view, mark);
         return null;
@@ -535,6 +530,26 @@ class ProjectLayoutController extends ChangeNotifier {
           : 'sheprd-view-update failed.';
     } catch (_) {
       return 'Could not reach ${host.name}.';
+    }
+  }
+
+  /// Runs marks in tests instead of a machine's companion.
+  @visibleForTesting
+  Future<String> Function(SavedHost host, String command)? sheprdRunner;
+
+  bool _canSend(SavedHost host) =>
+      sheprdRunner != null ||
+      (attention?.companionSupports(host.id, sheprdViewCapability) ?? false);
+
+  Future<String> _run(SavedHost host, String command) async {
+    if (sheprdRunner case final run?) return run(host, command);
+    final (runner, :owned) = attention!.runnerFor(host);
+    try {
+      final result = await runner.run(
+        command,
+        timeout: const Duration(seconds: 15),
+      );
+      return result.stdout;
     } finally {
       if (owned) unawaited(runner.close());
     }
