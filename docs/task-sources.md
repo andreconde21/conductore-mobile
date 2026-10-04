@@ -34,14 +34,26 @@ abstract class TaskSource {
 
 ## Adapters
 
-| Kind | API | Auth | Statuses |
-|---|---|---|---|
-| Markdown folder | the companion's `tasks` command | SSH to the machine | the files' `status:` values |
-| GitHub Issues | REST v3 (`api.github.com` or GHES `/api/v3`) | PAT, Bearer | open, closed |
-| GitLab Issues | REST v4 (gitlab.com or self-managed) | PAT, `PRIVATE-TOKEN` | opened, closed |
-| Jira Cloud | REST v3, `POST /search/jql` | email + API token, Basic | the issue's transitions |
-| Linear | GraphQL | personal API key | the team's workflow states |
-| Azure Boards | REST 7.1, WIQL | PAT, Basic | the work item type's states |
+| Kind | API | Auth | Statuses | Paging |
+|---|---|---|---|---|
+| Markdown folder | the companion's `tasks` command | SSH to the machine | the files' `status:` values | up to 2000 files |
+| GitHub Issues | REST v3 (`api.github.com` or GHES `/api/v3`) | PAT, Bearer | open, closed | `page` |
+| GitHub Projects (v2) | GraphQL | PAT, Bearer | the project's single-select field ("Status") | cursor |
+| GitLab Issues | REST v4 (gitlab.com or self-managed) | PAT, `PRIVATE-TOKEN` | opened, closed | `page` |
+| Jira Cloud | REST v3, `POST /search/jql` | email + API token, Basic | the issue's transitions | `nextPageToken` |
+| Jira Server / Data Center | REST v2, `GET /search` | PAT, Bearer | the issue's transitions | `startAt` |
+| Linear | GraphQL | personal API key | the team's workflow states | cursor |
+| Trello | REST v1 | API key + token in the OAuth header | the board's lists | one call (up to 1000 cards) |
+| ClickUp | API v2 | personal token | the list's statuses | `page` |
+| Asana | REST 1.0 | PAT, Bearer | the project's sections, plus Completed | `offset` |
+| Notion database | API 2022-06-28 | integration secret, Bearer | a status or select property ("Status") | cursor |
+| Azure Boards | REST 7.1, WIQL | PAT, Basic | the work item type's states | ids read 200 at a time |
+
+Every source loads at most 500 tasks (`maxTasksPerSource`), newest first.
+The task list combines every source, or only the sources you choose. It
+sorts by last update, status, source or key, and always breaks ties the
+same way: newest update first, then source name, then key, with numbers in
+keys compared as numbers. Each task shows a badge naming its source.
 
 Only `https://` addresses are used (plain `http://` for localhost only).
 Tokens live in this device's secure storage, one key per source
