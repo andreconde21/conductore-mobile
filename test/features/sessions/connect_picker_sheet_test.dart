@@ -177,7 +177,7 @@ void main() {
       activeTargetKeys: {'tmux:build'},
     );
 
-    expect(runner.commands.first, startsWith('tmux list-sessions'));
+    expect(runner.commands.first, startsWith('tmux -u list-sessions'));
     expect(find.text('root'), findsOneWidget);
     expect(find.text('build'), findsOneWidget);
     expect(find.text('Attached'), findsOneWidget);

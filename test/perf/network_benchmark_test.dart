@@ -68,7 +68,7 @@ class NetworkLog {
       ('conductore-hostd events', 'events'),
       ('conductore-hostd transcript', 'transcript'),
       ('conductore-hostd usage', 'usage'),
-      ('tmux list-sessions', 'tmux'),
+      ('tmux -u list-sessions', 'tmux'),
       ('workspace list', 'herdr-workspaces'),
       ('tab list', 'herdr-tabs'),
       ('agent list', 'herdr-agents'),
@@ -128,7 +128,7 @@ class FakeConnection implements StdinAgentCommandRunner {
           : page([userLine('u1', 'hi')], offset: 50);
     } else if (command.contains('conductore-hostd usage')) {
       out = '{"version":1,"days":[]}';
-    } else if (command.contains('tmux list-sessions')) {
+    } else if (command.contains('tmux -u list-sessions')) {
       out = 'main\t1\t3\t1790229500\n';
     } else if (command.contains('workspace list')) {
       out = HerdrFixtures.workspaces;

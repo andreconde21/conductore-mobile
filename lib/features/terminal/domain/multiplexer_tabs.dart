@@ -96,9 +96,11 @@ class MultiplexerTab {
 /// '=name'` matches the session name exactly; `window_activity` advances
 /// on output even without `monitor-activity`.
 abstract final class TmuxWindowCommands {
+  /// Tab, passed through by `tmux -u` on every version ([parse] also reads
+  /// the `_` that tmux 3.3+ prints for it to a non-UTF-8 client).
   static const separator = '\t';
 
-  static String _tmux(String args) => remoteToolCommand('tmux', args);
+  static String _tmux(String args) => remoteToolCommand('tmux', '-u $args');
 
   static String _q(String value) => shellQuoteArgument(value);
 
@@ -156,7 +158,12 @@ abstract final class TmuxWindowCommands {
   static List<MultiplexerTab> parse(String raw) {
     final tabs = <MultiplexerTab>[];
     for (final line in raw.split('\n')) {
-      final fields = line.split(separator);
+      final mangled = line.contains(separator)
+          ? null
+          : _mangledWindow.firstMatch(line);
+      final fields = mangled != null
+          ? ['W', for (var i = 1; i <= 7; i++) mangled[i]!]
+          : line.split(separator);
       if (fields.length < 8 || fields.first != 'W') continue;
       final id = fields[1].trim();
       if (!id.startsWith('@')) continue;
@@ -174,6 +181,12 @@ abstract final class TmuxWindowCommands {
     tabs.sort((a, b) => a.index.compareTo(b.index));
     return tabs;
   }
+
+  /// A `W` line with its tabs printed as `_`: the fixed fields lead, so
+  /// the window name (last) comes back whole.
+  static final _mangledWindow = RegExp(
+    r'^W_(@\d+)_(\d+)_([01])_([01])_([01])_(\d+)_(.*)$',
+  );
 }
 
 /// What `herdr tab list` says about one workspace's tabs.

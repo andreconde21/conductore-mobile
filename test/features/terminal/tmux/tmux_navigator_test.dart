@@ -179,7 +179,7 @@ void main() {
 
     test('lists clients and panes in one tmux invocation', () {
       final body = _body(TmuxCommands.listing);
-      expect(body, startsWith('tmux list-clients -F "\$(printf \'C\\t'));
+      expect(body, startsWith('tmux -u list-clients -F "\$(printf \'C\\t'));
       expect(body, contains("';' list-panes -a -F"));
       expect(body, contains(r'#{pane_current_command}\t'));
     });
@@ -192,21 +192,21 @@ void main() {
 
       expect(
         body(TmuxQuickAction.splitRight),
-        "tmux split-window -h -t '%11' -c '#{pane_current_path}'",
+        "tmux -u split-window -h -t '%11' -c '#{pane_current_path}'",
       );
       expect(
         body(TmuxQuickAction.splitDown),
-        "tmux split-window -v -t '%11' -c '#{pane_current_path}'",
+        "tmux -u split-window -v -t '%11' -c '#{pane_current_path}'",
       );
       expect(
         body(TmuxQuickAction.newWindow),
-        "tmux new-window -a -t '@7' -c '#{pane_current_path}'",
+        "tmux -u new-window -a -t '@7' -c '#{pane_current_path}'",
       );
-      expect(body(TmuxQuickAction.zoom), "tmux resize-pane -Z -t '%11'");
-      expect(body(TmuxQuickAction.killPane), "tmux kill-pane -t '%11'");
+      expect(body(TmuxQuickAction.zoom), "tmux -u resize-pane -Z -t '%11'");
+      expect(body(TmuxQuickAction.killPane), "tmux -u kill-pane -t '%11'");
       expect(
         body(TmuxQuickAction.detach),
-        "tmux detach-client -t '/dev/pts/4'",
+        "tmux -u detach-client -t '/dev/pts/4'",
       );
     });
 
@@ -223,19 +223,19 @@ void main() {
     test('window N, neighbour panes and pane focus', () {
       expect(
         _body(TmuxCommands.selectWindow(target, 3)),
-        r"tmux select-window -t '$2:3'",
+        r"tmux -u select-window -t '$2:3'",
       );
       expect(
         _body(TmuxCommands.selectPane(target, 'L')),
-        "tmux select-pane -L -t '%11'",
+        "tmux -u select-pane -L -t '%11'",
       );
       expect(
         _body(TmuxCommands.focusPane('%3', clientName: '/dev/pts/4')),
-        "tmux switch-client -c '/dev/pts/4' -t '%3'",
+        "tmux -u switch-client -c '/dev/pts/4' -t '%3'",
       );
       expect(
         _body(TmuxCommands.focusPane('%3')),
-        "tmux select-window -t '%3' ';' select-pane -t '%3'",
+        "tmux -u select-window -t '%3' ';' select-pane -t '%3'",
       );
     });
   });
@@ -268,7 +268,7 @@ void main() {
       expect(runner.commands[0], contains('list-clients'));
       expect(
         _body(runner.commands[1]),
-        "tmux split-window -h -t '%1' -c '#{pane_current_path}'",
+        "tmux -u split-window -h -t '%1' -c '#{pane_current_path}'",
       );
     });
 
@@ -289,8 +289,8 @@ void main() {
       );
 
       expect(runner.commands.map(_body), [
-        r"tmux select-window -t '$1:2'",
-        "tmux switch-client -c '/dev/pts/30' -t '%8'",
+        r"tmux -u select-window -t '$1:2'",
+        "tmux -u switch-client -c '/dev/pts/30' -t '%8'",
       ]);
     });
 
@@ -326,7 +326,7 @@ void main() {
       expect(await TmuxNavigator.focusAgentPane(runner, '%7'), isTrue);
       expect(
         _body(runner.commands.single),
-        "tmux select-window -t '%7' ';' select-pane -t '%7'",
+        "tmux -u select-window -t '%7' ';' select-pane -t '%7'",
       );
     });
   });

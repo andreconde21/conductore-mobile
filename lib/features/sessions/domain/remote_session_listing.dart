@@ -278,7 +278,9 @@ class RemoteListingFailed<T> extends RemoteListing<T> {
 /// exec channel before the interactive session starts.
 abstract final class RemoteSessionListing {
   /// Field separator in the tmux format string. A tab cannot appear in a
-  /// session name (tmux rejects it), so splitting is unambiguous.
+  /// session name (tmux rejects it), so splitting is unambiguous. `-u`
+  /// keeps tmux 3.3+ from printing it as `_` to a non-UTF-8 client;
+  /// [parseTmuxSessions] reads that form too.
   static const _tmuxSeparator = '\t';
 
   /// `tmux list-sessions` with one tab-separated line per session:
@@ -287,7 +289,9 @@ abstract final class RemoteSessionListing {
   /// `-F` uses a literal tab via `#{t:...}`-free syntax: the format string
   /// is passed through `printf` so the shell expands `\t`.
   static const tmuxListCommand =
-      r'''tmux list-sessions -F "$(printf '#{session_name}\t#{session_attached}\t#{session_windows}\t#{session_activity}')"''';
+      r'''tmux -u list-sessions -F "$(printf '#{session_name}\t#{session_attached}\t#{session_windows}\t#{session_activity}')"''';
+
+  static final _mangledSession = RegExp(r'^(.+)_(\d+)_(\d+)_(\d+)$');
 
   /// `herdr workspace list` (JSON), wrapped with the same PATH fix the agent
   /// dashboard uses so user-local installs are found.
@@ -376,7 +380,14 @@ abstract final class RemoteSessionListing {
       if (line.trim().isEmpty) {
         continue;
       }
-      final fields = line.split(_tmuxSeparator);
+      // Tabs printed as `_`: the three numbers trail, so the name before
+      // them comes back whole.
+      final mangled = line.contains(_tmuxSeparator)
+          ? null
+          : _mangledSession.firstMatch(line);
+      final fields = mangled != null
+          ? [for (var i = 1; i <= 4; i++) mangled[i]!]
+          : line.split(_tmuxSeparator);
       final name = fields.first.trim();
       if (name.isEmpty) {
         continue;

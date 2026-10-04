@@ -276,13 +276,15 @@ enum TmuxQuickAction {
 /// `new-window` refuses a pane target ("can't specify pane here"), so it
 /// takes the window id.
 abstract final class TmuxCommands {
-  /// Field separator in the list formats. tmux 3.4 prints other control
-  /// characters escaped (`\037`) but passes a tab through, as the connect
-  /// picker's `list-sessions` relies on; free text goes last so a tab in a
-  /// pane title cannot shift the fields.
+  /// Field separator in the list formats. tmux 3.3+ prints a tab as `_`
+  /// when it takes the client for non-UTF-8 (LANG unset or C, common on an
+  /// SSH exec channel), so every command runs `tmux -u`, which passes
+  /// tabs through on every version; [TmuxNavigator.parse] still reads the
+  /// `_` form. Free text goes last so a tab in a pane title cannot shift
+  /// the fields.
   static const separator = '\t';
 
-  static String _tmux(String args) => remoteToolCommand('tmux', args);
+  static String _tmux(String args) => remoteToolCommand('tmux', '-u $args');
 
   static String _q(String value) => shellQuoteArgument(value);
 
@@ -408,7 +410,7 @@ abstract final class TmuxNavigator {
     final panes = <TmuxPaneEntry>[];
     const sep = TmuxCommands.separator;
     for (final line in raw.split('\n')) {
-      final fields = line.split(sep);
+      final fields = line.contains(sep) ? line.split(sep) : _unmangle(line);
       if (fields.first == 'C' && fields.length >= 7) {
         clients.add(
           TmuxClient(
@@ -442,6 +444,50 @@ abstract final class TmuxNavigator {
     }
     return TmuxSnapshot(clients: clients, panes: panes);
   }
+
+  /// A listing line whose tabs tmux printed as `_` (see
+  /// [TmuxCommands.separator]), split by the shape of its fixed fields
+  /// (`$1`, `@2`, `%3`, numbers, flags); `[line]` when it has none. A
+  /// pane's command, path, window name and title cannot be told apart in
+  /// that form: the command keeps what comes before the path, the rest
+  /// is left empty.
+  static List<String> _unmangle(String line) {
+    final client = _mangledClient.firstMatch(line);
+    if (client != null) {
+      final names = client[1]!;
+      final cut = names.indexOf('_');
+      return [
+        'C',
+        if (cut < 0) ...[
+          names,
+          '',
+        ] else ...[
+          names.substring(0, cut),
+          names.substring(cut + 1),
+        ],
+        for (var i = 2; i <= 5; i++) client[i]!,
+      ];
+    }
+    final pane = _mangledPane.firstMatch(line);
+    if (pane != null) {
+      final rest = pane[10]!;
+      final pathAt = rest.indexOf('_/');
+      return [
+        'P',
+        for (var i = 1; i <= 9; i++) pane[i]!,
+        if (pathAt < 0) rest else rest.substring(0, pathAt),
+        '',
+        '',
+        '',
+      ];
+    }
+    return [line];
+  }
+
+  static final _mangledClient = RegExp(r'^C_(.*)_(\$\d+)_(@\d+)_(%\d+)_(\d+)$');
+  static final _mangledPane = RegExp(
+    r'^P_(\$\d+)_(.*?)_(@\d+)_(\d+)_([01])_(%\d+)_(\d+)_([01])_([01])_(.*)$',
+  );
 
   static Future<bool> _run(AgentCommandRunner runner, String? command) async {
     if (command == null) {

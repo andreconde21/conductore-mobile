@@ -46,7 +46,7 @@ void main() {
       );
       expect(
         TmuxWindowCommands.select('@3'),
-        endsWith("exec tmux select-window -t ${q('@3')}'"),
+        endsWith("exec tmux -u select-window -t ${q('@3')}'"),
       );
       expect(
         TmuxWindowCommands.create(afterWindowId: '@3'),
@@ -62,7 +62,7 @@ void main() {
       );
       expect(
         TmuxWindowCommands.kill('@3'),
-        endsWith("exec tmux kill-window -t ${q('@3')}'"),
+        endsWith("exec tmux -u kill-window -t ${q('@3')}'"),
       );
       expect(
         TmuxWindowCommands.swap('@3', '@4', activeWindowId: '@1'),

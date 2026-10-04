@@ -422,7 +422,7 @@ class _TmuxOffCompanion extends LiveCompanion {
 
   @override
   Future<AgentCommandResult> run(String command, {required Duration timeout}) {
-    if (command.contains('tmux list-sessions')) {
+    if (command.contains('tmux -u list-sessions')) {
       commands.add(command);
       return Future.value(
         const AgentCommandResult(
