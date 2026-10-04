@@ -382,6 +382,9 @@ class AgentInfo {
     this.usage,
     this.lastAutoApprovedAt,
     this.permissionMode,
+    this.lastEvent,
+    this.lastToolName,
+    this.lastError,
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -433,6 +436,18 @@ class AgentInfo {
   /// without asking.
   final String? permissionMode;
 
+  /// The companion's last hook event (`Stop`, `PreToolUse`, ...), when it
+  /// reports one: tells a turn that ended from a question.
+  final String? lastEvent;
+
+  /// The tool of the agent's last tool event (what it is running now while
+  /// it works), when the companion reports it.
+  final String? lastToolName;
+
+  /// The API error its last turn ended on (`rate_limit`, `overloaded`), as
+  /// the companion reports it until the next prompt.
+  final String? lastError;
+
   /// The project the inbox groups this agent under: the provider's
   /// [project], else the basename of a path-like [workspace] (the
   /// companion puts the agent's cwd there). Herdr's opaque workspace ids
@@ -471,6 +486,9 @@ class AgentInfo {
       usage: usage,
       lastAutoApprovedAt: lastAutoApprovedAt,
       permissionMode: permissionMode,
+      lastEvent: lastEvent,
+      lastToolName: lastToolName,
+      lastError: lastError,
     );
   }
 
@@ -491,6 +509,9 @@ class AgentInfo {
         other.usage == usage &&
         other.lastAutoApprovedAt == lastAutoApprovedAt &&
         other.permissionMode == permissionMode &&
+        other.lastEvent == lastEvent &&
+        other.lastToolName == lastToolName &&
+        other.lastError == lastError &&
         _sameRequests(other.pendingRequests, pendingRequests);
   }
 
@@ -525,6 +546,7 @@ class AgentInfo {
     usage,
     lastAutoApprovedAt,
     permissionMode,
+    Object.hash(lastEvent, lastToolName, lastError),
     Object.hashAll(pendingRequests),
   );
 }

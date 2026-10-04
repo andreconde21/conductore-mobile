@@ -8,6 +8,7 @@ import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
+import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 import 'package:conduit/features/app_lock/domain/app_authenticator.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
@@ -516,6 +517,12 @@ class RecordingAgentNotifier implements AgentAttentionNotifier {
   /// Agent notifications currently showing, by key.
   final Map<String, AgentNotification> agents = {};
 
+  /// Every ongoing status posted, in order (null: removed).
+  final List<AgentOngoingStatus?> statusPosts = [];
+
+  /// The ongoing status showing now.
+  AgentOngoingStatus? get status => statusPosts.lastOrNull;
+
   /// Plain ids currently showing (shown minus cancelled).
   final Set<String> active = {};
 
@@ -574,6 +581,11 @@ class RecordingAgentNotifier implements AgentAttentionNotifier {
   Future<void> cancelAgent({required String key}) async {
     agents.remove(key);
     agentCancelled.add(key);
+  }
+
+  @override
+  Future<void> showStatus(AgentOngoingStatus? status) async {
+    statusPosts.add(status);
   }
 }
 

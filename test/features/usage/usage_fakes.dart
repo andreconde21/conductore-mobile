@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
+import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
@@ -237,6 +238,9 @@ class FakeUsageNotifier implements AgentAttentionNotifier {
 
   @override
   Future<void> cancelAgent({required String key}) async {}
+
+  @override
+  Future<void> showStatus(AgentOngoingStatus? status) async {}
 
   @override
   Future<void> cancel({required String id}) async {}

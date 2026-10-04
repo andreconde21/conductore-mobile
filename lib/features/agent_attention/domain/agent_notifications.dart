@@ -4,6 +4,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -18,6 +19,10 @@ enum AgentNeed {
   /// The agent stopped on something other than a question.
   error,
 
+  /// The agents dashboard flags it: no progress, the same failure again
+  /// and again, or a command it keeps repeating.
+  stuck,
+
   /// The agent's turn ended.
   finished;
 
@@ -29,9 +34,46 @@ enum AgentNeed {
     AgentNeed.approval => 'needs you',
     AgentNeed.question => 'is waiting for you',
     AgentNeed.error => 'hit an error',
+    AgentNeed.stuck => 'looks stuck',
     AgentNeed.finished => 'finished',
   };
 }
+
+/// What this device notifies about agents (Settings › Agents ›
+/// Notifications).
+enum AgentNotificationMode {
+  /// One ongoing, silent notification listing every agent, plus alerts for
+  /// urgent things only (the default).
+  ongoingAndUrgent('Ongoing + urgent'),
+
+  /// One notification per agent for every need, finished turns included
+  /// (the behaviour before CON-074).
+  everything('Everything'),
+
+  /// Alerts for urgent things only, no ongoing notification.
+  urgentOnly('Urgent only');
+
+  const AgentNotificationMode(this.label);
+
+  final String label;
+
+  /// Whether only urgent needs notify (finished turns only when opted in).
+  bool get urgentOnlyAlerts => this != AgentNotificationMode.everything;
+
+  /// Whether the ongoing status notification shows.
+  bool get showsOngoing => this == AgentNotificationMode.ongoingAndUrgent;
+
+  static AgentNotificationMode parse(Object? raw) =>
+      AgentNotificationMode.values.firstWhere(
+        (mode) => mode.name == raw,
+        orElse: () => AgentNotificationMode.ongoingAndUrgent,
+      );
+}
+
+/// The key a mute is kept under: the agent on its machine (any session of
+/// the machine).
+String agentMuteKey(String hostId, String agentId) =>
+    '${baseHostId(hostId)}/$agentId';
 
 /// Settings › Agents › Notifications, on this device only (never synced:
 /// the phone may notify while the desktop stays quiet). Each machine's
@@ -45,7 +87,14 @@ class AgentNotificationPreferences {
     this.errors = true,
     this.summaryOnly = false,
     this.quietUpdates = true,
+    this.mode = AgentNotificationMode.ongoingAndUrgent,
+    this.stuck = true,
+    this.finishedAlerts = false,
+    this.mutedAgents = const {},
   });
+
+  /// Most mutes kept; the oldest go first (agents are sessions, which end).
+  static const maxMutedAgents = 200;
 
   final bool approvals;
   final bool questions;
@@ -61,12 +110,47 @@ class AgentNotificationPreferences {
   /// notification silently; off, every new request alerts.
   final bool quietUpdates;
 
+  final AgentNotificationMode mode;
+
+  /// Alerts for agents the dashboard flags as stuck or looping (the urgent
+  /// modes).
+  final bool stuck;
+
+  /// "Also alert when an agent finishes" in the urgent modes, where a
+  /// finished turn otherwise only updates the ongoing notification.
+  final bool finishedAlerts;
+
+  /// Agents that never notify on this device ([agentMuteKey]).
+  final Set<String> mutedAgents;
+
+  bool isMuted(String hostId, String agentId) =>
+      mutedAgents.contains(agentMuteKey(hostId, agentId));
+
+  /// These preferences with [hostId]'s [agentId] muted or not.
+  AgentNotificationPreferences withMuted(
+    String hostId,
+    String agentId, {
+    required bool muted,
+  }) {
+    final key = agentMuteKey(hostId, agentId);
+    final next = [
+      for (final existing in mutedAgents)
+        if (existing != key) existing,
+      if (muted) key,
+    ];
+    final kept = next.length > maxMutedAgents
+        ? next.sublist(next.length - maxMutedAgents)
+        : next;
+    return copyWith(mutedAgents: {...kept});
+  }
+
   /// Whether [need] notifies at all.
   bool notifies(AgentNeed need) => switch (need) {
     AgentNeed.approval => approvals,
     AgentNeed.question => questions,
     AgentNeed.error => errors,
-    AgentNeed.finished => finished,
+    AgentNeed.stuck => stuck && mode.urgentOnlyAlerts,
+    AgentNeed.finished => mode.urgentOnlyAlerts ? finishedAlerts : finished,
   };
 
   AgentNotificationPreferences copyWith({
@@ -76,6 +160,10 @@ class AgentNotificationPreferences {
     bool? errors,
     bool? summaryOnly,
     bool? quietUpdates,
+    AgentNotificationMode? mode,
+    bool? stuck,
+    bool? finishedAlerts,
+    Set<String>? mutedAgents,
   }) => AgentNotificationPreferences(
     approvals: approvals ?? this.approvals,
     questions: questions ?? this.questions,
@@ -83,6 +171,10 @@ class AgentNotificationPreferences {
     errors: errors ?? this.errors,
     summaryOnly: summaryOnly ?? this.summaryOnly,
     quietUpdates: quietUpdates ?? this.quietUpdates,
+    mode: mode ?? this.mode,
+    stuck: stuck ?? this.stuck,
+    finishedAlerts: finishedAlerts ?? this.finishedAlerts,
+    mutedAgents: mutedAgents ?? this.mutedAgents,
   );
 
   Map<String, Object?> toJson() => {
@@ -92,6 +184,10 @@ class AgentNotificationPreferences {
     'errors': errors,
     'summaryOnly': summaryOnly,
     'quietUpdates': quietUpdates,
+    'mode': mode.name,
+    'stuck': stuck,
+    'finishedAlerts': finishedAlerts,
+    'mutedAgents': [...mutedAgents],
   };
 
   static AgentNotificationPreferences fromJson(Object? json) {
@@ -110,6 +206,14 @@ class AgentNotificationPreferences {
       errors: flag('errors', true),
       summaryOnly: flag('summaryOnly', false),
       quietUpdates: flag('quietUpdates', true),
+      mode: AgentNotificationMode.parse(json['mode']),
+      stuck: flag('stuck', true),
+      finishedAlerts: flag('finishedAlerts', false),
+      mutedAgents: {
+        if (json['mutedAgents'] case final List<Object?> muted)
+          for (final key in muted)
+            if (key is String && key.isNotEmpty) key,
+      },
     );
   }
 
@@ -121,7 +225,11 @@ class AgentNotificationPreferences {
       other.finished == finished &&
       other.errors == errors &&
       other.summaryOnly == summaryOnly &&
-      other.quietUpdates == quietUpdates;
+      other.quietUpdates == quietUpdates &&
+      other.mode == mode &&
+      other.stuck == stuck &&
+      other.finishedAlerts == finishedAlerts &&
+      setEquals(other.mutedAgents, mutedAgents);
 
   @override
   int get hashCode => Object.hash(
@@ -131,6 +239,10 @@ class AgentNotificationPreferences {
     errors,
     summaryOnly,
     quietUpdates,
+    mode,
+    stuck,
+    finishedAlerts,
+    Object.hashAllUnordered(mutedAgents),
   );
 }
 
@@ -227,6 +339,10 @@ class AgentNotification {
     this.action,
     this.reviewAll = false,
     this.open,
+    this.answers = const [],
+    this.question = '',
+    this.reply = false,
+    this.openButton = false,
   });
 
   final String hostId;
@@ -261,6 +377,19 @@ class AgentNotification {
   /// Where tapping the body goes.
   final AgentOpenTarget? open;
 
+  /// Answer buttons for [action]'s request, a single-choice question: the
+  /// option labels, each answering [question].
+  final List<String> answers;
+  final String question;
+
+  /// A "Reply" button with an inline text field: the text is typed into
+  /// the agent.
+  final bool reply;
+
+  /// An "Open" button (a high-risk request, or next to Reply), which opens
+  /// the agent like the body.
+  final bool openButton;
+
   String get key => agentNotificationKey(hostId, agentId);
 
   AgentNotification copyWith({bool? alert}) => AgentNotification(
@@ -276,6 +405,10 @@ class AgentNotification {
     action: action,
     reviewAll: reviewAll,
     open: open,
+    answers: answers,
+    question: question,
+    reply: reply,
+    openButton: openButton,
   );
 
   /// Channel arguments for the platform notifier.
@@ -294,6 +427,10 @@ class AgentNotification {
       'allowAlways': action.allowAlways,
     },
     'reviewAll': reviewAll,
+    'answers': answers,
+    'question': question,
+    'reply': reply,
+    'openButton': openButton,
     ...?open?.toArguments(),
   };
 
@@ -311,7 +448,11 @@ class AgentNotification {
       other.alertKey == alertKey &&
       other.action == action &&
       other.reviewAll == reviewAll &&
-      other.open == open;
+      other.open == open &&
+      listEquals(other.answers, answers) &&
+      other.question == question &&
+      other.reply == reply &&
+      other.openButton == openButton;
 
   @override
   int get hashCode => Object.hash(
@@ -327,6 +468,7 @@ class AgentNotification {
     action,
     reviewAll,
     open,
+    Object.hash(Object.hashAll(answers), question, reply, openButton),
   );
 
   @override
@@ -497,6 +639,7 @@ abstract final class AgentNotificationPolicy {
       text = switch (need) {
         AgentNeed.question => message ?? 'Waiting for your answer',
         AgentNeed.error => message ?? 'Stopped. Open it to see why',
+        AgentNeed.stuck => message ?? 'Open it to see what it is doing',
         AgentNeed.finished =>
           (extra.isEmpty ? null : extra) ?? message ?? 'Turn finished',
         AgentNeed.approval => 'Waiting for approval',

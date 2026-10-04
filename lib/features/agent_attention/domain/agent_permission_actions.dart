@@ -1,5 +1,7 @@
-/// One Allow / Deny / Always tap on a permission notification, as relayed
-/// by the platform.
+/// One action tap on an agent notification, as relayed by the platform:
+/// Allow / Deny / Always on a permission request, an answer button of a
+/// question ([answerVerdict]), or a Reply typed into the agent
+/// ([replyVerdict]).
 class AgentPermissionAction {
   const AgentPermissionAction({
     required this.notificationId,
@@ -7,7 +9,15 @@ class AgentPermissionAction {
     required this.requestId,
     required this.verdict,
     this.agentId = '',
+    this.text = '',
+    this.question = '',
   });
+
+  /// An answer button: [text] answers [question].
+  static const answerVerdict = 'answer';
+
+  /// The inline Reply: [text] is typed into the agent.
+  static const replyVerdict = 'reply';
 
   final String notificationId;
   final String hostId;
@@ -17,8 +27,15 @@ class AgentPermissionAction {
   /// queued by an older build.
   final String agentId;
 
-  /// `allow`, `deny` or `always` as the platform stored it.
+  /// `allow`, `deny`, `always`, [answerVerdict] or [replyVerdict] as the
+  /// platform stored it.
   final String verdict;
+
+  /// The picked option's label, or the reply's text.
+  final String text;
+
+  /// The question an answer button answers (exactly as asked).
+  final String question;
 
   @override
   bool operator ==(Object other) {
@@ -27,12 +44,21 @@ class AgentPermissionAction {
         other.hostId == hostId &&
         other.requestId == requestId &&
         other.agentId == agentId &&
-        other.verdict == verdict;
+        other.verdict == verdict &&
+        other.text == text &&
+        other.question == question;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(notificationId, hostId, requestId, agentId, verdict);
+  int get hashCode => Object.hash(
+    notificationId,
+    hostId,
+    requestId,
+    agentId,
+    verdict,
+    text,
+    question,
+  );
 }
 
 /// Where notification action taps arrive from.
