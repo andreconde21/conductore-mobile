@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
+import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_state_dot.dart';
@@ -171,16 +172,27 @@ class _ViewMenu extends StatelessWidget {
             checked: controller.showHidden,
             child: Text('Show hidden ($hiddenCount)'),
           ),
-        const PopupMenuItem(
-          value: _ViewChoice.add,
-          child: Text('New project…'),
-        ),
-        if (!controller.followsMachines && controller.hasMachineLayout)
+        if (controller.canEditLayout)
+          const PopupMenuItem(
+            value: _ViewChoice.add,
+            child: Text('New project…'),
+          ),
+        if (controller.sheprdSync)
+          PopupMenuItem(
+            key: const ValueKey('project-view-sheprd-status'),
+            enabled: false,
+            child: Text(sheprdSyncStatus(controller)),
+          ),
+        if (controller.canEditLayout &&
+            !controller.followsMachines &&
+            controller.hasMachineLayout)
           const PopupMenuItem(
             value: _ViewChoice.follow,
             child: Text("Use the machines' sidebar.toml again"),
           ),
-        if (controller.followsMachines && controller.hasMachineLayout)
+        if (controller.canEditLayout &&
+            controller.followsMachines &&
+            controller.hasMachineLayout)
           const PopupMenuItem(
             enabled: false,
             child: Text("Following sheprd's sidebar.toml"),
@@ -190,6 +202,19 @@ class _ViewMenu extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The view menu's line while "Sync with sheprd" is on.
+String sheprdSyncStatus(ProjectLayoutController controller) {
+  final view = controller.sheprdView;
+  if (view == null) {
+    return controller.hasMachineLayout
+        ? 'Synced with sheprd: its sidebar.toml (no view state yet)'
+        : 'Synced with sheprd: waiting for its view';
+  }
+  return view.stale
+      ? 'Synced with sheprd: not running, view may be old'
+      : 'Synced with sheprd';
 }
 
 /// A project's header row: chevron, pin star, name, and when collapsed the
@@ -297,41 +322,135 @@ class ProjectHeaderTile extends StatelessWidget {
   }
 }
 
-/// What a row of the project view can do with its project.
-enum ProjectEntryAction { moveTo, moveToOther, hide }
+/// What a row of the project view can do: its project (the app's own
+/// layout), or, while synced with sheprd, its agents' marks.
+enum ProjectEntryAction {
+  moveTo,
+  moveToOther,
+  hide,
+  markRead,
+  markUnread,
+  keep,
+  unkeep,
+  dismiss;
 
-/// The project items of a row's menu.
+  /// The sheprd mark this action sends, if it is one.
+  SheprdMark? get mark => switch (this) {
+    ProjectEntryAction.markRead => SheprdMark.read,
+    ProjectEntryAction.markUnread => SheprdMark.unread,
+    ProjectEntryAction.keep => SheprdMark.keep,
+    ProjectEntryAction.unkeep => SheprdMark.unkeep,
+    ProjectEntryAction.dismiss => SheprdMark.dismiss,
+    _ => null,
+  };
+
+  static ProjectEntryAction of(SheprdMark mark) => switch (mark) {
+    SheprdMark.read => ProjectEntryAction.markRead,
+    SheprdMark.unread => ProjectEntryAction.markUnread,
+    SheprdMark.keep => ProjectEntryAction.keep,
+    SheprdMark.unkeep => ProjectEntryAction.unkeep,
+    SheprdMark.dismiss => ProjectEntryAction.dismiss,
+  };
+
+  IconData get icon => switch (this) {
+    ProjectEntryAction.moveTo => Icons.drive_file_move_outline,
+    ProjectEntryAction.moveToOther => Icons.move_down_rounded,
+    ProjectEntryAction.hide => Icons.visibility_off_outlined,
+    ProjectEntryAction.markRead => Icons.mark_email_read_outlined,
+    ProjectEntryAction.markUnread => Icons.markunread_outlined,
+    ProjectEntryAction.keep => Icons.push_pin_outlined,
+    ProjectEntryAction.unkeep => Icons.push_pin_rounded,
+    ProjectEntryAction.dismiss => Icons.do_not_disturb_on_outlined,
+  };
+}
+
+/// The agent rows of [entry] a mark on [row] goes to: [row] when sheprd
+/// knows it as an agent, else (a compact workspace row) each of its agents.
+List<SidebarNode> sheprdTargets(ProjectEntry entry, SidebarNode row) {
+  if (entry.sheprdKeys.containsKey(row.key)) return [row];
+  return [
+    for (final agent in entry.agentRows)
+      if (entry.sheprdKeys.containsKey(agent.key)) agent,
+  ];
+}
+
+/// What [row] of [entry] offers: sheprd's marks while synced (nothing for
+/// a row without a Herdr agent), else the project moves and Hide.
+List<ProjectEntryAction> projectEntryActions(
+  ProjectLayoutController? controller,
+  ProjectEntry entry, {
+  required ProjectGroup project,
+  SidebarNode? row,
+}) {
+  if (controller != null && controller.sheprdSync) {
+    final targets = sheprdTargets(entry, row ?? entry.node);
+    if (targets.isEmpty) return const [];
+    return [
+      for (final mark in SheprdMark.choicesFor(entry.sheprdOf(targets.first)))
+        ProjectEntryAction.of(mark),
+    ];
+  }
+  return [
+    ProjectEntryAction.moveTo,
+    if (!project.isOther) ProjectEntryAction.moveToOther,
+    ProjectEntryAction.hide,
+  ];
+}
+
+String projectEntryActionLabel(ProjectEntryAction action, ProjectEntry entry) =>
+    switch (action) {
+      ProjectEntryAction.moveTo => 'Move to project…',
+      ProjectEntryAction.moveToOther => 'Move to Other',
+      ProjectEntryAction.hide => entry.hidden ? 'Show again' : 'Hide',
+      _ => action.mark!.label,
+    };
+
+/// The items of a row's menu: see [projectEntryActions].
 List<PopupMenuEntry<T>> projectEntryMenuItems<T>(
   ProjectEntry entry, {
   required ProjectGroup project,
   required T Function(ProjectEntryAction action) value,
+  ProjectLayoutController? controller,
+  SidebarNode? row,
 }) => [
-  PopupMenuItem<T>(
-    value: value(ProjectEntryAction.moveTo),
-    child: const _MenuLine(Icons.drive_file_move_outline, 'Move to project…'),
-  ),
-  if (!project.isOther)
+  for (final action in projectEntryActions(
+    controller,
+    entry,
+    project: project,
+    row: row,
+  ))
     PopupMenuItem<T>(
-      value: value(ProjectEntryAction.moveToOther),
-      child: const _MenuLine(Icons.move_down_rounded, 'Move to Other'),
+      value: value(action),
+      child: _MenuLine(
+        action == ProjectEntryAction.hide && entry.hidden
+            ? Icons.visibility_outlined
+            : action.icon,
+        projectEntryActionLabel(action, entry),
+      ),
     ),
-  PopupMenuItem<T>(
-    value: value(ProjectEntryAction.hide),
-    child: _MenuLine(
-      entry.hidden ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-      entry.hidden ? 'Show again' : 'Hide',
-    ),
-  ),
 ];
 
-/// Runs a row's project [action].
+/// Runs a row's [action]; a mark goes to sheprd for [row] (else the
+/// row's agents), and a failure shows in a snack bar.
 Future<void> runProjectEntryAction(
   BuildContext context,
   ProjectLayoutController controller,
   ProjectEntry entry,
   ProjectEntryAction action, {
   required ProjectGroup project,
+  SidebarNode? row,
 }) async {
+  if (action.mark case final mark?) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    for (final target in sheprdTargets(entry, row ?? entry.node)) {
+      final error = await controller.mark(entry, target, mark);
+      if (error != null) {
+        messenger?.showSnackBar(SnackBar(content: Text(error)));
+        return;
+      }
+    }
+    return;
+  }
   switch (action) {
     case ProjectEntryAction.moveTo:
       final name = await showMoveToProjectDialog(
@@ -345,18 +464,28 @@ Future<void> runProjectEntryAction(
       await controller.moveTo(entry, '');
     case ProjectEntryAction.hide:
       await controller.toggleHidden(entry);
+    default:
+      break;
   }
 }
 
-/// The phone's long-press on a row: the project actions in a sheet, then
-/// [more] (the row's own actions) when given.
+/// The phone's long-press on a row ([row]: an agent row of [entry], else
+/// the entry itself): its actions in a sheet, then [more] (the row's own
+/// actions) when given.
 Future<void> showProjectEntrySheet(
   BuildContext context,
   ProjectLayoutController controller,
   ProjectEntry entry, {
   required ProjectGroup project,
+  SidebarNode? row,
   VoidCallback? more,
 }) async {
+  final actions = projectEntryActions(
+    controller,
+    entry,
+    project: project,
+    row: row,
+  );
   final picked = await showModalBottomSheet<ProjectEntryAction>(
     context: context,
     showDragHandle: true,
@@ -366,34 +495,26 @@ Future<void> showProjectEntrySheet(
         children: [
           ListTile(
             title: Text(
-              entry.node.label,
+              (row ?? entry.node).label,
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
             subtitle: Text(project.name),
           ),
-          ListTile(
-            key: const ValueKey('project-entry-move'),
-            leading: const Icon(Icons.drive_file_move_outline),
-            title: const Text('Move to project…'),
-            onTap: () => Navigator.pop(context, ProjectEntryAction.moveTo),
-          ),
-          if (!project.isOther)
+          for (final action in actions)
             ListTile(
-              key: const ValueKey('project-entry-other'),
-              leading: const Icon(Icons.move_down_rounded),
-              title: const Text('Move to Other'),
-              onTap: () =>
-                  Navigator.pop(context, ProjectEntryAction.moveToOther),
+              key: ValueKey(switch (action) {
+                ProjectEntryAction.moveTo => 'project-entry-move',
+                ProjectEntryAction.moveToOther => 'project-entry-other',
+                _ => 'project-entry-${action.name}',
+              }),
+              leading: Icon(
+                action == ProjectEntryAction.hide && entry.hidden
+                    ? Icons.visibility_outlined
+                    : action.icon,
+              ),
+              title: Text(projectEntryActionLabel(action, entry)),
+              onTap: () => Navigator.pop(context, action),
             ),
-          ListTile(
-            leading: Icon(
-              entry.hidden
-                  ? Icons.visibility_outlined
-                  : Icons.visibility_off_outlined,
-            ),
-            title: Text(entry.hidden ? 'Show again' : 'Hide'),
-            onTap: () => Navigator.pop(context, ProjectEntryAction.hide),
-          ),
           if (more != null)
             ListTile(
               leading: const Icon(Icons.more_horiz_rounded),
@@ -414,16 +535,19 @@ Future<void> showProjectEntrySheet(
     entry,
     picked,
     project: project,
+    row: row,
   );
 }
 
 /// What a project's header menu can do.
 enum ProjectGroupAction { pin, rules, remove }
 
+/// None while synced with sheprd ([editable] false): its layout wins.
 List<PopupMenuEntry<T>> projectGroupMenuItems<T>(
   ProjectGroup project, {
   required T Function(ProjectGroupAction action) value,
-}) => project.isOther
+  bool editable = true,
+}) => project.isOther || !editable
     ? const []
     : [
         PopupMenuItem<T>(

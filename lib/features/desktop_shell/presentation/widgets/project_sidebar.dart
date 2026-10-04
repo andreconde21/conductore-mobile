@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
+import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
@@ -225,9 +227,15 @@ class ProjectSidebar extends StatefulWidget {
     super.key,
   });
 
-  /// A row's right-click in the layout view: its project actions with the
-  /// usual ones. Null uses [onContextMenu].
-  final void Function(ProjectEntry entry, ProjectGroup project, Offset at)?
+  /// A row's right-click in the layout view: its project actions (or
+  /// sheprd's marks) with the usual ones, for [row] (an agent row of the
+  /// entry, or the entry's own). Null uses [onContextMenu].
+  final void Function(
+    ProjectEntry entry,
+    ProjectGroup project,
+    Offset at,
+    SidebarNode row,
+  )?
   onEntryMenu;
 
   final ProjectLayoutController? layout;
@@ -396,12 +404,31 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     ];
   }
 
-  void _entryMenu(ProjectEntry entry, ProjectGroup project, Offset at) {
+  void _entryMenu(
+    ProjectEntry entry,
+    ProjectGroup project,
+    Offset at, [
+    SidebarNode? row,
+  ]) {
     final menu = widget.onEntryMenu;
     if (menu != null) {
-      menu(entry, project, at);
+      menu(entry, project, at, row ?? entry.node);
     } else {
-      widget.onContextMenu(entry.node, at);
+      widget.onContextMenu(row ?? entry.node, at);
+    }
+  }
+
+  /// Opens [row]; with sheprd synced, an unread agent is read from then on
+  /// (sheprd does the same when an agent gets focus).
+  void _open(
+    ProjectLayoutController layout,
+    ProjectEntry entry,
+    SidebarNode row,
+  ) {
+    widget.onOpen(row);
+    if (layout.sheprdSync &&
+        entry.sheprdOf(row)?.presence == SheprdPresence.unread) {
+      unawaited(layout.mark(entry, row, SheprdMark.read));
     }
   }
 
@@ -454,20 +481,26 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
             _MemberRow(
               key: ValueKey('project-member-${project.key}-${entry.node.key}'),
               node: entry.node,
+              dot: entry.dot,
+              sheprd: entry.sheprdOf(entry.node),
               machineName: names[entry.node.machineId] ?? '',
               selected: entry.node.key == widget.selectedKey,
               faded: !entry.active || entry.hidden,
-              onOpen: () => widget.onOpen(entry.node),
+              onOpen: () => _open(layout, entry, entry.node),
               onContextMenu: (position) => _entryMenu(entry, project, position),
             )
           else
             for (final agent in entry.agentRows)
               if (!layout.activeOnly ||
                   entry.active &&
-                      (agent.dot != SidebarDot.idle || entry.node.openInApp))
+                      (entry.dotOf(agent) != SidebarDot.idle ||
+                          (entry.sheprdOf(agent)?.kept ?? false) ||
+                          entry.node.openInApp))
                 _MemberRow(
                   key: ValueKey('project-agent-${project.key}-${agent.key}'),
                   node: agent,
+                  dot: entry.dotOf(agent),
+                  sheprd: entry.sheprdOf(agent),
                   machineName: [
                     if (entry.node.label.toLowerCase() !=
                         project.name.toLowerCase())
@@ -475,10 +508,13 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
                     names[entry.node.machineId] ?? '',
                   ].where((part) => part.isNotEmpty).join(' · '),
                   selected: agent.key == widget.selectedKey,
-                  faded: !entry.active || entry.hidden,
-                  onOpen: () => widget.onOpen(agent),
+                  faded:
+                      !entry.active ||
+                      entry.hidden ||
+                      (entry.sheprdOf(agent)?.dismissed ?? false),
+                  onOpen: () => _open(layout, entry, agent),
                   onContextMenu: (position) =>
-                      _entryMenu(entry, project, position),
+                      _entryMenu(entry, project, position, agent),
                 ),
     ];
   }
@@ -586,10 +622,18 @@ class _MemberRow extends StatelessWidget {
     required this.onOpen,
     required this.onContextMenu,
     this.faded = false,
+    this.dot,
+    this.sheprd,
     super.key,
   });
 
   final SidebarNode node;
+
+  /// The dot to show: sheprd's presence when synced; null uses [node]'s.
+  final SidebarDot? dot;
+
+  /// sheprd's view of the agent, while synced: a pin when kept.
+  final SheprdAgentView? sheprd;
   final String machineName;
   final bool selected;
 
@@ -667,9 +711,21 @@ class _MemberRow extends StatelessWidget {
                       color: palette.accent,
                     ),
                   ),
-                if (node.dot != SidebarDot.none) ...[
+                if (sheprd?.kept ?? false)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Tooltip(
+                      message: 'Kept in active (sheprd)',
+                      child: Icon(
+                        Icons.push_pin_rounded,
+                        size: 11,
+                        color: palette.mutedForeground,
+                      ),
+                    ),
+                  ),
+                if ((dot ?? node.dot) != SidebarDot.none) ...[
                   const SizedBox(width: 7),
-                  ShellStateDot(dot: node.dot),
+                  ShellStateDot(dot: dot ?? node.dot),
                 ],
               ],
             ),

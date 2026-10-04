@@ -242,7 +242,11 @@ extension _ShellProjects on DesktopHomeState {
         ),
         if (layout != null) ...[
           const PopupMenuDivider(),
-          ...projectGroupMenuItems<Object>(project, value: (action) => action),
+          ...projectGroupMenuItems<Object>(
+            project,
+            value: (action) => action,
+            editable: layout.canEditLayout,
+          ),
         ],
       ],
     );
@@ -393,13 +397,8 @@ extension _ShellProjects on DesktopHomeState {
             : layout.tokensToday(projects, usage.summary),
         onEntryMenu: layout == null
             ? null
-            : (entry, project, position) => unawaited(
-                showNodeMenu(
-                  entry.node,
-                  position,
-                  entry: entry,
-                  project: project,
-                ),
+            : (entry, project, position, row) => unawaited(
+                showNodeMenu(row, position, entry: entry, project: project),
               ),
         onNeedsYou: () {
           for (final project in projects) {
