@@ -8,7 +8,8 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 enum UsageAgent {
   claude('Claude'),
   codex('Codex'),
-  opencode('OpenCode');
+  opencode('OpenCode'),
+  gemini('Gemini');
 
   const UsageAgent(this.label);
 
@@ -594,6 +595,8 @@ class UsageSection {
       activeModel: switch (json['active']) {
         {'provider': final String provider, 'model': final String model} =>
           '$provider/$model',
+        // Gemini CLI: the model alone.
+        {'model': final String model} => model,
         _ => null,
       },
     );
@@ -612,6 +615,7 @@ class UsageReport {
       agent: UsageAgent.opencode,
       present: false,
     ),
+    this.gemini = const UsageSection(agent: UsageAgent.gemini, present: false),
     this.generatedAt,
     this.companionVersion,
     this.pricingAsOf,
@@ -637,6 +641,10 @@ class UsageReport {
 
   /// From companions with the OpenCode adapter (CON-069); absent before.
   final UsageSection opencode;
+
+  /// From companions with the Gemini CLI adapter (CON-072): tokens only,
+  /// no prices and no limits.
+  final UsageSection gemini;
   final DateTime? generatedAt;
   final String? companionVersion;
   final String? pricingAsOf;
@@ -668,7 +676,7 @@ class UsageReport {
   /// The companion understands `--from`, `--to`, `--hourly`.
   bool get supportsRanges => to != null;
 
-  Iterable<UsageSection> get agents => [claude, codex, opencode];
+  Iterable<UsageSection> get agents => [claude, codex, opencode, gemini];
 }
 
 /// A `conductore-hostd cswap-switch` reply.
@@ -792,6 +800,7 @@ UsageReport? parseUsageReport(String stdout) {
     claude: UsageSection.fromJson(decoded['claude'], UsageAgent.claude),
     codex: UsageSection.fromJson(decoded['codex'], UsageAgent.codex),
     opencode: UsageSection.fromJson(decoded['opencode'], UsageAgent.opencode),
+    gemini: UsageSection.fromJson(decoded['gemini'], UsageAgent.gemini),
     generatedAt: generated is num
         ? DateTime.fromMillisecondsSinceEpoch(generated.toInt(), isUtc: true)
         : null,

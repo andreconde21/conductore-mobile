@@ -542,6 +542,8 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     }
     final toolName = _string(entry['toolName']) ?? 'tool';
     final info = parsePendingApprovalInfo(entry);
+    // `answerable: false`: only the agent's own prompt can answer it.
+    final terminalOnly = entry['answerable'] == false;
     return PendingPermissionRequest(
       id: id,
       toolName: toolName,
@@ -549,10 +551,11 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       toolInput: formatToolInput(entry['toolInput']),
       createdAt: _timestamp(entry['createdAt']),
       risk: info.risk,
-      batchable: info.batchable,
+      batchable: info.batchable && !terminalOnly,
       suggestedRules: info.suggestedRules,
       repo: info.repo,
       questions: parsePendingQuestions(entry['questions']),
+      terminalOnly: terminalOnly,
     );
   }
 

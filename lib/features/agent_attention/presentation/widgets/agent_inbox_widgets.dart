@@ -586,36 +586,40 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
             ),
           ],
           const SizedBox(height: 8),
-          ApprovalButtons(
-            deny: ApprovalAction(
-              PermissionVerdict.deny.label,
-              widget.busy
-                  ? null
-                  : () => widget.onDecide(PermissionVerdict.deny),
+          // The agent's own prompt answers it (Gemini CLI): no buttons.
+          if (request.terminalOnly)
+            TerminalOnlyNote(key: ValueKey('answer-in-terminal-${request.id}'))
+          else
+            ApprovalButtons(
+              deny: ApprovalAction(
+                PermissionVerdict.deny.label,
+                widget.busy
+                    ? null
+                    : () => widget.onDecide(PermissionVerdict.deny),
+              ),
+              secondary: [
+                if (onTrust != null)
+                  ApprovalAction(
+                    'Trust…',
+                    widget.busy ? null : onTrust,
+                    key: ValueKey('trust-${request.id}'),
+                  ),
+                // High risk always asks: no rule, from here or Claude Code.
+                if (!(high && widget.onTrust != null))
+                  ApprovalAction(
+                    PermissionVerdict.always.label,
+                    widget.busy
+                        ? null
+                        : () => widget.onDecide(PermissionVerdict.always),
+                  ),
+              ],
+              allow: ApprovalAction(
+                PermissionVerdict.allow.label,
+                widget.busy
+                    ? null
+                    : () => widget.onDecide(PermissionVerdict.allow),
+              ),
             ),
-            secondary: [
-              if (onTrust != null)
-                ApprovalAction(
-                  'Trust…',
-                  widget.busy ? null : onTrust,
-                  key: ValueKey('trust-${request.id}'),
-                ),
-              // High risk always asks: no rule, from here or Claude Code.
-              if (!(high && widget.onTrust != null))
-                ApprovalAction(
-                  PermissionVerdict.always.label,
-                  widget.busy
-                      ? null
-                      : () => widget.onDecide(PermissionVerdict.always),
-                ),
-            ],
-            allow: ApprovalAction(
-              PermissionVerdict.allow.label,
-              widget.busy
-                  ? null
-                  : () => widget.onDecide(PermissionVerdict.allow),
-            ),
-          ),
           if (widget.busy)
             const Padding(
               padding: EdgeInsets.only(top: 8),
