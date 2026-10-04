@@ -7,7 +7,6 @@ import 'package:conduit/features/agent_attention/domain/agent_attention_notifier
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_notification_settings.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
