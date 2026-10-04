@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
+import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -27,7 +29,11 @@ void main() {
     ScriptedAgentCommandRunner,
     RecordingAgentNotifier,
   )
-  build(List<Object> script, {SavedHost? host}) {
+  build(
+    List<Object> script, {
+    SavedHost? host,
+    AgentNotificationMode mode = AgentNotificationMode.ongoingAndUrgent,
+  }) {
     final workspace = TerminalWorkspaceController(
       ImmediateTerminalRepository(TrackableTerminalSession()),
     );
@@ -38,6 +44,10 @@ void main() {
       runnerFactory: (_) => runner,
       provider: const HerdrAttentionProvider(),
       notifier: notifier,
+      notificationPreferences: MemoryAgentNotificationPreferencesStore(
+        AgentNotificationPreferences(mode: mode),
+      ),
+      statusThrottle: AgentStatusThrottle(interval: Duration.zero),
       // Far beyond test duration; polls are driven manually via pollNow.
       pollInterval: const Duration(days: 1),
     );
@@ -125,7 +135,20 @@ void main() {
     );
   });
 
-  test('notifies when background work finishes', () async {
+  test('"Everything" notifies when background work finishes', () async {
+    final (workspace, controller, _, notifier) = build([
+      agents(working),
+      agents(done),
+    ], mode: AgentNotificationMode.everything);
+    await workspace.open(monitoredHost('h')).connect();
+    await pumpEventQueue();
+
+    await controller.pollNow('h');
+    expect(notifier.alerts.single.title, 'builder · Host h finished');
+  });
+
+  test('"Ongoing + urgent" keeps a finished turn to the status '
+      'notification', () async {
     final (workspace, controller, _, notifier) = build([
       agents(working),
       agents(done),
@@ -134,7 +157,8 @@ void main() {
     await pumpEventQueue();
 
     await controller.pollNow('h');
-    expect(notifier.alerts.single.title, 'builder · Host h finished');
+    expect(notifier.alerts, isEmpty);
+    expect(notifier.status?.lines.single, startsWith('builder · Done'));
   });
 
   test('honors per-host notification toggles', () async {

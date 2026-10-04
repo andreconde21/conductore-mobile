@@ -293,6 +293,12 @@ void main() {
               ? const ConductoreHostAttentionProvider()
               : const HerdrAttentionProvider(),
           notifier: notifier,
+          // The machine levels, under the "Everything" mode.
+          notificationPreferences: MemoryAgentNotificationPreferencesStore(
+            const AgentNotificationPreferences(
+              mode: AgentNotificationMode.everything,
+            ),
+          ),
           pollInterval: const Duration(days: 1),
         );
         controller.setAppForeground(false);

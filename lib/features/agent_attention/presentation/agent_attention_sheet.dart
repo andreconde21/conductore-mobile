@@ -371,6 +371,46 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
     }
   }
 
+  /// Long-press on an agent: mute or unmute its notifications on this
+  /// device.
+  Future<void> _agentMenu(
+    BuildContext context,
+    SavedHost host,
+    AgentInfo agent,
+  ) async {
+    final muted = controller.isAgentMuted(host.id, agent.id);
+    final picked = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              key: const ValueKey('agent-menu-mute'),
+              leading: Icon(
+                muted
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+              ),
+              title: Text(
+                muted ? 'Unmute notifications' : 'Mute notifications',
+              ),
+              subtitle: Text(
+                muted
+                    ? 'Alerts for this agent come back.'
+                    : 'No alerts for this agent on this device. The '
+                          'ongoing notification still lists it.',
+              ),
+              onTap: () => Navigator.of(context).pop(!muted),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    await controller.setAgentMuted(host.id, agent.id, muted: picked);
+  }
+
   Widget _row(
     BuildContext context,
     SavedHost host,
@@ -385,6 +425,8 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
       entry: entry,
       showHost: showHost,
       onOpen: () => widget.onOpenAgent(host, agent),
+      muted: controller.isAgentMuted(host.id, agent.id),
+      onLongPress: () => unawaited(_agentMenu(context, host, agent)),
       onOpenChat: openChat == null ? null : () => openChat(host, agent),
       onReview:
           reviewAvailable(controller, host) &&

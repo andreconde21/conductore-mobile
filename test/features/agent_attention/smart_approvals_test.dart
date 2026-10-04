@@ -380,9 +380,9 @@ void main() {
         'Approve Bash: rm -rf build · High risk',
         '  Deletes recursively (rm -rf): build',
       ]);
-      // High risk always asks: no Always button.
-      expect(notification.action?.requestId, 'req-high');
-      expect(notification.action?.allowAlways, isFalse);
+      // High risk is decided in the app: only Open.
+      expect(notification.action, isNull);
+      expect(notification.openButton, isTrue);
     });
   });
 

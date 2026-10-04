@@ -103,6 +103,49 @@ class AgentNotificationModelTest {
     }
 
     @Test
+    fun aQuestionOffersItsAnswersInsteadOfAllow() {
+        val question = spec(requestId = "q1", allowAlways = false).copy(
+            answers = listOf("Postgres", "SQLite", "Both", "Neither"),
+            question = "Which database?",
+            reviewAll = false,
+        )
+        assertTrue(AgentNotificationModel.verdicts(question).isEmpty())
+        val answers = AgentNotificationModel.answerPayloads(question)
+        // Android shows three actions at most.
+        assertEquals(listOf("Postgres", "SQLite", "Both"), answers.map { it.text })
+        for (payload in answers) {
+            assertEquals(AgentNotificationModel.ANSWER, payload.verdict)
+            assertEquals("q1", payload.requestId)
+            assertEquals("Which database?", payload.question)
+        }
+        assertEquals(question, AgentNotificationModel.Spec.fromJson(question.toJson()))
+        val parsed = AgentNotificationModel.Spec.fromMap(
+            mapOf(
+                "hostId" to "h", "agentId" to "s-1", "requestId" to "q1", "answers" to listOf("Yes", "No"),
+                "question" to "Ship it?", "reply" to false, "openButton" to false,
+            ),
+        )!!
+        assertEquals(listOf("Yes", "No"), parsed.answers)
+        assertEquals("Ship it?", parsed.question)
+    }
+
+    @Test
+    fun aReplyIsGuardedLikeTheOtherButtons() {
+        val token = "0123456789abcdef0123456789abcdef"
+        val waiting = spec(requestId = null).copy(reply = true, openButton = true)
+        val payload = AgentNotificationModel.replyPayload(waiting)!!
+        assertEquals(AgentNotificationModel.REPLY, payload.verdict)
+        assertEquals(AgentNotificationModel.REPLY_REQUEST, payload.requestId)
+        val issued = AgentNotificationModel.issued(waiting, token)
+        assertTrue(PermissionActionGuard.accepts(issued, payload.hostId, payload.requestId, token))
+        assertFalse(PermissionActionGuard.accepts(issued, payload.hostId, payload.requestId, "f".repeat(32)))
+        // Without Reply nothing is issued.
+        assertNull(AgentNotificationModel.replyPayload(spec(requestId = null)))
+        assertNull(AgentNotificationModel.issued(spec(requestId = null), token))
+        assertEquals(waiting, AgentNotificationModel.Spec.fromJson(waiting.toJson()))
+    }
+
+    @Test
     fun tokensStillGuardTheButtons() {
         val token = "0123456789abcdef0123456789abcdef"
         val issued = AgentNotificationModel.issued(spec(requestId = "r1"), token)

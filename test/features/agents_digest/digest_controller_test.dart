@@ -72,6 +72,40 @@ void main() {
     detach();
   });
 
+  testWidgets('keeps the facts fresh with no view while asked, for the '
+      'stuck alerts', (tester) async {
+    runner = FakeDigestRunner(
+      facts: digestReplyJson([
+        digestAgentJson(
+          'api',
+          state: 'working',
+          stuck: [
+            {'rule': 'repeating', 'reason': 'Ran `npm test` 6 times'},
+          ],
+        ),
+      ]),
+    );
+    source = FakeDigestSource([digestHost('box')], {'box': runner});
+    final controller = build();
+    controller.keepFactsFresh(true);
+    await tester.pump(controller.freshFactsInterval);
+    await tester.pump();
+    expect(runner.commands, hasLength(1));
+    expect(runner.commands.single, isNot(contains('--summaries')));
+    expect(controller.cachedStuckFor('box', 'api'), 'Ran `npm test` 6 times');
+    expect(controller.cachedStuckFor('box', 'web'), isNull);
+
+    // Fresh enough: the next tick asks again only once the interval passed.
+    now = now.add(controller.freshFactsInterval);
+    await tester.pump(controller.freshFactsInterval);
+    await tester.pump();
+    expect(runner.commands, hasLength(2));
+
+    controller.keepFactsFresh(false);
+    await tester.pump(controller.freshFactsInterval * 3);
+    expect(runner.commands, hasLength(2));
+  });
+
   testWidgets('polls facts while visible, never summaries; stops when hidden', (
     tester,
   ) async {

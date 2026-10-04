@@ -376,8 +376,30 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.agents,
-    'Notify when an agent finishes',
+    'Ongoing + urgent',
+    keywords: [
+      'notify',
+      'notifications',
+      'mode',
+      'ongoing',
+      'status',
+      'urgent',
+      'everything',
+      'verbose',
+      'quiet',
+    ],
+    availableWhen: _agentNotifications,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Also alert when an agent finishes',
     keywords: ['notify', 'finished', 'done', 'turn ended', 'idle'],
+    availableWhen: _agentNotifications,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Stuck or looping',
+    keywords: ['notify', 'stuck', 'loop', 'repeating', 'no progress'],
     availableWhen: _agentNotifications,
   ),
   SettingsEntry(

@@ -83,6 +83,31 @@ void main() {
     expect(find.text('Needs input'), findsOneWidget);
   });
 
+  testWidgets('long-press an agent to mute its notifications', (tester) async {
+    final (controller, _, _) = await pumpSheet(tester, [
+      const AgentCommandResult(
+        stdout: '[{"name": "builder", "state": "working"}]',
+        stderr: '',
+        exitCode: 0,
+      ),
+    ]);
+    final agent = controller.statusFor('h')!.agents.single;
+
+    await tester.longPress(find.text('builder'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mute notifications'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('agent-menu-mute')));
+    await tester.pumpAndSettle();
+    expect(controller.isAgentMuted('h', agent.id), isTrue);
+    expect(find.textContaining('Muted'), findsOneWidget);
+
+    await tester.longPress(find.text('builder'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unmute notifications'));
+    await tester.pumpAndSettle();
+    expect(controller.isAgentMuted('h', agent.id), isFalse);
+  });
+
   testWidgets('shows the no-agents empty state', (tester) async {
     await pumpSheet(tester, [
       const AgentCommandResult(stdout: '[]', stderr: '', exitCode: 0),

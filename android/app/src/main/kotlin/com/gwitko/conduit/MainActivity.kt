@@ -1,10 +1,6 @@
 package com.gwitko.conduit
 
 import android.Manifest
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -233,75 +229,65 @@ class MainActivity : FlutterFragmentActivity() {
     }
 }
 
+/**
+ * Keeps live sessions connected while the app is in the background. Its
+ * notification is the agents' ongoing status when there is one
+ * ([AgentOngoingNotification], same id), else the session count.
+ */
 class BackgroundConnectionService : Service() {
     override fun onCreate() {
         super.onCreate()
-        ensureNotificationChannel()
+        AgentOngoingNotification.ensureChannel(this)
+        running = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val sessionCount = intent?.getIntExtra(SESSION_COUNT_EXTRA, 0) ?: 0
-        val notification = buildNotification(sessionCount)
+        AgentOngoingNotification.serviceSessions = sessionCount
+        val notification = AgentOngoingNotification.build(this, sessionCount)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                NOTIFICATION_ID,
+                AgentOngoingNotification.NOTIFICATION_ID,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            startForeground(AgentOngoingNotification.NOTIFICATION_ID, notification)
         }
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
-        val manager = getSystemService(NotificationManager::class.java)
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Active sessions",
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = "Keeps active sessions running while Conductore is in the background."
-            setShowBadge(false)
-        }
-        manager.createNotificationChannel(channel)
+    override fun onDestroy() {
+        if (running === this) running = null
+        AgentOngoingNotification.serviceSessions = null
+        super.onDestroy()
     }
 
-    private fun buildNotification(sessionCount: Int): Notification {
-        val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
+    /**
+     * Stops the service; a status notification outlives it (detached from
+     * the service and re-posted as a plain ongoing one).
+     */
+    private fun stopKeepingStatus() {
+        AgentOngoingNotification.serviceSessions = null
+        val keep = AgentOngoingNotification.status != null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(if (keep) STOP_FOREGROUND_DETACH else STOP_FOREGROUND_REMOVE)
         } else {
             @Suppress("DEPRECATION")
-            Notification.Builder(this)
+            stopForeground(!keep)
         }
-
-        val sessionLabel = if (sessionCount == 1) "session" else "sessions"
-
-        return builder
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Conductore")
-            .setContentText("$sessionCount active $sessionLabel")
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build()
+        stopSelf()
+        if (keep) AgentOngoingNotification.update(applicationContext, AgentOngoingNotification.status)
     }
 
     companion object {
-        private const val CHANNEL_ID = "ssh_sessions"
-        private const val NOTIFICATION_ID = 1001
         private const val SESSION_COUNT_EXTRA = "session_count"
+
+        /** The running service, if any (same process, main thread). */
+        @Volatile
+        private var running: BackgroundConnectionService? = null
 
         fun start(context: Context, sessionCount: Int) {
             val intent = Intent(context, BackgroundConnectionService::class.java).apply {
@@ -315,7 +301,12 @@ class BackgroundConnectionService : Service() {
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, BackgroundConnectionService::class.java))
+            val service = running
+            if (service != null) {
+                service.stopKeepingStatus()
+            } else {
+                context.stopService(Intent(context, BackgroundConnectionService::class.java))
+            }
         }
     }
 }

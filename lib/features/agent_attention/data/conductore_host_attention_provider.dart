@@ -470,6 +470,13 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       lastAutoApprovedAt: _timestamp(item['lastAutoApprovedAt']),
       stateSequence: _int(item['stateSeq']),
       permissionMode: _string(item['permissionMode']),
+      lastEvent: _string(item['lastEvent']),
+      lastToolName: _string(item['lastToolName']),
+      lastError: switch (item['lastError']) {
+        final Map<Object?, Object?> error =>
+          _string(error['type']) ?? 'unknown',
+        _ => null,
+      },
     );
   }
 

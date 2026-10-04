@@ -271,6 +271,20 @@ void main() {
   );
   // An agent's expanded notification ends with its dashboard line.
   agentAttention.notificationDetail = digest.cachedLineFor;
+  // The urgent modes alert on the dashboard's stuck flags (CON-074): its
+  // facts stay fresh in the background while they are wanted, and each new
+  // answer re-checks the alerts and the ongoing status.
+  agentAttention.stuckReasonFor = digest.cachedStuckFor;
+  void syncStuckFacts() {
+    final preferences = agentAttention.notificationPreferences;
+    digest.keepFactsFresh(
+      preferences.mode.urgentOnlyAlerts && preferences.stuck,
+    );
+  }
+
+  agentAttention.addListener(syncStuckFacts);
+  syncStuckFacts();
+  digest.addListener(() => unawaited(agentAttention.resyncNotifications()));
   // Herdr sidebar tokens and the worktree location, per companion; read
   // from storage only once a companion that takes them connects.
   final companionPreferences = CompanionPreferences.instance =

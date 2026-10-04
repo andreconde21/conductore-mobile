@@ -300,11 +300,19 @@ class AgentInboxRow extends StatelessWidget {
     this.onOpenChat,
     this.onReview,
     this.pending,
+    this.onLongPress,
+    this.muted = false,
     super.key,
   });
 
   final AgentInboxEntry entry;
   final VoidCallback onOpen;
+
+  /// The row's long-press menu (Mute notifications).
+  final VoidCallback? onLongPress;
+
+  /// Its notifications are muted on this device.
+  final bool muted;
 
   /// False when the group header already names the host.
   final bool showHost;
@@ -334,6 +342,7 @@ class AgentInboxRow extends StatelessWidget {
       if (isHerdrOnlyAgent(agent))
         '${AgentKindStyle.of(agent.kind).label} via Herdr',
       if (changed != null) relativeAgentTime(changed),
+      if (muted) 'Muted',
     ].join(' · ');
     final message = agent.lastMessage?.trim();
     return Padding(
@@ -359,6 +368,7 @@ class AgentInboxRow extends StatelessWidget {
                   '${entry.hostName}, ${state.label}',
               child: InkWell(
                 onTap: onOpen,
+                onLongPress: onLongPress,
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                   child: Row(

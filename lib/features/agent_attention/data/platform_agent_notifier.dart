@@ -1,6 +1,7 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
+import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -53,6 +54,10 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
   Future<void> cancelAgent({required String key}) =>
       _invoke('cancelAgent', {'key': key});
 
+  @override
+  Future<void> showStatus(AgentOngoingStatus? status) =>
+      _invoke('showStatus', {'status': status?.toArguments()});
+
   /// Routes native-to-Dart calls on [channel] to the permission action and
   /// open-agent listeners; the channel has one handler slot for both.
   static void _installHandler() {
@@ -95,8 +100,8 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
   }
 }
 
-/// Receives Allow / Deny / Always taps from the Android notification
-/// actions over the same channel. The native side queues each tap in
+/// Receives Allow / Deny / Always, answer and Reply taps from the Android
+/// notification actions over the same channel. The native side queues each tap in
 /// SharedPreferences (so a tap that started the app is delivered after
 /// Dart is ready) and calls `permissionActionAvailable` while the engine
 /// is alive.
@@ -144,6 +149,8 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
               agentId: item['agentId'] as String? ?? '',
               requestId: item['requestId'] as String,
               verdict: item['verdict'] as String? ?? '',
+              text: item['text'] as String? ?? '',
+              question: item['question'] as String? ?? '',
             ),
     ];
   }

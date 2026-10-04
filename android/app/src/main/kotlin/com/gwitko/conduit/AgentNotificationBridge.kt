@@ -6,6 +6,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -34,6 +35,8 @@ import java.security.SecureRandom
  *   agent's first pending request.
  * - `showAgent(...)`: posts or updates one agent's notification.
  * - `cancelAgent(key)`: removes one agent's notification.
+ * - `showStatus(status)`: the ongoing status notification listing every
+ *   agent ([AgentOngoingNotification]); a null status removes it.
  * - `consumePermissionActions()` -> `List<Map>`: queued action taps, cleared.
  * - `consumeOpenAgent()` -> `Map?`: the agent a tapped notification points
  *   at (`hostId`, `agentId`, `workspaceId`, `tabId`, `paneId`), cleared.
@@ -49,6 +52,10 @@ import java.security.SecureRandom
  *   the app is locked or not yet listening).
  * - `openAgentAvailable()`: a notification body was tapped while the engine
  *   runs; Dart calls `consumeOpenAgent`.
+ *
+ * Besides Allow / Deny / Always, an agent notification may carry answer
+ * buttons (a single-choice question), a Reply with an inline text field
+ * (typed into the agent) and an Open button (CON-074).
  *
  * Action taps go through [AgentPermissionActionReceiver], which queues the
  * tap durably and pings Dart when the engine is alive. When the engine goes
@@ -79,7 +86,11 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         channel = null
         // Nobody is listening for broadcast actions any more: make the
         // buttons launch the app instead.
-        context?.let { AgentNotificationStore.repostForLaunch(it) }
+        context?.let {
+            AgentNotificationStore.repostForLaunch(it)
+            // Nobody updates the status any more.
+            AgentOngoingNotification.update(it, null)
+        }
         context = null
     }
 
@@ -206,6 +217,11 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                 AgentNotificationStore.cancel(ctx, call.argument<String>("id") ?: "")
                 result.success(null)
             }
+            "showStatus" -> {
+                val status = (call.argument<Map<*, *>>("status"))?.let(AgentOngoingNotification.Status::fromMap)
+                AgentOngoingNotification.update(ctx, status)
+                result.success(null)
+            }
             "consumePermissionActions" -> result.success(AgentNotificationStore.consumeActions(ctx))
             else -> result.notImplemented()
         }
@@ -324,6 +340,10 @@ object AgentNotificationStore {
         val body: String,
         val token: String = "",
         val agentId: String = "",
+        /** The answer's option label, or the Reply's text. */
+        val text: String = "",
+        /** The question an answer button answers. */
+        val question: String = "",
     )
 
     private const val PREFS = "conduit_agent_notifications"
@@ -346,9 +366,14 @@ object AgentNotificationStore {
     const val EXTRA_TITLE = "com.gwitko.conduit.TITLE"
     const val EXTRA_BODY = "com.gwitko.conduit.BODY"
     const val EXTRA_TOKEN = "com.gwitko.conduit.TOKEN"
+    const val EXTRA_TEXT = "com.gwitko.conduit.TEXT"
+    const val EXTRA_QUESTION = "com.gwitko.conduit.QUESTION"
+
+    /** The Reply button's inline text field. */
+    const val KEY_REPLY = "com.gwitko.conduit.REPLY_TEXT"
     val ACTION_EXTRAS = listOf(
         EXTRA_NOTIFICATION_ID, EXTRA_HOST_ID, EXTRA_AGENT_ID, EXTRA_REQUEST_ID, EXTRA_VERDICT, EXTRA_TITLE,
-        EXTRA_BODY, EXTRA_TOKEN,
+        EXTRA_BODY, EXTRA_TOKEN, EXTRA_TEXT, EXTRA_QUESTION,
     )
     const val EXTRA_OPEN_HOST_ID = "com.gwitko.conduit.OPEN_HOST_ID"
     const val EXTRA_OPEN_AGENT_ID = "com.gwitko.conduit.OPEN_AGENT_ID"
@@ -360,6 +385,9 @@ object AgentNotificationStore {
         EXTRA_OPEN_PANE_ID,
     )
     private val VERDICT_LABELS = mapOf("allow" to "Allow", "deny" to "Deny", "always" to "Always")
+
+    /** The label of the button that only opens the agent, like the body. */
+    private const val OPEN_LABEL = "Open"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -559,28 +587,36 @@ object AgentNotificationStore {
             builder.setPriority(Notification.PRIORITY_HIGH)
         }
         val verdicts = AgentNotificationModel.verdicts(spec)
-        if (verdicts.isEmpty()) {
+        val answers = AgentNotificationModel.answerPayloads(spec)
+        val launch = PermissionActionGuard.buttonsLaunchApp(
+            Build.VERSION.SDK_INT,
+            engineListening = !launchApp,
+        )
+        // A Reply needs the running app to send it: once the engine is gone
+        // the body (and Open) open the agent instead.
+        val reply = if (launch) null else AgentNotificationModel.replyPayload(spec)
+        if (verdicts.isEmpty() && answers.isEmpty() && reply == null) {
             forgetToken(context, spec.key)
         } else {
             val token = issueToken(context, spec)
-            val launch = PermissionActionGuard.buttonsLaunchApp(
-                Build.VERSION.SDK_INT,
-                engineListening = !launchApp,
-            )
             for ((verdict, label) in verdicts) {
                 val payload = AgentNotificationModel.buttonPayload(spec, verdict) ?: continue
                 builder.addAction(button(context, spec, payload, label, token, launch))
             }
+            for ((index, payload) in answers.withIndex()) {
+                builder.addAction(button(context, spec, payload, payload.text, token, launch, index))
+            }
+            if (reply != null) builder.addAction(replyButton(context, spec, reply, token))
         }
-        if (spec.reviewAll) {
+        if (spec.reviewAll || spec.openButton) {
             // Opens the agent, like the body: nothing is decided.
             @Suppress("DEPRECATION")
-            val review = Notification.Action.Builder(
+            val open = Notification.Action.Builder(
                 0,
-                "Review all",
+                if (spec.reviewAll) "Review all" else OPEN_LABEL,
                 launchIntent(context, (spec.key + ":review").hashCode()) { spec.open?.putInto(this) },
             )
-            builder.addAction(review.build())
+            builder.addAction(open.build())
         }
         manager.notify(TAG, id, builder.build())
         return spec.copy(postedAt = postedAt)
@@ -593,18 +629,10 @@ object AgentNotificationStore {
         label: String,
         token: String,
         launch: Boolean,
+        index: Int = 0,
     ): Notification.Action {
-        val requestCode = (payload.notificationId + payload.verdict).hashCode()
-        val fill: Intent.() -> Unit = {
-            putExtra(EXTRA_NOTIFICATION_ID, payload.notificationId)
-            putExtra(EXTRA_HOST_ID, payload.hostId)
-            putExtra(EXTRA_AGENT_ID, payload.agentId)
-            putExtra(EXTRA_REQUEST_ID, payload.requestId)
-            putExtra(EXTRA_VERDICT, payload.verdict)
-            putExtra(EXTRA_TITLE, spec.title)
-            putExtra(EXTRA_BODY, spec.text)
-            putExtra(EXTRA_TOKEN, token)
-        }
+        val requestCode = (payload.notificationId + payload.verdict + index).hashCode()
+        val fill = fillAction(spec, payload, token)
         val pending = if (launch) {
             launchIntent(context, requestCode, fill)
         } else {
@@ -612,7 +640,9 @@ object AgentNotificationStore {
                 action = ACTION_DECIDE
                 // Distinct data per button so the system never merges the
                 // PendingIntents.
-                data = Uri.parse("conductore://decide/${Uri.encode(payload.notificationId)}/${payload.verdict}")
+                data = Uri.parse(
+                    "conductore://decide/${Uri.encode(payload.notificationId)}/${payload.verdict}/$index",
+                )
                 fill()
             }
             PendingIntent.getBroadcast(
@@ -629,6 +659,57 @@ object AgentNotificationStore {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Allow / Deny / Always decide for the host (Always for good):
             // never from a locked phone.
+            button.setAuthenticationRequired(true)
+        }
+        return button.build()
+    }
+
+    private fun fillAction(
+        spec: AgentNotificationModel.Spec,
+        payload: AgentNotificationModel.ButtonPayload,
+        token: String,
+    ): Intent.() -> Unit = {
+        putExtra(EXTRA_NOTIFICATION_ID, payload.notificationId)
+        putExtra(EXTRA_HOST_ID, payload.hostId)
+        putExtra(EXTRA_AGENT_ID, payload.agentId)
+        putExtra(EXTRA_REQUEST_ID, payload.requestId)
+        putExtra(EXTRA_VERDICT, payload.verdict)
+        putExtra(EXTRA_TITLE, spec.title)
+        putExtra(EXTRA_BODY, spec.text)
+        putExtra(EXTRA_TOKEN, token)
+        putExtra(EXTRA_TEXT, payload.text)
+        putExtra(EXTRA_QUESTION, payload.question)
+    }
+
+    /**
+     * Reply: an inline text field whose text the receiver queues for Dart,
+     * which types it into the agent. Android fills the field's result into
+     * the intent, so its PendingIntent must be mutable.
+     */
+    private fun replyButton(
+        context: Context,
+        spec: AgentNotificationModel.Spec,
+        payload: AgentNotificationModel.ButtonPayload,
+        token: String,
+    ): Notification.Action {
+        val fill = fillAction(spec, payload, token)
+        val intent = Intent(context, AgentPermissionActionReceiver::class.java).apply {
+            action = ACTION_DECIDE
+            data = Uri.parse("conductore://reply/${Uri.encode(payload.notificationId)}")
+            fill()
+        }
+        val mutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+        val pending = PendingIntent.getBroadcast(
+            context,
+            (payload.notificationId + payload.verdict).hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or mutable,
+        )
+        val input = RemoteInput.Builder(KEY_REPLY).setLabel("Message to the agent").build()
+        @Suppress("DEPRECATION")
+        val button = Notification.Action.Builder(0, "Reply", pending).addRemoteInput(input)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Typed into the agent: never from a locked phone.
             button.setAuthenticationRequired(true)
         }
         return button.build()
@@ -692,15 +773,19 @@ object AgentNotificationStore {
 
     /** Replaces the buttons with a "sending" line so a second tap cannot double-decide. */
     fun showSending(context: Context, action: PermissionAction) {
-        showStatus(context, action, "Sending ${label(action.verdict)}…", launchOnTap = false)
+        showStatus(context, action, "Sending ${label(action)}…", launchOnTap = false)
     }
 
     /** The engine is gone: the queued tap completes once the app is opened. */
     fun showOpenToFinish(context: Context, action: PermissionAction) {
-        showStatus(context, action, "Tap to open Conductore and finish: ${label(action.verdict)}", launchOnTap = true)
+        showStatus(context, action, "Tap to open Conductore and finish: ${label(action)}", launchOnTap = true)
     }
 
-    private fun label(verdict: String) = VERDICT_LABELS[verdict] ?: verdict
+    private fun label(action: PermissionAction) = when (action.verdict) {
+        AgentNotificationModel.ANSWER -> "“${action.text}”"
+        AgentNotificationModel.REPLY -> "your reply"
+        else -> VERDICT_LABELS[action.verdict] ?: action.verdict
+    }
 
     /** The agent's notification without buttons, saying where its tap stands. */
     @Synchronized
@@ -710,7 +795,13 @@ object AgentNotificationStore {
         if (spec != null) {
             // Answered: a re-post (the engine going away) must not bring
             // the buttons back.
-            stored[spec.key] = spec.copy(action = null, reviewAll = false)
+            stored[spec.key] = spec.copy(
+                action = null,
+                reviewAll = false,
+                answers = emptyList(),
+                reply = false,
+                openButton = false,
+            )
             saveAgents(context, stored)
         }
         val manager = manager(context) ?: return
@@ -741,7 +832,7 @@ object AgentNotificationStore {
     @Synchronized
     fun repostForLaunch(context: Context) {
         for (spec in agents(context).values) {
-            if (spec.action != null) post(context, spec.copy(alert = false), spec, launchApp = true)
+            if (spec.action != null || spec.reply) post(context, spec.copy(alert = false), spec, launchApp = true)
         }
     }
 
@@ -758,6 +849,12 @@ object AgentNotificationStore {
         val hostId = intent?.getStringExtra(EXTRA_HOST_ID) ?: return null
         val requestId = intent.getStringExtra(EXTRA_REQUEST_ID) ?: return null
         val verdict = intent.getStringExtra(EXTRA_VERDICT) ?: return null
+        val text = if (verdict == AgentNotificationModel.REPLY) {
+            RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)?.toString()
+                ?: intent.getStringExtra(EXTRA_TEXT)
+        } else {
+            intent.getStringExtra(EXTRA_TEXT)
+        }
         return PermissionAction(
             notificationId = intent.getStringExtra(EXTRA_NOTIFICATION_ID) ?: "",
             hostId = hostId,
@@ -767,6 +864,8 @@ object AgentNotificationStore {
             body = intent.getStringExtra(EXTRA_BODY) ?: "",
             token = intent.getStringExtra(EXTRA_TOKEN) ?: "",
             agentId = intent.getStringExtra(EXTRA_AGENT_ID) ?: "",
+            text = text ?: "",
+            question = intent.getStringExtra(EXTRA_QUESTION) ?: "",
         )
     }
 
@@ -824,10 +923,10 @@ object AgentNotificationStore {
      */
     @Synchronized
     private fun issueToken(context: Context, spec: AgentNotificationModel.Spec): String {
-        val action = spec.action ?: return ""
+        val requestId = AgentNotificationModel.tokenRequestId(spec) ?: return ""
         val tokens = tokens(context)
         val current = tokens.optJSONObject(spec.key)?.let(::issuedFrom)
-        if (current != null && current.hostId == spec.hostId && current.requestId == action.requestId) {
+        if (current != null && current.hostId == spec.hostId && current.requestId == requestId) {
             return current.token
         }
         val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
@@ -837,7 +936,7 @@ object AgentNotificationStore {
             JSONObject()
                 .put("token", token)
                 .put("hostId", spec.hostId)
-                .put("requestId", action.requestId),
+                .put("requestId", requestId),
         )
         prefs(context).edit().putString(KEY_TOKENS, tokens.toString()).apply()
         return token
@@ -892,7 +991,9 @@ object AgentNotificationStore {
                 .put("hostId", action.hostId)
                 .put("agentId", action.agentId)
                 .put("requestId", action.requestId)
-                .put("verdict", action.verdict),
+                .put("verdict", action.verdict)
+                .put("text", action.text)
+                .put("question", action.question),
         )
         prefs(context).edit().putString(KEY_ACTIONS, queue.toString()).apply()
     }
@@ -911,6 +1012,8 @@ object AgentNotificationStore {
                     "agentId" to item.optString("agentId"),
                     "requestId" to item.optString("requestId"),
                     "verdict" to item.optString("verdict"),
+                    "text" to item.optString("text"),
+                    "question" to item.optString("question"),
                 ),
             )
         }

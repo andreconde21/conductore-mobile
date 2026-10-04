@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
+import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 
 /// Where tapping a notification's body takes the app: one agent on one
 /// host, with its Herdr location when the provider reports it.
@@ -103,6 +104,12 @@ abstract class AgentAttentionNotifier {
 
   /// Removes the agent notification [key] ([agentNotificationKey]).
   Future<void> cancelAgent({required String key});
+
+  /// Posts or updates the one ongoing, silent status notification that
+  /// lists every agent; null removes it. On Android it is the background
+  /// service's notification while that runs. Tapping it opens the agents
+  /// dashboard.
+  Future<void> showStatus(AgentOngoingStatus? status);
 }
 
 /// Delivers notification taps that should open an agent.

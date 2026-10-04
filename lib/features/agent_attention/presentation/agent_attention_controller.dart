@@ -12,7 +12,9 @@ import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
+import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
+import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -88,6 +90,12 @@ class AgentHostStatus {
 /// nor leaves an answered agent's notification behind. A request that
 /// timed out on the host (the agent still waits, now in the terminal)
 /// turns the notification into "is waiting for you".
+///
+/// That is the "Everything" mode. The default "Ongoing + urgent" mode
+/// (CON-074) posts one ongoing, silent status notification listing every
+/// agent ([AgentStatusSummary], throttled by [AgentStatusThrottle]) and
+/// per-agent alerts only for urgent needs ([UrgentNotificationPolicy]);
+/// "Urgent only" drops the status notification. Muted agents never notify.
 class AgentAttentionController extends ChangeNotifier {
   AgentAttentionController({
     required TerminalWorkspaceController workspace,
@@ -98,8 +106,12 @@ class AgentAttentionController extends ChangeNotifier {
     AgentNotificationPreferencesStore? notificationPreferences,
     Duration pollInterval = const Duration(seconds: 15),
     Duration watchRestartDelay = const Duration(milliseconds: 500),
+    AgentStatusThrottle? statusThrottle,
+    DateTime Function()? clock,
     this.persistMonitoringEnabled,
-  }) : _workspace = workspace,
+  }) : _statusThrottle = statusThrottle ?? AgentStatusThrottle(),
+       _clock = clock ?? DateTime.now,
+       _workspace = workspace,
        _runnerFactory = runnerFactory,
        _provider = provider,
        _companionProvider = companionProvider,
@@ -165,6 +177,15 @@ class AgentAttentionController extends ChangeNotifier {
   /// (host id, agent id), shown in its expanded notification. The app
   /// wires it to the digest once that exists.
   String? Function(String hostId, String agentId)? notificationDetail;
+
+  /// The agents dashboard's first stuck flag for an agent (host id, agent
+  /// id), for the urgent "looks stuck" alert. The app wires it to the
+  /// digest; call [resyncNotifications] when its answer changes.
+  String? Function(String hostId, String agentId)? stuckReasonFor;
+
+  final AgentStatusThrottle _statusThrottle;
+  final DateTime Function() _clock;
+  Timer? _statusTimer;
 
   /// A monitored machine's companion reported (other) capabilities: the
   /// app pushes its companion settings there (herdr-sidebar, worktree
@@ -383,23 +404,32 @@ class AgentAttentionController extends ChangeNotifier {
   /// Completes a notification action tap: answers the request on [host]
   /// (through its monitor when connected, else over a one-off connection)
   /// and updates the agent's notification (the next item, or gone), or
-  /// rewrites it to say the decision failed. Never throws.
+  /// rewrites it to say the decision failed. An answer button answers its
+  /// question through the same `decide`; a Reply is typed into the agent
+  /// through the companion's `send`, like the Chat View. Never throws.
   Future<void> completePermissionAction(
     AgentPermissionAction action,
     SavedHost? host,
   ) async {
     final notifier = _notifier;
-    final verdict = PermissionVerdict.values
-        .where((value) => value.wireName == action.verdict)
-        .firstOrNull;
+    final answering = action.verdict == AgentPermissionAction.answerVerdict;
+    final replying = action.verdict == AgentPermissionAction.replyVerdict;
+    final verdict = answering
+        ? PermissionVerdict.allow
+        : PermissionVerdict.values
+              .where((value) => value.wireName == action.verdict)
+              .firstOrNull;
     final hasAgent = action.agentId.isNotEmpty;
     final key = hasAgent
         ? agentNotificationKey(action.hostId, action.agentId)
         : action.notificationId;
     Future<void> failed(String reason) async {
-      final body =
-          'Open Conductore to answer the request'
-          '${host == null ? '' : ' on ${host.name}'}. $reason';
+      final body = replying
+          ? 'Open Conductore to send it'
+                '${host == null ? '' : ' on ${host.name}'}. $reason'
+          : 'Open Conductore to answer the request'
+                '${host == null ? '' : ' on ${host.name}'}. $reason';
+      final title = replying ? 'Reply not sent' : 'Permission decision failed';
       if (!hasAgent) {
         await notifier?.show(
           id: action.notificationId,
@@ -416,10 +446,10 @@ class AgentAttentionController extends ChangeNotifier {
           hostId: action.hostId,
           agentId: action.agentId,
           need: AgentNeed.approval,
-          title: 'Permission decision failed',
+          title: title,
           text: body,
           lines: [body],
-          publicTitle: 'Conductore: permission decision failed',
+          publicTitle: 'Conductore: ${title.toLowerCase()}',
           alert: true,
           alertKey: 'failed:${action.requestId}',
           open: AgentOpenTarget(hostId: action.hostId, agentId: action.agentId),
@@ -431,15 +461,27 @@ class AgentAttentionController extends ChangeNotifier {
       await failed('The machine is no longer saved.');
       return;
     }
-    if (verdict == null) {
+    if (replying) {
+      await _completeReply(action, host, key, failed);
+      return;
+    }
+    if (verdict == null || (answering && action.text.isEmpty)) {
       await failed('Unknown action.');
       return;
     }
-    final request = PendingPermissionRequest(
+    final question = answering ? _questionOf(host.id, action) : '';
+    if (answering && question.isEmpty) {
+      await failed('The question is no longer known.');
+      return;
+    }
+    final asked = PendingPermissionRequest(
       id: action.requestId,
-      toolName: '',
+      toolName: answering ? PendingPermissionRequest.questionTool : '',
       summary: '',
     );
+    final request = answering
+        ? asked.withAnswers({question: action.text})
+        : asked;
     final monitor = _monitors[host.id];
     try {
       if (monitor != null) {
@@ -489,6 +531,55 @@ class AgentAttentionController extends ChangeNotifier {
     }
   }
 
+  /// The question an answer button answers: as the notification carried
+  /// it, else the one the monitor still lists for the request.
+  String _questionOf(String hostId, AgentPermissionAction action) {
+    if (action.question.isNotEmpty) {
+      return action.question;
+    }
+    for (final agent
+        in _monitors[hostId]?.status.agents ?? const <AgentInfo>[]) {
+      for (final request in agent.pendingRequests) {
+        if (request.id == action.requestId && request.questions.length == 1) {
+          return request.questions.single.question;
+        }
+      }
+    }
+    return '';
+  }
+
+  /// Types a notification's Reply into its agent through the companion's
+  /// `send` (the monitor's connection, else a one-off one). Sent, the
+  /// alert goes: the user answered it. The agent's next state notifies as
+  /// usual.
+  Future<void> _completeReply(
+    AgentPermissionAction action,
+    SavedHost host,
+    String key,
+    Future<void> Function(String reason) failed,
+  ) async {
+    final text = action.text.trim();
+    if (text.isEmpty || action.agentId.isEmpty) {
+      await failed('Nothing to send.');
+      return;
+    }
+    final monitor = _monitors[host.id];
+    final runner = monitor?.runner ?? _runnerFactory(host);
+    try {
+      await ConductoreChatClient(runner).send(action.agentId, text);
+    } catch (error) {
+      await failed(error.toString());
+      return;
+    } finally {
+      if (monitor == null) unawaited(runner.close());
+    }
+    // The need stays known (its notice), so the same state never alerts
+    // again; Android does not bring back a silent update it no longer
+    // shows.
+    await _notifier?.cancelAgent(key: key);
+    if (monitor != null) unawaited(_poll(monitor));
+  }
+
   /// Settings › Agents › Notifications.
   AgentNotificationPreferences get notificationPreferences =>
       _notificationPreferences;
@@ -501,12 +592,44 @@ class AgentAttentionController extends ChangeNotifier {
     if (preferences == _notificationPreferences) {
       return;
     }
+    final modeChanged = preferences.mode != _notificationPreferences.mode;
     _notificationPreferences = preferences;
     notifyListeners();
-    for (final monitor in _monitors.values) {
-      await _syncNotifications(monitor, entered: const {});
+    if (modeChanged) {
+      // Another mode posts other notifications; what was notified stays
+      // known, so the same need does not alert again.
+      _sentNotifications.clear();
     }
+    await resyncNotifications();
     await _notificationStore.save(preferences);
+  }
+
+  /// Whether [agentId] on [hostId] is muted on this device.
+  bool isAgentMuted(String hostId, String agentId) =>
+      _notificationPreferences.isMuted(hostId, agentId);
+
+  /// Mutes (or unmutes) one agent's notifications on this device: its
+  /// alerts go now and never come back while muted. The ongoing status
+  /// still lists it.
+  Future<void> setAgentMuted(
+    String hostId,
+    String agentId, {
+    required bool muted,
+  }) => setNotificationPreferences(
+    _notificationPreferences.withMuted(hostId, agentId, muted: muted),
+  );
+
+  /// Brings every agent notification and the ongoing status in line with
+  /// what is known now (no state counts as newly entered).
+  Future<void> resyncNotifications() async {
+    for (final monitor in _monitors.values.toList()) {
+      // Before its first snapshot a host has nothing to say yet (and an
+      // empty list would clear what an earlier run left showing).
+      if (monitor.sawInitialSnapshot) {
+        await _syncNotifications(monitor, entered: const {});
+      }
+    }
+    _syncStatus();
   }
 
   Future<void> _loadNotificationPreferences() async {
@@ -516,6 +639,7 @@ class AgentAttentionController extends ChangeNotifier {
     }
     _notificationPreferences = loaded;
     notifyListeners();
+    await resyncNotifications();
   }
 
   // --- smart approvals ------------------------------------------------------
@@ -950,6 +1074,7 @@ class AgentAttentionController extends ChangeNotifier {
       updatedAt: monitor.status.updatedAt,
     );
     unawaited(_syncNotifications(monitor, entered: const {}));
+    _syncStatus();
   }
 
   void _syncMonitors() {
@@ -1020,6 +1145,7 @@ class AgentAttentionController extends ChangeNotifier {
     monitor.timer?.cancel();
     monitor.timer = null;
     unawaited(monitor.runner.close());
+    _syncStatus();
   }
 
   void _startTimer(_HostMonitor monitor) {
@@ -1028,6 +1154,9 @@ class AgentAttentionController extends ChangeNotifier {
   }
 
   void _onTick(_HostMonitor monitor) {
+    // Refreshes an unchanged status now and then (the platform drops one
+    // nobody refreshed), even while the long-poll has nothing new.
+    _syncStatus();
     if (monitor.skipTicks > 0) {
       monitor.skipTicks -= 1;
       return;
@@ -1333,6 +1462,7 @@ class AgentAttentionController extends ChangeNotifier {
               agent.id,
       },
     );
+    _syncStatus();
   }
 
   /// Brings the host's agent notifications in line with its agents: one
@@ -1352,6 +1482,7 @@ class AgentAttentionController extends ChangeNotifier {
     }
     final host = monitor.host;
     final preferences = _notificationPreferences;
+    final urgent = preferences.mode.urgentOnlyAlerts;
     final previous = previousStates ?? monitor.lastStates;
     final companion = monitor.provider?.id == companionProviderId;
     final notifications = <AgentNotification>[];
@@ -1361,21 +1492,38 @@ class AgentAttentionController extends ChangeNotifier {
       keys.add(key);
       final notice = _notices[key];
       final isEntered = entered.contains(agent.id);
-      final need = AgentNotificationPolicy.needFor(
-        agent: agent,
-        previous: notice,
-        entered: isEntered,
-        previousState: previous[agent.id]?.state,
-        // The companion reports a session that ended as finished; a
-        // Herdr-only agent's finished is a turn that ended.
-        ended:
-            companion &&
-            agent.state == AgentAttentionState.finished &&
-            !isHerdrOnlyAgent(agent),
-        initial: initial,
-        level: host.agentNotifyLevel,
-        preferences: preferences,
-      );
+      // The companion reports a session that ended as finished; a
+      // Herdr-only agent's finished is a turn that ended.
+      final ended =
+          companion &&
+          agent.state == AgentAttentionState.finished &&
+          !isHerdrOnlyAgent(agent);
+      final stuck = urgent ? stuckReasonFor?.call(host.id, agent.id) : null;
+      final need = preferences.isMuted(host.id, agent.id)
+          ? null
+          : urgent
+          ? UrgentNotificationPolicy.needFor(
+              agent: agent,
+              previous: notice,
+              entered: isEntered,
+              previousState: previous[agent.id]?.state,
+              ended: ended,
+              companion: companion && !isHerdrOnlyAgent(agent),
+              initial: initial,
+              level: host.agentNotifyLevel,
+              preferences: preferences,
+              stuckReason: stuck,
+            )
+          : AgentNotificationPolicy.needFor(
+              agent: agent,
+              previous: notice,
+              entered: isEntered,
+              previousState: previous[agent.id]?.state,
+              ended: ended,
+              initial: initial,
+              level: host.agentNotifyLevel,
+              preferences: preferences,
+            );
       if (need == null) {
         _notices.remove(key);
         continue;
@@ -1383,26 +1531,44 @@ class AgentAttentionController extends ChangeNotifier {
       final requestIds = need == AgentNeed.approval
           ? {for (final request in agent.pendingRequests) request.id}
           : const <String>{};
-      final alert = AgentNotificationPolicy.shouldAlert(
-        previous: notice,
-        need: need,
-        requestIds: requestIds,
-        entered: isEntered,
-        quietUpdates: preferences.quietUpdates,
-        initial: initial,
-      );
+      final alert =
+          (urgent
+          ? UrgentNotificationPolicy.shouldAlert
+          : AgentNotificationPolicy.shouldAlert)(
+            previous: notice,
+            need: need,
+            requestIds: requestIds,
+            entered: isEntered,
+            quietUpdates: preferences.quietUpdates,
+            initial: initial,
+          );
       _notices[key] = AgentNotice(need: need, requestIds: requestIds);
+      final open = openTargetFor(host.id, agent);
+      final detail = notificationDetail?.call(host.id, agent.id);
       notifications.add(
-        AgentNotificationPolicy.build(
-          hostId: host.id,
-          hostName: host.name,
-          agent: agent,
-          need: need,
-          alert: alert,
-          preferences: preferences,
-          open: openTargetFor(host.id, agent),
-          detail: notificationDetail?.call(host.id, agent.id),
-        ),
+        urgent
+            ? UrgentNotificationPolicy.build(
+                hostId: host.id,
+                hostName: host.name,
+                agent: agent,
+                need: need,
+                alert: alert,
+                preferences: preferences,
+                open: open,
+                canReply: _canReply(monitor, agent),
+                detail: detail,
+                stuckReason: stuck,
+              )
+            : AgentNotificationPolicy.build(
+                hostId: host.id,
+                hostName: host.name,
+                agent: agent,
+                need: need,
+                alert: alert,
+                preferences: preferences,
+                open: open,
+                detail: detail,
+              ),
       );
     }
     // Agents gone from the host have ended.
@@ -1422,6 +1588,59 @@ class AgentAttentionController extends ChangeNotifier {
     // Commit before posting so a throwing notifier cannot alert twice.
     _sentNotifications[host.id] = quiet;
     await notifier.showAgents(hostId: host.id, notifications: notifications);
+  }
+
+  /// Whether a notification's Reply can type into [agent]: a companion
+  /// agent whose kind takes prompts (`send`), not waiting on a permission
+  /// prompt (the companion refuses to type then). The companion types it
+  /// into the agent's own pane by id, so Herdr's shared focus never moves.
+  bool _canReply(_HostMonitor monitor, AgentInfo agent) =>
+      monitor.provider?.id == companionProviderId &&
+      !isHerdrOnlyAgent(agent) &&
+      agent.pendingRequests.isEmpty &&
+      (monitor.kinds ?? AgentKindCatalog.legacy).of(agent.kind).send != null;
+
+  /// Posts (throttled) or clears the ongoing status notification of the
+  /// "Ongoing + urgent" mode, across every monitored host.
+  void _syncStatus() {
+    final notifier = _notifier;
+    if (notifier == null || _disposed) {
+      return;
+    }
+    final status = _notificationPreferences.mode.showsOngoing
+        ? AgentStatusSummary.build([
+            for (final monitor in _monitors.values)
+              for (final agent in monitor.status.agents)
+                if (!(monitor.provider?.id == companionProviderId &&
+                    agent.state == AgentAttentionState.finished &&
+                    !isHerdrOnlyAgent(agent)))
+                  (
+                    hostName: monitor.host.name,
+                    agent: agent,
+                    companion:
+                        monitor.provider?.id == companionProviderId &&
+                        !isHerdrOnlyAgent(agent),
+                    detail: notificationDetail?.call(monitor.host.id, agent.id),
+                    stuck: stuckReasonFor?.call(monitor.host.id, agent.id),
+                  ),
+          ])
+        : null;
+    final now = _clock();
+    final offer = _statusThrottle.offer(status, now);
+    if (offer.retryAfter case final wait?) {
+      _statusTimer ??= Timer(wait, () {
+        _statusTimer = null;
+        _syncStatus();
+      });
+      return;
+    }
+    if (!offer.post) {
+      return;
+    }
+    _statusTimer?.cancel();
+    _statusTimer = null;
+    _statusThrottle.posted(status, now);
+    unawaited(notifier.showStatus(status).catchError((_) {}));
   }
 
   /// The companion provider's id: it reports an ended session as
@@ -1482,6 +1701,7 @@ class AgentAttentionController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _statusTimer?.cancel();
     inboxDismissals.dispose();
     _workspace.removeListener(_syncMonitors);
     for (final hostId in _monitors.keys.toList()) {

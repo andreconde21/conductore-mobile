@@ -309,13 +309,16 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   1.0) shows any range, a day by the hour, filters and a CSV export. With
   [cswap](https://github.com/realiti4/claude-swap) on the machine
   (companion 0.8), every Claude account's limits, and a confirmed switch.
-- **Notifications with actions**: one notification per agent, updated in place
-  with what it needs now ("api · VTM needs you: Approve Bash: npm test · +2
-  more"). Approve or deny the first request, or jump to the agent's exact
-  pane, straight from the notification; approving from the lock screen asks
-  you to unlock first. It alerts only when an agent newly needs you, goes away
-  once everything is answered, and all agents stack under one summary that
-  opens the dashboard.
+- **Notifications with actions**: by default one silent, ongoing notification
+  lists every agent's progress ("web · Working · Bash"), and separate alerts
+  come only for urgent things: a permission request, a question, an error, an
+  agent that looks stuck, and finished turns if you opt in. Allow or Deny a
+  low-risk request, pick an answer to a short question, Reply to the agent,
+  or jump to its exact pane, straight from the notification; acting from the
+  lock screen asks you to unlock first. Each agent has one alert that sounds
+  once, goes away once it is resolved, and can be muted with a long-press.
+  "Everything" brings back one notification per agent for every need. See
+  [docs/notifications.md](docs/notifications.md).
 - **Home screen widget and Quick Settings tile** (Android) showing the
   dashboard: agents that need you or are stuck, and the limit rings.
 - Agent attention dashboard that polls Herdr and shows which agents are
