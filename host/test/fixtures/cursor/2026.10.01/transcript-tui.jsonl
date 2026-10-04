@@ -1,0 +1,7 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nrun the echo command\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I will run a command."},{"type":"tool_use","name":"Shell","input":{"command":"echo hello-from-cursor","working_directory":"/home/u/proj"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Done: it printed hello-from-cursor."}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nlist it again\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Listing again."},{"type":"tool_use","name":"Shell","input":{"command":"ls","working_directory":"/home/u/proj"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The folder is empty."}]}}
+{"type":"turn_ended","status":"success"}

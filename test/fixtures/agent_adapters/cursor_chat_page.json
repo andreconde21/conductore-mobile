@@ -1,0 +1,88 @@
+{
+  "sessionId": "b72f0585-051e-4457-8295-665b2a8d26a1",
+  "agent": {
+    "name": "proj",
+    "state": "waiting_input",
+    "lastEvent": "Stop",
+    "lastToolName": "Bash",
+    "lastMessage": "Listing again.The folder is empty.",
+    "startedAt": 1791137645016,
+    "updatedAt": 1791137666940,
+    "endedAt": null,
+    "pending": []
+  },
+  "format": "items",
+  "items": [
+    {
+      "id": "l0",
+      "type": "user",
+      "at": null,
+      "text": "run the echo command"
+    },
+    {
+      "id": "l1.0",
+      "type": "assistant",
+      "at": null,
+      "text": "I will run a command."
+    },
+    {
+      "id": "l1.1",
+      "type": "tool",
+      "at": null,
+      "tool": "Shell",
+      "toolKind": "bash",
+      "input": {
+        "command": "echo hello-from-cursor",
+        "working_directory": "/home/u/proj"
+      },
+      "title": "echo hello-from-cursor",
+      "result": {
+        "ok": true,
+        "text": ""
+      }
+    },
+    {
+      "id": "l2.0",
+      "type": "assistant",
+      "at": null,
+      "text": "Done: it printed hello-from-cursor."
+    },
+    {
+      "id": "l3",
+      "type": "user",
+      "at": null,
+      "text": "list it again"
+    },
+    {
+      "id": "l4.0",
+      "type": "assistant",
+      "at": null,
+      "text": "Listing again."
+    },
+    {
+      "id": "l4.1",
+      "type": "tool",
+      "at": null,
+      "tool": "Shell",
+      "toolKind": "bash",
+      "input": {
+        "command": "ls",
+        "working_directory": "/home/u/proj"
+      },
+      "title": "ls",
+      "result": {
+        "ok": true,
+        "text": ""
+      }
+    },
+    {
+      "id": "l5.0",
+      "type": "assistant",
+      "at": null,
+      "text": "The folder is empty."
+    }
+  ],
+  "cursor": "L7",
+  "startCursor": null,
+  "more": false
+}

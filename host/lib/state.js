@@ -213,6 +213,8 @@ function reduce (state, event, now = Date.now()) {
       break
     }
     case 'PermissionDenied':
+      // The agent refused the call: a request the phone only watched is over.
+      dropObserved(agent)
       next = agent.pending.length ? 'needs_permission' : 'working'
       break
     case 'Notification': {

@@ -109,14 +109,45 @@ async function cleanup ({ strict = true } = {}) {
 }
 
 // The user's real agent configs, which no test may write: install and
-// uninstall run every present adapter. Returns a check that fails when
-// any of them changed (appeared, vanished, or got a new mtime or size).
-const REAL_CONFIGS = ['.claude/settings.json', '.claude.json', '.codex/hooks.json', '.codex/config.toml', '.codex', '.config/opencode', '.gemini/settings.json', '.gemini']
+// uninstall run every present adapter. Only what an install could change
+// is watched, by content: the hook (and statusline) entries of the agents'
+// settings, the hook files, the OpenCode plugins. Never mtimes, and never
+// ~/.claude.json: the agents themselves rewrite their files all the time.
+// Returns a check that fails when any of them changed.
+const REAL_CONFIGS = [
+  ['.claude/settings.json', ['hooks', 'statusLine']],
+  ['.codex/hooks.json'],
+  ['.gemini/settings.json', ['hooks', 'hooksConfig']],
+  ['.cursor/hooks.json'],
+  ['.config/opencode/plugins']
+]
+
+const sha = text => require('crypto').createHash('sha256').update(text).digest('hex').slice(0, 16)
+
+// One entry's fingerprint: '-' when absent; the listed keys of a JSON file
+// (the whole file when it does not parse); a directory's files and their
+// contents.
+function fingerprint (file, keys) {
+  let st
+  try { st = fs.statSync(file) } catch { return '-' }
+  if (st.isDirectory()) {
+    let names = []
+    try { names = fs.readdirSync(file).sort() } catch { return 'd?' }
+    return names.map(n => `${n}=${fingerprint(path.join(file, n))}`).join(',')
+  }
+  let text
+  try { text = fs.readFileSync(file, 'utf8') } catch { return '?' }
+  if (keys) {
+    try {
+      const doc = JSON.parse(text)
+      return sha(JSON.stringify(keys.map(k => (doc && typeof doc === 'object' ? doc[k] : undefined) ?? null)))
+    } catch {}
+  }
+  return sha(text)
+}
 
 function guardRealConfigs (home = os.homedir()) {
-  const snap = () => REAL_CONFIGS.map(rel => {
-    try { const st = fs.statSync(path.join(home, rel)); return `${rel}:${st.mtimeMs}:${st.isDirectory() ? 'd' : st.size}` } catch { return `${rel}:-` }
-  }).join('\n')
+  const snap = () => REAL_CONFIGS.map(([rel, keys]) => `${rel}:${fingerprint(path.join(home, rel), keys)}`).join('\n')
   const before = snap()
   return () => {
     const after = snap()
@@ -124,4 +155,4 @@ function guardRealConfigs (home = os.homedir()) {
   }
 }
 
-module.exports = { tempDir, cleanup, stopDaemons, daemonsIn, guardRealConfigs }
+module.exports = { tempDir, cleanup, stopDaemons, daemonsIn, guardRealConfigs, fingerprint }

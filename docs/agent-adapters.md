@@ -184,6 +184,45 @@ live runs showed, beyond the design doc:
 * App: `approvals: 'observe'` → the approval card reads "Answer in the
   terminal" with no Allow/Deny/Always (`AgentKindCapabilities.answersApprovals`).
 
+## Cursor (CON-073, built)
+
+`host/lib/adapters/cursor.js` + `cursor-transcript.js`, checked against a
+real Cursor `agent` 2026.10.01 in Docker, headless and as the TUI in tmux,
+against a mock of Cursor's API (`host/test/fixtures/cursor/README.md`).
+Differences from the design doc:
+
+* **Approvals are watch-only** (`approvals: 'observe'`). Cursor's hooks can
+  deny or force its prompt but never allow: `{"permission":"allow"}` from
+  `beforeShellExecution` still shows "Run this command?". That hook fires
+  before the prompt for every command, so `normalize()` turns it into a
+  `PermissionRequest` with `answerable: false` only when Cursor will ask
+  (`wouldAsk`: not allowlisted in `cli-config.json`, no `--force`/`--yolo`
+  on the agent's command line, approval mode `allowlist`, not sandboxed),
+  and drops it otherwise. Nothing blocks, so no hook waits on a FIFO.
+  The request goes through the same watch-only path as Gemini's (daemon
+  `observe`, state `dropObserved`, app `terminalOnly`); Cursor defines no
+  `settleObserved`, since its postToolUse/postToolUseFailure/stop always
+  come. A `PermissionDenied` also ends a watch-only request.
+* **Cursor runs Claude Code's hooks too** (`~/.claude/settings.json`,
+  user and project), with Cursor's payload. The Claude Code adapter drops
+  anything carrying `cursor_version`; without that, every Cursor session
+  was a phantom Claude Code agent.
+* Events: `stop` and `afterAgentResponse` arrive in either order; the
+  reply is a `Notification` (sets `lastMessage`, no state change) and is
+  also put on the next `Stop`. Esc sends `stop` `aborted` then `error`;
+  the error is dropped. Headless `agent -p` sends no
+  `beforeSubmitPrompt`/`stop`.
+* Process: the hook runs under `bash -c`, so the sh hook's `claude_pid`
+  is the agent: node with comm `MainThread`, recognised by
+  `…/cursor-agent/versions/<v>/index.js` on its command line.
+* Transcript: `agent-transcripts/<id>/<id>.jsonl` (`transcript_path` is
+  null until the first turn, so `normalize()` fills in Cursor's own path).
+  No timestamps, no tool results (a call another line follows is shown as
+  done), thinking folded into the reply. Paged by line (`L<n>`); a call on
+  the last line is sent again once the next line exists.
+* No brain (no tool-off switch, no schema, chats saved), no usage section
+  (per-turn tokens only in `stop`), no accounts. `launch: 'cursor-agent'`.
+
 ## What the next adapters need (from the design doc)
 
 **Codex (CON-068, hooks and pane first; socket later).**

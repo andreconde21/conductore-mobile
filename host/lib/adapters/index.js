@@ -16,7 +16,8 @@ const MODULES = {
   claude: './claude',
   codex: './codex',
   opencode: './opencode',
-  gemini: './gemini'
+  gemini: './gemini',
+  cursor: './cursor'
 }
 
 // Events and records with no agent id are Claude Code's: hooks registered
