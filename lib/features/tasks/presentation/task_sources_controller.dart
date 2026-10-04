@@ -67,12 +67,27 @@ class SourceTasks {
   final DateTime? loadedAt;
 }
 
+/// How the combined task list is ordered. Ties always fall back to the
+/// newest update, then the source's name, then the key, so the order is
+/// the same whichever sources are shown.
+enum TaskSort {
+  updated('Last updated'),
+  status('Status'),
+  source('Source'),
+  key('Key');
+
+  const TaskSort(this.label);
+
+  final String label;
+}
+
 /// The task list's filters; null means any.
 @immutable
 class TaskFilter {
-  const TaskFilter({this.sourceId, this.status, this.assignee, this.query});
+  const TaskFilter({this.sourceIds, this.status, this.assignee, this.query});
 
-  final String? sourceId;
+  /// The sources shown; null shows every source.
+  final Set<String>? sourceIds;
 
   /// A status label (statuses differ per source, so by label).
   final String? status;
@@ -83,7 +98,9 @@ class TaskFilter {
   static const unassigned = '\u0000unassigned';
 
   bool matches(TaskItem task) {
-    if (sourceId != null && task.sourceId != sourceId) return false;
+    if (sourceIds != null && !sourceIds!.contains(task.sourceId)) {
+      return false;
+    }
     if (status != null && task.status?.label != status) return false;
     if (assignee == unassigned) {
       if (task.assignees.isNotEmpty) return false;
@@ -99,12 +116,12 @@ class TaskFilter {
   }
 
   TaskFilter copyWith({
-    String? Function()? sourceId,
+    Set<String>? Function()? sourceIds,
     String? Function()? status,
     String? Function()? assignee,
     String? Function()? query,
   }) => TaskFilter(
-    sourceId: sourceId == null ? this.sourceId : sourceId(),
+    sourceIds: sourceIds == null ? this.sourceIds : sourceIds(),
     status: status == null ? this.status : status(),
     assignee: assignee == null ? this.assignee : assignee(),
     query: query == null ? this.query : query(),
@@ -143,13 +160,58 @@ class TaskSourcesController extends ChangeNotifier {
   bool get loadingTasks => _tasks.values.any((t) => t.loading);
 
   /// Every source's tasks, newest first.
-  List<TaskItem> get allTasks {
-    final all = [for (final s in _sources) ...tasksOf(s.id).tasks];
-    all.sort(
-      (a, b) =>
-          (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0)),
-    );
-    return all;
+  List<TaskItem> get allTasks =>
+      sorted([for (final s in _sources) ...tasksOf(s.id).tasks]);
+
+  /// [tasks] in [sort] order (see [TaskSort]).
+  List<TaskItem> sorted(
+    List<TaskItem> tasks, [
+    TaskSort sort = TaskSort.updated,
+  ]) {
+    final names = {for (final s in _sources) s.id: s.name.toLowerCase()};
+    int newest(TaskItem a, TaskItem b) =>
+        (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0));
+    int bySource(TaskItem a, TaskItem b) =>
+        (names[a.sourceId] ?? '').compareTo(names[b.sourceId] ?? '');
+    int byKey(TaskItem a, TaskItem b) => _naturalCompare(a.key, b.key);
+    int byStatus(TaskItem a, TaskItem b) {
+      final ca = (a.status?.category ?? TaskStatusCategory.unknown).index;
+      final cb = (b.status?.category ?? TaskStatusCategory.unknown).index;
+      if (ca != cb) return ca.compareTo(cb);
+      return (a.status?.label ?? '').toLowerCase().compareTo(
+        (b.status?.label ?? '').toLowerCase(),
+      );
+    }
+
+    final order = switch (sort) {
+      TaskSort.updated => [newest, bySource, byKey],
+      TaskSort.status => [byStatus, newest, bySource, byKey],
+      TaskSort.source => [bySource, newest, byKey],
+      TaskSort.key => [bySource, byKey, newest],
+    };
+    return [...tasks]..sort((a, b) {
+      for (final compare in order) {
+        final c = compare(a, b);
+        if (c != 0) return c;
+      }
+      return a.ref.compareTo(b.ref);
+    });
+  }
+
+  /// `CON-9` before `CON-10`: digit runs compare as numbers.
+  static int _naturalCompare(String a, String b) {
+    final re = RegExp(r'(\d+)|(\D+)');
+    final pa = re.allMatches(a.toLowerCase()).map((m) => m[0]!).toList();
+    final pb = re.allMatches(b.toLowerCase()).map((m) => m[0]!).toList();
+    for (var i = 0; i < pa.length && i < pb.length; i++) {
+      final na = int.tryParse(pa[i]);
+      final nb = int.tryParse(pb[i]);
+      final c = na != null && nb != null
+          ? na.compareTo(nb)
+          : pa[i].compareTo(pb[i]);
+      if (c != 0) return c;
+    }
+    return pa.length.compareTo(pb.length);
   }
 
   Future<void> ensureLoaded() => _loading ??= _load();

@@ -93,12 +93,43 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Any assignee'));
     await tester.pumpAndSettle();
+    // Every task carries its source's badge.
+    expect(find.byKey(const ValueKey('task-source-badge-A')), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('task-source-badge-B')), findsOneWidget);
+
     await tester.tap(find.byKey(const ValueKey('tasks-filter-source')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('A').last);
+    await tester.tap(find.byKey(const ValueKey('tasks-source-check-b')));
+    await tester.tap(find.byKey(const ValueKey('tasks-sources-apply')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('task-b/3')), findsNothing);
     expect(find.byKey(const ValueKey('task-a/1')), findsOneWidget);
+    expect(find.text('A'), findsWidgets);
+
+    // Back to every source.
+    await tester.tap(find.byKey(const ValueKey('tasks-filter-source')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tasks-source-check-b')));
+    await tester.tap(find.byKey(const ValueKey('tasks-sources-apply')));
+    await tester.pumpAndSettle();
+    expect(find.text('All sources'), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-b/3')), findsOneWidget);
+  });
+
+  testWidgets('sorting by status groups to do, in progress, done', (
+    tester,
+  ) async {
+    await addTwoSources();
+    await pump(tester);
+    await tester.tap(find.byKey(const ValueKey('tasks-sort')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Status').last);
+    await tester.pumpAndSettle();
+    final order = [
+      for (final ref in ['a/1', 'b/3', 'a/2'])
+        tester.getTopLeft(find.byKey(ValueKey('task-$ref'))).dy,
+    ];
+    expect(order, orderedEquals([...order]..sort()));
   });
 
   testWidgets('a task opens: change its status, add a comment', (tester) async {

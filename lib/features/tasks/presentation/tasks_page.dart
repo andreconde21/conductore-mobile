@@ -24,7 +24,31 @@ class TasksPage extends StatefulWidget {
 
 class _TasksPageState extends State<TasksPage> {
   TaskFilter _filter = const TaskFilter();
+  TaskSort _sort = TaskSort.updated;
   final _search = TextEditingController();
+
+  bool _shown(TaskItem t) =>
+      _filter.sourceIds == null || _filter.sourceIds!.contains(t.sourceId);
+
+  /// Picks the sources shown: every one, or the ones ticked.
+  Future<void> _pickSources() async {
+    final chosen = await showDialog<Set<String>>(
+      context: context,
+      builder: (context) => _SourcesDialog(
+        sources: [for (final s in _c.sources) (s.id, s.name, s.kind.label)],
+        selected: _filter.sourceIds ?? {for (final s in _c.sources) s.id},
+      ),
+    );
+    if (chosen == null) return;
+    final all = chosen.length == _c.sources.length;
+    setState(
+      () => _filter = _filter.copyWith(
+        sourceIds: () => all ? null : chosen,
+        status: () => null,
+        assignee: () => null,
+      ),
+    );
+  }
 
   TaskSourcesController get _c => widget.controller;
 
@@ -109,7 +133,7 @@ class _TasksPageState extends State<TasksPage> {
           );
         }
         final all = _c.allTasks;
-        final tasks = all.where(_filter.matches).toList();
+        final tasks = _c.sorted(all.where(_filter.matches).toList(), _sort);
         final errors = [
           for (final s in _c.sources)
             if (_c.tasksOf(s.id).error case final error?) (s.name, error),
@@ -145,14 +169,11 @@ class _TasksPageState extends State<TasksPage> {
     final theme = Theme.of(context);
     final statuses = {
       for (final t in all)
-        if ((_filter.sourceId == null || t.sourceId == _filter.sourceId) &&
-            t.status != null)
-          t.status!.label,
+        if (_shown(t) && t.status != null) t.status!.label,
     }.toList()..sort();
     final assignees = {
       for (final t in all)
-        if (_filter.sourceId == null || t.sourceId == _filter.sourceId)
-          ...t.assignees,
+        if (_shown(t)) ...t.assignees,
     }.toList()..sort();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -176,18 +197,21 @@ class _TasksPageState extends State<TasksPage> {
             runSpacing: 4,
             children: [
               if (_c.sources.length > 1)
-                _FilterChip<String>(
+                ActionChip(
                   key: const ValueKey('tasks-filter-source'),
-                  label: 'Source',
-                  value: _filter.sourceId,
-                  options: [for (final s in _c.sources) (s.id, s.name)],
-                  onChanged: (v) => setState(
-                    () => _filter = _filter.copyWith(
-                      sourceId: () => v,
-                      status: () => null,
-                      assignee: () => null,
-                    ),
+                  avatar: Icon(
+                    _filter.sourceIds == null
+                        ? Icons.layers_outlined
+                        : Icons.check,
+                    size: 16,
                   ),
+                  label: Text(switch (_filter.sourceIds) {
+                    null => 'All sources',
+                    final ids when ids.length == 1 =>
+                      _c.sourceById(ids.first)?.name ?? '1 source',
+                    final ids => '${ids.length} sources',
+                  }),
+                  onPressed: () => unawaited(_pickSources()),
                 ),
               _FilterChip<String>(
                 key: const ValueKey('tasks-filter-status'),
@@ -207,6 +231,20 @@ class _TasksPageState extends State<TasksPage> {
                 ],
                 onChanged: (v) => setState(
                   () => _filter = _filter.copyWith(assignee: () => v),
+                ),
+              ),
+              PopupMenuButton<TaskSort>(
+                key: const ValueKey('tasks-sort'),
+                tooltip: 'Sort',
+                initialValue: _sort,
+                onSelected: (v) => setState(() => _sort = v),
+                itemBuilder: (context) => [
+                  for (final s in TaskSort.values)
+                    PopupMenuItem(value: s, child: Text(s.label)),
+                ],
+                child: Chip(
+                  avatar: const Icon(Icons.sort, size: 16),
+                  label: Text(_sort.label),
                 ),
               ),
             ],
@@ -294,7 +332,6 @@ class _TaskTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final meta = [
-      if (showSource) sourceName,
       ?task.status?.label,
       if (task.assignees.isNotEmpty) task.assignees.join(', '),
     ].join(' · ');
@@ -316,7 +353,110 @@ class _TaskTile extends StatelessWidget {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: meta.isEmpty ? null : Text(meta),
+      subtitle: !showSource && meta.isEmpty
+          ? null
+          : Text.rich(
+              TextSpan(
+                children: [
+                  if (showSource)
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: TaskSourceBadge(name: sourceName),
+                      ),
+                    ),
+                  TextSpan(text: meta),
+                ],
+              ),
+            ),
     );
   }
+}
+
+/// A task's source, as a small label with a colour of its own (stable per
+/// name), so tasks from several sources tell apart at a glance.
+class TaskSourceBadge extends StatelessWidget {
+  const TaskSourceBadge({required this.name, super.key});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hue =
+        (name.codeUnits.fold<int>(7, (h, c) => (h * 31 + c) & 0xffff) % 360)
+            .toDouble();
+    final color = HSLColor.fromAHSL(
+      1,
+      hue,
+      0.45,
+      scheme.brightness == Brightness.dark ? 0.7 : 0.4,
+    ).toColor();
+    return DecoratedBox(
+      key: ValueKey('task-source-badge-$name'),
+      decoration: BoxDecoration(
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        child: Text(
+          name,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ),
+    );
+  }
+}
+
+/// Ticks the sources the list shows.
+class _SourcesDialog extends StatefulWidget {
+  const _SourcesDialog({required this.sources, required this.selected});
+
+  final List<(String id, String name, String kind)> sources;
+  final Set<String> selected;
+
+  @override
+  State<_SourcesDialog> createState() => _SourcesDialogState();
+}
+
+class _SourcesDialogState extends State<_SourcesDialog> {
+  late final Set<String> _selected = {...widget.selected};
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Show tasks from'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (id, name, kind) in widget.sources)
+            CheckboxListTile(
+              key: ValueKey('tasks-source-check-$id'),
+              value: _selected.contains(id),
+              title: Text(name),
+              subtitle: Text(kind),
+              onChanged: (on) => setState(
+                () => on == true ? _selected.add(id) : _selected.remove(id),
+              ),
+            ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () =>
+            setState(() => _selected.addAll(widget.sources.map((s) => s.$1))),
+        child: const Text('All'),
+      ),
+      FilledButton(
+        key: const ValueKey('tasks-sources-apply'),
+        onPressed: _selected.isEmpty
+            ? null
+            : () => Navigator.of(context).pop(_selected),
+        child: const Text('Show'),
+      ),
+    ],
+  );
 }

@@ -148,6 +148,40 @@ void main() {
     });
   });
 
+  test('sorting is the same whichever sources are combined', () async {
+    final c = TaskSourcesController(
+      store: MemoryTaskSourcesStore(),
+      build: (config, token) => FakeTaskSource(config),
+    );
+    await c.save(
+      const TaskSourceConfig(
+        id: 'b',
+        kind: TaskSourceKind.linear,
+        name: 'Beta',
+      ),
+    );
+    await c.save(
+      const TaskSourceConfig(id: 'a', kind: TaskSourceKind.jira, name: 'Alpha'),
+    );
+    final same = DateTime.utc(2026, 10);
+    final tasks = [
+      task('b', '10', updated: same),
+      task('a', '9', updated: same),
+      task('a', '10', updated: same),
+      task('b', '2', status: 'done', updated: DateTime.utc(2026, 10, 5)),
+    ];
+    List<String> refs(TaskSort s) => [
+      for (final t in c.sorted(tasks, s)) t.ref,
+    ];
+    expect(refs(TaskSort.updated), ['b/2', 'a/9', 'a/10', 'b/10']);
+    expect(refs(TaskSort.status), ['a/9', 'a/10', 'b/10', 'b/2']);
+    expect(refs(TaskSort.source), ['a/9', 'a/10', 'b/2', 'b/10']);
+    expect(refs(TaskSort.key), ['a/9', 'a/10', 'b/2', 'b/10']);
+    // A subset keeps the relative order of the whole.
+    final subset = c.sorted(tasks.where((t) => t.sourceId == 'a').toList());
+    expect(subset.map((t) => t.ref), ['a/9', 'a/10']);
+  });
+
   group('TaskFilter', () {
     final tasks = [
       task('a', '1', assignees: ['ana']),
@@ -161,12 +195,14 @@ void main() {
     ];
 
     test('by source, status, assignee, nobody and text', () {
-      expect(ids(const TaskFilter(sourceId: 'a')), ['1', '2']);
+      expect(ids(const TaskFilter(sourceIds: {'a'})), ['1', '2']);
+      expect(ids(const TaskFilter(sourceIds: {'a', 'b'})), ['1', '2', '3']);
+      expect(ids(const TaskFilter(sourceIds: {})), isEmpty);
       expect(ids(const TaskFilter(status: 'todo')), ['1', '3']);
       expect(ids(const TaskFilter(assignee: 'bo')), ['3']);
       expect(ids(const TaskFilter(assignee: TaskFilter.unassigned)), ['2']);
       expect(ids(const TaskFilter(query: 'LOGIN')), ['3']);
-      expect(ids(const TaskFilter(sourceId: 'a', status: 'todo')), ['1']);
+      expect(ids(const TaskFilter(sourceIds: {'a'}, status: 'todo')), ['1']);
     });
   });
 
