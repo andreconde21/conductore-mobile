@@ -7,6 +7,7 @@ import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
+import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -260,8 +261,16 @@ void main() {
       );
 
       expect(find.text('Mosh'), findsOneWidget);
-      expect(find.text('Host a: DTech'), findsNWidgets(2));
-      expect(find.text('DTech'), findsOneWidget);
+      // Titled by the workspace (over the preview and below it), the
+      // machine only as a small caption (CON-071).
+      expect(find.text('DTech'), findsNWidgets(2));
+      expect(find.text('Host a: DTech'), findsNothing);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('home-machine-caption')))
+            .data,
+        'Host a',
+      );
       expect(
         find.byKey(const ValueKey('multiplexer-icon-herdr')),
         findsOneWidget,
@@ -530,6 +539,158 @@ void main() {
       expect(find.text('Connection refused'), findsOneWidget);
       await tester.tap(find.text('Retry'));
       expect(acted, 1);
+    });
+  });
+  group('session titles and previews (CON-071)', () {
+    TerminalSessionController w8() => session(
+      () => const ConnectTarget.herdr(
+        workspaceId: 'w8',
+      ).apply(buildHost('a').copyWith(name: 'development-central')),
+    );
+
+    testWidgets('a row at 360 dp: the workspace label is the title, the '
+        'machine a caption, Claude Code\'s footer is skipped', (tester) async {
+      final herdr = w8();
+      await herdr.connect();
+      herdr.terminal.write(
+        'Reading rejectIfAutoManaged\r\n'
+        '──────────────────────\r\n'
+        '❯ \r\n'
+        '──────────────────────\r\n'
+        '⏵⏵ auto mode on (alt+m to cycle) · ← for agents\r\n',
+      );
+      await tester.pumpWidget(
+        host(
+          HomeSessionRow(
+            session: herdr,
+            info: HomeSessionInfo.of(
+              herdr,
+              workspaces: [workspace('w8', 'lf-seguros-web')],
+              agentState: AgentAttentionState.working,
+              machineName: 'development-central',
+            ),
+            palette: palette,
+            brightness: Brightness.dark,
+            fontFamily: 'monospace',
+            onTap: () {},
+            onLongPress: () {},
+          ),
+          width: 360,
+          height: 90,
+        ),
+      );
+      final title = tester.widget<Text>(
+        find.byKey(const ValueKey('home-row-title')),
+      );
+      expect(title.data, 'lf-seguros-web');
+      expect(find.textContaining('development-central:'), findsNothing);
+      expect(find.textContaining('w8'), findsNothing);
+      // The machine once, as the small caption at the bottom right.
+      expect(find.text('development-central'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('home-machine-caption')))
+            .data,
+        'development-central',
+      );
+      final tail = tester.widget<Text>(
+        find.byKey(const ValueKey('home-row-tail')),
+      );
+      expect(tail.data, 'Reading rejectIfAutoManaged');
+      expect(tail.style?.fontFamilyFallback, previewFontFallback);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the agent\'s own line wins over the screen', (tester) async {
+      final herdr = w8();
+      herdr.terminal.write('some output\r\n');
+      await herdr.connect();
+      await tester.pumpWidget(
+        host(
+          HomeSessionRow(
+            session: herdr,
+            info: HomeSessionInfo.of(
+              herdr,
+              agentLine: 'Fixing the CI cache\nsecond line',
+            ),
+            palette: palette,
+            brightness: Brightness.dark,
+            fontFamily: 'monospace',
+            onTap: () {},
+            onLongPress: () {},
+          ),
+          width: 360,
+          height: 90,
+        ),
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('home-row-tail'))).data,
+        'Fixing the CI cache',
+      );
+    });
+
+    testWidgets('a grid tile at 360 dp names the workspace, not its id', (
+      tester,
+    ) async {
+      final herdr = w8();
+      await tester.pumpWidget(
+        host(
+          HomeSessionTile(
+            session: herdr,
+            info: HomeSessionInfo.of(
+              herdr,
+              workspaces: [workspace('w8', 'lf-seguros-web')],
+              machineName: 'development-central',
+            ),
+            palette: palette,
+            brightness: Brightness.dark,
+            fontFamily: 'monospace',
+            onTap: () {},
+            onLongPress: () {},
+          ),
+          width: HomeGridMetrics.of(360).tileWidth,
+          height: HomeGridMetrics.of(360).sessionExtent,
+        ),
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('home-tile-title'))).data,
+        'lf-seguros-web',
+      );
+      expect(find.textContaining('w8'), findsNothing);
+      expect(find.text('development-central'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    test('the live label replaces a raw workspace id in every title', () {
+      final herdr = w8();
+      expect(herdr.title, 'development-central: w8');
+      herdr.noteTargetLabel('lf-seguros-web');
+      expect(herdr.title, 'development-central: lf-seguros-web');
+      herdr.noteTargetLabel('');
+      expect(herdr.title, 'development-central: w8');
+      herdr
+        ..noteTargetLabel('lf-seguros-web')
+        ..rename('Mine');
+      expect(herdr.title, 'Mine');
+    });
+
+    test('agent chrome is not a preview line', () {
+      for (final chrome in [
+        '⏵⏵ auto mode on (alt+m to cycle) · ← for agents',
+        '⏸ plan mode on (shift+tab to cycle)',
+        'accept edits on',
+        '? for shortcuts',
+        '─────────────',
+        '│ > │',
+        '❯',
+        '  100% context left',
+      ]) {
+        expect(isAgentChromeLine(chrome), isTrue, reason: chrome);
+      }
+      expect(isAgentChromeLine('npm test passed'), isFalse);
+      expect(meaningfulTail(['done', '? for shortcuts', '']), 'done');
+      expect(meaningfulTail(['? for shortcuts']), '');
+      expect(withPreviewGlyphs('⏵⏵ on ⏸'), '▸▸ on ‖');
     });
   });
 }

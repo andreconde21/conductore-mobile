@@ -447,31 +447,33 @@ class HomeSessionTile extends StatelessWidget {
                   SessionTargetIcon(info: info),
                   const SizedBox(width: 5),
                 ],
-                Expanded(
-                  child: info.showsTargetLabel
-                      ? Text(
-                          info.targetLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: info.isHerdr
-                                ? AppPalette.of(context).success
-                                : muted,
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-                if (info.showsMachine) ...[
+                if (info.showsTargetLabel) ...[
+                  Expanded(
+                    child: Text(
+                      info.targetLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: info.isHerdr
+                            ? AppPalette.of(context).success
+                            : muted,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 6),
-                  HomeMachineCaption(info.machineName, color: muted),
-                ] else if (info.machineName.isEmpty && info.targetLabel.isEmpty)
-                  Text(
-                    session.host.endpoint,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: muted, fontSize: 12.5),
+                ] else
+                  const Spacer(),
+                // Shrinks (ellipsis) before it pushes anything out.
+                if (info.showsMachine || info.target == null)
+                  Flexible(
+                    child: HomeMachineCaption(
+                      info.showsMachine
+                          ? info.machineName
+                          : session.host.endpoint,
+                      color: muted,
+                    ),
                   ),
               ],
             ),
@@ -1072,7 +1074,7 @@ class HomeSessionRow extends StatelessWidget {
                     if (info.showsMachine) ...[
                       const SizedBox(width: 8),
                       HomeMachineCaption(info.machineName, color: muted),
-                    ] else if (info.machineName.isEmpty) ...[
+                    ] else if (info.target == null) ...[
                       const SizedBox(width: 8),
                       HomeMachineCaption(session.host.endpoint, color: muted),
                     ],
