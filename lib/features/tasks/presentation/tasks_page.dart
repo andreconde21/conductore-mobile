@@ -150,7 +150,7 @@ class _TasksPageState extends State<TasksPage> {
     final hostIds = [
       for (final m in environment?.machines() ?? const <TaskMachine>[]) m.id,
     ];
-    unawaited(runs.refreshAll(hostIds));
+    unawaited(runs.watch());
     unawaited(
       Navigator.of(context).push(
         MaterialPageRoute<void>(

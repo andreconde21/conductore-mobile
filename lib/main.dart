@@ -301,12 +301,13 @@ void main() {
     attention: agentAttention,
   );
   // Started tasks (CON-037): batches on the machines' companions, followed
-  // while any run waits or goes; finished ones move to done when asked.
+  // once Tasks or the dashboard shows them (no timer at startup); finished
+  // ones move to done when asked.
   TaskRunsController.instance = createAppTaskRuns(
     storage: secureStorage,
     attention: agentAttention,
     sources: taskSources,
-  )..startPolling();
+  );
   appTaskStartEnvironment = taskStartEnvironment(agentAttention);
   // The project view (CON-065): its prefs sync with the app settings; the
   // machines' sidebar.toml is read when a project view shows.

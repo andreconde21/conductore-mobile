@@ -9,11 +9,12 @@ import 'package:flutter/services.dart';
 /// Started tasks grouped by batch (CON-037), each batch with its progress:
 /// how many finished, run, wait or failed, and every run's state. Nothing
 /// when there are none, so the Agents dashboard can always mount it.
-class TaskBatchesPanel extends StatelessWidget {
+class TaskBatchesPanel extends StatefulWidget {
   const TaskBatchesPanel({
     required this.controller,
     required this.hostName,
     this.limit = 5,
+    this.watch = true,
     super.key,
   });
 
@@ -22,6 +23,24 @@ class TaskBatchesPanel extends StatelessWidget {
 
   /// Batches shown, newest first.
   final int limit;
+
+  /// Starts following the machines' runs when shown.
+  final bool watch;
+
+  @override
+  State<TaskBatchesPanel> createState() => _TaskBatchesPanelState();
+}
+
+class _TaskBatchesPanelState extends State<TaskBatchesPanel> {
+  TaskRunsController get controller => widget.controller;
+  int get limit => widget.limit;
+  String Function(String hostId) get hostName => widget.hostName;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.watch) unawaited(controller.watch());
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(

@@ -230,6 +230,7 @@ void main() {
         home: Scaffold(
           body: SingleChildScrollView(
             child: TaskBatchesPanel(
+              watch: false,
               controller: runs,
               hostName: (id) => 'Machine $id',
             ),

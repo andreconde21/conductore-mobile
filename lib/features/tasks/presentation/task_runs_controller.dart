@@ -60,6 +60,13 @@ class TaskRunsController extends ChangeNotifier {
     hostId,
   ).where((r) => r.active || r.status == TaskRunStatus.queued).length;
 
+  /// Asks every machine of [hosts] once, then keeps following: called
+  /// when Tasks or the dashboard shows started tasks.
+  Future<void> watch() async {
+    if (_poll == null) startPolling();
+    await refreshAll(hosts?.call() ?? const []);
+  }
+
   /// Refreshes [hostIds] side by side.
   Future<void> refreshAll(Iterable<String> hostIds) =>
       Future.wait([for (final id in hostIds) refresh(id)]);
