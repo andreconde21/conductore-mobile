@@ -58,7 +58,8 @@ class ProjectViewBar extends StatelessWidget {
           ),
         );
     final active = controller.activeOnly;
-    return Padding(
+    final notice = controller.markNotice;
+    final bar = Padding(
       padding: EdgeInsets.fromLTRB(dense ? 6 : 0, 0, 0, dense ? 2 : 4),
       child: Row(
         children: [
@@ -119,7 +120,67 @@ class ProjectViewBar extends StatelessWidget {
         ],
       ),
     );
+    if (notice == null) return bar;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        bar,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(
+            key: const ValueKey('project-mark-notice'),
+            children: [
+              Icon(
+                Icons.sync_problem_rounded,
+                size: 14,
+                color: palette.mutedForeground,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  notice,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: palette.mutedForeground,
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const ValueKey('project-mark-notice-close'),
+                tooltip: 'Dismiss',
+                iconSize: 14,
+                visualDensity: VisualDensity.compact,
+                onPressed: controller.clearMarkNotice,
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
+}
+
+/// A mark sent to sheprd and not confirmed yet: a small spinner.
+class SheprdPendingMark extends StatelessWidget {
+  const SheprdPendingMark({this.size = 10, super.key});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: 'Waiting for sheprd to apply this',
+    child: SizedBox(
+      key: const ValueKey('sheprd-mark-pending'),
+      width: size,
+      height: size,
+      child: CircularProgressIndicator(
+        strokeWidth: 1.5,
+        color: AppPalette.of(context).mutedForeground,
+      ),
+    ),
+  );
 }
 
 enum _ViewChoice { hours, hidden, add, follow }

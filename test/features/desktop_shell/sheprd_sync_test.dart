@@ -190,11 +190,15 @@ void main() {
     setUp(() async {
       theme = ThemeController(InMemoryThemePreferences());
       await theme.load();
-      controller = ProjectLayoutController(theme: theme)
-        ..sheprdRunner = (host, command) async {
-          sent.add((host.name, command));
-          return '{"ok":true,"id":"c-1-abcd"}';
-        };
+      controller =
+          ProjectLayoutController(
+              theme: theme,
+              markTimeout: const Duration(milliseconds: 80),
+            )
+            ..sheprdRunner = (host, command) async {
+              sent.add((host.name, command));
+              return '{"ok":true,"id":"c-1-abcd"}';
+            };
       sent.clear();
     });
     tearDown(() => controller.dispose());
@@ -340,11 +344,13 @@ void main() {
           contains(' --state-seq 41'),
         ),
       );
-      expect(sf().dotOf(row('w2:p1')), SidebarDot.idle);
-      expect(sf().sheprdOf(row('w2:p1'))!.dismissed, isTrue);
+      // Pending, not applied: the dot and the marks stay sheprd's.
+      expect(sf().dotOf(row('w2:p1')), SidebarDot.done);
+      expect(sf().sheprdOf(row('w2:p1'))!.dismissed, isFalse);
+      expect(sf().sheprdOf(row('w2:p1'))!.pending, SheprdMark.dismiss);
 
       // An agent sheprd has not listed yet: the live sequence, and the mark
-      // shows too.
+      // is pending too.
       expect(
         await controller.mark(sf(), row('w2:p3'), SheprdMark.keep),
         isNull,
@@ -354,7 +360,8 @@ void main() {
         allOf(contains('--op keep --agent'), contains('dev-box/w2:p3')),
       );
       expect(sent.last.$2, isNot(contains('--state-seq')));
-      expect(sf().sheprdOf(row('w2:p3'))!.kept, isTrue);
+      expect(sf().sheprdOf(row('w2:p3'))!.kept, isFalse);
+      expect(sf().sheprdOf(row('w2:p3'))!.pending, SheprdMark.keep);
 
       // The companion's refusal comes back as the message.
       controller.sheprdRunner = (host, command) async =>
@@ -446,15 +453,93 @@ void main() {
       expect(find.text('Mark as unread'), findsOneWidget);
       expect(find.text('Keep in active'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('project-entry-dismiss')));
-      await tester.pumpAndSettle();
+      // The mark is sent at once; its 80 ms timeout runs on the test clock.
+      await tester.pump();
+      await tester.pump();
       expect(sent.single.$2, contains('--op dismiss'));
       expect(
         store().entries
             .firstWhere((e) => e.node.label == 'sf')
             .sheprdOf(row)!
-            .dismissed,
-        isTrue,
+            .pending,
+        SheprdMark.dismiss,
       );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: controller,
+              builder: (context, _) =>
+                  ProjectViewBar(controller: controller, needsYou: 0),
+            ),
+          ),
+        ),
+      );
+      expect(find.byKey(const ValueKey('project-mark-notice')), findsNothing);
+      // Unconfirmed past the timeout (2 minutes in the app).
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.byKey(const ValueKey('project-mark-notice')), findsOneWidget);
+      expect(find.textContaining("sheprd didn't apply this"), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('project-mark-notice-close')));
+      await tester.pump();
+      expect(controller.markNotice, isNull);
+    });
+
+    test('a pending mark is confirmed only by a newer view that shows it, '
+        'and dropped with a notice when sheprd never does', () async {
+      await controller.setSheprdSync(true);
+      Map<String, Object?> agent({bool dismissed = false}) => {
+        'dev-box/w2:p1': {
+          'presence': dismissed ? 'idle' : 'done',
+          'state_seq': 41,
+          'dismissed': dismissed,
+        },
+      };
+      controller
+        ..applyViewReply(laptop, _reply('local', agents: agent()))
+        ..applyViewReply(dev, _reply('dev-box'));
+      ProjectEntry sf() => controller
+          .build(tree(), hosts: [laptop, dev])
+          .firstWhere((g) => g.name == 'Storefront')
+          .entries
+          .firstWhere((e) => e.node.label == 'sf');
+      SidebarNode row() =>
+          sf().agentRows.firstWhere((r) => r.label == 'agent w2:p1');
+      SheprdAgentView view() => sf().sheprdOf(row())!;
+
+      expect(await controller.mark(sf(), row(), SheprdMark.dismiss), isNull);
+      expect(view().pending, SheprdMark.dismiss);
+      // The menu already offers what comes after it.
+      expect(
+        SheprdMark.choicesFor(view()),
+        isNot(contains(SheprdMark.dismiss)),
+      );
+
+      // A newer view without the mark: still pending.
+      controller.applyViewReply(
+        laptop,
+        _reply('local', updated: 1010, agents: agent()),
+      );
+      expect(view().pending, SheprdMark.dismiss);
+      // A newer view with it: applied, no longer pending, no notice later.
+      controller.applyViewReply(
+        laptop,
+        _reply('local', updated: 1020, agents: agent(dismissed: true)),
+      );
+      expect(view().pending, isNull);
+      expect(view().dismissed, isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(controller.markNotice, isNull);
+
+      // Never confirmed: reverted after the timeout, with the notice.
+      expect(await controller.mark(sf(), row(), SheprdMark.keep), isNull);
+      expect(view().pending, SheprdMark.keep);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(view().pending, isNull);
+      expect(view().kept, isFalse);
+      expect(controller.markNotice, contains("sheprd didn't apply this"));
+      controller.clearMarkNotice();
+      expect(controller.markNotice, isNull);
     });
   });
 }

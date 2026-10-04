@@ -37,6 +37,7 @@ class ProjectLayoutController extends ChangeNotifier {
     this.attention,
     this.refreshEvery = const Duration(minutes: 2),
     this.syncEvery = const Duration(seconds: 15),
+    this.markTimeout = const Duration(minutes: 2),
     this.clock = DateTime.now,
   }) {
     theme.addListener(notifyListeners);
@@ -52,6 +53,10 @@ class ProjectLayoutController extends ChangeNotifier {
 
   /// How often sheprd's view is read again while "Sync with sheprd" is on.
   final Duration syncEvery;
+
+  /// How long a mark sent to sheprd may stay unconfirmed before it is
+  /// dropped as not applied.
+  final Duration markTimeout;
   final DateTime Function() clock;
 
   /// sidebar.toml per saved machine id, already localized (`local/` is
@@ -65,7 +70,13 @@ class ProjectLayoutController extends ChangeNotifier {
   final Map<String, (SavedHost, SheprdView)> _views = {};
   final Map<String, DateTime> _viewFetchedAt = {};
   final Set<String> _viewInFlight = {};
+
+  /// The newest view as sheprd wrote it, and the same with the pending
+  /// marks shown on it ([sheprdView]).
+  SheprdView? _base;
   SheprdView? _merged;
+  final Map<String, _PendingMark> _pending = {};
+  String? _markNotice;
   Map<String, String> _sheprdNames = const {};
 
   /// The names of the projects found from what agents report, as last
@@ -94,6 +105,16 @@ class ProjectLayoutController extends ChangeNotifier {
   /// sheprd's view while synced: the newest any machine reported, its keys
   /// in the app's machine names. Null when off or before one was read.
   SheprdView? get sheprdView => sheprdSync ? _merged : null;
+
+  /// A mark sheprd did not apply in time ("not running?"), until
+  /// [clearMarkNotice].
+  String? get markNotice => sheprdSync ? _markNotice : null;
+
+  void clearMarkNotice() {
+    if (_markNotice == null) return;
+    _markNotice = null;
+    if (!_disposed) notifyListeners();
+  }
 
   /// Layout edits are the app's own; while synced the layout is sheprd's.
   bool get canEditLayout => !sheprdSync;
@@ -474,7 +495,9 @@ class ProjectLayoutController extends ChangeNotifier {
         return (b.fromHub ? 1 : 0) - (a.fromHub ? 1 : 0);
       });
     _sheprdNames = names;
-    _merged = newest.isEmpty ? null : newest.first.renamed(names);
+    _base = newest.isEmpty ? null : newest.first.renamed(names);
+    _confirmPending();
+    _overlay();
     if (!_disposed) notifyListeners();
   }
 
@@ -522,7 +545,7 @@ class ProjectLayoutController extends ChangeNotifier {
       );
       final reply = jsonDecode(stdout.trim().split('\n').last);
       if (reply is Map && reply['ok'] == true) {
-        _showMark(key, view, mark);
+        _showMark(key, mark);
         return null;
       }
       return reply is Map && reply['error'] is String
@@ -560,13 +583,55 @@ class ProjectLayoutController extends ChangeNotifier {
     _ => null,
   };
 
-  /// [mark] on the merged view until sheprd's next write says otherwise.
-  void _showMark(String key, SheprdAgentView? view, SheprdMark mark) {
-    final merged = _merged;
-    if (merged == null) return;
-    final before = view ?? const SheprdAgentView(presence: SheprdPresence.idle);
-    _merged = merged.withAgent(key, before.after(mark));
+  /// Waits for sheprd to confirm [mark]: shown as pending until a newer
+  /// view reflects it, dropped with a notice after [markTimeout].
+  void _showMark(String key, SheprdMark mark) {
+    _pending.remove(key)?.timer.cancel();
+    _pending[key] = _PendingMark(
+      mark,
+      since: _base?.updated ?? 0,
+      timer: Timer(markTimeout, () => _expire(key)),
+    );
+    _overlay();
     if (!_disposed) notifyListeners();
+  }
+
+  void _expire(String key) {
+    final pending = _pending.remove(key);
+    if (pending == null || _disposed) return;
+    _markNotice =
+        "sheprd didn't apply this (not running?): "
+        '${pending.mark.label.toLowerCase()}';
+    _overlay();
+    notifyListeners();
+  }
+
+  /// Drops the pending marks a view newer than their sending reflects.
+  void _confirmPending() {
+    final base = _base;
+    if (base == null) return;
+    _pending.removeWhere((key, pending) {
+      final view = base.agents[key];
+      final done =
+          base.updated > pending.since &&
+          view != null &&
+          view.reflects(pending.mark);
+      if (done) pending.timer.cancel();
+      return done;
+    });
+  }
+
+  void _overlay() {
+    var view = _base;
+    if (view != null) {
+      for (final MapEntry(:key, value: pending) in _pending.entries) {
+        final agent =
+            view!.agents[key] ??
+            const SheprdAgentView(presence: SheprdPresence.idle);
+        view = view.withAgent(key, agent.withPending(pending.mark));
+      }
+    }
+    _merged = view;
   }
 
   // Per-project usage.
@@ -612,6 +677,9 @@ class ProjectLayoutController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    for (final pending in _pending.values) {
+      pending.timer.cancel();
+    }
     theme.removeListener(notifyListeners);
     super.dispose();
   }
@@ -622,4 +690,13 @@ String formatProjectTokens(int tokens) {
   if (tokens < 1000) return '$tokens';
   if (tokens < 1000000) return '${tokens ~/ 1000}k';
   return '${(tokens / 1000000).toStringAsFixed(1)}M';
+}
+
+/// A mark sent to sheprd, waiting for a view newer than [since] to show it.
+class _PendingMark {
+  _PendingMark(this.mark, {required this.since, required this.timer});
+
+  final SheprdMark mark;
+  final int since;
+  final Timer timer;
 }

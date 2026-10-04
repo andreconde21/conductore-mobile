@@ -711,6 +711,11 @@ class _MemberRow extends StatelessWidget {
                       color: palette.accent,
                     ),
                   ),
+                if (sheprd?.pending != null)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 6),
+                    child: SheprdPendingMark(),
+                  ),
                 if (sheprd?.kept ?? false)
                   Padding(
                     padding: const EdgeInsets.only(left: 6),

@@ -40,9 +40,14 @@ class SheprdAgentView {
     this.unread = false,
     this.dismissed = false,
     this.kept = false,
+    this.pending,
   });
 
   final SheprdPresence presence;
+
+  /// A mark sent from the app that sheprd has not confirmed yet (its view
+  /// was not rewritten with it): shown as pending, never as applied.
+  final SheprdMark? pending;
 
   /// Herdr's `state_change_seq` when sheprd last saw the agent.
   final int? stateSeq;
@@ -70,6 +75,26 @@ class SheprdAgentView {
       kept: json['kept'] == true,
     );
   }
+
+  /// Whether this view already shows [mark] applied.
+  bool reflects(SheprdMark mark) => switch (mark) {
+    SheprdMark.unread => unread || presence == SheprdPresence.unread,
+    SheprdMark.read => !unread && presence != SheprdPresence.unread,
+    SheprdMark.dismiss => dismissed,
+    SheprdMark.keep => kept,
+    SheprdMark.unkeep => !kept,
+  };
+
+  /// This view with [mark] waiting for sheprd: the marks as they are, the
+  /// mark only as [pending].
+  SheprdAgentView withPending(SheprdMark mark) => SheprdAgentView(
+    presence: presence,
+    stateSeq: stateSeq,
+    unread: unread,
+    dismissed: dismissed,
+    kept: kept,
+    pending: mark,
+  );
 
   /// This agent after [mark], as sheprd will apply it.
   SheprdAgentView after(SheprdMark mark) => switch (mark) {
@@ -111,10 +136,12 @@ class SheprdAgentView {
       other.stateSeq == stateSeq &&
       other.unread == unread &&
       other.dismissed == dismissed &&
-      other.kept == kept;
+      other.kept == kept &&
+      other.pending == pending;
 
   @override
-  int get hashCode => Object.hash(presence, stateSeq, unread, dismissed, kept);
+  int get hashCode =>
+      Object.hash(presence, stateSeq, unread, dismissed, kept, pending);
 }
 
 /// A presence change sent back to sheprd (`sheprd-view-update --op`).
@@ -135,7 +162,14 @@ enum SheprdMark {
 
   /// What can be done to an agent in [view] (null: sheprd does not list
   /// it yet; marks still apply).
-  static List<SheprdMark> choicesFor(SheprdAgentView? view) => [
+  static List<SheprdMark> choicesFor(SheprdAgentView? shown) {
+    // A pending mark counts as done here, so the menu offers its undo.
+    final pending = shown?.pending;
+    final view = pending == null ? shown : shown!.after(pending);
+    return _choices(view);
+  }
+
+  static List<SheprdMark> _choices(SheprdAgentView? view) => [
     if (view?.presence == SheprdPresence.unread)
       SheprdMark.read
     else

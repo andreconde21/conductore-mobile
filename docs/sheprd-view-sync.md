@@ -132,7 +132,9 @@ sheprd applies lines in file order. It skips, and logs, a line that does
 not parse, has an unknown `v` or `op`, or has an invalid key. An `agent`
 that sheprd does not know is still applied: marks are plain strings in
 `sidebar.toml`. After applying, sheprd rewrites `view.json`, so the writer
-sees the result there.
+sees the result there. Conductore shows a mark as pending until a
+`view.json` with a newer `updated` reflects it, and drops it after 2
+minutes without one.
 
 ### Appending and draining
 

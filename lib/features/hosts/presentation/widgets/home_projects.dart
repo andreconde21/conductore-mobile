@@ -351,6 +351,11 @@ class _HomeProjectRow extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 6),
                 child: Icon(Icons.tab_rounded, size: 14, color: palette.accent),
               ),
+            if (sheprd?.pending != null)
+              const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: SheprdPendingMark(size: 11),
+              ),
             if (sheprd?.kept ?? false)
               Padding(
                 padding: const EdgeInsets.only(left: 6),

@@ -149,7 +149,9 @@ narrower than 900 dp, keep the phone layout.
   covers projects, order, hidden workspaces and each agent's presence: an
   unread dot, a pin when kept, dimmed when dismissed. A row's menu (or a
   long press) offers *Mark as read / unread*, *Keep in active* and
-  *Dismiss*, which go back to sheprd. Opening an unread agent marks it
+  *Dismiss*, which go back to sheprd. A mark shows as pending (a small
+  spinner) until a newer sheprd view reflects it; unconfirmed after 2
+  minutes, it is dropped with "sheprd didn't apply this (not running?)". Opening an unread agent marks it
   read. While sync is on, the app's own project edits are paused; turning
   it off brings back the app's layout unchanged.
 - **Quick actions.** Per project, from the repo's `.code-workspace` file
