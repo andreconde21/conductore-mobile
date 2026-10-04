@@ -3,10 +3,12 @@ import 'dart:convert';
 
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
+import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -16,6 +18,10 @@ import 'package:flutter/foundation.dart';
 /// The companion capability behind `sidebar-layout`: sheprd's
 /// `~/.config/herdr/sidebar.toml`, read-only, as JSON.
 const sheprdSidebarCapability = 'sheprd-sidebar';
+
+/// The companion capability behind `sheprd-view` and `sheprd-view-update`
+/// (CON-077): sheprd's view state, read-only, and marks sent back.
+const sheprdViewCapability = 'sheprd-view';
 
 /// The project view's state, shared by the desktop sidebar, the phone home
 /// and the agents dashboard (CON-065): the layout (the app's own once
@@ -30,6 +36,7 @@ class ProjectLayoutController extends ChangeNotifier {
     required this.theme,
     this.attention,
     this.refreshEvery = const Duration(minutes: 2),
+    this.syncEvery = const Duration(seconds: 15),
     this.clock = DateTime.now,
   }) {
     theme.addListener(notifyListeners);
@@ -42,6 +49,9 @@ class ProjectLayoutController extends ChangeNotifier {
   final ThemeController theme;
   final AgentAttentionController? attention;
   final Duration refreshEvery;
+
+  /// How often sheprd's view is read again while "Sync with sheprd" is on.
+  final Duration syncEvery;
   final DateTime Function() clock;
 
   /// sidebar.toml per saved machine id, already localized (`local/` is
@@ -50,6 +60,13 @@ class ProjectLayoutController extends ChangeNotifier {
   final Map<String, String> _machineErrors = {};
   final Map<String, DateTime> _fetchedAt = {};
   final Set<String> _inFlight = {};
+
+  /// sheprd's view per saved machine id, as that machine reported it.
+  final Map<String, (SavedHost, SheprdView)> _views = {};
+  final Map<String, DateTime> _viewFetchedAt = {};
+  final Set<String> _viewInFlight = {};
+  SheprdView? _merged;
+  Map<String, String> _sheprdNames = const {};
 
   /// The names of the projects found from what agents report, as last
   /// built: the first edit of a layout-less view keeps them as projects.
@@ -71,7 +88,21 @@ class ProjectLayoutController extends ChangeNotifier {
   /// Following the machines' sidebar.toml (nothing edited in the app).
   bool get followsMachines => prefs.layout == null;
 
-  ProjectLayout get layout => prefs.layout ?? machineLayout;
+  /// "Sync with sheprd" is on: the views mirror sheprd's view.
+  bool get sheprdSync => prefs.sheprdSync;
+
+  /// sheprd's view while synced: the newest any machine reported, its keys
+  /// in the app's machine names. Null when off or before one was read.
+  SheprdView? get sheprdView => sheprdSync ? _merged : null;
+
+  /// Layout edits are the app's own; while synced the layout is sheprd's.
+  bool get canEditLayout => !sheprdSync;
+
+  /// While synced, sheprd's layout (from its view, else from the machines'
+  /// sidebar.toml); else the app's own once edited, else sidebar.toml.
+  ProjectLayout get layout => sheprdSync
+      ? (_merged?.layout ?? machineLayout)
+      : (prefs.layout ?? machineLayout);
 
   bool get compact => prefs.compact ?? layout.compact ?? false;
   bool get activeOnly => prefs.activeOnly ?? layout.activeOnly ?? false;
@@ -98,6 +129,7 @@ class ProjectLayoutController extends ChangeNotifier {
     Map<String, List<AgentInfo>> agentsByMachine = const {},
     Iterable<SavedHost> hosts = const [],
   }) {
+    final view = sheprdView;
     final groups = ProjectTreeBuilder.build(
       tree,
       agentsByMachine: agentsByMachine,
@@ -105,6 +137,8 @@ class ProjectLayoutController extends ChangeNotifier {
       machineAliases: aliasesOf(hosts),
       now: clock(),
       recentHours: recentHours,
+      sheprd: sheprdSync ? (view?.agents ?? const {}) : null,
+      order: view?.order ?? const [],
     );
     _found = [
       for (final group in groups)
@@ -166,6 +200,13 @@ class ProjectLayoutController extends ChangeNotifier {
   Future<void> setShowHidden(bool on) =>
       _setPrefs(prefs.copyWith(showHidden: on));
 
+  /// Turns "Sync with sheprd" on or off. Off brings the app's own layout
+  /// back as it was; on reads sheprd's view now.
+  Future<void> setSheprdSync(bool on) async {
+    await _setPrefs(prefs.copyWith(sheprdSync: on));
+    if (on) await refresh(force: true);
+  }
+
   // Layout edits: the app's own layout from here on.
 
   /// The layout edits start from: the app's own, else the machines', else
@@ -183,8 +224,11 @@ class ProjectLayoutController extends ChangeNotifier {
     return layout;
   }
 
-  Future<void> _editLayout(ProjectLayout Function(ProjectLayout) edit) =>
-      _setPrefs(prefs.copyWith(layout: edit(_editable)));
+  /// Ignored while synced with sheprd: its layout wins.
+  Future<void> _editLayout(ProjectLayout Function(ProjectLayout) edit) async {
+    if (!canEditLayout) return;
+    await _setPrefs(prefs.copyWith(layout: edit(_editable)));
+  }
 
   /// "Move to project…" ([project] made when missing) and "Move to Other"
   /// (an empty [project]).
@@ -219,8 +263,10 @@ class ProjectLayoutController extends ChangeNotifier {
   });
 
   /// Back to the machines' sidebar.toml: drops what was edited in the app.
-  Future<void> followMachineLayout() =>
-      _setPrefs(prefs.copyWith(clearLayout: true));
+  Future<void> followMachineLayout() async {
+    if (!canEditLayout) return;
+    await _setPrefs(prefs.copyWith(clearLayout: true));
+  }
 
   /// Project names to offer in "Move to project…": the layout's, then
   /// those found from the agents.
@@ -275,6 +321,14 @@ class ProjectLayoutController extends ChangeNotifier {
     for (final host in attention.monitoredHosts) {
       final id = baseHostId(host.id);
       if (!seen.add(id)) continue;
+      if (sheprdSync &&
+          attention.companionSupports(host.id, sheprdViewCapability)) {
+        final last = _viewFetchedAt[id];
+        if ((force || last == null || now.difference(last) >= syncEvery) &&
+            !_viewInFlight.contains(id)) {
+          pending.add(_fetchView(attention, host, id));
+        }
+      }
       if (!attention.companionSupports(host.id, sheprdSidebarCapability)) {
         continue;
       }
@@ -337,6 +391,167 @@ class ProjectLayoutController extends ChangeNotifier {
     if (before != (_machineLayouts[id], _machineErrors[id]) && !_disposed) {
       notifyListeners();
     }
+  }
+
+  // sheprd's view (CON-077).
+
+  Future<void> _fetchView(
+    AgentAttentionController attention,
+    SavedHost host,
+    String id,
+  ) async {
+    _viewInFlight.add(id);
+    _viewFetchedAt[id] = clock();
+    final (runner, :owned) = attention.runnerFor(host);
+    try {
+      final result = await runner.run(
+        ConductoreHostAttentionProvider.remoteCommand('sheprd-view'),
+        timeout: const Duration(seconds: 15),
+      );
+      applyViewReply(host, result.stdout);
+    } catch (_) {
+      // Unreachable now: the next refresh asks again.
+    } finally {
+      _viewInFlight.remove(id);
+      if (owned) unawaited(runner.close());
+    }
+  }
+
+  /// Takes one `sheprd-view` reply from [host].
+  @visibleForTesting
+  void applyViewReply(SavedHost host, String stdout) {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(stdout.trim().split('\n').last);
+    } catch (_) {
+      return;
+    }
+    final id = baseHostId(host.id);
+    final view = SheprdView.fromReply(decoded);
+    if (view == null) {
+      if (_views.remove(id) == null) return;
+    } else {
+      if (_views[id]?.$2 == view) return;
+      _views[id] = (host, view);
+    }
+    _remerge();
+  }
+
+  /// sheprd names machines by the hub's endpoint labels and the hub itself
+  /// `local`, in every machine's copy. A machine's own copy says which
+  /// label is that machine (`self`); the hub is the machine whose copy says
+  /// `local`, else the one named like the hub.
+  void _remerge() {
+    final names = <String, String>{};
+    String? hub;
+    String? hubName;
+    for (final (host, view) in _views.values) {
+      final name = host.name.toLowerCase();
+      hubName ??= view.hub;
+      if (view.fromHub) {
+        hub = name;
+      } else {
+        names[view.self] = name;
+      }
+    }
+    if (hub == null && hubName != null) {
+      final hosts = [
+        ...?attention?.monitoredHosts,
+        for (final (host, _) in _views.values) host,
+      ];
+      for (final host in hosts) {
+        if (aliasesOf([host]).values.single.contains(hubName)) {
+          hub = host.name.toLowerCase();
+          break;
+        }
+      }
+    }
+    names['local'] = hub ?? hubName ?? 'local';
+    final newest = [for (final (_, view) in _views.values) view]
+      ..sort((a, b) {
+        final byTime = b.updated.compareTo(a.updated);
+        if (byTime != 0) return byTime;
+        return (b.fromHub ? 1 : 0) - (a.fromHub ? 1 : 0);
+      });
+    _sheprdNames = names;
+    _merged = newest.isEmpty ? null : newest.first.renamed(names);
+    if (!_disposed) notifyListeners();
+  }
+
+  /// [key] (`machine/pane_id` in the app's names) as sheprd names it.
+  String _sheprdKey(String key) {
+    final back = {
+      for (final MapEntry(:key, :value) in _sheprdNames.entries) value: key,
+    };
+    return ProjectKeys.renamed(key, back);
+  }
+
+  /// Sends [mark] for the agent [row] of [entry] back to sheprd, through a
+  /// machine whose companion has sheprd's view (the agent's own first),
+  /// and shows it at once. Returns why it failed, null when sent.
+  Future<String?> mark(
+    ProjectEntry entry,
+    SidebarNode row,
+    SheprdMark mark,
+  ) async {
+    final attention = this.attention;
+    final key = entry.sheprdKeys[row.key];
+    if (attention == null || key == null || !sheprdSync) {
+      return 'Not synced with sheprd.';
+    }
+    final senders = [
+      for (final MapEntry(key: id, value: (host, _)) in _views.entries)
+        if (attention.companionSupports(host.id, sheprdViewCapability))
+          (id == baseHostId(row.machineId) ? 0 : 1, host),
+    ]..sort((a, b) => a.$1.compareTo(b.$1));
+    if (senders.isEmpty) return 'No machine has sheprd\'s view.';
+    final host = senders.first.$2;
+    final view = entry.sheprdOf(row);
+    final seq = view?.stateSeq ?? _liveSequence(row);
+    if (mark == SheprdMark.dismiss && seq == null) {
+      return 'sheprd has not seen this agent change state yet.';
+    }
+    final args = [
+      'sheprd-view-update',
+      '--op',
+      mark.name,
+      '--agent',
+      shellQuoteArgument(_sheprdKey(key)),
+      if (mark == SheprdMark.dismiss) ...['--state-seq', '$seq'],
+    ].join(' ');
+    final (runner, :owned) = attention.runnerFor(host);
+    try {
+      final result = await runner.run(
+        ConductoreHostAttentionProvider.remoteCommand(args),
+        timeout: const Duration(seconds: 15),
+      );
+      final reply = jsonDecode(result.stdout.trim().split('\n').last);
+      if (reply is Map && reply['ok'] == true) {
+        _showMark(key, view, mark);
+        return null;
+      }
+      return reply is Map && reply['error'] is String
+          ? reply['error'] as String
+          : 'sheprd-view-update failed.';
+    } catch (_) {
+      return 'Could not reach ${host.name}.';
+    } finally {
+      if (owned) unawaited(runner.close());
+    }
+  }
+
+  static int? _liveSequence(SidebarNode row) => switch (row.target) {
+    AgentPaneTarget(:final pane) => pane.agent.stateSequence,
+    _ => null,
+  };
+
+  /// [mark] on the merged view until sheprd's next write says otherwise.
+  void _showMark(String key, SheprdAgentView? view, SheprdMark mark) {
+    final merged = _merged;
+    if (merged == null) return;
+    final before = view ?? const SheprdAgentView(presence: SheprdPresence.idle);
+    _merged = merged.withAgent(key, before.after(mark));
+    if (!_disposed) notifyListeners();
   }
 
   // Per-project usage.
