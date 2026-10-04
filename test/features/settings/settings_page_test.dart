@@ -351,7 +351,9 @@ void main() {
       'sheprd',
     );
     await tester.pumpAndSettle();
-    final result = find.byKey(ValueKey('settings-result-$sheprdSyncTitle'));
+    final result = find.byKey(
+      const ValueKey('settings-result-$sheprdSyncTitle'),
+    );
     expect(result, findsOneWidget);
     await tester.tap(result);
     await tester.pumpAndSettle();

@@ -249,7 +249,6 @@ void main() {
           laptop,
           _reply(
             'local',
-            updated: 1000,
             agents: {
               'dev-box/w2:p1': {
                 'presence': 'unread',
