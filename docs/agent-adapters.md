@@ -83,7 +83,9 @@ Neither is ever set for Claude Code, so its JSON is unchanged.
    agent's own prompt ask). `'server'` agents answer through the agent; the
    daemon side of that is not built yet (OpenCode, see below).
 5. Chat: `readTranscript(agent, opts)` returns a page built with
-   `chat-items.js` (`format: "items"`) or `{ error }`; set
+   `chat-items.js` (`format: "items"`) or `{ error }` (add `notYet: true`
+   when the session simply has no transcript yet, before its first turn:
+   the phone then shows an empty chat instead of an error); set
    `capabilities().chat = 'items'`. Paging is by opaque cursor
    (`transcript --cursor` / `--before-cursor`). Optionally `readTail()` for
    the dashboard (types.js `Tail`).

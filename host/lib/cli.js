@@ -524,6 +524,12 @@ async function transcriptCmd (args) {
   const adapter = adaptersMod().of(a)
   if (!adapter.readTranscript) return fail(`${adapter.label} sessions have no chat view`)
   const page = adapter.readTranscript(a, opts)
+  // notYet: no transcript before the first turn; the phone shows an empty
+  // chat and keeps polling.
+  if (page.error && page.notYet) {
+    process.stdout.write(JSON.stringify({ error: page.error, notYet: true }) + '\n')
+    return 1
+  }
   if (page.error) return fail(page.error)
   // The agent's live status rides along so one poll refreshes the whole view.
   const agent = { name: a.name, state: a.state, lastEvent: a.lastEvent || null, lastToolName: a.lastToolName || null, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - fix: `send`, `interrupt`, `focus` and the tmux location work when the daemon runs without a UTF-8 locale (CON-071). tmux 3.3+ prints a format's tabs as `_` for a client it thinks is not UTF-8 (LANG unset or C: systemd, minimal containers), so the pane context came back as one field and every agent read as "not in tmux". The lookup now passes `tmux -u` and a tab-mangled line still yields the pane, its process and window. Checked in Docker on tmux 3.3a and 3.4.
+- feat: `transcript` marks the "no transcript yet" errors (before a Claude Code or Codex session's first turn) with `notYet: true`, so the phone shows an empty chat instead of an error (CON-071). Adapters: see `docs/agent-adapters.md`.
 
 ## 1.4.0 (2026-10-03)
 

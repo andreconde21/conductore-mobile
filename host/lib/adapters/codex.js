@@ -528,12 +528,12 @@ const isRollout = file => typeof file === 'string' && path.isAbsolute(file) && f
 
 function readTranscript (agent, opts = {}) {
   const file = agent && agent.transcriptPath
-  if (!file) return { error: 'no session file recorded for this Codex session yet (it appears with the next hook event)' }
+  if (!file) return { error: 'no session file recorded for this Codex session yet (it appears with the next hook event)', notYet: true }
   if (!isRollout(file)) return { error: 'session file path is not an absolute .jsonl file' }
   try {
     return rollout().readPage(file, opts)
   } catch (err) {
-    if (err.code === 'ENOENT') return { error: `session file not found: ${file}` }
+    if (err.code === 'ENOENT') return { error: `session file not found: ${file}`, notYet: true }
     return { error: `cannot read session file: ${err.message}` }
   }
 }

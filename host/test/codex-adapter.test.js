@@ -359,6 +359,7 @@ test('missing or odd session files give the error transcript prints', () => {
   assert.match(codex.readTranscript({}, {}).error, /no session file/)
   assert.match(codex.readTranscript({ transcriptPath: 'rel.jsonl' }, {}).error, /absolute/)
   assert.match(codex.readTranscript(fixtures.missing, {}).error, /not found/)
+  assert.equal(codex.readTranscript(fixtures.missing, {}).notYet, true)
 })
 
 test('the dashboard tail: prompts, replies, command runs and tokens of the window', () => {

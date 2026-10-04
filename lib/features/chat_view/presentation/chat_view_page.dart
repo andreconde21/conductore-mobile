@@ -1508,7 +1508,7 @@ class _ChatViewPageState extends State<ChatViewPage>
           const ValueKey('chat-empty'),
           () => const _Centered(
             icon: Icons.forum_outlined,
-            text: 'No messages yet. Send a prompt to start.',
+            text: 'No messages yet. Send the first one below.',
           ),
         ),
     ];

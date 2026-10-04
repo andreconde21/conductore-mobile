@@ -366,6 +366,23 @@ void main() {
     expect(opened, 1);
   });
 
+  testWidgets('a fresh session shows the empty chat, not an error', (
+    tester,
+  ) async {
+    await pumpPage(tester, [
+      const AgentCommandResult(
+        stdout: '{"error":"transcript not found: /x/s-1.jsonl","notYet":true}',
+        stderr: '',
+        exitCode: 1,
+      ),
+    ]);
+    expect(
+      find.text('No messages yet. Send the first one below.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('transcript not found'), findsNothing);
+  });
+
   testWidgets('an old companion offers the update', (tester) async {
     var opened = 0;
     await pumpPage(tester, [

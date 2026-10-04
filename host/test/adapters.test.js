@@ -142,9 +142,9 @@ test('Claude Code: a transcript page through the adapter is the one transcript.j
   for (const opts of [{}, { since: 0 }, { tailBytes: 200 }, { before: 300, maxBytes: 1024 }]) {
     assert.deepEqual(claude.readTranscript(fixtures.agent, opts), transcript.readTranscript(transcriptFile, opts))
   }
-  assert.deepEqual(claude.readTranscript({ sessionId: 'x' }, {}), { error: 'no transcript recorded for this session yet (it appears with the next hook event)' })
+  assert.deepEqual(claude.readTranscript({ sessionId: 'x' }, {}), { error: 'no transcript recorded for this session yet (it appears with the next hook event)', notYet: true })
   assert.deepEqual(claude.readTranscript({ transcriptPath: 'rel.jsonl' }, {}), { error: 'transcript path is not an absolute .jsonl file' })
-  assert.deepEqual(claude.readTranscript(fixtures.missing, {}), { error: `transcript not found: ${fixtures.missing.transcriptPath}` })
+  assert.deepEqual(claude.readTranscript(fixtures.missing, {}), { error: `transcript not found: ${fixtures.missing.transcriptPath}`, notYet: true })
   assert.deepEqual(claude.readTail(fixtures.agent, { since: 0 }), digest.readTail(transcriptFile, { since: 0 }))
 })
 

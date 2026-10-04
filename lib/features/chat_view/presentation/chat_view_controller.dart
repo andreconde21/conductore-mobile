@@ -386,6 +386,13 @@ class ChatViewController extends ChangeNotifier {
       _timer?.cancel();
       _timer = null;
       if (!_disposed) notifyListeners();
+    } on ChatTranscriptNotYet {
+      // Before the session's first turn: an empty chat, still polled, so
+      // the transcript shows up as soon as it is written.
+      final changed = _loading || _error != null;
+      _error = null;
+      _loading = false;
+      if (changed && !_disposed) notifyListeners();
     } catch (error) {
       _error = _describe(error);
       _loading = false;

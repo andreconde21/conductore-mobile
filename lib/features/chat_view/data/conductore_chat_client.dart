@@ -32,6 +32,18 @@ class ChatUnsupported implements Exception {
   String toString() => message;
 }
 
+/// Thrown by [ConductoreChatClient.transcript] when the session has no
+/// transcript yet, which is normal before its first turn: the chat is
+/// empty, not broken.
+class ChatTranscriptNotYet implements Exception {
+  const ChatTranscriptNotYet(this.detail);
+
+  final String detail;
+
+  @override
+  String toString() => detail;
+}
+
 /// The chat view's side of the companion contract (`host/README.md`):
 /// `transcript`, `send` and `interrupt`, each run over an exec channel
 /// through the same PATH wrapper as the attention provider.
@@ -143,6 +155,9 @@ class ConductoreChatClient {
       ),
       timeout: _timeout,
     );
+    if (notYetDetail(result) case final detail?) {
+      throw ChatTranscriptNotYet(detail);
+    }
     _check(result);
     try {
       return TranscriptParser.parsePage(result.stdout);
@@ -213,6 +228,30 @@ class ConductoreChatClient {
       );
     }
   }
+
+  /// The companion's "no transcript yet" error, or null. Companions since
+  /// CON-071 mark it `notYet: true`; older ones are recognised by the
+  /// message (Claude Code's and Codex's adapters).
+  static String? notYetDetail(AgentCommandResult result) {
+    if (result.exitCode == null || result.exitCode == 0) return null;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(result.stdout.trim());
+    } catch (_) {
+      return null;
+    }
+    if (decoded is! Map || decoded['error'] is! String) return null;
+    final error = decoded['error'] as String;
+    if (decoded['notYet'] == true || _notYetMessage.hasMatch(error)) {
+      return error;
+    }
+    return null;
+  }
+
+  static final _notYetMessage = RegExp(
+    r'^(no (transcript|session file) recorded for |'
+    r'(transcript|session file) not found: )',
+  );
 
   static void _check(AgentCommandResult result) {
     final stderr = result.stderr.trim();
