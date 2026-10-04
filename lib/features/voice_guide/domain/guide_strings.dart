@@ -57,6 +57,10 @@ abstract class GuideStrings {
   String replyFrom(String agent, String text);
   String confirmApprove(GuidePending pending);
   String confirmDeny(GuidePending pending);
+
+  /// A request only the agent's own terminal answers (Gemini CLI): no
+  /// approve or deny, an offer to open the agent instead.
+  String answerInTerminal(GuidePending pending);
   String confirmApproveAll(int count);
   String confirmTrust(GuidePending pending, int minutes);
   String nothingToTrust(String agent);
@@ -240,6 +244,10 @@ class _English extends GuideStrings {
   String confirmDeny(GuidePending pending) =>
       'Deny ${GuideStrings.requestLabel(pending.request)} for '
       '${pending.agent.label}? Say yes.';
+  @override
+  String answerInTerminal(GuidePending pending) =>
+      '${pending.agent.label} takes its approvals in the terminal: answer it '
+      'there. Open ${pending.agent.label}? Say yes.';
   @override
   String confirmApproveAll(int count) => count == 1
       ? 'Approve one low-risk request? Say yes.'
@@ -498,6 +506,10 @@ class _Portuguese extends GuideStrings {
   String confirmDeny(GuidePending pending) =>
       'Negar ${GuideStrings.requestLabel(pending.request)} para '
       '${pending.agent.label}? Diz sim.';
+  @override
+  String answerInTerminal(GuidePending pending) =>
+      '${pending.agent.label} responde às aprovações no terminal: responde '
+      'lá. Abro ${pending.agent.label}? Diz sim.';
   @override
   String confirmApproveAll(int count) => count == 1
       ? 'Aprovar um pedido de baixo risco? Diz sim.'

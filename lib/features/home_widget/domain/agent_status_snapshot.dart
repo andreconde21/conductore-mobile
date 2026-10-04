@@ -553,7 +553,9 @@ class AgentStatusDashboard {
 
   static String _needsReason(AgentInfo agent) {
     if (agent.pendingRequests.firstOrNull case final request?) {
-      return 'approve ${request.toolName}';
+      return request.terminalOnly
+          ? 'approve ${request.toolName} in the terminal'
+          : 'approve ${request.toolName}';
     }
     return agent.state.label.toLowerCase();
   }

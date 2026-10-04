@@ -164,6 +164,53 @@ void main() {
     expect(await hear(tester), 'Approved.');
   });
 
+  testWidgets('a request only the terminal answers (Gemini CLI): no approve, '
+      'deny, trust or approve all; it offers to open the agent', (
+    tester,
+  ) async {
+    const write = PendingPermissionRequest(
+      id: 'req-gem',
+      toolName: 'Write',
+      summary: '/work/proj/hello.txt',
+      terminalOnly: true,
+    );
+    await setUpGuide(
+      tester,
+      world: GuideWorld(
+        machines: const [vtm],
+        agents: [
+          agent('s-gem', project: 'proj', pending: const [write]),
+        ],
+      ),
+      approvalActions: FakeApprovals(
+        risks: {'req-gem': ApprovalRisk.low},
+        smart: true,
+      ),
+    );
+    await begin(tester);
+    const offer =
+        'proj takes its approvals in the terminal: answer it there. '
+        'Open proj? Say yes.';
+    await talk(tester, 'approve');
+    expect(await hear(tester), offer);
+    await talk(tester, 'no');
+    await hear(tester);
+    await talk(tester, 'deny');
+    expect(await hear(tester), offer);
+    await talk(tester, 'no');
+    await hear(tester);
+    await talk(tester, 'approve all safe');
+    expect(await hear(tester), 'No low-risk requests are waiting.');
+    await talk(tester, 'approve');
+    expect(await hear(tester), offer);
+    await talk(tester, 'yes');
+    expect(navigator.opened.last, ('s-gem', null));
+    await hear(tester);
+    expect(approvals.decided, isEmpty);
+    expect(approvals.batches, isEmpty);
+    expect(approvals.trusted, isEmpty);
+  });
+
   testWidgets('no, or two unclear answers, cancel without acting', (
     tester,
   ) async {
