@@ -154,6 +154,10 @@ void main() {
         provider: const HerdrAttentionProvider(),
         companionProvider: const ConductoreHostAttentionProvider(),
         notifier: notifier,
+        // A finished turn alerts once opted in.
+        notificationPreferences: MemoryAgentNotificationPreferencesStore(
+          const AgentNotificationPreferences(finishedAlerts: true),
+        ),
         pollInterval: const Duration(days: 1),
       )..setAppForeground(false);
       addTearDown(controller.dispose);

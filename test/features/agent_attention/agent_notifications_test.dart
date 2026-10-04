@@ -629,7 +629,7 @@ void main() {
 
     testWidgets('Settings › Agents › Notifications switches', (tester) async {
       final workspace = TerminalWorkspaceController(FreshTerminalRepository());
-      final store = MemoryAgentNotificationPreferencesStore();
+      final store = MemoryAgentNotificationPreferencesStore(_everything);
       final controller = AgentAttentionController(
         workspace: workspace,
         runnerFactory: (_) => ScriptedAgentCommandRunner(const []),
