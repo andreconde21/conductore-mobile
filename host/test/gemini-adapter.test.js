@@ -401,6 +401,25 @@ test('usage: tokens per day, project and model from the session files', () => {
   assert.deepEqual(gemini.usageReport({ env: { HOME: emptyDir }, range: { from: '2026-10-01', to: '2026-10-04', today: '2026-10-04' }, projectOf: d => d, localDate }), { present: false })
 })
 
+test("the app's Gemini chat fixture is what the adapter reads from the real session today", () => {
+  const file = path.join(__dirname, '..', '..', 'test', 'fixtures', 'agent_adapters', 'gemini_chat_page.json')
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const { sessionId, agent, ...page } = saved
+  assert.equal(sessionId, SID)
+  assert.equal(agent.state, 'waiting_input')
+  assert.deepEqual(page, JSON.parse(JSON.stringify(gemini.readTranscript(fixtures.agent, {}))))
+})
+
+test('the dashboard digest names a Gemini agent\'s kind and reads its facts from the session file', async () => {
+  const digest = require('../lib/digest')
+  const now = Date.parse('2026-10-04T18:10:00Z')
+  const agent = { sessionId: SID, kind: 'gemini', name: 'proj', cwd: '/work/proj', transcriptPath: SESSION, state: 'waiting_input', lastMessage: 'The answer is **42**.', startedAt: now - 120000, updatedAt: now - 1000, pending: [] }
+  const r = await digest.digest({ now, since: now - 3600000, data: { status: { agents: [agent] }, activity: {}, source: 'test', hasActivity: false }, storeFile: path.join(root, 'digest.json'), env: { HOME: root }, gitTimeoutMs: 1 })
+  const entry = r.agents.find(a => a.sessionId === SID)
+  assert.equal(entry.kind, 'gemini')
+  assert.equal(entry.facts.tokens.output, 440)
+})
+
 // --- process and accounts ---------------------------------------------------------------
 
 test('identifyProcess knows a node process running gemini, not one that mentions it', async () => {
