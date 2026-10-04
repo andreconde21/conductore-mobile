@@ -22,7 +22,7 @@ const fakeBin = tempDir('cnd-bin-')
 const tmuxLog = path.join(fakeBin, 'tmux.log')
 fs.writeFileSync(path.join(fakeBin, 'tmux'), `#!/bin/sh
 printf '%s\n' "$*" >> '${tmuxLog}'
-printf 'main\t2\t%s\t/work/t\tfixer\t4242\n' "$6"
+printf '%s\t4242\t2\tmain\tfixer\t/work/t\n' "$7"
 `, { mode: 0o755 })
 // A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9;
 // `pane get w5:p1` answers for a pane moved since to w6:p3 (Herdr keeps
@@ -164,7 +164,7 @@ test('tmux location is resolved by the daemon from the variables in the spool he
   const a = (await status()).agents.find(a => a.sessionId === 't1')
   assert.deepEqual(a.tmux, { session: 'main', window: 2, paneId: '%7', windowName: 'fixer', socket: '/tmp/fake-tmux-sock', panePid: 4242 })
   assert.equal(a.name, 'fixer')
-  assert.match(fs.readFileSync(tmuxLog, 'utf8'), /^-S \/tmp\/fake-tmux-sock display-message -p -t %7 /m)
+  assert.match(fs.readFileSync(tmuxLog, 'utf8'), /^-u -S \/tmp\/fake-tmux-sock display-message -p -t %7 /m)
   // Herdr comes straight from the header.
   await hook(ev('t2', 'SessionStart'), { HERDR_WORKSPACE_ID: 'w1', HERDR_TAB_ID: 'w1:t1', HERDR_PANE_ID: 'w1:p1', HERDR_AGENT_NAME: 'rev' })
   const b = (await status()).agents.find(a => a.sessionId === 't2')
