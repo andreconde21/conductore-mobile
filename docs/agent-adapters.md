@@ -68,6 +68,11 @@ Neither is ever set for Claude Code, so its JSON is unchanged.
    `capabilities()` and `normalize()`; add what the agent supports
    (types.js lists every optional member). Require heavy modules lazily: the
    daemon loads the adapter on its agent's first event.
+   The phone's "New workspace" offers to start the agent when its command
+   is on the machine's PATH: add the agent to `knownAgentKinds` in
+   `lib/features/agent_attention/domain/agent_kinds.dart` (kind, label,
+   command), or report `launch: '<command>'` (one plain word) in
+   `capabilities()` and the phone picks it up from the `adapters` map.
 2. Add one line to `MODULES` in `host/lib/adapters/index.js` (after
    `claude`: the order decides the default brain).
 3. Events in:
