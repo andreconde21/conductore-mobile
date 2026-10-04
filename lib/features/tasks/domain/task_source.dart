@@ -381,6 +381,27 @@ enum TaskSourceKind {
       ),
     ],
   ),
+  trello(
+    'trello',
+    'Trello',
+    "Cards of a Trello board; a card's list is its status.",
+    TaskSourceCapabilities(),
+    'Token (authorize your API key at trello.com/1/authorize)',
+    [
+      TaskSourceField(
+        'board',
+        'Board',
+        hint: 'the code in trello.com/b/<code>/…',
+      ),
+      TaskSourceField(
+        'apiKey',
+        'API key',
+        help:
+            'From trello.com/power-ups/admin. The key identifies the app; '
+            'the token below is the secret.',
+      ),
+    ],
+  ),
   azureBoards(
     'azure-boards',
     'Azure Boards',

@@ -5,6 +5,7 @@ import 'package:conduit/features/tasks/data/gitlab_task_source.dart';
 import 'package:conduit/features/tasks/data/jira_task_source.dart';
 import 'package:conduit/features/tasks/data/linear_task_source.dart';
 import 'package:conduit/features/tasks/data/markdown_folder_task_source.dart';
+import 'package:conduit/features/tasks/data/trello_task_source.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
 import 'package:http/http.dart' as http;
 
@@ -42,6 +43,7 @@ TaskSource createTaskSource(
       client: client,
     ),
     TaskSourceKind.linear => LinearTaskSource(config, token: t, client: client),
+    TaskSourceKind.trello => TrelloTaskSource(config, token: t, client: client),
     TaskSourceKind.azureBoards => AzureBoardsTaskSource(
       config,
       token: t,
