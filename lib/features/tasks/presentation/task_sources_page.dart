@@ -150,7 +150,8 @@ class _TaskSourcesPageState extends State<TaskSourcesPage> {
       TaskSourceKind.markdownFolder => s['folder'],
       TaskSourceKind.github => s['repo'],
       TaskSourceKind.gitlab => s['project'],
-      TaskSourceKind.jira => s['project'] ?? s['jql'],
+      TaskSourceKind.jira ||
+      TaskSourceKind.jiraServer => s['project'] ?? s['jql'],
       TaskSourceKind.linear => s['team'] ?? 'every team',
       TaskSourceKind.azureBoards => [
         s['organization'],

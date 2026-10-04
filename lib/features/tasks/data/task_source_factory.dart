@@ -30,7 +30,11 @@ TaskSource createTaskSource(
     ),
     TaskSourceKind.github => GitHubTaskSource(config, token: t, client: client),
     TaskSourceKind.gitlab => GitLabTaskSource(config, token: t, client: client),
-    TaskSourceKind.jira => JiraTaskSource(config, token: t, client: client),
+    TaskSourceKind.jira || TaskSourceKind.jiraServer => JiraTaskSource(
+      config,
+      token: t,
+      client: client,
+    ),
     TaskSourceKind.linear => LinearTaskSource(config, token: t, client: client),
     TaskSourceKind.azureBoards => AzureBoardsTaskSource(
       config,

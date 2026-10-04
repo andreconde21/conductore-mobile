@@ -4,17 +4,24 @@ import 'package:conduit/features/tasks/data/task_http.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
 import 'package:http/http.dart' as http;
 
-/// Jira Cloud issues (REST v3): a project's issues or any JQL, statuses
-/// through each issue's transitions, comments in Atlassian Document
-/// Format. Basic auth with the account email and an API token.
+/// Jira issues: a project's issues or any JQL, statuses through each
+/// issue's transitions.
+///
+/// Jira Cloud ([TaskSourceKind.jira]): REST v3, `POST /search/jql` paged by
+/// token, Atlassian Document Format, Basic auth with the account email and
+/// an API token. Jira Server / Data Center ([TaskSourceKind.jiraServer]):
+/// REST v2, `GET /search` paged by `startAt`, plain text, a personal access
+/// token as Bearer.
 class JiraTaskSource implements TaskSource {
   JiraTaskSource(this.config, {required String token, http.Client? client})
-    : _http = TaskHttp(
+    : _server = config.kind == TaskSourceKind.jiraServer,
+      _http = TaskHttp(
         client ?? http.Client(),
         service: 'Jira',
         headers: {
-          'authorization':
-              'Basic ${base64Encode(utf8.encode('${config['email'] ?? ''}:$token'))}',
+          'authorization': config.kind == TaskSourceKind.jiraServer
+              ? 'Bearer $token'
+              : 'Basic ${base64Encode(utf8.encode('${config['email'] ?? ''}:$token'))}',
           'accept': 'application/json',
         },
       );
@@ -22,6 +29,7 @@ class JiraTaskSource implements TaskSource {
   @override
   final TaskSourceConfig config;
   final TaskHttp _http;
+  final bool _server;
 
   static const _fields = 'summary,status,assignee,labels,updated';
 
@@ -36,8 +44,12 @@ class JiraTaskSource implements TaskSource {
     return baseUrl(site, '');
   }
 
-  Uri _uri(List<String> path, [Map<String, String>? query]) =>
-      joinUri(_site, ['rest', 'api', '3', ...path], query);
+  Uri _uri(List<String> path, [Map<String, String>? query]) => joinUri(_site, [
+    'rest',
+    'api',
+    if (_server) '2' else '3',
+    ...path,
+  ], query);
 
   /// The configured JQL, else the project's issues, newest first.
   String get jql {
@@ -97,7 +109,34 @@ class JiraTaskSource implements TaskSource {
   }
 
   @override
-  Future<List<TaskItem>> list() => collectPages((cursor) async {
+  Future<List<TaskItem>> list() => _server ? _listServer() : _listCloud();
+
+  Future<List<TaskItem>> _listServer() => collectPages((cursor) async {
+    final startAt = (cursor as int?) ?? 0;
+    final json = await _http.get(
+      _uri(
+        ['search'],
+        {
+          'jql': jql,
+          'startAt': '$startAt',
+          'maxResults': '100',
+          'fields': _fields,
+        },
+      ),
+    );
+    final issues = [
+      if (json case {'issues': final List<Object?> list})
+        for (final issue in list)
+          if (issue is Map) _task(issue),
+    ];
+    final total = json is Map && json['total'] is num
+        ? (json['total']! as num).toInt()
+        : 0;
+    final next = startAt + issues.length;
+    return (issues, next < total ? next : null);
+  });
+
+  Future<List<TaskItem>> _listCloud() => collectPages((cursor) async {
     final json = await _http.send(
       'POST',
       _uri(['search', 'jql']),
@@ -186,7 +225,7 @@ class JiraTaskSource implements TaskSource {
     await _http.send(
       'POST',
       _uri(['issue', task.id, 'comment']),
-      body: {'body': textToAdf(text)},
+      body: {'body': _server ? text : textToAdf(text)},
     );
   }
 }

@@ -316,6 +316,29 @@ enum TaskSourceKind {
       ),
     ],
   ),
+  jiraServer(
+    'jira-server',
+    'Jira Server / Data Center',
+    'Issues of a self-hosted Jira project (or any JQL).',
+    TaskSourceCapabilities(),
+    'Personal access token (Profile › Personal Access Tokens)',
+    [
+      TaskSourceField(
+        'site',
+        'Server URL',
+        hint: 'https://jira.example.com',
+        kind: TaskSourceFieldKind.url,
+      ),
+      TaskSourceField('project', 'Project key', hint: 'PROJ', required: false),
+      TaskSourceField(
+        'jql',
+        'JQL',
+        hint: 'assignee = currentUser() ORDER BY updated DESC',
+        required: false,
+        help: 'Overrides the project key.',
+      ),
+    ],
+  ),
   linear(
     'linear',
     'Linear',
@@ -408,7 +431,7 @@ class TaskSourceConfig {
     for (final field in kind.fields) {
       if (field.required && this[field.key] == null) return field.label;
     }
-    if (kind == TaskSourceKind.jira &&
+    if ((kind == TaskSourceKind.jira || kind == TaskSourceKind.jiraServer) &&
         this['project'] == null &&
         this['jql'] == null) {
       return 'Project key or JQL';
