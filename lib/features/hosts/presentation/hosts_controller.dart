@@ -4,6 +4,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:flutter/foundation.dart';
@@ -453,6 +454,7 @@ class HostsController extends ChangeNotifier {
   void _setHosts(List<SavedHost> hosts) {
     _hosts = hosts;
     _sortedHostsCache = null;
+    SshClientFactory.retainKeysOf(hosts);
   }
 
   List<SavedHost> _computeSortedHosts() {

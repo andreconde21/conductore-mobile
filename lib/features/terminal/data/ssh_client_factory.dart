@@ -37,7 +37,7 @@ class SshClientFactory {
   /// terminal, the side connection, SFTP) would pay it again. The key and
   /// its passphrase are in memory anyway, in the saved machine.
   static List<SSHKeyPair> parseKeyPairs(String pemText, String? passphrase) {
-    final key = '${passphrase ?? ''}\u0000$pemText';
+    final key = _parsedKeyId(pemText, passphrase);
     final known = _parsedKeys.remove(key);
     final keyPairs = known ?? SSHKeyPair.fromPem(pemText, passphrase);
     _parsedKeys[key] = keyPairs;
@@ -46,6 +46,35 @@ class SshClientFactory {
     }
     return keyPairs;
   }
+
+  /// Drops every decrypted key no machine in [hosts] uses any more, so a
+  /// deleted machine's key, or the old key or passphrase of an edited one,
+  /// does not stay decrypted in memory for the rest of the run.
+  static void retainKeysOf(Iterable<SavedHost> hosts) {
+    if (_parsedKeys.isEmpty) return;
+    final inUse = <String>{
+      for (final host in hosts) ...[
+        if (host.privateKey.isNotEmpty)
+          _parsedKeyId(
+            host.privateKey,
+            host.passphrase.isEmpty ? null : host.passphrase,
+          ),
+        for (final entry in host.hardwareKeys)
+          _parsedKeyId(
+            entry.privateKey,
+            entry.passphrase.isEmpty ? null : entry.passphrase,
+          ),
+      ],
+    };
+    _parsedKeys.removeWhere((key, _) => !inUse.contains(key));
+  }
+
+  @visibleForTesting
+  static bool isParsed(String pemText, String? passphrase) =>
+      _parsedKeys.containsKey(_parsedKeyId(pemText, passphrase));
+
+  static String _parsedKeyId(String pemText, String? passphrase) =>
+      '${passphrase ?? ''}\u0000$pemText';
 
   static final _parsedKeys = <String, List<SSHKeyPair>>{};
   static const _parsedKeysKept = 16;

@@ -1,5 +1,9 @@
+import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/test_doubles.dart';
 
 /// A throwaway test key (ed25519, one bcrypt round), passphrase
 /// `test-passphrase`.
@@ -42,5 +46,71 @@ void main() {
       SshClientFactory.parseKeyPairs(_encryptedPem, 'test-passphrase'),
       hasLength(1),
     );
+  });
+
+  group('decrypted keys are forgotten with their machine (CON-071)', () {
+    SavedHost machine(String id, String passphrase) => SavedHost(
+      id: id,
+      name: id,
+      host: '$id.example',
+      port: 22,
+      username: 'me',
+      authMethod: SshAuthMethod.privateKey,
+      privateKey: _encryptedPem,
+      passphrase: passphrase,
+    );
+
+    bool cached() =>
+        SshClientFactory.isParsed(_encryptedPem, 'test-passphrase');
+
+    Future<HostsController> controllerWith(List<SavedHost> hosts) async {
+      final repository = FakeHostsRepository()..persisted = hosts;
+      final controller = HostsController(repository);
+      await controller.load();
+      SshClientFactory.parseKeyPairs(_encryptedPem, 'test-passphrase');
+      expect(cached(), isTrue);
+      return controller;
+    }
+
+    test('when the machine is deleted', () async {
+      final a = machine('a', 'test-passphrase');
+      final controller = await controllerWith([a]);
+      await controller.remove(a);
+      expect(cached(), isFalse);
+    });
+
+    test('when its passphrase or key changes', () async {
+      final a = machine('a', 'test-passphrase');
+      final controller = await controllerWith([a]);
+      await controller.upsert(machine('a', 'another-passphrase'));
+      expect(cached(), isFalse);
+
+      final b = await controllerWith([a]);
+      await b.upsert(
+        SavedHost(
+          id: 'a',
+          name: 'a',
+          host: 'a.example',
+          port: 22,
+          username: 'me',
+          authMethod: SshAuthMethod.privateKey,
+          privateKey: 'a new key',
+          passphrase: 'test-passphrase',
+        ),
+      );
+      expect(cached(), isFalse);
+    });
+
+    test('but kept while another machine still uses it', () async {
+      final a = machine('a', 'test-passphrase');
+      final controller = await controllerWith([
+        a,
+        machine('b', 'test-passphrase'),
+      ]);
+      await controller.remove(a);
+      expect(cached(), isTrue);
+      await controller.upsert(machine('c', ''));
+      expect(cached(), isTrue);
+    });
   });
 }
