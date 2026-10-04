@@ -267,3 +267,20 @@ test('a linked agent that disappears ends its run', async () => {
   assert.equal(after.status, 'finished')
   assert.equal(after.outcome, 'gone')
 })
+
+test('worktree off: the run works in the repository, links only a fresh agent', async () => {
+  reset()
+  const dir = repo()
+  const { runs: [r] } = await runs.start({ repo: dir, agent: 'claude', place: 'none', worktree: false, tasks: [task('N-1')] })
+  assert.equal(r.status, 'running', r.error)
+  assert.equal(r.worktree, dir)
+  assert.equal(r.branch, null)
+  assert.match(r.command, new RegExp(`^cd '${dir}' && 'claude'`))
+  assert.deepEqual(git(dir, 'worktree', 'list').split('\n').length, 1, 'no worktree made')
+  const old = { sessionId: 'old', cwd: dir, state: 'working', startedAt: r.startedAt - 60000 }
+  let { runs: [after] } = await runs.list([old])
+  assert.equal(after.sessionId, undefined, 'an agent already there is not the run')
+  const fresh = { sessionId: 'new', cwd: dir, state: 'working', startedAt: Date.now() }
+  ;({ runs: [after] } = await runs.list([old, fresh]))
+  assert.equal(after.sessionId, 'new')
+})

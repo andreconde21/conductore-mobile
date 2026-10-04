@@ -21,6 +21,8 @@ import 'package:conduit/features/session_navigation/domain/session_view_preferen
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
+import 'package:conduit/features/tasks/presentation/task_runs_controller.dart';
+import 'package:conduit/features/tasks/presentation/task_runs_panel.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -210,6 +212,8 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     _detach?.call();
     super.dispose();
   }
+
+  String _hostName(String hostId) => _host(hostId)?.name ?? hostId;
 
   SavedHost? _host(String hostId) => widget.attention.monitoredHosts
       .where((host) => host.id == hostId)
@@ -458,6 +462,9 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
                   ),
                 ),
               ),
+          // Started tasks (CON-037), by batch with their progress.
+          if (TaskRunsController.instance case final runs?)
+            TaskBatchesPanel(controller: runs, hostName: _hostName),
           if (overview.isEmpty)
             _Empty(
               loading: controller.isLoading,

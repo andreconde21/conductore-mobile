@@ -39,7 +39,8 @@ machine, the repository, the agent and the place.
  "branchPrefix": "task", "herdrServer": null, "workspaceId": null, "markDone": false}
 ```
 
-It queues one run per task and attempt, on branch
+With `"worktree": false` a run works in the repository as it is (no
+branch), and links only an agent that started with it. Otherwise it queues one run per task and attempt, on branch
 `<prefix>/<slug of the key>[-a<attempt>]` (`-2`, `-3`, ... when the branch
 is taken). It then starts runs while fewer than the cap (1 to 20, default
 3, across every batch on the machine) are starting or running. Starting a
@@ -111,3 +112,30 @@ none`):
 - prompts with quotes and `$(...)` reached the agent unchanged;
 - the agents started in the right worktrees;
 - the main worktree was untouched.
+
+## In the app
+
+To start one task, open it in Tasks and tap Start. To start several,
+long-press a task, tick the others, then tap "Start N tasks". The Start page
+offers these choices:
+
+- **Machine:** one for all the tasks, one per task, or Automatic, which
+  picks the least busy machine whose companion has `task-runs`.
+- **Repository.**
+- **Fresh worktree:** on or off.
+- **Place:** Herdr tab, tmux window or none.
+- **Agent:** the New workspace picker's detection. With several machines,
+  only the agents installed on every one are offered.
+- **Attempts.**
+- **At once on a machine:** the cap.
+- **Mark done in the source when finished:** opt-in, and offered only when
+  every task's source has statuses.
+
+The choices are remembered on this device, and the machine and repository
+per source.
+
+Started tasks show by batch on the Agents dashboard and under Tasks ›
+Started tasks. Each batch has a progress bar (finished, running, waiting,
+failed) and each run has its state, branch and actions (copy the command,
+stop following, remove). The app follows the runs only once one of those
+views has shown them, so no timer runs at startup.

@@ -187,6 +187,7 @@ async function start (input, deps = {}) {
         herdrServer: str(input.herdrServer, 100),
         workspaceId: str(input.workspaceId, 100),
         markDone: input.markDone === true,
+        useWorktree: input.worktree !== false,
         promptFile,
         status: 'queued',
         createdAt: now
@@ -246,7 +247,13 @@ async function advance (deps = {}) {
 async function launch (run, deps) {
   let wt
   let branch = run.branch
-  for (let i = 2; ; i++) {
+  if (run.useWorktree === false) {
+    // In the repository itself, on whatever it has checked out.
+    const root = await worktree.repoRoot(run.repo)
+    wt = { path: root, repo: root, head: null }
+    branch = null
+  }
+  for (let i = 2; !wt; i++) {
     try {
       wt = await worktree.create({ repo: run.repo, branch, base: run.base, location: run.location })
       break
@@ -332,7 +339,11 @@ function link (data, agents) {
   for (const r of data.runs) {
     if (!isActive(r) || !r.worktree) continue
     const wt = realpath(r.worktree)
-    const mine = list.filter(a => a && a.cwd && (a.sessionId === r.sessionId || (!r.sessionId && (realpath(a.cwd) === wt || realpath(a.cwd).startsWith(wt + path.sep)))))
+    // Without a worktree the repository is shared: only an agent that
+    // started with the run, and no other run's.
+    const claimed = new Set(data.runs.filter(x => x !== r && x.sessionId).map(x => x.sessionId))
+    const fresh = a => r.useWorktree !== false || ((a.startedAt || 0) >= (r.startedAt || 0) - 2000 && !claimed.has(a.sessionId))
+    const mine = list.filter(a => a && a.cwd && (a.sessionId === r.sessionId || (!r.sessionId && fresh(a) && (realpath(a.cwd) === wt || realpath(a.cwd).startsWith(wt + path.sep)))))
     const agent = mine.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0]
     if (!agent) {
       // Its agent was linked and is gone from the list (pruned): over.
@@ -440,7 +451,8 @@ const START_USAGE = `usage: conductore-hostd task-start -
     {repo, agent: claude|codex|opencode|gemini|cursor, place: herdr|tmux|none,
      tasks: [{ref?, key, title?, url?, prompt}], base?: "HEAD",
      location?: next-to-repo|herdr|<template>, attempts?: 1, cap?: 3,
-     branchPrefix?: "task", herdrServer?, workspaceId?, markDone?: false}
+     branchPrefix?: "task", herdrServer?, workspaceId?, markDone?: false,
+     worktree?: true (false: run in the repository as it is)}
 `
 
 async function startCli (args, { readStdin }) {
