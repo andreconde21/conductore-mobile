@@ -63,7 +63,29 @@ class HomeSessionInfo {
     this.multiplexer,
     this.machineName = '',
     this.restoreNote,
+    this.title = '',
+    this.agentLine,
   });
+
+  /// The tile's title: the name the user gave the session, else the
+  /// workspace or project ([targetLabel]), else the machine. The machine
+  /// is shown on its own ([showsMachine]), never prefixed to it.
+  final String title;
+
+  /// What the session's agent is about (the dashboard's summary, else its
+  /// last message), preferred over the screen's last line; null without.
+  final String? agentLine;
+
+  /// Whether the machine name is worth its own small line: not when the
+  /// title is the machine already.
+  bool get showsMachine => machineName.isNotEmpty && machineName != title;
+
+  /// Whether [targetLabel] says more than the title (a renamed session).
+  bool get showsTargetLabel => targetLabel.isNotEmpty && targetLabel != title;
+
+  /// [title], else (info built without one) the session's own title.
+  String titleOr(TerminalSessionController session) =>
+      title.isNotEmpty ? title : session.title;
 
   /// What the session is attached to (null for a plain session).
   final ConnectTarget? target;
@@ -98,6 +120,7 @@ class HomeSessionInfo {
     AgentAttentionState? agentState,
     String machineName = '',
     String? restoreNote,
+    String? agentLine,
   }) {
     final target = ConnectTarget.fromSessionHostId(session.host.id);
     var label = '';
@@ -127,13 +150,19 @@ class HomeSessionInfo {
       multiplexer = MultiplexerKind.tmux;
       label = tmuxSessionNameOf(session.host);
     }
+    final machine = machineName.isNotEmpty ? machineName : session.machineTitle;
+    final line = agentLine?.trim().split('\n').first.trim();
     return HomeSessionInfo(
       target: target,
       targetLabel: label,
       agentState: agentState ?? boardState,
       multiplexer: multiplexer,
-      machineName: machineName,
+      machineName: machine,
       restoreNote: restoreNote,
+      title:
+          session.customTitle ??
+          (label.isNotEmpty && target != null ? label : session.title),
+      agentLine: line == null || line.isEmpty ? null : line,
     );
   }
 
@@ -153,6 +182,27 @@ class HomeSessionInfo {
     final name = host.tmuxSessionName.trim();
     return name.isEmpty ? defaultTmuxSessionName : name;
   }
+}
+
+/// The machine a session runs on, small and dim at a tile's bottom right.
+class HomeMachineCaption extends StatelessWidget {
+  const HomeMachineCaption(this.name, {required this.color, super.key});
+
+  final String name;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 140),
+    child: Text(
+      name,
+      key: const ValueKey('home-machine-caption'),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.end,
+      style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 11),
+    ),
+  );
 }
 
 /// Icon for what a session is attached to: the multiplexer's logo, a
@@ -274,7 +324,8 @@ class HomeSessionTile extends StatelessWidget {
     return Semantics(
       button: true,
       label: [
-        session.title,
+        info.titleOr(session),
+        if (info.showsMachine) info.machineName,
         info.restoreNote ?? statusLabel(session.status),
         if (showsAgentState(state)) AgentStateChip.labelFor(state!),
       ].join(', '),
@@ -362,7 +413,7 @@ class HomeSessionTile extends StatelessWidget {
                       right: 0,
                       top: 0,
                       child: _TileHeader(
-                        title: session.title,
+                        title: info.titleOr(session),
                         dotColor: dotColor(context, session.status, state),
                         background: terminalTheme.background,
                         foreground: terminalTheme.foreground,
@@ -376,7 +427,8 @@ class HomeSessionTile extends StatelessWidget {
           ),
           const SizedBox(height: 7),
           Text(
-            session.title,
+            info.titleOr(session),
+            key: const ValueKey('home-tile-title'),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -394,30 +446,32 @@ class HomeSessionTile extends StatelessWidget {
                 if (info.targetLabel.isNotEmpty) ...[
                   SessionTargetIcon(info: info),
                   const SizedBox(width: 5),
-                  Flexible(
-                    child: Text(
-                      info.targetLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: info.isHerdr
-                            ? AppPalette.of(context).success
-                            : muted,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ] else
-                  Flexible(
-                    child: Text(
-                      info.machineName.isEmpty
-                          ? session.host.endpoint
-                          : info.machineName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: muted, fontSize: 12.5),
-                    ),
+                ],
+                Expanded(
+                  child: info.showsTargetLabel
+                      ? Text(
+                          info.targetLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: info.isHerdr
+                                ? AppPalette.of(context).success
+                                : muted,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+                if (info.showsMachine) ...[
+                  const SizedBox(width: 6),
+                  HomeMachineCaption(info.machineName, color: muted),
+                ] else if (info.machineName.isEmpty && info.targetLabel.isEmpty)
+                  Text(
+                    session.host.endpoint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: muted, fontSize: 12.5),
                   ),
               ],
             ),
@@ -885,15 +939,11 @@ class HomeSessionRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
-  /// The last non-blank line on the session's screen.
-  static String tailOf(TerminalSessionController session) {
-    final lines = TerminalPreview.capture(
-      session.terminal,
-      rows: 1,
-      columns: 160,
-    ).lines;
-    return lines.isEmpty ? '' : lines.last.trim();
-  }
+  /// The last line on the session's screen worth a preview: agent
+  /// footers and prompt chrome are skipped ([meaningfulTail]).
+  static String tailOf(TerminalSessionController session) => meaningfulTail(
+    TerminalPreview.capture(session.terminal, columns: 160).lines,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -906,7 +956,8 @@ class HomeSessionRow extends StatelessWidget {
     return Semantics(
       button: true,
       label: [
-        session.title,
+        info.titleOr(session),
+        if (info.showsMachine) info.machineName,
         info.restoreNote ?? HomeSessionTile.statusLabel(session.status),
         if (showsAgentState(state)) AgentStateChip.labelFor(state!),
       ].join(', '),
@@ -950,7 +1001,8 @@ class HomeSessionRow extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        session.title,
+                        info.titleOr(session),
+                        key: const ValueKey('home-row-title'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -968,6 +1020,24 @@ class HomeSessionRow extends StatelessWidget {
                     TransportBadge.forSession(session),
                   ],
                 ),
+                if (info.showsTargetLabel) ...[
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 17),
+                    child: Text(
+                      info.targetLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: info.isHerdr
+                            ? AppPalette.of(context).success
+                            : muted,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 4),
                 Row(
                   children: [
@@ -975,55 +1045,38 @@ class HomeSessionRow extends StatelessWidget {
                     if (info.targetLabel.isNotEmpty) ...[
                       SessionTargetIcon(info: info, size: 14),
                       const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          info.targetLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: info.isHerdr
-                                ? AppPalette.of(context).success
-                                : muted,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                     ],
-                    Flexible(
-                      child: Text(
-                        info.machineName.isEmpty
-                            ? session.host.endpoint
-                            : info.machineName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: muted, fontSize: 12.5),
+                    Expanded(
+                      child: SessionPreviewBuilder(
+                        session: session,
+                        builder: (context, _, shared) {
+                          final tail =
+                              info.agentLine ?? shared?.tail ?? tailOf(session);
+                          return Text(
+                            placeholder ??
+                                (tail.isEmpty ? ' ' : withPreviewGlyphs(tail)),
+                            key: const ValueKey('home-row-tail'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
+                            style: TextStyle(
+                              color: muted,
+                              fontFamily: fontFamily,
+                              fontFamilyFallback: previewFontFallback,
+                              fontSize: 12,
+                            ),
+                          );
+                        },
                       ),
                     ),
+                    if (info.showsMachine) ...[
+                      const SizedBox(width: 8),
+                      HomeMachineCaption(info.machineName, color: muted),
+                    ] else if (info.machineName.isEmpty) ...[
+                      const SizedBox(width: 8),
+                      HomeMachineCaption(session.host.endpoint, color: muted),
+                    ],
                   ],
-                ),
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.only(left: 17),
-                  child: SessionPreviewBuilder(
-                    session: session,
-                    builder: (context, _, shared) {
-                      final tail = shared?.tail ?? tailOf(session);
-                      return Text(
-                        placeholder ?? (tail.isEmpty ? ' ' : tail),
-                        key: const ValueKey('home-row-tail'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: muted,
-                          fontFamily: fontFamily,
-                          fontSize: 12,
-                        ),
-                      );
-                    },
-                  ),
                 ),
               ],
             ),

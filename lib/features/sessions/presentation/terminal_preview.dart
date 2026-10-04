@@ -233,14 +233,9 @@ class SharedViewSnapshot {
   /// The Herdr workspace the session is on, when known.
   final String label;
 
-  /// The last non-blank line of [preview].
-  String get tail {
-    final lines = preview.lines;
-    for (final line in lines.reversed) {
-      if (line.trim().isNotEmpty) return line.trim();
-    }
-    return '';
-  }
+  /// The last line of [preview] worth a one-line preview (see
+  /// [meaningfulTail]).
+  String get tail => meaningfulTail(preview.lines);
 
   /// "05:54": when it was taken, for the tile's caption.
   String get timeLabel {
@@ -249,3 +244,60 @@ class SharedViewSnapshot {
     return '${two(local.hour)}:${two(local.minute)}';
   }
 }
+
+/// Whether [line] is a coding agent's own chrome rather than what it is
+/// doing: Claude Code's mode footer ("⏵⏵ auto mode on (alt+m to cycle) · ←
+/// for agents"), shortcut hints, the empty prompt box and its rules, and
+/// Codex's context gauge. A one-line preview skips these.
+bool isAgentChromeLine(String line) {
+  final text = line.trim();
+  if (text.isEmpty) return true;
+  if (text.startsWith('⏵') || text.startsWith('⏸')) return true;
+  if (_chromeHints.any(text.contains)) return true;
+  return _chromePatterns.any((pattern) => pattern.hasMatch(text));
+}
+
+const _chromeHints = [
+  'to cycle)',
+  '← for agents',
+  '? for shortcuts',
+  'esc to interrupt',
+  'ctrl+p commands',
+];
+
+final _chromePatterns = [
+  RegExp(
+    r'^(auto mode|accept edits|plan mode|bypass permissions) on\b',
+    caseSensitive: false,
+  ),
+  // Rules and the empty prompt box ("╭───", "│ > │", "❯").
+  RegExp(r'^[─━═╌┄\-╭╮╰╯│|\s]+$'),
+  RegExp(r'^[│|]?\s*[>❯›]\s*[│|]?$'),
+  RegExp(r'\b\d{1,3}% context left\b'),
+];
+
+/// The last line of [lines] worth a one-line preview: not blank and not
+/// agent chrome ([isAgentChromeLine]), looking back at most [lookBack]
+/// lines; empty when there is none.
+String meaningfulTail(List<String> lines, {int lookBack = 12}) {
+  var seen = 0;
+  for (final line in lines.reversed) {
+    if (line.trim().isEmpty) continue;
+    if (++seen > lookBack) break;
+    if (!isAgentChromeLine(line)) return line.trim();
+  }
+  return '';
+}
+
+/// [text] with the media-control arrows agents draw (⏵ ⏴ ⏸), which the
+/// bundled monospace fonts lack, swapped for look-alikes they have.
+String withPreviewGlyphs(String text) => text
+    .replaceAll('⏵', '▸')
+    .replaceAll('⏴', '◂')
+    .replaceAll('⏶', '▴')
+    .replaceAll('⏷', '▾')
+    .replaceAll('⏸', '‖');
+
+/// Bundled fonts to fall back on in previews: JetBrains Mono Nerd Font has
+/// the arrows and box drawing the other monospace choices lack.
+const previewFontFallback = ['JetBrainsMonoNerdFontMono'];

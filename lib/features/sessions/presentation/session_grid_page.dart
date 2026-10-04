@@ -311,14 +311,16 @@ AgentAttentionState? summarizeAgentState(
   AgentAttentionState? summary;
   for (final agent in agents) {
     final state = agent.state;
-    if (summary == null || _priority(state) < _priority(summary)) {
+    if (summary == null ||
+        agentStatePriority(state) < agentStatePriority(summary)) {
       summary = state;
     }
   }
   return summary;
 }
 
-int _priority(AgentAttentionState state) => switch (state) {
+/// How urgent [state] is: lower first.
+int agentStatePriority(AgentAttentionState state) => switch (state) {
   AgentAttentionState.needsInput => 0,
   AgentAttentionState.blocked => 1,
   AgentAttentionState.working => 2,
