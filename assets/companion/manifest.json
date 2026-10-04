@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
+  "version": "1.5.1",
   "archive": "companion.tar.gz",
   "files": {
     "README.md": "62584d3851173fc3e4b29ed1fd2495f832e9416f6d0abebc8581aa3c0395051e",
@@ -36,7 +36,7 @@
     "lib/live.js": "c7ed786eb8b0bd7342d88ab4787d74913724c7bd94091cbcade47b882c8a54d8",
     "lib/log.js": "9ba8a3a5b87df77433e285da1ff9d279fa3be9e50fa62a6bd83437ae1d999fd1",
     "lib/pane.js": "2a8724ef56bb3321409deff38ce594d102be369a2671fd60f8d37ec602580590",
-    "lib/paths.js": "f1b1408fb5affe85793551d654ad74dc4b08a1329c25431c0d3a8a6c3e7694f5",
+    "lib/paths.js": "58471a78a8df9bf47bb60a90a1790aaaa3e16d3c70643696877f0afb40e57859",
     "lib/permission.js": "c43ab47450ba0c136004a7b52e9bf9faa1b1c178f92b5cac94dfeefd3966c103",
     "lib/ports.js": "e6e1cec8d5b2deb5e68f5642f268e2d1e5d83fb0985e8b34c508344174f9a2b2",
     "lib/pricing.js": "360b9f70bdbde122e3322f204d1a4a2368956c31ef908de37ecbe0bf727cb10b",
@@ -56,7 +56,7 @@
     "lib/talkbawt-cli.js": "e5be6d88cc99759e9f6f5a4b78dc68e3d9dd9e90e9a3dcba95fe9189c3da4963",
     "lib/talkbawt-serve.js": "6737bba7cb7f065532d07ceb013d2393b7eeb2e5ab4f31eecbca8b553bece0be",
     "lib/talkbawt.js": "d4f564ca196a9e59177a2a17c488faeb30dc01cc6d936a98f25f4206d4fe80f1",
-    "lib/task-runs.js": "a35c30681dafbd55c4eccbad05e3a7ac20d258b945ac5d5d781197163e923bb6",
+    "lib/task-runs.js": "cbedb9a6db62cbf6a5e30bd5454557577eef4a5299e43690a71251c4aac6b58e",
     "lib/tasks-folder.js": "492d93ce3ebc95078a99ada179b28ec69ef714cec13e54a8badcd05c6e6027a9",
     "lib/tmux-live.js": "c77baa37fa54dd32ca642f3d0c6c3633e4d344935f33d27da61efb77d0a95410",
     "lib/toml-lite.js": "f3ebbcdb72f477dafbff6f09f4f695d1a7e5ad7b3e9915be90b0a445bd9d3cfc",
@@ -64,7 +64,7 @@
     "lib/turns.js": "5bf69c07cdd574b7ef3f9d97c12224ceca02cb5bdd3c996a645e29e153e2aac9",
     "lib/usage.js": "79cb0f33e257481765d081ccebfb9c254d534670dc0066f3746088e5e4daf73b",
     "lib/worktree.js": "214e9e147c1d6926eea063cb023a81ef7d5935e6a278d598861998228f17e0d2",
-    "package.json": "0fc42c50ff3e4f28de75595b5c3c8357a6651c193ad6a87a85743fee4e298187",
+    "package.json": "a4fe87b6b4900f266d229cdbaa69b8997bfea4330f7cc8efad9c645e67e719ce",
     "vendor/talkbawt/LICENSE": "c52febe8360c39966ab50e4e7b173165c212d9aa6ebf53bd5fdda416f6f57700",
     "vendor/talkbawt/README.md": "e779e697b3b8fefae5ec84e3096438a221e86bde725536056f3aa9a0c5318cb9",
     "vendor/talkbawt/src/app.mjs": "349f837f64504c5773b01d44da36740f8837706f3a52ac9facc4c6bf1626dadc",

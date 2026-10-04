@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 1.5.1 (2026-10-04)
 
 - feat: `task-start` takes `worktree: false` to run in the repository as it is (no branch); such a run links only an agent that started with it and no other run's.
 
