@@ -353,6 +353,7 @@ class UsageSummary {
             UsageAgent.claude => report.claude,
             UsageAgent.codex => report.codex,
             UsageAgent.opencode => report.opencode,
+            UsageAgent.gemini => report.gemini,
           }.today;
     }
     return total;

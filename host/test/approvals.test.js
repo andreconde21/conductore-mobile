@@ -81,8 +81,8 @@ const median = xs => { const s = [...xs].sort((a, b) => a - b); return s[Math.fl
 test('status reports the capability and a risk label on every pending request', async () => {
   await hook({ session_id: 'a1', cwd: repo, hook_event_name: 'SessionStart' })
   const st = await status()
-  assert.deepEqual(st.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'question-answers'])
-  assert.deepEqual((await cli('version')).json.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'question-answers'])
+  assert.deepEqual(st.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'question-answers', 'tasks-folder', 'task-runs'])
+  assert.deepEqual((await cli('version')).json.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'question-answers', 'tasks-folder', 'task-runs'])
   const p = hook(bash('a1', 'rm -rf node_modules'))
   const [req] = await pendingOf('a1')
   assert.deepEqual(req.risk, { level: 'high', reason: 'Deletes recursively (rm -rf): node_modules' })

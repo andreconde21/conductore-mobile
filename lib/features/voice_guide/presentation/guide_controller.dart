@@ -688,6 +688,8 @@ class GuideController extends ChangeNotifier {
         if (agent.pending.isEmpty) return s.noRequests;
         pending = GuidePending(agent, agent.pending.first);
     }
+    // Only the agent's own prompt answers it (Gemini CLI): offer to open it.
+    if (pending.request.terminalOnly) return _offerTerminal(pending, s);
     final risk = approvals.riskOf(pending.hostId, pending.request);
     if (!confirmed && _mustConfirm(intent, risk)) {
       return _ask(
@@ -708,6 +710,11 @@ class GuideController extends ChangeNotifier {
     return intent.allow ? s.approved : s.denied;
   }
 
+  String? _offerTerminal(GuidePending pending, GuideStrings s) => _ask(
+    s.answerInTerminal(pending),
+    _Confirm(GuideOpen(GuideAgentRef(pending.hostId, pending.agent.id))),
+  );
+
   Future<String?> _approveAllSafe(
     GuideWorld now,
     GuideStrings s, {
@@ -715,6 +722,7 @@ class GuideController extends ChangeNotifier {
   }) async {
     if (!approvals.supportsApproveAllSafe) return s.notAvailableApproveAll;
     bool safe(GuidePending p) =>
+        !p.request.terminalOnly &&
         approvals.canBatch(p.hostId) &&
         approvals.riskOf(p.hostId, p.request) == ApprovalRisk.low;
     if (confirmed == null) {
@@ -760,6 +768,7 @@ class GuideController extends ChangeNotifier {
       if (agent.pending.isEmpty) return s.nothingToTrust(agent.label);
       pending = GuidePending(agent, agent.pending.first);
     }
+    if (pending.request.terminalOnly) return _offerTerminal(pending, s);
     if (!approvals.canTrust(pending.hostId)) return s.notAvailableTrust;
     if (approvals.riskOf(pending.hostId, pending.request) ==
         ApprovalRisk.high) {

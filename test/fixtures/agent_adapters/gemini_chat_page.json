@@ -1,0 +1,155 @@
+{
+  "sessionId": "6cc5de7a-3a09-4d80-87fc-762d9a55101d",
+  "agent": {
+    "name": "proj",
+    "state": "waiting_input",
+    "lastEvent": "Stop",
+    "lastToolName": "TodoWrite",
+    "lastMessage": "The answer is **42**.",
+    "pending": []
+  },
+  "format": "items",
+  "items": [
+    {
+      "id": "ca9284ee-0b4e-4679-985e-731f3ba44a47",
+      "type": "user",
+      "at": "2026-10-04T18:08:21.520Z",
+      "text": "SHELLME"
+    },
+    {
+      "id": "68b81344-6c38-4836-8a62-fe89857960bf",
+      "type": "assistant",
+      "at": "2026-10-04T18:08:21.599Z",
+      "text": "Creating the file."
+    },
+    {
+      "id": "68b81344-6c38-4836-8a62-fe89857960bf:run_shell_command__run_shell_command_1791137301552_0",
+      "type": "tool",
+      "at": "2026-10-04T18:08:24.535Z",
+      "tool": "run_shell_command",
+      "toolKind": "bash",
+      "input": {
+        "command": "touch made.txt",
+        "description": "Create made.txt"
+      },
+      "title": "touch made.txt",
+      "result": {
+        "ok": true,
+        "text": ""
+      }
+    },
+    {
+      "id": "33cb909b-64c4-4f74-abda-5092623aa922",
+      "type": "assistant",
+      "at": "2026-10-04T18:08:24.591Z",
+      "text": "Done with run_shell_command."
+    },
+    {
+      "id": "1975b4ef-27b7-4724-a492-9de262b6b466",
+      "type": "user",
+      "at": "2026-10-04T18:08:28.509Z",
+      "text": "WRITEME"
+    },
+    {
+      "id": "bdd0be76-6648-4814-8cd9-c71b6b97fc90:write_file__write_file_1791137308516_0",
+      "type": "tool",
+      "at": "2026-10-04T18:08:31.480Z",
+      "tool": "write_file",
+      "toolKind": "write",
+      "input": {
+        "file_path": "/work/proj/hello.txt",
+        "content": "hello world\n"
+      },
+      "title": "/work/proj/hello.txt",
+      "result": {
+        "ok": false,
+        "text": "[Operation Cancelled] Reason: User denied execution."
+      }
+    },
+    {
+      "id": "8b0dc060-d7d7-46f5-9a99-3562d422c878",
+      "type": "notice",
+      "at": "2026-10-04T18:08:31.481Z",
+      "level": "interrupted",
+      "text": "Request cancelled."
+    },
+    {
+      "id": "35896b24-ea0d-4daa-95ee-64f8ba87258b",
+      "type": "user",
+      "at": "2026-10-04T18:08:35.518Z",
+      "text": "README"
+    },
+    {
+      "id": "b12116f3-bc7a-4556-bd39-1ffdc2baec26:read_file__read_file_1791137315525_0",
+      "type": "tool",
+      "at": "2026-10-04T18:08:35.620Z",
+      "tool": "read_file",
+      "toolKind": "read",
+      "input": {
+        "file_path": "/work/proj/notes.md"
+      },
+      "title": "/work/proj/notes.md",
+      "result": {
+        "ok": true,
+        "text": "# notes"
+      }
+    },
+    {
+      "id": "87f209a7-d8fa-4d0d-8a22-41506222ce59",
+      "type": "assistant",
+      "at": "2026-10-04T18:08:35.661Z",
+      "text": "Done with read_file."
+    },
+    {
+      "id": "49cadb23-0af5-4c22-8b78-b04169b9cf91",
+      "type": "user",
+      "at": "2026-10-04T18:08:39.573Z",
+      "text": "TODOME"
+    },
+    {
+      "id": "5ece4aa1-bdf9-4d9a-adf4-ce6f58ce7a37:write_todos__write_todos_1791137319579_0",
+      "type": "todo",
+      "at": "2026-10-04T18:08:42.491Z",
+      "todos": [
+        {
+          "text": "Read the notes",
+          "status": "completed"
+        },
+        {
+          "text": "Write the summary",
+          "status": "in_progress"
+        },
+        {
+          "text": "Ship it",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "7a3ff733-17c3-4222-820e-033a8599a0ce",
+      "type": "assistant",
+      "at": "2026-10-04T18:08:42.538Z",
+      "text": "Done with write_todos."
+    },
+    {
+      "id": "5c867ffd-2b41-43d5-b162-5666ad46bc23",
+      "type": "user",
+      "at": "2026-10-04T18:08:46.544Z",
+      "text": "THINKME"
+    },
+    {
+      "id": "a0db286b-b1a9-4156-b10f-c971b5d707bd:thinking",
+      "type": "thinking",
+      "at": "2026-10-04T18:08:46.552Z"
+    },
+    {
+      "id": "a0db286b-b1a9-4156-b10f-c971b5d707bd",
+      "type": "assistant",
+      "at": "2026-10-04T18:08:46.552Z",
+      "text": "The answer is **42**."
+    }
+  ],
+  "cursor": "13385",
+  "startCursor": null,
+  "more": false
+}

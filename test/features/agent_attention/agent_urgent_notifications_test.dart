@@ -376,12 +376,27 @@ void main() {
       expect(n.openButton, isFalse);
     });
 
-    test('a high-risk approval only opens', () {
+    test('a high-risk approval, or one only the terminal answers, only '
+        'opens', () {
       final n = build(
         _agent(pending: [_request('r1', risk: PermissionRiskLevel.high)]),
       );
       expect(n.action, isNull);
       expect(n.openButton, isTrue);
+      final terminal = build(
+        _agent(
+          pending: const [
+            PendingPermissionRequest(
+              id: 'r1',
+              toolName: 'run_shell_command',
+              summary: 'ls',
+              terminalOnly: true,
+            ),
+          ],
+        ),
+      );
+      expect(terminal.action, isNull);
+      expect(terminal.openButton, isTrue);
     });
 
     test('a single-choice question with up to three options gets its '

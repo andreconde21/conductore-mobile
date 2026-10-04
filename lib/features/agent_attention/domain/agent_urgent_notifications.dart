@@ -213,7 +213,8 @@ abstract final class UrgentNotificationPolicy {
 
   /// [agent]'s urgent alert for [need], with its actions:
   /// - an approval: Allow and Deny, plus Open (Review all for several);
-  ///   a high-risk one only Open;
+  ///   a high-risk one, or one only the agent's own prompt answers, only
+  ///   Open;
   /// - a single-choice question with up to [maxAnswerButtons] options:
   ///   one button per option (the body opens the agent); any other
   ///   question: Open;
@@ -259,7 +260,9 @@ abstract final class UrgentNotificationPolicy {
     var reply = false;
     if (first != null) {
       final choice = singleChoice(first);
-      if (first.isQuestion) {
+      if (first.terminalOnly) {
+        // Only the agent's own prompt answers it (Gemini CLI): Open.
+      } else if (first.isQuestion) {
         if (choice != null && buttons) {
           action = AgentNotificationAction(
             requestId: first.id,
@@ -305,7 +308,9 @@ abstract final class UrgentNotificationPolicy {
   /// a single, single-choice question with 1 to [maxAnswerButtons]
   /// options.
   static PendingQuestion? singleChoice(PendingPermissionRequest request) {
-    if (!request.answerable || request.questions.length != 1) {
+    if (!request.answerable ||
+        request.terminalOnly ||
+        request.questions.length != 1) {
       return null;
     }
     final question = request.questions.single;

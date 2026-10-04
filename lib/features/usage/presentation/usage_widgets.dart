@@ -870,6 +870,14 @@ class _MachineLimits extends StatelessWidget {
             key: ValueKey('usage-opencode-${machine.hostId}'),
             style: muted,
           ),
+        // Gemini CLI: tokens only (no prices, no plan limits reported).
+        if (report != null && report.gemini.present)
+          Text(
+            'Gemini CLI: ${report.gemini.activeModel ?? 'no answers yet'}'
+            ' · tokens only, no cost estimate',
+            key: ValueKey('usage-gemini-${machine.hostId}'),
+            style: muted,
+          ),
         if (report != null && report.partial)
           Text('Still counting older transcripts…', style: muted),
       ],

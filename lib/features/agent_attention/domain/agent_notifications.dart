@@ -652,8 +652,12 @@ abstract final class AgentNotificationPolicy {
     final first = requests.firstOrNull;
     // A question has no Allow: its answer needs the app (the card's
     // options), so a tap opens it instead.
+    // One the agent's own prompt answers (Gemini CLI) has none either.
     final actionable =
-        first != null && !first.isQuestion && !preferences.summaryOnly;
+        first != null &&
+        !first.isQuestion &&
+        !first.terminalOnly &&
+        !preferences.summaryOnly;
     return AgentNotification(
       hostId: hostId,
       agentId: agent.id,
@@ -683,6 +687,11 @@ abstract final class AgentNotificationPolicy {
       return 'Question${summary.isEmpty ? '' : ': $summary'}';
     }
     final risk = request.risk?.level.label;
+    if (request.terminalOnly) {
+      return 'Approve ${request.toolName} in the terminal'
+          '${summary.isEmpty ? '' : ': $summary'}'
+          '${risk == null ? '' : ' · $risk'}';
+    }
     return 'Approve ${request.toolName}'
         '${summary.isEmpty ? '' : ': $summary'}'
         '${risk == null ? '' : ' · $risk'}';

@@ -813,7 +813,11 @@ class ChatApprovalCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  isPlan ? 'Approve the plan?' : 'Allow ${request.toolName}?',
+                  isPlan
+                      ? 'Approve the plan?'
+                      : request.terminalOnly
+                      ? '${request.toolName} is waiting for approval'
+                      : 'Allow ${request.toolName}?',
                   style: theme.textTheme.titleSmall,
                 ),
               ),
@@ -833,29 +837,35 @@ class ChatApprovalCard extends StatelessWidget {
             RiskLine(risk: risk),
           ],
           const SizedBox(height: 10),
-          ApprovalButtons(
-            deny: ApprovalAction(
-              label(PermissionVerdict.deny),
-              busy ? null : () => onDecide(PermissionVerdict.deny),
+          // The agent's own prompt answers it (Gemini CLI): no buttons.
+          if (request.terminalOnly)
+            TerminalOnlyNote(
+              key: ValueKey('chat-answer-in-terminal-${request.id}'),
+            )
+          else
+            ApprovalButtons(
+              deny: ApprovalAction(
+                label(PermissionVerdict.deny),
+                busy ? null : () => onDecide(PermissionVerdict.deny),
+              ),
+              secondary: [
+                if (onTrust != null)
+                  ApprovalAction(
+                    'Trust…',
+                    busy ? null : onTrust,
+                    key: ValueKey('chat-trust-${request.id}'),
+                  ),
+                if (!(high && this.onTrust != null))
+                  ApprovalAction(
+                    label(PermissionVerdict.always),
+                    busy ? null : () => onDecide(PermissionVerdict.always),
+                  ),
+              ],
+              allow: ApprovalAction(
+                label(PermissionVerdict.allow),
+                busy ? null : () => onDecide(PermissionVerdict.allow),
+              ),
             ),
-            secondary: [
-              if (onTrust != null)
-                ApprovalAction(
-                  'Trust…',
-                  busy ? null : onTrust,
-                  key: ValueKey('chat-trust-${request.id}'),
-                ),
-              if (!(high && this.onTrust != null))
-                ApprovalAction(
-                  label(PermissionVerdict.always),
-                  busy ? null : () => onDecide(PermissionVerdict.always),
-                ),
-            ],
-            allow: ApprovalAction(
-              label(PermissionVerdict.allow),
-              busy ? null : () => onDecide(PermissionVerdict.allow),
-            ),
-          ),
           if (busy)
             const Padding(
               padding: EdgeInsets.only(top: 8),
