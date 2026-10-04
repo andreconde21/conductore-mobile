@@ -471,23 +471,25 @@ class Daemon {
   observe (id, sessionId) {
     this.observed.set(id, sessionId)
     if (this.observeTimer) return
-    this.observeTimer = setInterval(() => {
-      for (const [rid, sid] of [...this.observed]) {
-        const agent = this.state.agents[sid]
-        const request = agent && agent.pending.find(p => p.id === rid)
-        if (!request) { this.observed.delete(rid); continue }
-        const adapter = adapters.of(agent)
-        let outcome = null
-        try { outcome = adapter.settleObserved ? adapter.settleObserved(agent, request) : null } catch (err) { log('permission', `observe ${rid}: ${err.message}`) }
-        if (!outcome) continue
-        this.observed.delete(rid)
-        this.commit(state.resolvePermission(this.state, rid, 'gone'))
-        if (outcome.turnEnded && !agent.pending.length) this.commit(state.reduce(this.state, { session_id: sid, hook_event_name: 'Stop', agent_kind: agent.kind, interrupted: true }))
-        log('permission', `${rid} answered in the terminal${outcome.turnEnded ? ' (refused)' : ''}`)
-      }
-      if (!this.observed.size) { clearInterval(this.observeTimer); this.observeTimer = null }
-    }, OBSERVE_EVERY_MS)
+    this.observeTimer = setInterval(() => this.checkObserved(), OBSERVE_EVERY_MS)
     this.observeTimer.unref()
+  }
+
+  checkObserved () {
+    for (const [rid, sid] of [...this.observed]) {
+      const agent = this.state.agents[sid]
+      const request = agent && agent.pending.find(p => p.id === rid)
+      if (!request) { this.observed.delete(rid); continue }
+      const adapter = adapters.of(agent)
+      let outcome = null
+      try { outcome = adapter.settleObserved ? adapter.settleObserved(agent, request) : null } catch (err) { log('permission', `observe ${rid}: ${err.message}`) }
+      if (!outcome) continue
+      this.observed.delete(rid)
+      this.commit(state.resolvePermission(this.state, rid, 'gone'))
+      if (outcome.turnEnded && !agent.pending.length) this.commit(state.reduce(this.state, { session_id: sid, hook_event_name: 'Stop', agent_kind: agent.kind, interrupted: true }))
+      log('permission', `${rid} answered in the terminal${outcome.turnEnded ? ' (refused)' : ''}`)
+    }
+    if (!this.observed.size && this.observeTimer) { clearInterval(this.observeTimer); this.observeTimer = null }
   }
 
   // Resolves a waiting hook. decision: allow | deny | always | answer |
