@@ -434,6 +434,10 @@ class Daemon {
     event.request_id = id
     this.commit(state.reduce(this.state, event))
     if (!fifo || !isOurFifo(fifo) || !fifoAlive(fifo)) {
+      // A request the phone can only watch (`answerable: false`: the
+      // agent's own prompt answers it) stays pending until the agent moves
+      // on (state.reduce).
+      if (event.answerable === false) return
       // Nobody is waiting (no FIFO support, or the hook gave up already):
       // the prompt is in the terminal.
       this.commit(state.resolvePermission(this.state, id, 'timeout'))
@@ -775,6 +779,9 @@ class Daemon {
     }
     const found = state.findPending(this.state, requestId)
     if (!found) { this.reply(c, { error: `unknown request ${requestId}` }); c.end(); return }
+    if (found.request.answerable === false) {
+      this.reply(c, { error: 'this agent asks in the terminal; answer it there' }); c.end(); return
+    }
     const waiter = this.waiters.get(requestId)
     if (!waiter) {
       // Pending but nobody waiting: the hook died; clean up.

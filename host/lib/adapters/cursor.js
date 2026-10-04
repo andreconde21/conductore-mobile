@@ -317,6 +317,8 @@ function tool (event) {
 // The last reply, kept per session when afterAgentResponse comes before
 // stop (Cursor sends them in either order).
 const replies = new Map()
+// session -> the generation an Esc aborted.
+const aborted = new Map()
 
 function normalize (event, header = {}) {
   if (!event || typeof event !== 'object' || Array.isArray(event)) return null
@@ -364,6 +366,15 @@ function normalize (event, header = {}) {
       return { ...base, hook_event_name: 'Notification', message: text }
     }
     case 'stop': {
+      // Esc in the TUI: `aborted`, then (seen with 2026.10.01) an `error`
+      // stop of the same generation as the stream closes. The interrupt
+      // is the one that counts.
+      const gen = typeof event.generation_id === 'string' ? event.generation_id : null
+      if (event.status === 'error' && gen && aborted.get(sid) === gen) return null
+      if (event.status === 'aborted' && gen) {
+        aborted.set(sid, gen)
+        if (aborted.size > 200) aborted.delete(aborted.keys().next().value)
+      }
       const out = { ...base, hook_event_name: event.status === 'error' ? 'StopFailure' : 'Stop' }
       const text = replies.get(sid)
       if (text) out.last_assistant_message = text

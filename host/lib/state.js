@@ -179,6 +179,7 @@ function reduce (state, event, now = Date.now()) {
       break
     case 'PostToolUse':
     case 'PostToolUseFailure':
+      dropWatched(agent)
       next = agent.pending.length ? 'needs_permission' : 'working'
       break
     case 'PermissionRequest': {
@@ -210,6 +211,7 @@ function reduce (state, event, now = Date.now()) {
       break
     }
     case 'PermissionDenied':
+      dropWatched(agent)
       next = agent.pending.length ? 'needs_permission' : 'working'
       break
     case 'Notification': {
@@ -221,12 +223,14 @@ function reduce (state, event, now = Date.now()) {
       break
     }
     case 'Stop':
+      dropWatched(agent)
       if (typeof event.last_assistant_message === 'string') agent.lastMessage = truncate(event.last_assistant_message, MESSAGE_MAX)
       next = agent.pending.length ? 'needs_permission' : 'waiting_input'
       break
     case 'StopFailure':
       // The turn ended on an API error (rate limit, auth, overload, ...).
       if (isSubagent) break
+      dropWatched(agent)
       agent.lastError = { type: typeof event.error === 'string' ? truncate(event.error, 40) : 'unknown', at: now }
       if (typeof event.last_assistant_message === 'string' && event.last_assistant_message.trim()) agent.lastMessage = truncate(event.last_assistant_message, MESSAGE_MAX)
       next = agent.pending.length ? 'needs_permission' : 'waiting_input'
@@ -246,6 +250,13 @@ function reduce (state, event, now = Date.now()) {
   agent.updatedAt = now
   changes.push(record(state, 'change', agent, reason))
   return changes
+}
+
+// Requests the phone could only watch (`answerable: false`) end when the
+// agent moves on: its own prompt was answered, in the terminal. Claude
+// Code's requests never carry the flag.
+function dropWatched (agent) {
+  if (agent.pending.some(p => p.answerable === false)) agent.pending = agent.pending.filter(p => p.answerable !== false)
 }
 
 // The questions of an AskUserQuestion request, for the phone to answer
