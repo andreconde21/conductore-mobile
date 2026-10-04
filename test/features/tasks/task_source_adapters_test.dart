@@ -113,7 +113,7 @@ void main() {
         token: _token,
         client: r.client,
       );
-      final listed = TaskItem(sourceId: 's1', id: '12', key: '#12', title: '');
+      const listed = TaskItem(sourceId: 's1', id: '12', key: '#12', title: '');
       final full = await source.read(listed);
       expect(full.body, 'Steps…');
       expect(full.comments!.single.author, 'bo');
