@@ -237,7 +237,6 @@ void main() {
       expect(
         need(
           _agent(lastMessage: 'Permission prompt is waiting in the terminal'),
-          entered: true,
           previous: const AgentNotice(
             need: AgentNeed.approval,
             requestIds: {'r1'},
@@ -502,7 +501,6 @@ void main() {
         entry(
           _agent(
             id: 'c',
-            project: 'api',
             kind: 'codex',
             pending: [_request('r1', summary: 'git push')],
           ),
@@ -618,7 +616,7 @@ void main() {
             'lastEvent': lastEvent,
             'stateSeq': stateSeq,
             'lastMessage': ?lastMessage,
-            'pending': pending.isEmpty ? [] : [jsonDecode(pending)],
+            'pending': [if (pending.isNotEmpty) jsonDecode(pending)],
           },
         ],
       }),

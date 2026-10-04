@@ -83,9 +83,7 @@ void main() {
     expect(find.text('Needs input'), findsOneWidget);
   });
 
-  testWidgets('long-press an agent to mute its notifications', (
-    tester,
-  ) async {
+  testWidgets('long-press an agent to mute its notifications', (tester) async {
     final (controller, _, _) = await pumpSheet(tester, [
       const AgentCommandResult(
         stdout: '[{"name": "builder", "state": "working"}]',
