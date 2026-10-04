@@ -202,7 +202,7 @@ async function focus (agent) {
     if (r1.err) return { error: `tmux select-window failed: ${why(r1)}` }
     const r2 = await run('tmux', tmuxArgs(t, ['select-pane', '-t', t.paneId]))
     if (r2.err) return { error: `tmux select-pane failed: ${why(r2)}` }
-    const target = agent.tmux.session !== undefined ? `${agent.tmux.session}:${agent.tmux.window}` : null
+    const target = agent.tmux.session != null ? `${agent.tmux.session}:${agent.tmux.window}` : null
     return { ok: true, via: 'tmux', target, paneId: t.paneId }
   }
   return { error: errors.join('; ') }
