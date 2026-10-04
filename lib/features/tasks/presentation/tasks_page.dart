@@ -1,22 +1,35 @@
 import 'dart:async';
 
 import 'package:conduit/features/tasks/domain/task_source.dart';
+import 'package:conduit/features/tasks/presentation/start_tasks_page.dart';
 import 'package:conduit/features/tasks/presentation/task_detail_page.dart';
+import 'package:conduit/features/tasks/presentation/task_runs_controller.dart';
+import 'package:conduit/features/tasks/presentation/task_runs_panel.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_page.dart';
 import 'package:flutter/material.dart';
 
 /// Every source's tasks in one list, filtered by source, status and
-/// assignee; a task opens its detail page.
+/// assignee; a task opens its detail page. With [runs], tasks start as
+/// agents: "Start" on a task, or long-press to select several and
+/// "Start N tasks" (CON-037).
 class TasksPage extends StatefulWidget {
   const TasksPage({
     required this.controller,
     required this.machines,
+    this.runs,
+    this.startEnvironment,
+    this.hostName,
     super.key,
   });
 
   final TaskSourcesController controller;
   final List<TaskMachine> Function() machines;
+  final TaskRunsController? runs;
+  final TaskStartEnvironment? startEnvironment;
+
+  /// A machine's name, for the started tasks.
+  final String Function(String hostId)? hostName;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
@@ -78,17 +91,121 @@ class _TasksPageState extends State<TasksPage> {
     );
   }
 
+  /// Refs of the tasks selected for "Start N tasks".
+  final Set<String> _selected = {};
+
+  bool get _canStart => widget.runs != null && widget.startEnvironment != null;
+
   Future<void> _open(TaskItem task) => Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => TaskDetailPage(controller: _c, task: task),
+      builder: (_) => TaskDetailPage(
+        controller: _c,
+        task: task,
+        actions: [
+          if (_canStart)
+            Builder(
+              builder: (context) => FilledButton.icon(
+                key: const ValueKey('task-start'),
+                onPressed: () => unawaited(_start(context, [task])),
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('Start'),
+              ),
+            ),
+        ],
+      ),
     ),
+  );
+
+  Future<void> _start(BuildContext context, List<TaskItem> tasks) async {
+    final runs = widget.runs;
+    final environment = widget.startEnvironment;
+    if (runs == null || environment == null || tasks.isEmpty) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final queued = await Navigator.of(context).push<int>(
+      MaterialPageRoute(
+        builder: (_) => StartTasksPage(
+          tasks: tasks,
+          sources: _c,
+          runs: runs,
+          environment: environment,
+        ),
+      ),
+    );
+    if (queued == null || !mounted) return;
+    setState(_selected.clear);
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(
+          '$queued run${queued == 1 ? '' : 's'} started or queued.',
+        ),
+        action: SnackBarAction(label: 'Show', onPressed: _openRuns),
+      ),
+    );
+  }
+
+  void _openRuns() {
+    final runs = widget.runs;
+    final environment = widget.startEnvironment;
+    if (runs == null) return;
+    final hostIds = [
+      for (final m in environment?.machines() ?? const <TaskMachine>[]) m.id,
+    ];
+    unawaited(runs.refreshAll(hostIds));
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => TaskRunsPage(
+            controller: runs,
+            hostName: widget.hostName ?? (id) => id,
+            hostIds: () => hostIds,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _toggle(TaskItem task) => setState(
+    () => _selected.contains(task.ref)
+        ? _selected.remove(task.ref)
+        : _selected.add(task.ref),
   );
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Tasks'),
+      title: Text(_selected.isEmpty ? 'Tasks' : '${_selected.length} selected'),
+      leading: _selected.isEmpty
+          ? null
+          : IconButton(
+              key: const ValueKey('tasks-clear-selection'),
+              tooltip: 'Clear selection',
+              icon: const Icon(Icons.close),
+              onPressed: () => setState(_selected.clear),
+            ),
       actions: [
+        if (_selected.isNotEmpty)
+          TextButton.icon(
+            key: const ValueKey('tasks-start-selected'),
+            onPressed: () => unawaited(
+              _start(context, [
+                for (final t in _c.allTasks)
+                  if (_selected.contains(t.ref)) t,
+              ]),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded),
+            label: Text(
+              _selected.length == 1
+                  ? 'Start'
+                  : 'Start ${_selected.length} tasks',
+            ),
+          ),
+        if (widget.runs != null && _selected.isEmpty)
+          IconButton(
+            key: const ValueKey('tasks-runs'),
+            tooltip: 'Started tasks',
+            icon: const Icon(Icons.rocket_launch_outlined),
+            onPressed: _openRuns,
+          ),
         IconButton(
           key: const ValueKey('tasks-refresh'),
           tooltip: 'Refresh',
@@ -151,7 +268,12 @@ class _TasksPageState extends State<TasksPage> {
                 task: task,
                 sourceName: _c.sourceById(task.sourceId)?.name ?? '',
                 showSource: _c.sources.length > 1,
-                onTap: () => unawaited(_open(task)),
+                selected: _selected.isEmpty
+                    ? null
+                    : _selected.contains(task.ref),
+                onTap: () =>
+                    _selected.isEmpty ? unawaited(_open(task)) : _toggle(task),
+                onLongPress: _canStart ? () => _toggle(task) : null,
               );
             },
           ),
@@ -321,12 +443,18 @@ class _TaskTile extends StatelessWidget {
     required this.sourceName,
     required this.showSource,
     required this.onTap,
+    this.selected,
+    this.onLongPress,
   });
 
   final TaskItem task;
   final String sourceName;
   final bool showSource;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  /// Null outside selection mode.
+  final bool? selected;
 
   @override
   Widget build(BuildContext context) {
@@ -338,16 +466,20 @@ class _TaskTile extends StatelessWidget {
     return ListTile(
       key: ValueKey('task-${task.ref}'),
       onTap: onTap,
-      leading: Icon(
-        switch (task.status?.category) {
-          TaskStatusCategory.done => Icons.check_circle_outline,
-          TaskStatusCategory.inProgress => Icons.timelapse,
-          _ => Icons.radio_button_unchecked,
-        },
-        color: task.status?.category == TaskStatusCategory.done
-            ? theme.colorScheme.outline
-            : theme.colorScheme.primary,
-      ),
+      onLongPress: onLongPress,
+      selected: selected ?? false,
+      leading: selected != null
+          ? Checkbox(value: selected, onChanged: (_) => onTap())
+          : Icon(
+              switch (task.status?.category) {
+                TaskStatusCategory.done => Icons.check_circle_outline,
+                TaskStatusCategory.inProgress => Icons.timelapse,
+                _ => Icons.radio_button_unchecked,
+              },
+              color: task.status?.category == TaskStatusCategory.done
+                  ? theme.colorScheme.outline
+                  : theme.colorScheme.primary,
+            ),
       title: Text(
         '${task.key}  ${task.title}',
         maxLines: 2,

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/features/tasks/domain/task_run.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
+import 'package:conduit/features/tasks/domain/task_start_defaults.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
 import 'package:flutter/foundation.dart';
 
@@ -27,7 +28,41 @@ class TaskRunsController extends ChangeNotifier {
     required this.sources,
     required this.loadSynced,
     required this.saveSynced,
+    this.loadDefaults,
+    this.saveDefaults,
+    this.hosts,
   });
+
+  /// The machines whose companion starts tasks: asked now and then, so
+  /// runs started elsewhere (another device, the CLI) show too.
+  final List<String> Function()? hosts;
+
+  /// The app's one instance (the task list, Start and the dashboard).
+  static TaskRunsController? instance;
+
+  /// "Start"'s remembered choices, as stored on this device.
+  final Future<String?> Function()? loadDefaults;
+  final Future<void> Function(String json)? saveDefaults;
+
+  TaskStartDefaults? _defaults;
+
+  Future<TaskStartDefaults> defaults() async =>
+      _defaults ??= TaskStartDefaults.parse(await loadDefaults?.call());
+
+  Future<void> rememberDefaults(TaskStartDefaults defaults) async {
+    _defaults = defaults;
+    await saveDefaults?.call(defaults.toJson());
+  }
+
+  /// Runs waiting or going on [hostId] (Start's automatic machine choice
+  /// takes the least busy).
+  int busyOn(String hostId) => runsOn(
+    hostId,
+  ).where((r) => r.active || r.status == TaskRunStatus.queued).length;
+
+  /// Refreshes [hostIds] side by side.
+  Future<void> refreshAll(Iterable<String> hostIds) =>
+      Future.wait([for (final id in hostIds) refresh(id)]);
 
   final CompanionJsonCall call;
   final TaskSourcesController sources;
@@ -116,14 +151,24 @@ class TaskRunsController extends ChangeNotifier {
     await refresh(hostId);
   }
 
-  /// Refreshes the machines with waiting or going runs every [every].
-  void startPolling({Duration every = const Duration(seconds: 20)}) {
+  /// Refreshes the machines with waiting or going runs every [every], and
+  /// every machine of [hosts] every [allEvery] ticks (the first tick too).
+  void startPolling({
+    Duration every = const Duration(seconds: 20),
+    int allEvery = 15,
+  }) {
     _poll?.cancel();
+    var tick = 0;
     _poll = Timer.periodic(every, (_) {
-      for (final MapEntry(key: hostId, value: runs) in _runs.entries) {
-        if (runs.any((r) => r.active || r.status == TaskRunStatus.queued)) {
-          unawaited(refresh(hostId));
-        }
+      final all = tick++ % allEvery == 0;
+      final ids = {
+        if (all) ...?hosts?.call(),
+        for (final MapEntry(key: hostId, value: runs) in _runs.entries)
+          if (runs.any((r) => r.active || r.status == TaskRunStatus.queued))
+            hostId,
+      };
+      for (final id in ids) {
+        unawaited(refresh(id));
       }
     });
   }

@@ -185,6 +185,7 @@ class TaskStartRequest {
     this.branchPrefix,
     this.workspaceId,
     this.markDone = false,
+    this.worktree = true,
   });
 
   final String repo;
@@ -201,6 +202,9 @@ class TaskStartRequest {
   final String? workspaceId;
   final bool markDone;
 
+  /// False: work in the repository as it is, no worktree or branch.
+  final bool worktree;
+
   Map<String, Object?> toJson() => {
     'repo': repo,
     'agent': agent,
@@ -213,6 +217,7 @@ class TaskStartRequest {
     'branchPrefix': ?branchPrefix,
     'workspaceId': ?workspaceId,
     'markDone': markDone,
+    if (!worktree) 'worktree': false,
   };
 }
 
