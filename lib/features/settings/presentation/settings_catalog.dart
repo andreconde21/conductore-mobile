@@ -216,7 +216,7 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.terminal,
-    'Open Claude sessions in',
+    'Open agent sessions in',
     keywords: ['default view', 'chat view', 'claude'],
     availableWhen: _sessionViews,
   ),

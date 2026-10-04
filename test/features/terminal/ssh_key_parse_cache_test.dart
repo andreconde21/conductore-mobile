@@ -87,7 +87,7 @@ void main() {
 
       final b = await controllerWith([a]);
       await b.upsert(
-        SavedHost(
+        const SavedHost(
           id: 'a',
           name: 'a',
           host: 'a.example',

@@ -34,11 +34,12 @@ class DigestSettingsCards extends StatelessWidget {
               key: const ValueKey('settings-digest-summaries'),
               switchKey: const ValueKey('settings-digest-summaries-switch'),
               icon: Icons.auto_awesome_outlined,
-              title: 'Summaries with Claude',
+              title: 'Summaries by an agent',
               subtitle:
-                  'A one- or two-sentence summary per agent, written by '
-                  'Claude Haiku on the machine when you open the dashboard. '
-                  'Off: facts only, no Claude cost.',
+                  'A one- or two-sentence summary per agent, written by a '
+                  'coding agent on the machine (Claude Haiku, Codex or '
+                  'OpenCode, whichever is installed) when you open the '
+                  'dashboard. Off: facts only, no model cost.',
               value: preferences.summariesEnabled,
               onChanged: (value) =>
                   unawaited(controller.setSummariesEnabled(value)),

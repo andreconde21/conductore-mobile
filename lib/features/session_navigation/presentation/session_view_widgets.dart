@@ -51,8 +51,8 @@ Future<void> showSessionViewPicker(
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
               subtitle: const Text(
-                'Where this session opens when its pane runs Claude. Other '
-                'panes always open in the terminal.',
+                'Where this session opens when its pane runs a coding agent. '
+                'Other panes always open in the terminal.',
               ),
             ),
             const Divider(height: 1),
@@ -126,7 +126,7 @@ class SessionViewSettingsTile extends StatelessWidget {
                   const SizedBox(width: 16),
                   Expanded(
                     child: Text(
-                      'Open Claude sessions in',
+                      'Open agent sessions in',
                       style: theme.textTheme.titleMedium,
                     ),
                   ),
@@ -136,7 +136,8 @@ class SessionViewSettingsTile extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(left: 40),
                 child: Text(
-                  'Sessions whose pane runs Claude open here. Long-press a '
+                  'Sessions whose pane runs a coding agent open here. '
+                  'Long-press a '
                   'session to choose for it alone. Other panes always open in '
                   'the terminal.',
                   style: theme.textTheme.bodySmall?.copyWith(

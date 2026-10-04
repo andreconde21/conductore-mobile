@@ -61,7 +61,7 @@ String? continuityOpenMessage(
 ) => switch (result) {
   ContinuityOpenResult.opened => null,
   ContinuityOpenResult.openedTerminal =>
-    'That Claude session is not running any more; opened its terminal.',
+    'That agent session is not running any more; opened its terminal.',
   ContinuityOpenResult.noMachine =>
     context.place.machineId == null
         ? 'That session is on the other device itself, which is not saved '

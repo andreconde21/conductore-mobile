@@ -396,7 +396,7 @@ CompanionStatus classifyCompanionStatus(
     final hooks = checks.where((c) => c.name == 'hooks registered').firstOrNull;
     return build(
       CompanionState.hooksMissing,
-      'The companion is installed but Claude Code does not call it'
+      'The companion is installed but no agent calls it'
       '${hooks != null && !hooks.ok ? ' (${hooks.detail})' : ''}.',
       installedVersion: installedVersion,
       installedProtocol: installedProtocol,
@@ -436,7 +436,7 @@ CompanionStatus classifyCompanionStatus(
     return build(
       CompanionState.active,
       daemonRunning
-          ? 'The daemon is running and receiving Claude Code hook events.'
+          ? 'The daemon is running and receiving agent hook events.'
           : 'Hook events are arriving; the daemon starts on the next one.',
       installedVersion: installedVersion,
       installedProtocol: installedProtocol,
@@ -452,9 +452,9 @@ CompanionStatus classifyCompanionStatus(
   return build(
     CompanionState.waitingForFirstEvent,
     everSawEvent
-        ? 'Installed and hooked; no Claude Code activity in the last 24 hours.'
-        : 'Installed and hooked. The first Claude Code event (starting or '
-              'using a session) starts the daemon.',
+        ? 'Installed and hooked; no agent activity in the last 24 hours.'
+        : 'Installed and hooked. The first agent event (starting or using '
+              'a session) starts the daemon.',
     installedVersion: installedVersion,
     installedProtocol: installedProtocol,
     checks: checks,

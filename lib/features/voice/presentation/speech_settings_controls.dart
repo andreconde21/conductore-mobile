@@ -75,13 +75,13 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
   static String _sampleFor(String tag) {
     final language = tag.split('-').first.toLowerCase();
     return switch (language) {
-      'pt' => 'É assim que as respostas do Claude vão soar.',
-      'es' => 'Así sonarán las respuestas de Claude.',
-      'fr' => 'Voici comment les réponses de Claude seront lues.',
-      'de' => 'So klingen die Antworten von Claude.',
-      'it' => 'Ecco come suoneranno le risposte di Claude.',
-      'nl' => 'Zo klinken de antwoorden van Claude.',
-      _ => "This is how Claude's replies will sound.",
+      'pt' => 'É assim que as respostas do agente vão soar.',
+      'es' => 'Así sonarán las respuestas del agente.',
+      'fr' => "Voici comment les réponses de l'agent seront lues.",
+      'de' => 'So klingen die Antworten des Agenten.',
+      'it' => "Ecco come suoneranno le risposte dell'agente.",
+      'nl' => 'Zo klinken de antwoorden van de agent.',
+      _ => "This is how the agent's replies will sound.",
     };
   }
 
@@ -219,7 +219,7 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                   secondary: const Icon(Icons.record_voice_over_outlined),
                   title: const Text('Read replies aloud by default'),
                   subtitle: Text(
-                    "Chat View speaks Claude's final answer of each turn, "
+                    "Chat View speaks the agent's final answer of each turn, "
                     'approvals and questions, never tool output. The speaker '
                     'in its header turns it off per session.',
                     style: muted,
@@ -247,7 +247,8 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                           'The whole answer. Code blocks and tables become a '
                               'short cue.',
                         ReadAloudLength.summary =>
-                          'A short summary written by Claude on the machine '
+                          'A short summary written by a coding agent on the '
+                              'machine '
                               '(companion 0.7.0 or later), else the brief '
                               'version.',
                       }, style: muted),

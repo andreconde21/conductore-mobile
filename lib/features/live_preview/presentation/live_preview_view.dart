@@ -431,7 +431,7 @@ class _LivePreviewViewState extends State<LivePreviewView> {
                 // Without an embedded web view there is no page to capture.
                 if (widget.onScreenshot != null && _embedded)
                   IconButton(
-                    tooltip: 'Screenshot to Claude',
+                    tooltip: 'Screenshot to the agent',
                     iconSize: 19,
                     color: muted,
                     icon: _capturing

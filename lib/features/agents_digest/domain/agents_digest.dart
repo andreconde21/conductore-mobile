@@ -428,12 +428,16 @@ DigestAgent? _parseAgent(
   final pending = raw['pending'];
   final summary = raw['summary'];
   final lastError = raw['lastError'];
+  final kind = _text(raw['kind']) ?? defaultAgentKind;
   return DigestAgent(
     hostId: hostId,
     hostName: hostName,
     sessionId: sessionId,
-    kind: _text(raw['kind']) ?? defaultAgentKind,
-    name: _text(raw['name']) ?? _text(raw['project']) ?? 'Claude session',
+    kind: kind,
+    name:
+        _text(raw['name']) ??
+        _text(raw['project']) ??
+        '${agentKindLabel(kind)} session',
     state: _text(raw['state']) ?? 'working',
     attention: DigestAttention.parse(raw['attention']),
     project: _text(raw['project']),

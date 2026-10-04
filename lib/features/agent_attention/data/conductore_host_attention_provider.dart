@@ -425,10 +425,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
         _string(item['name']) ??
         _basename(cwd) ??
         // Companions with agent adapters send `kind: "claude"` too.
-        switch (_string(item['kind'])) {
-          final kind? when normalizeAgentKind(kind) != defaultAgentKind => kind,
-          _ => 'Claude session',
-        };
+        '${agentKindLabel(_string(item['kind']) ?? defaultAgentKind)} session';
     final tmux = item['tmux'];
     final herdr = item['herdr'];
     // `workspace` is a Herdr workspace id (the home board and deep links
