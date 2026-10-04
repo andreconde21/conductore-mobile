@@ -586,8 +586,9 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
             ),
           ],
           const SizedBox(height: 8),
-          if (request.watchOnly)
-            const TerminalOnlyNote()
+          // The agent's own prompt answers it (Gemini CLI): no buttons.
+          if (request.terminalOnly)
+            TerminalOnlyNote(key: ValueKey('answer-in-terminal-${request.id}'))
           else
             ApprovalButtons(
               deny: ApprovalAction(

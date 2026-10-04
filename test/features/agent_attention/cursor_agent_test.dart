@@ -92,7 +92,7 @@ void main() {
       '"pending":[$watched]}]}',
     );
     final request = parsed.agents.single.pendingRequests.single;
-    expect(request.watchOnly, isTrue);
+    expect(request.terminalOnly, isTrue);
     expect(request.batchable, isFalse);
     expect(request.trustable, isFalse);
     // Claude Code's requests never carry the flag.
@@ -102,7 +102,7 @@ void main() {
       '"s-1","name":"api","state":"needs_permission","pending":'
       '[$claudeRequest]}]}',
     );
-    expect(claude.agents.single.pendingRequests.single.watchOnly, isFalse);
+    expect(claude.agents.single.pendingRequests.single.terminalOnly, isFalse);
   });
 
   Future<(AgentAttentionController, ScriptedAgentCommandRunner)> pumpSheet(
@@ -188,7 +188,10 @@ void main() {
 
     final post = notifier.alerts.single;
     expect(post.title, contains('(Cursor)'));
-    expect(post.text, 'Approve Bash: echo hello-from-cursor · Low risk');
+    expect(
+      post.text,
+      'Approve Bash in the terminal: echo hello-from-cursor · Low risk',
+    );
     expect(post.action, isNull);
   });
 
@@ -199,7 +202,7 @@ void main() {
       id: 'req-1',
       toolName: 'Bash',
       summary: 'echo hello-from-cursor',
-      watchOnly: true,
+      terminalOnly: true,
     );
     final decided = <PermissionVerdict>[];
     await tester.pumpWidget(
@@ -214,7 +217,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Bash is waiting in the terminal'), findsOneWidget);
+    expect(find.text('Bash is waiting for approval'), findsOneWidget);
     expect(find.byType(TerminalOnlyNote), findsOneWidget);
     expect(find.text('Allow'), findsNothing);
     expect(find.text('Trust…'), findsNothing);

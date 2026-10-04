@@ -41,6 +41,7 @@ const MAX_POLL_TIMEOUT_S = 600
 const DEFAULT_PERMISSION_TIMEOUT_S = 120
 const MAX_PERMISSION_TIMEOUT_S = 600
 const PROBE_EVERY_MS = 1000
+const OBSERVE_EVERY_MS = 2000
 const SNAPSHOT_DEBOUNCE_MS = 1000
 const WATCH_FALLBACK_MS = 2000
 const TMP_MAX_AGE_MS = 60 * 60 * 1000
@@ -228,6 +229,8 @@ class Daemon {
     this.changes = [] // { seq, line }: each change record serialized once
     this.changeChars = 0
     this.waiters = new Map() // requestId -> { fifo, event, sessionId, timer }
+    this.observed = new Map() // requestId -> sessionId (answerable: false)
+    this.observeTimer = null
     this.approvals = new Approvals()
     this.pollers = new Set() // { socket, since, timer }
     this.usageEmits = new Map() // sessionId -> { at, timer }
@@ -433,11 +436,10 @@ class Daemon {
     const id = event.request_id || requestId()
     event.request_id = id
     this.commit(state.reduce(this.state, event))
+    // The phone only watches it (Gemini): no hook waits, it stays pending
+    // until the terminal answered it (state.reduce, observeProbe).
+    if (event.answerable === false) return this.observe(id, event.session_id)
     if (!fifo || !isOurFifo(fifo) || !fifoAlive(fifo)) {
-      // A request the phone can only watch (`answerable: false`: the
-      // agent's own prompt answers it) stays pending until the agent moves
-      // on (state.reduce).
-      if (event.answerable === false) return
       // Nobody is waiting (no FIFO support, or the hook gave up already):
       // the prompt is in the terminal.
       this.commit(state.resolvePermission(this.state, id, 'timeout'))
@@ -461,6 +463,33 @@ class Daemon {
       if (!this.waiters.size) { clearInterval(this.probeTimer); this.probeTimer = null }
     }, PROBE_EVERY_MS)
     this.probeTimer.unref()
+  }
+
+  // Watches an observe-only request until its agent's adapter sees the
+  // terminal's answer (settleObserved: the agent's own events end most of
+  // them first). A refusal that cancelled the turn ends it like a Stop.
+  observe (id, sessionId) {
+    this.observed.set(id, sessionId)
+    if (this.observeTimer) return
+    this.observeTimer = setInterval(() => this.checkObserved(), OBSERVE_EVERY_MS)
+    this.observeTimer.unref()
+  }
+
+  checkObserved () {
+    for (const [rid, sid] of [...this.observed]) {
+      const agent = this.state.agents[sid]
+      const request = agent && agent.pending.find(p => p.id === rid)
+      if (!request) { this.observed.delete(rid); continue }
+      const adapter = adapters.of(agent)
+      let outcome = null
+      try { outcome = adapter.settleObserved ? adapter.settleObserved(agent, request) : null } catch (err) { log('permission', `observe ${rid}: ${err.message}`) }
+      if (!outcome) continue
+      this.observed.delete(rid)
+      this.commit(state.resolvePermission(this.state, rid, 'gone'))
+      if (outcome.turnEnded && !agent.pending.length) this.commit(state.reduce(this.state, { session_id: sid, hook_event_name: 'Stop', agent_kind: agent.kind, interrupted: true }))
+      log('permission', `${rid} answered in the terminal${outcome.turnEnded ? ' (refused)' : ''}`)
+    }
+    if (!this.observed.size && this.observeTimer) { clearInterval(this.observeTimer); this.observeTimer = null }
   }
 
   // Resolves a waiting hook. decision: allow | deny | always | answer |
@@ -586,6 +615,8 @@ class Daemon {
     for (const p of [...this.pollers]) this.servePoller(p)
     this.live.companionChanged()
     this.sidebar.update(this.state.agents)
+    // Started tasks (CON-037): finish runs, start queued ones under the cap.
+    require('./task-runs').onAgents(this.state.agents)
     if (pruneRelevant) this.schedulePrune()
     if (!this.snapshotTimer) {
       this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
@@ -780,7 +811,8 @@ class Daemon {
     const found = state.findPending(this.state, requestId)
     if (!found) { this.reply(c, { error: `unknown request ${requestId}` }); c.end(); return }
     if (found.request.answerable === false) {
-      this.reply(c, { error: 'this agent asks in the terminal; answer it there' }); c.end(); return
+      // Watched only (Gemini): its agent's own prompt answers it.
+      this.reply(c, { error: 'this agent takes its answers in the terminal' }); c.end(); return
     }
     const waiter = this.waiters.get(requestId)
     if (!waiter) {
@@ -899,6 +931,7 @@ class Daemon {
     }
     for (const t of [this.snapshotTimer, this.pruneTimer, this.idleTimer]) clearTimeout(t)
     clearInterval(this.probeTimer)
+    clearInterval(this.observeTimer)
     clearInterval(this.watchFallback)
     // A snapshot still running is dropped (its temp index goes with tmp/'s
     // hourly clean-up); the next turn takes a new one.

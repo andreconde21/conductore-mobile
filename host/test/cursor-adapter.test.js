@@ -263,15 +263,31 @@ test('a watch-only request stays pending until the command ran, and cannot be an
   // The phone cannot answer it, nor approve it in a batch or trust it.
   const written = []
   d.handleDecide({ requestId: p.id, decision: 'allow' }, { write: s => written.push(JSON.parse(s)), end () {} })
-  assert.deepEqual(written, [{ error: 'this agent asks in the terminal; answer it there' }])
+  assert.deepEqual(written, [{ error: 'this agent takes its answers in the terminal' }])
   const low = approvalOps.handle(d, { op: 'approve-low' })
   assert.deepEqual(low.approved, [])
-  assert.equal(approvalOps.handle(d, { op: 'trust', requestId: p.id }).error, 'this agent asks in the terminal; nothing was trusted')
+  assert.equal(approvalOps.handle(d, { op: 'trust', requestId: p.id }).error, 'this agent takes its answers in the terminal; nothing was trusted')
   assert.equal(d.state.agents[SID].pending.length, 1)
   // The user answered "Run" in the terminal: the command ran.
   await send(hookLines.find((h, i) => i > upTo && h.event === 'postToolUse'))
   assert.equal(d.state.agents[SID].pending.length, 0)
   assert.equal(d.state.agents[SID].state, 'working')
+  clearInterval(d.observeTimer)
+})
+
+test('a watch-only request also ends when the agent refuses the call (PermissionDenied)', () => {
+  const st = state.createState()
+  const req = norm(hookLines.find(h => h.event === 'beforeShellExecution'))
+  state.reduce(st, norm(hookLines[0]), 1)
+  state.reduce(st, { ...req, request_id: 'r1' }, 2)
+  assert.equal(st.agents[SID].pending.length, 1)
+  state.reduce(st, { session_id: SID, agent_kind: 'cursor', hook_event_name: 'PermissionDenied', tool_name: 'Bash' }, 3)
+  assert.deepEqual(st.agents[SID].pending, [])
+  assert.equal(st.agents[SID].state, 'working')
+  // A request the phone answers (a waiting hook) is not touched by it.
+  state.reduce(st, { session_id: SID, hook_event_name: 'PermissionRequest', request_id: 'r2', tool_name: 'Bash', tool_input: { command: 'ls' } }, 4)
+  state.reduce(st, { session_id: SID, hook_event_name: 'PermissionDenied', tool_name: 'Bash' }, 5)
+  assert.equal(st.agents[SID].pending.length, 1)
 })
 
 // --- chat -----------------------------------------------------------------------------

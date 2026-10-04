@@ -16,6 +16,7 @@ const MODULES = {
   claude: './claude',
   codex: './codex',
   opencode: './opencode',
+  gemini: './gemini',
   cursor: './cursor'
 }
 

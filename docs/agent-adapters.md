@@ -15,6 +15,7 @@ is the code as it is.
 | Interface and shapes (JSDoc) | `host/lib/adapters/types.js` |
 | Claude Code adapter (the reference) | `host/lib/adapters/claude.js` |
 | OpenCode adapter and its plugin | `host/lib/adapters/opencode.js`, `host/lib/adapters/opencode-plugin.mjs` |
+| Gemini CLI adapter and its session reader | `host/lib/adapters/gemini.js`, `host/lib/adapters/gemini-session.js` |
 | Neutral chat format for new agents | `host/lib/adapters/chat-items.js` |
 | Contract every adapter must pass | `host/test/helpers/adapter-contract.js` |
 | Claude Code's contract run, byte-compat checks, a fake second adapter through the daemon | `host/test/adapters.test.js` |
@@ -146,6 +147,36 @@ the design doc:
 * App: `renderableChatFormats` includes `items`; the Chat View pages by
   cursor and replaces an item re-sent with the same id.
 
+## Gemini CLI (CON-072, built)
+
+`host/lib/adapters/gemini.js` + `gemini-session.js`, checked against a real
+Gemini CLI 0.62.0 run in Docker (mock Gemini API via
+`GOOGLE_GEMINI_BASE_URL`; `host/test/fixtures/gemini/README.md`). What the
+live runs showed, beyond the design doc:
+
+* Hooks live only in `settings.json` (JSONC, rewritten by Gemini itself, e.g.
+  it migrated `disableAutoUpdate` on start), so `install` edits just the
+  top-level `hooks` value (comments elsewhere kept), re-reads before writing,
+  keeps a `.bak` and checks the result parses back to the intended document.
+  The TUI shows "Executing Hook: conductore" while a hook runs
+  (`hooksConfig.notifications`, the user's to turn off).
+* Hooks run synchronously in the relaunched `node --max-old-space-size=…
+  gemini` child, with the TUI's environment (pane, Herdr ids): pid and pane
+  are right without an `origin()`. `PreCompress` fires on every turn;
+  `SessionEnd` up to three times.
+* A prompt: `BeforeTool`, then `Notification` (`ToolPermission`, `details`
+  exec/edit/info/mcp, no tool name). Allowed: `AfterTool`. Refused (Esc):
+  no hook at all; Gemini cancels the turn, writes the call as `cancelled`
+  plus "Request cancelled.", re-records its rolled back history (new ids, no
+  `model`) and a `$set.messages`. The daemon keeps such a request pending
+  (`answerable: false`, `daemon.observe`) and asks the adapter's
+  `settleObserved()` every 2 s; `state.reduce` drops it on its tool's
+  PostToolUse and on Stop. `ls` and reads are not prompted.
+* Headless `-p` refuses an untrusted folder (exit 55; `--skip-trust`) and
+  always records a session: no brain.
+* App: `approvals: 'observe'` → the approval card reads "Answer in the
+  terminal" with no Allow/Deny/Always (`AgentKindCapabilities.answersApprovals`).
+
 ## Cursor (CON-073, built)
 
 `host/lib/adapters/cursor.js` + `cursor-transcript.js`, checked against a
@@ -161,11 +192,10 @@ Differences from the design doc:
   (`wouldAsk`: not allowlisted in `cli-config.json`, no `--force`/`--yolo`
   on the agent's command line, approval mode `allowlist`, not sandboxed),
   and drops it otherwise. Nothing blocks, so no hook waits on a FIFO.
-  The daemon keeps such a request pending without a waiter and drops it
-  when the agent moves on (PostToolUse, PostToolUseFailure, Stop, ...);
-  `decide`, `trust` and `approve-low` refuse it. The app shows "Answer it
-  in the terminal" instead of the buttons and sends no Allow action in the
-  notification. Any other watch-only agent (Gemini) can use the same path.
+  The request goes through the same watch-only path as Gemini's (daemon
+  `observe`, state `dropObserved`, app `terminalOnly`); Cursor defines no
+  `settleObserved`, since its postToolUse/postToolUseFailure/stop always
+  come. A `PermissionDenied` also ends a watch-only request.
 * **Cursor runs Claude Code's hooks too** (`~/.claude/settings.json`,
   user and project), with Cursor's payload. The Claude Code adapter drops
   anything carrying `cursor_version`; without that, every Cursor session

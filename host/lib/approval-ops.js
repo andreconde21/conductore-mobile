@@ -65,6 +65,7 @@ function approveLow (daemon, req) {
     for (const p of [...agent.pending]) {
       if (wanted && !wanted.delete(p.id)) continue
       if (p.answerable === false) {
+        // Watched only: the agent's own prompt answers it.
         skipped.push({ id: p.id, reason: 'answer it in the terminal' })
       } else if (!p.batchable || !p.risk || p.risk.level !== 'low') {
         skipped.push({ id: p.id, reason: `${(p.risk && p.risk.level) || 'unrated'} risk: review it` })
@@ -90,7 +91,7 @@ function trust (daemon, req) {
   if (!found) return { error: `unknown request ${req.requestId}` }
   const { agent, request } = found
   if (request.toolName === 'AskUserQuestion') return { error: 'a question takes an answer; nothing was trusted' }
-  if (request.answerable === false) return { error: 'this agent asks in the terminal; nothing was trusted' }
+  if (request.answerable === false) return { error: 'this agent takes its answers in the terminal; nothing was trusted' }
   if (!request.risk || request.risk.level === 'high') {
     return { error: `high-risk requests always ask (${request.risk ? request.risk.reason : 'not rated'}); nothing was trusted` }
   }

@@ -213,6 +213,7 @@ String? otherAgentKindName(String kind) {
   return const {
         'codex': 'Codex',
         'opencode': 'OpenCode',
+        'gemini': 'Gemini CLI',
         'cursor': 'Cursor',
       }[key] ??
       key;

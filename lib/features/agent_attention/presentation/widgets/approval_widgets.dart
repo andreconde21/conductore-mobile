@@ -424,36 +424,6 @@ class BatchApprovalRow extends StatelessWidget {
   }
 }
 
-/// In place of an approval card's answers when the phone can only watch
-/// the request ([PendingPermissionRequest.watchOnly]): the agent's own
-/// prompt in the terminal decides.
-class TerminalOnlyNote extends StatelessWidget {
-  const TerminalOnlyNote({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      key: const ValueKey('approval-terminal-only'),
-      children: [
-        Icon(
-          Icons.terminal_rounded,
-          size: 18,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'Answer it in the terminal: this agent cannot take a decision '
-            'from the phone.',
-            style: theme.textTheme.bodySmall,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 /// One answer on an approval card.
 class ApprovalAction {
   const ApprovalAction(this.label, this.onPressed, {this.key});
@@ -584,3 +554,34 @@ class ApprovalButtons extends StatelessWidget {
 }
 
 enum _AnswerKind { deny, secondary, allow }
+
+/// Says a permission prompt is answered in the agent's terminal (the
+/// phone can only show it).
+class TerminalOnlyNote extends StatelessWidget {
+  const TerminalOnlyNote({super.key});
+
+  static const text = 'Answer in the terminal';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(
+          Icons.terminal_rounded,
+          size: 18,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '$text: this agent takes its approvals there',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

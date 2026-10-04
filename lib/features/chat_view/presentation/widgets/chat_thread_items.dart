@@ -815,8 +815,8 @@ class ChatApprovalCard extends StatelessWidget {
                 child: Text(
                   isPlan
                       ? 'Approve the plan?'
-                      : request.watchOnly
-                      ? '${request.toolName} is waiting in the terminal'
+                      : request.terminalOnly
+                      ? '${request.toolName} is waiting for approval'
                       : 'Allow ${request.toolName}?',
                   style: theme.textTheme.titleSmall,
                 ),
@@ -837,8 +837,11 @@ class ChatApprovalCard extends StatelessWidget {
             RiskLine(risk: risk),
           ],
           const SizedBox(height: 10),
-          if (request.watchOnly)
-            const TerminalOnlyNote()
+          // The agent's own prompt answers it (Gemini CLI): no buttons.
+          if (request.terminalOnly)
+            TerminalOnlyNote(
+              key: ValueKey('chat-answer-in-terminal-${request.id}'),
+            )
           else
             ApprovalButtons(
               deny: ApprovalAction(

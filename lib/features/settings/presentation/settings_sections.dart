@@ -31,6 +31,8 @@ import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:conduit/features/sync/domain/sync_category.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
+import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
+import 'package:conduit/features/tasks/presentation/tasks_entry.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
@@ -384,6 +386,12 @@ class SettingsSectionBody extends StatelessWidget {
     final hosts = services.hostsController;
     final attention = services.agentAttention;
     return [
+      if (TaskSourcesController.instance case final tasks?) ...[
+        SettingsCard(
+          child: TasksSettingsTile(controller: tasks, hosts: hosts),
+        ),
+        _gap,
+      ],
       if (services.talkbawt case final talkbawt? when attention != null) ...[
         SettingsCard(
           child: ListTile(

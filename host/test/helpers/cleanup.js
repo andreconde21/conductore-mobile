@@ -111,7 +111,7 @@ async function cleanup ({ strict = true } = {}) {
 // The user's real agent configs, which no test may write: install and
 // uninstall run every present adapter. Returns a check that fails when
 // any of them changed (appeared, vanished, or got a new mtime or size).
-const REAL_CONFIGS = ['.claude/settings.json', '.claude.json', '.codex/hooks.json', '.codex/config.toml', '.codex', '.config/opencode', '.cursor/hooks.json', '.cursor']
+const REAL_CONFIGS = ['.claude/settings.json', '.claude.json', '.codex/hooks.json', '.codex/config.toml', '.codex', '.config/opencode', '.gemini/settings.json', '.gemini', '.cursor/hooks.json', '.cursor']
 
 function guardRealConfigs (home = os.homedir()) {
   const snap = () => REAL_CONFIGS.map(rel => {
