@@ -88,7 +88,7 @@ class CompanionDoctorCheck {
   /// Other agents' checks (`codex`, `codex hooks`, ...): informative, an
   /// agent the machine lacks is no failure (older companions do not mark
   /// them `optional`).
-  static const otherAgents = {'codex'};
+  static const otherAgents = {'codex', 'gemini'};
 
   bool get optional =>
       reportedOptional ||

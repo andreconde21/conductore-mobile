@@ -83,6 +83,8 @@ import 'package:conduit/features/talkbawt/presentation/paired_mode_page.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_controller.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
+import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
+import 'package:conduit/features/tasks/presentation/tasks_entry.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
 import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
@@ -276,6 +278,13 @@ void main() {
       CompanionPreferences.secure(secureStorage, attention: agentAttention);
   agentAttention.onCompanionCapabilities = (host, capabilities) =>
       unawaited(companionPreferences.hostConnected(host, capabilities));
+  // Task sources (CON-039): trackers and markdown folders, tokens in
+  // secure storage on this device only. Read when Tasks first opens.
+  TaskSourcesController.instance = createAppTaskSources(
+    storage: secureStorage,
+    hosts: hostsController,
+    attention: agentAttention,
+  );
   // The project view (CON-065): its prefs sync with the app settings; the
   // machines' sidebar.toml is read when a project view shows.
   ProjectLayoutController.instance = ProjectLayoutController(

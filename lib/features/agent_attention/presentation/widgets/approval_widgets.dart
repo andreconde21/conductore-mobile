@@ -554,3 +554,34 @@ class ApprovalButtons extends StatelessWidget {
 }
 
 enum _AnswerKind { deny, secondary, allow }
+
+/// Says a permission prompt is answered in the agent's terminal (the
+/// phone can only show it).
+class TerminalOnlyNote extends StatelessWidget {
+  const TerminalOnlyNote({super.key});
+
+  static const text = 'Answer in the terminal';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(
+          Icons.terminal_rounded,
+          size: 18,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '$text: this agent takes its approvals there',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
