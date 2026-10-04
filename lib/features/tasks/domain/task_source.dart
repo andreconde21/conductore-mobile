@@ -410,6 +410,20 @@ enum TaskSourceKind {
     'Personal API token (Settings › Apps, starts with pk_)',
     [TaskSourceField('list', 'List id', hint: 'the number in …/li/<id>')],
   ),
+  asana(
+    'asana',
+    'Asana',
+    'Tasks of an Asana project; sections are statuses, plus Completed.',
+    TaskSourceCapabilities(),
+    'Personal access token (My settings › Apps › Developer apps)',
+    [
+      TaskSourceField(
+        'project',
+        'Project id',
+        hint: 'the number in app.asana.com/0/<id>/…',
+      ),
+    ],
+  ),
   azureBoards(
     'azure-boards',
     'Azure Boards',

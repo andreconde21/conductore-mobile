@@ -157,6 +157,7 @@ class _TaskSourcesPageState extends State<TaskSourcesPage> {
       TaskSourceKind.linear => s['team'] ?? 'every team',
       TaskSourceKind.trello => s['board'],
       TaskSourceKind.clickup => s['list'],
+      TaskSourceKind.asana => s['project'],
       TaskSourceKind.azureBoards => [
         s['organization'],
         s['project'],

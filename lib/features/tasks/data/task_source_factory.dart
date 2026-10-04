@@ -1,3 +1,4 @@
+import 'package:conduit/features/tasks/data/asana_task_source.dart';
 import 'package:conduit/features/tasks/data/azure_boards_task_source.dart';
 import 'package:conduit/features/tasks/data/clickup_task_source.dart';
 import 'package:conduit/features/tasks/data/github_projects_task_source.dart';
@@ -50,6 +51,7 @@ TaskSource createTaskSource(
       token: t,
       client: client,
     ),
+    TaskSourceKind.asana => AsanaTaskSource(config, token: t, client: client),
     TaskSourceKind.azureBoards => AzureBoardsTaskSource(
       config,
       token: t,
