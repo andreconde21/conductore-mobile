@@ -39,7 +39,8 @@ machine, the repository, the agent and the place.
  "branchPrefix": "task", "herdrServer": null, "workspaceId": null, "markDone": false}
 ```
 
-It queues one run per task and attempt, on branch
+With `"worktree": false` a run works in the repository as it is (no
+branch), and links only an agent that started with it. Otherwise it queues one run per task and attempt, on branch
 `<prefix>/<slug of the key>[-a<attempt>]` (`-2`, `-3`, ... when the branch
 is taken). It then starts runs while fewer than the cap (1 to 20, default
 3, across every batch on the machine) are starting or running. Starting a
