@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- SHA-256 digests of the signing certificates allowed to read
-         LauncherDetailsProvider through knownSigner (API 31+): the hex
-         SHA-256 digest apksigner verify with print-certs prints. -->
-    <!-- TODO(CON-075): add com.outsmartis.launcher's certificate SHA-256
-         once it is known. Until then only same-signature apps may read. -->
+    <!-- Signing certificates allowed to read LauncherDetailsProvider through
+         knownSigner (API 31+): each the certificate's SHA-256 digest as hex,
+         without colons (the platform hex-decodes it, so case does not
+         matter). Debug builds override this in src/debug/res. -->
     <string-array name="launcher_details_known_certs" translatable="false">
+        <!-- Yoke (com.outsmartis.yoke), release key. -->
+        <item>C1C53F01F674494483AA0CB16B0190C4CCBE736840580C383C18BC88510AD4DA</item>
     </string-array>
 </resources>

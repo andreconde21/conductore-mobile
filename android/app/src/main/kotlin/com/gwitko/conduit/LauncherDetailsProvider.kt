@@ -8,7 +8,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 
 /**
- * The details sheet André's launcher (com.outsmartis.launcher) shows on a
+ * The details sheet André's launcher Yoke (com.outsmartis.yoke) shows on a
  * long-press of Conductore. Contract: docs/launcher-details-provider.md.
  *
  * Authority `<applicationId>.launcherdetails`, announced by the

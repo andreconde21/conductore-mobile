@@ -1,6 +1,7 @@
 # Launcher details provider (CON-075)
 
-André's launcher (`com.outsmartis.launcher`, an OLauncher fork) opens a
+André's launcher Yoke (an OLauncher fork; `com.outsmartis.yoke`, debug
+builds `com.outsmartis.yoke.debug`) opens a
 details sheet when Conductore's icon is long-pressed. Conductore supplies the
 sheet's content through a read-only `ContentProvider`. This page is the
 contract between the two apps.
@@ -29,9 +30,16 @@ release build (it follows the applicationId of whatever build is installed).
   `UnsupportedOperationException`.
 - Conductore declares the permission with
   `protectionLevel="signature|knownSigner"` and
-  `knownCerts="@array/launcher_details_known_certs"`
-  (`res/values/launcher_details.xml`). That array is still empty (TODO): the
-  launcher's signing-certificate SHA-256 goes there.
+  `knownCerts="@array/launcher_details_known_certs"`. The array holds
+  signing-certificate SHA-256 digests as hex without colons (the platform
+  hex-decodes them, so case does not matter):
+  - `src/main/res/values/launcher_details.xml` (every build): Yoke's release
+    key, `C1C53F01F674494483AA0CB16B0190C4CCBE736840580C383C18BC88510AD4DA`.
+  - `src/debug/res/values/launcher_details.xml` (Conductore debug builds
+    only): the release key plus Yoke's debug key from the dev host's debug
+    keystore, `3F81175131F903E5D0704FDDAA885A2B5C1C4CC609310855E2EFEAE446C9E5AA`.
+    A release (or profile) Conductore never trusts a debug-signed Yoke.
+  - A new Yoke signing key means a new digest here and a Conductore release.
 - `knownSigner` exists from API 31. Conductore's minSdk is 24; on API 24-30
   the system ignores the unknown flag and the permission is signature-only,
   so there only an app signed with Conductore's own key can read it.
@@ -41,10 +49,12 @@ release build (it follows the applicationId of whatever build is installed).
 - Install-time permission: Android grants it when the launcher is installed
   or updated. If the launcher was installed before Conductore, it has to be
   reinstalled (or updated) after Conductore to get it.
-- Android 11+ package visibility is per package: a launcher that already
-  sees Conductore (through its `MAIN`/`LAUNCHER` `<queries>`) can query the
-  provider. Otherwise add
+- Android 11+ package visibility is per package, and applies to Yoke
+  (`com.outsmartis.yoke` and `.debug`) as the querying app: if Yoke already
+  sees Conductore (its `MAIN`/`LAUNCHER` intent `<queries>`, or
+  `QUERY_ALL_PACKAGES`), it can query the provider. Otherwise Yoke adds
   `<queries><provider android:authorities="com.outsmartis.conductore.launcherdetails" /></queries>`.
+  Conductore needs nothing to be seen by Yoke for this; it never queries Yoke.
 
 ## `content://<authority>/items`
 

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug builds only: also trust a debug-signed Yoke, so a release
+         Conductore never does. Same format as src/main/res. -->
+    <string-array name="launcher_details_known_certs" translatable="false">
+        <!-- Yoke (com.outsmartis.yoke), release key. -->
+        <item>C1C53F01F674494483AA0CB16B0190C4CCBE736840580C383C18BC88510AD4DA</item>
+        <!-- Yoke debug (com.outsmartis.yoke.debug), the dev host's debug keystore. -->
+        <item>3F81175131F903E5D0704FDDAA885A2B5C1C4CC609310855E2EFEAE446C9E5AA</item>
+    </string-array>
+</resources>

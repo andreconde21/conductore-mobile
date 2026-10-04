@@ -134,7 +134,7 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Launcher details (CON-075): the sheet com.outsmartis.launcher
+        <!-- Launcher details (CON-075): the sheet Yoke (com.outsmartis.yoke)
              shows on a long-press. Read-only; docs/launcher-details-provider.md. -->
         <meta-data
             android:name="com.outsmartis.launcher.DETAILS_AUTHORITY"
