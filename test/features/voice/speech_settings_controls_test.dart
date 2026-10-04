@@ -97,7 +97,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('speech-test')));
     await tester.pumpAndSettle();
-    expect(tts.spoken.last, 'É assim que as respostas do Claude vão soar.');
+    expect(tts.spoken.last, 'É assim que as respostas do agente vão soar.');
     expect(tts.rate, 2.0);
 
     // Picking a reading language resets the voice (voices are per

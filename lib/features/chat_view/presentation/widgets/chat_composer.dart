@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/terminal/data/keyboard_image_file.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
@@ -19,6 +20,7 @@ class ChatComposer extends StatefulWidget {
     required this.onInterrupt,
     this.enabled = true,
     this.disabledHint,
+    this.agentName,
     this.sending = false,
     this.showInterrupt = false,
     this.onExpand,
@@ -43,6 +45,10 @@ class ChatComposer extends StatefulWidget {
 
   /// Shown as the hint while [enabled] is false.
   final String? disabledHint;
+
+  /// The agent's name for people ("Claude Code", "Codex"); null when its
+  /// kind is not known.
+  final String? agentName;
   final bool sending;
 
   /// Emphasizes the Esc button (the agent is working).
@@ -309,7 +315,7 @@ class _ChatComposerState extends State<ChatComposer> {
                 decoration: InputDecoration(
                   isDense: true,
                   hintText: widget.enabled
-                      ? 'Message Claude…'
+                      ? 'Message ${agentObject(widget.agentName)}…'
                       : widget.disabledHint,
                   border: const OutlineInputBorder(
                     borderRadius: BorderRadius.all(

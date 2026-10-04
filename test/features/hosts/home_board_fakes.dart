@@ -108,7 +108,7 @@ class HerdrFakeRunner implements AgentCommandRunner {
       // ignore: only_throw_errors
       throw failure;
     }
-    if (command.startsWith('tmux list-sessions')) {
+    if (command.startsWith('tmux -u list-sessions')) {
       return AgentCommandResult(
         stdout: tmuxSessions,
         stderr: tmuxStderr,

@@ -67,6 +67,7 @@ class SpeechSummaryFailed extends SpeechSummaryResult {
 
   // The companion's error codes.
   static const claudeMissing = 'claude-missing';
+  static const agentMissing = 'agent-missing';
   static const notLoggedIn = 'not-logged-in';
   static const timeout = 'timeout';
   static const busy = 'busy';
@@ -85,16 +86,17 @@ class SpeechSummaryFailed extends SpeechSummaryResult {
   /// answers come back as a passthrough summary, never as a failure.)
   String? get note => switch (reason) {
     outdated =>
-      'Claude summaries need the Conductore companion 0.7.0 or later on '
+      'Summaries need the Conductore companion 0.7.0 or later on '
           'this machine. Reading a brief version instead.',
     missing || unsupported =>
-      'Claude summaries need the Conductore companion on this machine. '
+      'Summaries need the Conductore companion on this machine. '
           'Reading a brief version instead.',
-    claudeMissing =>
-      'Claude Code is not installed on this machine, so there is no '
+    claudeMissing || agentMissing =>
+      'No coding agent is installed on this machine, so there is no '
           'summary. Reading a brief version instead.',
     notLoggedIn =>
-      'Claude is not logged in on this machine, so there is no summary. '
+      'The coding agent is not logged in on this machine, so there is no '
+          'summary. '
           'Reading a brief version instead.',
     timeout => 'The summary took too long. Reading a brief version instead.',
     busy =>

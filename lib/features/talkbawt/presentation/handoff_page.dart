@@ -354,7 +354,7 @@ class _HandoffPageState extends State<HandoffPage> {
         key: const ValueKey('handoff-source-summary'),
         leading: const Icon(Icons.summarize_outlined),
         title: const Text('Summarise its transcript'),
-        subtitle: const Text('Claude on the machine, with tools off.'),
+        subtitle: const Text('A coding agent on the machine, with tools off.'),
         onTap: () => unawaited(_start(HandoffDraftSource.summary)),
       ),
     ),

@@ -264,7 +264,7 @@ void main() {
       expect(state.tmuxSessions.first.isAttached, isTrue);
       expect(state.tmuxSessions.first.windows, 3);
       expect(state.workspaces, hasLength(2));
-      expect(runner.commands.first, startsWith('tmux list-sessions'));
+      expect(runner.commands.first, startsWith('tmux -u list-sessions'));
     });
 
     test('no tmux server is an empty list, not an error', () async {
@@ -294,7 +294,7 @@ void main() {
       expect(timed.state.hasTmux, isTrue);
       expect(timed.state.tmuxSessions.map((s) => s.name), ['main', 'build']);
       int polls() => tmuxOnly.commands
-          .where((c) => c.startsWith('tmux list-sessions'))
+          .where((c) => c.startsWith('tmux -u list-sessions'))
           .length;
       final first = polls();
       await tester.pump(const Duration(seconds: 16));
@@ -323,7 +323,7 @@ void main() {
         ..selectHost(connected('a'));
       await tester.pump();
       int polls() => quiet.commands
-          .where((c) => c.startsWith('tmux list-sessions'))
+          .where((c) => c.startsWith('tmux -u list-sessions'))
           .length;
       // Two minutes of the same listing: 5, 5, 5, 10, 10, 10, 15, … 20 s.
       var start = polls();

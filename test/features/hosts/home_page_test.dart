@@ -307,6 +307,27 @@ void main() {
     await flow!.herdr.dispose();
   });
 
+  testWidgets('a session opened by Herdr workspace id takes the live label '
+      'in every title (CON-071)', (tester) async {
+    final (workspace, _) = await pumpHome(tester, hosts: [host('a')]);
+    final herdr = workspace.open(
+      const ConnectTarget.herdr(workspaceId: 'w1').apply(host('a')),
+    );
+    // Named after the raw id when opened...
+    expect(herdr.host.name, endsWith(': w1'));
+    await tester.pump();
+    await tester.pump();
+    // The home board knows w1 as "Infrastructure": the tile, the tabs and
+    // the switcher (all of which read the session's title) say so.
+    expect(herdr.title, endsWith(': Infrastructure'));
+    final tile = find.byKey(const ValueKey('home-session-a#herdr:w1'));
+    expect(find.descendant(of: tile, matching: find.text('w1')), findsNothing);
+    expect(
+      find.descendant(of: tile, matching: find.text('Infrastructure')),
+      findsWidgets,
+    );
+  });
+
   testWidgets('open sessions show as live tiles with transport and '
       'workspace', (tester) async {
     final (workspace, _) = await pumpHome(
@@ -333,7 +354,7 @@ void main() {
     );
     expect(
       find.descendant(of: herdrTile, matching: find.text('Infrastructure')),
-      findsOneWidget,
+      findsNWidgets(2),
     );
     expect(
       find.descendant(
@@ -680,7 +701,7 @@ void main() {
       final tile = find.byKey(const ValueKey('home-session-t#tmux:main'));
       expect(
         find.descendant(of: tile, matching: find.text('main')),
-        findsOneWidget,
+        findsNWidgets(2),
       );
       expect(
         find.descendant(

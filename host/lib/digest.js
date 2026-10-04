@@ -488,7 +488,7 @@ const LANGS = { en: 'English', pt: 'European Portuguese' }
 
 function systemPrompt (lang) {
   return [
-    'You write the status lines of a dashboard that shows a developer what each of their coding agents (Claude Code sessions) did while they were away.',
+    'You write the status lines of a dashboard that shows a developer what each of their coding agents (Claude Code, Codex, OpenCode and others) did while they were away.',
     'For every agent in the input write one or two short sentences, at most 40 words: what it did, where it is now, and what it needs from the user, if anything (an approval, an answer, a decision). Plain words, no markdown, no greeting, no file paths unless essential, no agent ids.',
     'Use the facts. When a previous summary is given, update it with the new activity instead of repeating it.',
     `Write in ${LANGS[lang] || 'English'}.`,

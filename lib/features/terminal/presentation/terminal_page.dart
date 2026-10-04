@@ -1036,7 +1036,7 @@ class _TerminalPageState extends State<TerminalPage>
           agents: candidates,
           alwaysAsk: elsewhere,
           title: elsewhere
-              ? 'No Claude session in this ${_placeName(session)}. Open '
+              ? 'No agent session in this ${_placeName(session)}. Open '
                     'another?'
               : 'Open chat for…',
         );
@@ -1046,7 +1046,7 @@ class _TerminalPageState extends State<TerminalPage>
         }
       case ChatAgentNone():
         _openComposerBecause(
-          'No Claude session is running on ${host.name}. Opened the '
+          'No agent session is running on ${host.name}. Opened the '
           'composer.',
         );
     }
@@ -1137,7 +1137,7 @@ class _TerminalPageState extends State<TerminalPage>
         behavior: SnackBarBehavior.floating,
         margin: EdgeInsets.fromLTRB(16, 0, 16, 112),
         content: Text(
-          'Chat opens Chat View for Claude sessions. Long-press it for the '
+          'Chat opens Chat View for agent sessions. Long-press it for the '
           'composer.',
         ),
       ),

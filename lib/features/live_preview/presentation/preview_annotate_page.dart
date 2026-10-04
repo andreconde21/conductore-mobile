@@ -234,7 +234,7 @@ class _PreviewAnnotatePageState extends State<PreviewAnnotatePage> {
                       textInputAction: TextInputAction.done,
                       decoration: const InputDecoration(
                         isDense: true,
-                        hintText: 'Note for Claude (optional)',
+                        hintText: 'Note for the agent (optional)',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -250,7 +250,7 @@ class _PreviewAnnotatePageState extends State<PreviewAnnotatePage> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.send_rounded, size: 18),
-                    label: const Text('To Claude'),
+                    label: const Text('To the agent'),
                   ),
                 ],
               ),

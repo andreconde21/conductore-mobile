@@ -10,9 +10,9 @@ enum ReadAloudLength {
   /// The whole answer.
   full('Full'),
 
-  /// A short summary written by Claude on the machine (the companion's
-  /// `summarize`), falling back to [brief].
-  summary('Claude summary');
+  /// A short summary written by the machine's coding agent (the
+  /// companion's `summarize`), falling back to [brief].
+  summary('Agent summary');
 
   const ReadAloudLength(this.label);
 

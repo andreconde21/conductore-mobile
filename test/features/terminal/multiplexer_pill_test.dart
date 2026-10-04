@@ -327,17 +327,17 @@ void main() {
 
       expect(
         _tmuxBody(runners.single.commands.last),
-        "tmux switch-client -c '/dev/pts/30' -t '%7'",
+        "tmux -u switch-client -c '/dev/pts/30' -t '%7'",
       );
       expect(controller.sentText, isEmpty);
     });
 
     const expected = {
-      'splitRight': "tmux split-window -h -t '%1' -c '#{pane_current_path}'",
-      'splitDown': "tmux split-window -v -t '%1' -c '#{pane_current_path}'",
-      'newWindow': "tmux new-window -a -t '@1' -c '#{pane_current_path}'",
-      'zoom': "tmux resize-pane -Z -t '%1'",
-      'detach': "tmux detach-client -t '/dev/pts/30'",
+      'splitRight': "tmux -u split-window -h -t '%1' -c '#{pane_current_path}'",
+      'splitDown': "tmux -u split-window -v -t '%1' -c '#{pane_current_path}'",
+      'newWindow': "tmux -u new-window -a -t '@1' -c '#{pane_current_path}'",
+      'zoom': "tmux -u resize-pane -Z -t '%1'",
+      'detach': "tmux -u detach-client -t '/dev/pts/30'",
     };
     for (final MapEntry(key: action, value: command) in expected.entries) {
       testWidgets('$action runs `$command`', (tester) async {
@@ -361,7 +361,10 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('herdr-confirm')));
       await tester.pumpAndSettle();
-      expect(_tmuxBody(runners.single.commands.last), "tmux kill-pane -t '%1'");
+      expect(
+        _tmuxBody(runners.single.commands.last),
+        "tmux -u kill-pane -t '%1'",
+      );
     });
 
     testWidgets('window buttons select that window of the app session', (
@@ -374,7 +377,7 @@ void main() {
 
       expect(
         _tmuxBody(runners.single.commands.last),
-        r"tmux select-window -t '$1:3'",
+        r"tmux -u select-window -t '$1:3'",
       );
     });
 
@@ -422,7 +425,7 @@ void main() {
       expect(runners.single.commands.first, contains('list-clients'));
       expect(
         _tmuxBody(runners.single.commands.last),
-        "tmux new-window -a -t '@1' -c '#{pane_current_path}'",
+        "tmux -u new-window -a -t '@1' -c '#{pane_current_path}'",
       );
     });
   });

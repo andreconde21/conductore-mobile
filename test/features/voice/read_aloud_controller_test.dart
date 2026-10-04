@@ -127,7 +127,7 @@ void main() {
     controller.observe([prompt('u1')], const [request], 'needs_permission');
     controller.observe([prompt('u1')], const [request], 'needs_permission');
     await pumpEventQueue();
-    expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+    expect(tts.spoken, ['The agent needs your approval to run npm test.']);
     tts.done();
 
     controller.observe(
@@ -142,7 +142,7 @@ void main() {
       'waiting_input',
     );
     await pumpEventQueue();
-    expect(tts.spoken.last, 'Claude is asking: Ship it?');
+    expect(tts.spoken.last, 'The agent is asking: Ship it?');
   });
 
   test('queues utterances and plays them one at a time', () async {
@@ -158,7 +158,7 @@ void main() {
       'waiting_input',
     );
     await pumpEventQueue();
-    expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+    expect(tts.spoken, ['The agent needs your approval to run npm test.']);
     expect(controller.busy, isTrue);
     tts.done();
     await pumpEventQueue();
@@ -218,7 +218,7 @@ void main() {
       await pumpEventQueue();
       expect(
         tts.spoken.single,
-        'Claude needs your approval to run npm test. '
+        'The agent needs your approval to run npm test. '
         'Say allow, deny, or always.',
       );
     },
@@ -265,7 +265,7 @@ void main() {
     expect(tts.spoken.last, 'Second answer.');
     tts.done();
     await pumpEventQueue();
-    expect(tts.spoken.last, 'Claude needs your approval to run npm test.');
+    expect(tts.spoken.last, 'The agent needs your approval to run npm test.');
   });
 
   test('a short audio interruption (a notification, a ringtone) pauses and '
@@ -282,7 +282,7 @@ void main() {
       'waiting_input',
     );
     await pumpEventQueue();
-    expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+    expect(tts.spoken, ['The agent needs your approval to run npm test.']);
     tts.done();
     await pumpEventQueue();
     expect(tts.spoken.last, 'One is done. Two is next. Three last.');
@@ -519,7 +519,7 @@ void main() {
         'waiting_input',
       );
       await pumpEventQueue();
-      expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+      expect(tts.spoken, ['The agent needs your approval to run npm test.']);
       expect(controller.queued, 1);
 
       other.claim();
@@ -542,7 +542,7 @@ void main() {
       tts.emit(TtsDone(tts.ids.first));
       await pumpEventQueue();
       expect(tts.spoken, [
-        'Claude needs your approval to run npm test.',
+        'The agent needs your approval to run npm test.',
         'New chat answer.',
       ]);
       // Stopping the quiet chat does not cut the new one.

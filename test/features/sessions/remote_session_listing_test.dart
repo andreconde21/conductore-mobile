@@ -67,7 +67,7 @@ void main() {
     test('the tmux command produces one tab-separated line per session', () {
       expect(
         RemoteSessionListing.tmuxListCommand,
-        startsWith('tmux list-sessions -F'),
+        startsWith('tmux -u list-sessions -F'),
       );
       expect(
         RemoteSessionListing.tmuxListCommand,

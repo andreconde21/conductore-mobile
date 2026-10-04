@@ -59,7 +59,7 @@ import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sessions/presentation/live_terminal_preview.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
-    show summarizeAgentState;
+    show agentStatePriority, summarizeAgentState;
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
 import 'package:conduit/features/settings/presentation/privacy_notice.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
@@ -280,6 +280,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     }
     widget.hostsController.addListener(_syncBoards);
     widget.workspaceController.addListener(_syncBoards);
+    widget.workspaceController.addListener(_labelSessions);
+    _boards?.addListener(_labelSessions);
     flow?.terminalRequests.addListener(_handleTerminalRequest);
     widget.launchRequests?.addListener(_handleLaunchRequest);
     widget.sessionRestore?.addListener(_handleRestoreChanged);
@@ -339,6 +341,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.hostsController.removeListener(_syncBoards);
     widget.workspaceController.removeListener(_syncBoards);
+    widget.workspaceController.removeListener(_labelSessions);
+    _boards?.removeListener(_labelSessions);
     widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
     widget.launchRequests?.removeListener(_handleLaunchRequest);
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
@@ -473,6 +477,61 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       for (final host in hosts)
         HomeBoardEntry(host, connectedBefore: _connectedBefore(host)),
     ]);
+  }
+
+  /// What the session's agent is about, for its home row: the dashboard's
+  /// summary of the most urgent agent there, else that agent's last
+  /// message unless it is only Claude Code's generic notice.
+  String? _agentLineFor(TerminalSessionController session) {
+    final status = widget.agentAttention.statusFor(session.host.id);
+    if (status == null || status.agents.isEmpty) return null;
+    final target = ConnectTarget.fromSessionHostId(session.host.id);
+    final workspace = target?.kind == ConnectTargetKind.herdr
+        ? target!.name
+        : '';
+    final agents =
+        [
+          for (final agent in status.agents)
+            if (workspace.isEmpty || agent.workspace == workspace) agent,
+        ]..sort(
+          (a, b) => agentStatePriority(a.state) - agentStatePriority(b.state),
+        );
+    for (final agent in agents) {
+      final summary = widget.agentAttention.notificationDetail?.call(
+        session.host.id,
+        agent.id,
+      );
+      if (summary != null && summary.trim().isNotEmpty) return summary;
+      final message = agent.lastMessage?.trim() ?? '';
+      if (message.isNotEmpty && !_genericNotice.hasMatch(message)) {
+        return message;
+      }
+    }
+    return null;
+  }
+
+  static final _genericNotice = RegExp(
+    r'^\w+( \w+)? (is waiting for your input|needs your (permission|attention))',
+    caseSensitive: false,
+  );
+
+  /// Gives each open Herdr session its workspace's live label, so titles
+  /// everywhere (home, tabs, switcher, sidebar) name the workspace, not
+  /// Herdr's raw id a session opened by id was named with.
+  void _labelSessions() {
+    final boards = _boards;
+    if (boards == null) return;
+    for (final session in widget.workspaceController.sessions) {
+      final target = ConnectTarget.fromSessionHostId(session.host.id);
+      if (target?.kind != ConnectTargetKind.herdr || target!.name.isEmpty) {
+        continue;
+      }
+      final board = boards[baseHostId(session.host.id)];
+      final live = board?.state.workspaces
+          .where((workspace) => workspace.id == target.name)
+          .firstOrNull;
+      if (live != null) session.noteTargetLabel(live.label);
+    }
   }
 
   bool _connectedBefore(SavedHost host) =>
@@ -1110,6 +1169,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         ),
         machineName: session.host.isLocal ? 'This device' : machine?.name ?? '',
         restoreNote: widget.sessionRestore?.noteFor(session),
+        agentLine: _agentLineFor(session),
       );
     }
 

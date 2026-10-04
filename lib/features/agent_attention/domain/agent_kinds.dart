@@ -25,6 +25,7 @@ class AgentKindCapabilities {
     this.brain = false,
     this.accounts,
     this.setup = const [],
+    this.launch,
   });
 
   /// Claude Code as companions before agent adapters behaved: everything
@@ -75,8 +76,16 @@ class AgentKindCapabilities {
           for (final step in steps)
             if (step is String && step.isNotEmpty) step,
       ],
+      launch: switch (text(raw['launch'])) {
+        final String command when launchCommandPattern.hasMatch(command) =>
+          command,
+        _ => null,
+      },
     );
   }
+
+  /// What a [launch] command may be: one plain word, typed into a pane.
+  static final launchCommandPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]*$');
 
   final String kind;
 
@@ -111,6 +120,10 @@ class AgentKindCapabilities {
   /// Manual steps the user must take once (e.g. `trust-hooks`).
   final List<String> setup;
 
+  /// The command that starts this agent in a terminal, when the companion
+  /// reports one (else [knownAgentKinds] has it).
+  final String? launch;
+
   /// Whether the phone can answer this kind's permission prompts.
   bool get answersApprovals => approvals == 'hook' || approvals == 'server';
 
@@ -131,7 +144,8 @@ class AgentKindCapabilities {
       other.history == history &&
       other.brain == brain &&
       other.accounts == accounts &&
-      listEquals(other.setup, setup);
+      listEquals(other.setup, setup) &&
+      other.launch == launch;
 
   @override
   int get hashCode => Object.hash(
@@ -150,6 +164,7 @@ class AgentKindCapabilities {
     brain,
     accounts,
     Object.hashAll(setup),
+    launch,
   );
 }
 
@@ -205,17 +220,74 @@ String normalizeAgentKind(String kind) {
   return key;
 }
 
+/// An agent kind the app knows by name: its label for people and the
+/// command that starts it in a terminal.
+@immutable
+class KnownAgentKind {
+  const KnownAgentKind(this.kind, this.label, this.command);
+
+  final String kind;
+  final String label;
+  final String command;
+}
+
+/// The agents the app can name and start without a companion telling it
+/// (an older companion, or none). A companion's `adapters` map adds to and
+/// overrides this ([agentLaunchCandidates]).
+const knownAgentKinds = [
+  KnownAgentKind(defaultAgentKind, 'Claude Code', 'claude'),
+  KnownAgentKind('codex', 'Codex', 'codex'),
+  KnownAgentKind('opencode', 'OpenCode', 'opencode'),
+  KnownAgentKind('gemini', 'Gemini CLI', 'gemini'),
+  KnownAgentKind('cursor', 'Cursor', 'cursor-agent'),
+];
+
+/// The name people know [kind] by (`Claude Code`, `Codex`): what the
+/// companion reported in [catalog], else [knownAgentKinds], else the id.
+String agentKindLabel(String kind, [AgentKindCatalog? catalog]) {
+  final key = normalizeAgentKind(kind);
+  final reported = catalog?.kinds[key]?.label;
+  if (reported != null) return reported;
+  for (final known in knownAgentKinds) {
+    if (known.kind == key) return known.label;
+  }
+  return key;
+}
+
+/// [label] (an [agentKindLabel]) to start a sentence with, or "The agent"
+/// when the kind is not known.
+String agentSubject(String? label) => label ?? 'The agent';
+
+/// [label] inside a sentence, or "the agent" when the kind is not known.
+String agentObject(String? label) => label ?? 'the agent';
+
 /// A person's name for an agent kind other than Claude Code (`Codex`), for
 /// texts that must say which agent it is; null for Claude Code.
 String? otherAgentKindName(String kind) {
   final key = normalizeAgentKind(kind);
   if (key == defaultAgentKind) return null;
-  return const {
-        'codex': 'Codex',
-        'opencode': 'OpenCode',
-        'gemini': 'Gemini CLI',
-      }[key] ??
-      key;
+  return agentKindLabel(key);
+}
+
+/// The agents a new workspace could start on a machine whose companion
+/// reported [catalog]: every [knownAgentKinds] entry (with the reported
+/// label and command when there is one) and every other reported kind
+/// that names its [AgentKindCapabilities.launch] command. Whether each is
+/// installed there is a separate check (its command on PATH).
+List<KnownAgentKind> agentLaunchCandidates([AgentKindCatalog? catalog]) {
+  final reported = catalog?.kinds ?? const <String, AgentKindCapabilities>{};
+  return [
+    for (final known in knownAgentKinds)
+      KnownAgentKind(
+        known.kind,
+        reported[known.kind]?.label ?? known.label,
+        reported[known.kind]?.launch ?? known.command,
+      ),
+    for (final entry in reported.entries)
+      if (entry.value.launch case final String command
+          when !knownAgentKinds.any((known) => known.kind == entry.key))
+        KnownAgentKind(entry.key, entry.value.label ?? entry.key, command),
+  ];
 }
 
 /// Transcript formats the Chat View renders: Claude Code's `entries`, and

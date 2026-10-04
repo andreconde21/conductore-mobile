@@ -125,7 +125,33 @@ class TerminalSessionController extends ChangeNotifier {
   /// computer"), so it ends with an exit code and restarts instead of
   /// reconnecting.
   bool get runsOnThisComputer => host.isThisComputer;
-  String get title => _customTitle ?? host.name;
+  String get title => _customTitle ?? _labelledTitle ?? host.name;
+
+  /// [host]'s "`<machine>: <target>`" name with the target's live label
+  /// ([noteTargetLabel]), when it differs; null otherwise.
+  String? _labelledTitle;
+
+  /// The machine part of the default title ("dev" of "dev: api").
+  String get machineTitle {
+    final cut = host.name.lastIndexOf(': ');
+    return cut > 0 ? host.name.substring(0, cut) : host.name;
+  }
+
+  /// The live name of what the session is attached to (a Herdr
+  /// workspace's label): replaces the name baked into [host] when the
+  /// session was opened, often Herdr's raw workspace id ("w8"), in the
+  /// default [title]. Blank keeps the baked-in name.
+  void noteTargetLabel(String label) {
+    final cut = host.name.lastIndexOf(': ');
+    final trimmed = label.trim();
+    final next = cut <= 0 || trimmed.isEmpty
+        ? null
+        : '${host.name.substring(0, cut)}: $trimmed';
+    final value = next == host.name ? null : next;
+    if (value == _labelledTitle) return;
+    _labelledTitle = value;
+    notifyListeners();
+  }
 
   /// Name the user gave this session (long-press › Rename on the home
   /// grid), or null to show the machine and target name.

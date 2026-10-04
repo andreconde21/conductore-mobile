@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/chat_view/domain/chat_working.dart';
 import 'package:flutter/material.dart';
 
-/// The "Claude is working" row at the bottom of the thread: a typing
+/// The "`<agent>` is working" row at the bottom of the thread: a typing
 /// bubble with three pulsing dots, the live activity label and a timer
 /// that ticks every second. With reduced motion the dots stand still.
 class ChatWorkingIndicator extends StatefulWidget {
@@ -12,10 +13,14 @@ class ChatWorkingIndicator extends StatefulWidget {
     required this.working,
     required this.since,
     this.now = DateTime.now,
+    this.agentName,
     super.key,
   });
 
   final ChatWorking working;
+
+  /// The agent's name for people; null when its kind is not known.
+  final String? agentName;
 
   /// When the turn started (the prompt, else when the row first showed).
   final DateTime since;
@@ -52,7 +57,9 @@ class _ChatWorkingIndicatorState extends State<ChatWorkingIndicator> {
     );
     return Semantics(
       liveRegion: true,
-      label: 'Claude is working: ${widget.working.label}',
+      label:
+          '${agentSubject(widget.agentName)} is working: '
+          '${widget.working.label}',
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.only(top: 6, bottom: 4, right: 8),

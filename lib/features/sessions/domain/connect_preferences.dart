@@ -6,6 +6,7 @@ class ConnectPreferences {
     this.rememberChoice = false,
     this.lastTarget,
     this.recents = const [],
+    this.lastAgent,
   });
 
   /// When true and [lastTarget] is set, connecting skips the picker.
@@ -17,6 +18,10 @@ class ConnectPreferences {
   final List<ConnectTarget> recents;
 
   static const maxRecents = 8;
+
+  /// The agent a new workspace or session started last time on this
+  /// machine (an agent kind, `''` for none); null before the first one.
+  final String? lastAgent;
 
   /// Records a chosen target as the latest and pushes it to the top of the
   /// recents. A plain shell is not worth remembering as a recent, and
@@ -36,19 +41,23 @@ class ConnectPreferences {
       rememberChoice: remember,
       lastTarget: target,
       recents: updated.take(maxRecents).toList(growable: false),
+      lastAgent: lastAgent,
     );
   }
 
-  ConnectPreferences copyWith({bool? rememberChoice}) => ConnectPreferences(
-    rememberChoice: rememberChoice ?? this.rememberChoice,
-    lastTarget: lastTarget,
-    recents: recents,
-  );
+  ConnectPreferences copyWith({bool? rememberChoice, String? lastAgent}) =>
+      ConnectPreferences(
+        rememberChoice: rememberChoice ?? this.rememberChoice,
+        lastTarget: lastTarget,
+        recents: recents,
+        lastAgent: lastAgent ?? this.lastAgent,
+      );
 
   Map<String, Object?> toJson() => {
     'rememberChoice': rememberChoice,
     'lastTarget': lastTarget?.toJson(),
     'recents': [for (final recent in recents) recent.toJson()],
+    if (lastAgent != null) 'lastAgent': lastAgent,
   };
 
   static ConnectPreferences fromJson(Object? json) {
@@ -66,6 +75,9 @@ class ConnectPreferences {
                 .take(maxRecents)
                 .toList(growable: false)
           : const [],
+      lastAgent: json['lastAgent'] is String
+          ? json['lastAgent'] as String
+          : null,
     );
   }
 }

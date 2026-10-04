@@ -123,6 +123,9 @@ void main() {
       findsOneWidget,
     );
     expect(theme.herdrMayMoveFocus, isFalse);
+    // Fully on screen, not just scrolled to the edge.
+    await tester.ensureVisible(title);
+    await tester.pumpAndSettle();
     await tester.tap(title);
     await tester.pumpAndSettle();
     expect(theme.herdrMayMoveFocus, isTrue);
@@ -146,7 +149,7 @@ void main() {
       'Menu buttons',
       'Paste images as uploaded files',
       'Restore sessions on launch',
-      'Open Claude sessions in',
+      'Open agent sessions in',
       'Multiplexer tabs on phone',
       'This computer: shell',
       'Keyboard shortcuts',

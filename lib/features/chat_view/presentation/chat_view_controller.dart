@@ -206,7 +206,16 @@ class ChatViewController extends ChangeNotifier {
 
   bool isDeciding(String requestId) => _deciding.contains(requestId);
 
-  String get name => _agent?.name ?? fallbackName ?? 'Claude';
+  String get name => _agent?.name ?? fallbackName ?? 'Agent session';
+
+  /// Whether the companion answers in the neutral format (every agent but
+  /// Claude Code), or Claude Code's own entries; null before the first
+  /// page.
+  bool? get neutralFormat => _neutral != null
+      ? true
+      : _offset != null
+      ? false
+      : null;
 
   List<PendingPermissionRequest> get pending => _agent?.pending ?? const [];
 
@@ -386,6 +395,13 @@ class ChatViewController extends ChangeNotifier {
       _timer?.cancel();
       _timer = null;
       if (!_disposed) notifyListeners();
+    } on ChatTranscriptNotYet {
+      // Before the session's first turn: an empty chat, still polled, so
+      // the transcript shows up as soon as it is written.
+      final changed = _loading || _error != null;
+      _error = null;
+      _loading = false;
+      if (changed && !_disposed) notifyListeners();
     } catch (error) {
       _error = _describe(error);
       _loading = false;

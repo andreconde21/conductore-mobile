@@ -69,6 +69,11 @@ Neither is ever set for Claude Code, so its JSON is unchanged.
    `capabilities()` and `normalize()`; add what the agent supports
    (types.js lists every optional member). Require heavy modules lazily: the
    daemon loads the adapter on its agent's first event.
+   The phone's "New workspace" offers to start the agent when its command
+   is on the machine's PATH: add the agent to `knownAgentKinds` in
+   `lib/features/agent_attention/domain/agent_kinds.dart` (kind, label,
+   command), or report `launch: '<command>'` (one plain word) in
+   `capabilities()` and the phone picks it up from the `adapters` map.
 2. Add one line to `MODULES` in `host/lib/adapters/index.js` (after
    `claude`: the order decides the default brain).
 3. Events in:
@@ -84,7 +89,9 @@ Neither is ever set for Claude Code, so its JSON is unchanged.
    agent's own prompt ask). `'server'` agents answer through the agent; the
    daemon side of that is not built yet (OpenCode, see below).
 5. Chat: `readTranscript(agent, opts)` returns a page built with
-   `chat-items.js` (`format: "items"`) or `{ error }`; set
+   `chat-items.js` (`format: "items"`) or `{ error }` (add `notYet: true`
+   when the session simply has no transcript yet, before its first turn:
+   the phone then shows an empty chat instead of an error); set
    `capabilities().chat = 'items'`. Paging is by opaque cursor
    (`transcript --cursor` / `--before-cursor`). Optionally `readTail()` for
    the dashboard (types.js `Tail`).

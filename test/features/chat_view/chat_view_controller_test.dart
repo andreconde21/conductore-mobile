@@ -214,6 +214,45 @@ void main() {
     expect(controller.error, isNull);
   });
 
+  test('no transcript before the first turn is an empty chat, still '
+      'polled (CON-071)', () async {
+    final runner = ScriptedAgentCommandRunner([
+      // An older companion: only the message says so.
+      failed('transcript not found: /home/me/.claude/projects/x/s-1.jsonl'),
+      // Since CON-071 it is marked.
+      AgentCommandResult(
+        stdout: jsonEncode({'error': 'anything', 'notYet': true}),
+        stderr: '',
+        exitCode: 1,
+      ),
+      failed(
+        'no session file recorded for this Codex session yet (it appears '
+        'with the next hook event)',
+      ),
+      ok(page([userLine('u1', 'hi')], offset: 50)),
+    ]);
+    final controller = controllerFor(runner);
+    for (var i = 0; i < 3; i++) {
+      await controller.refresh();
+      expect(controller.loading, isFalse);
+      expect(controller.error, isNull);
+      expect(controller.items, isEmpty);
+      expect(controller.unsupported, isNull);
+    }
+    await controller.refresh();
+    expect(runner.commands.last, contains('--tail-bytes 1000'));
+    expect(controller.items.single, isA<ChatUserMessage>());
+  });
+
+  test('a real transcript failure is still an error', () async {
+    final runner = ScriptedAgentCommandRunner([
+      failed('cannot read transcript: EACCES'),
+    ]);
+    final controller = controllerFor(runner);
+    await controller.refresh();
+    expect(controller.error, isNotNull);
+  });
+
   test(
     'decide goes through the attention flow and drops the request',
     () async {

@@ -142,7 +142,7 @@ void main() {
       expect(older.kinds, isNull);
     });
 
-    test('a nameless Claude Code agent is still a "Claude session"', () {
+    test('a nameless agent is named after its kind (CON-071)', () {
       final snapshot = ConductoreHostAttentionProvider.parseSnapshot(
         jsonEncode({
           'version': 1,
@@ -155,9 +155,9 @@ void main() {
         }),
       );
       expect(snapshot.agents.map((a) => a.name), [
-        'Claude session',
-        'Claude session',
-        'codex',
+        'Claude Code session',
+        'Claude Code session',
+        'Codex session',
       ]);
     });
   });

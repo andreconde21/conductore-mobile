@@ -587,12 +587,12 @@ const isSession = file => typeof file === 'string' && path.isAbsolute(file) && f
 
 function readTranscript (agent, opts = {}) {
   const file = agent && agent.transcriptPath
-  if (!file) return { error: 'no session file recorded for this Gemini session yet (it appears with the next hook event)' }
+  if (!file) return { error: 'no session file recorded for this Gemini session yet (it appears with the next hook event)', notYet: true }
   if (!isSession(file)) return { error: 'session file path is not an absolute .jsonl file (Gemini CLI 0.39 or newer writes one)' }
   try {
     return session().readPage(file, opts)
   } catch (err) {
-    if (err.code === 'ENOENT') return { error: `session file not found: ${file}` }
+    if (err.code === 'ENOENT') return { error: `session file not found: ${file}`, notYet: true }
     return { error: `cannot read session file: ${err.message}` }
   }
 }

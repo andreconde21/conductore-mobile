@@ -115,8 +115,8 @@ class GuideSettingsControls extends StatelessWidget {
     final id = _prefs.brainHostId;
     if (id.isEmpty) {
       return 'Automatic: the first connected machine with the Conductore '
-          'companion. It runs Claude (Haiku) for what the phone cannot '
-          'match itself.';
+          'companion. A coding agent there (Claude Haiku, Codex or '
+          'OpenCode) answers what the phone cannot match itself.';
     }
     return hosts.findById(id)?.name ?? 'A removed machine (automatic)';
   }

@@ -182,7 +182,7 @@ void main() {
 
     final chatButton = find.byKey(const ValueKey('toolbar-chat'));
     const hint =
-        'Chat opens Chat View for Claude sessions. Long-press it for the '
+        'Chat opens Chat View for agent sessions. Long-press it for the '
         'composer.';
 
     testWidgets('a Claude session opens Chat View directly', (tester) async {
@@ -394,7 +394,7 @@ void main() {
       expect(find.byType(ChatViewPage), findsNothing);
       expect(find.byTooltip('Close chat mode'), findsOneWidget);
       expect(
-        find.textContaining('No Claude session is running on'),
+        find.textContaining('No agent session is running on'),
         findsOneWidget,
       );
       await drainSnackBars(tester);

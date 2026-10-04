@@ -361,7 +361,7 @@ class SettingsSectionBody extends StatelessWidget {
         'View). Add a Dictate button to the pill (long-press the pill), '
         'or swipe up on the pill and pick Dictate.\n'
         'Talk: the speaking-head button in Chat View\'s composer runs a '
-        'hands-free conversation with Claude. Long-press it for the voice '
+        'hands-free conversation with the agent. Long-press it for the voice '
         'guide, which talks to all your agents (also the headset-mic button at '
         'the top of home and the Voice guide quick-settings tile).\n'
         'A crossed-out mic means this phone has no speech recognizer yet; '
@@ -427,8 +427,9 @@ class SettingsSectionBody extends StatelessWidget {
               children: [
                 const SettingsHeading('Agent hooks'),
                 const SettingsNote(
-                  'The Conductore companion reports Claude Code sessions, '
-                  'approvals and usage from each machine. Set it up per '
+                  'The Conductore companion reports coding agent sessions '
+                  '(Claude Code, Codex, OpenCode), approvals and usage from '
+                  'each machine. Set it up per '
                   'machine, and pick how loudly each one notifies.',
                 ),
                 const SizedBox(height: 10),

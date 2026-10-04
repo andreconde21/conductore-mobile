@@ -690,7 +690,7 @@ class _ManualInstructions extends StatelessWidget {
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'On the machine, as the user that runs Claude Code '
+            'On the machine, as the user that runs your coding agents '
             '(needs Node.js 18+ and git):',
           ),
           const SizedBox(height: 8),

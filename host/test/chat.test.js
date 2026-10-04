@@ -157,6 +157,9 @@ test('transcript errors: unknown session, no transcript, bad flags, bad path', a
   const none = await cli(['transcript', 'bare'])
   assert.equal(none.code, 1)
   assert.match(none.json.error, /no transcript recorded/)
+  // Before the first turn: the phone shows an empty chat (CON-071).
+  assert.equal(none.json.notYet, true)
+  assert.equal((await cli(['transcript', 'rel'])).json.notYet, undefined)
   assert.equal((await cli(['transcript', 'tm', '--since', 'abc'])).json.error, '--since must be a non-negative number')
   assert.match((await cli(['transcript', 'tm', '--since', '1', '--before', '2'])).json.error, /not both/)
   assert.match((await cli(['transcript', 'rel'])).json.error, /absolute \.jsonl/)

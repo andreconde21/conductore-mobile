@@ -47,6 +47,7 @@ class ReadAloudController extends ChangeNotifier {
     this.dictationLanguage = _noLanguage,
     this.summarize,
     this.onNotice,
+    this.agentName,
     bool enabled = false,
   }) : _tts = tts,
        _enabled = enabled;
@@ -81,6 +82,12 @@ class ReadAloudController extends ChangeNotifier {
 
   /// Shown once per reason (why a summary was not read).
   final void Function(String note)? onNotice;
+
+  /// The chat's agent's name for people ("Claude Code", "Codex"), for what
+  /// is spoken about it; null (or a null answer) says "The agent".
+  final String? Function()? agentName;
+
+  String? get _agent => agentName?.call();
 
   bool _enabled;
   bool _suppressed = false;
@@ -295,16 +302,20 @@ class ReadAloudController extends ChangeNotifier {
       if (!speak) break;
       switch (item) {
         case ChatQuestion() when !item.answered:
-          _enqueue(SpeechText.question(item, hint: _conversation));
+          _enqueue(
+            SpeechText.question(item, hint: _conversation, agent: _agent),
+          );
         case ChatPlan(:final status) when status == ChatPlanStatus.pending:
-          _enqueue(SpeechText.planReady);
+          _enqueue(SpeechText.planReady(agent: _agent));
         default:
           break;
       }
     }
     if (speak) {
       for (final request in newRequests) {
-        _enqueue(SpeechText.approval(request, hint: _conversation));
+        _enqueue(
+          SpeechText.approval(request, hint: _conversation, agent: _agent),
+        );
       }
     }
     final turnEnded =

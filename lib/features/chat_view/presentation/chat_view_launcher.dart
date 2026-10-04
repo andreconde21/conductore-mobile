@@ -345,7 +345,7 @@ Future<ChatViewAccess> checkChatViewAccess({
     if (unreached != null) return ChatViewAccess.connection(unreached);
     final detail = error is AppFailure ? error.userMessage : '$error';
     return ChatViewAccess.blocked(
-      title: 'Could not list Claude sessions',
+      title: 'Could not list agent sessions',
       problem:
           'The companion${_version(status)} is installed on ${host.name}, '
           'but "conductore-hostd status" failed: $detail',
@@ -615,8 +615,8 @@ Future<AgentInfo?> pickChatAgent(
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
         content: Text(
-          'No Claude session is running on ${host.name}. Start claude in '
-          'tmux or Herdr there, then try again.',
+          'No agent session is running on ${host.name}. Start a coding '
+          'agent in tmux or Herdr there, then try again.',
         ),
       ),
     );

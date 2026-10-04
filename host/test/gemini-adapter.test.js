@@ -457,3 +457,9 @@ test('no test touched the real agent configs (~/.gemini included)', () => {
   assert.equal(path.join(os.homedir(), '.gemini') !== path.join(root, '.gemini'), true)
   realConfigs()
 })
+
+test('no session file yet is marked notYet, so the phone shows an empty chat (CON-071)', () => {
+  assert.equal(gemini.readTranscript(fixtures.missing, {}).notYet, true)
+  assert.equal(gemini.readTranscript({ sessionId: 'x', kind: 'gemini' }, {}).notYet, true)
+  assert.equal(gemini.readTranscript({ sessionId: 'x', kind: 'gemini', transcriptPath: 'rel.jsonl' }, {}).notYet, undefined)
+})

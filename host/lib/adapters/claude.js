@@ -186,15 +186,16 @@ function toolKind (toolName) {
 const isTranscriptFile = file => typeof file === 'string' && path.isAbsolute(file) && file.endsWith('.jsonl')
 
 // The session's chat page: Claude Code's entries (transcript.js), or
-// { error } with the message `transcript` prints.
+// { error } with the message `transcript` prints. `notYet`: no transcript
+// exists yet, which is normal before the session's first turn.
 function readTranscript (agent, opts = {}) {
   const file = agent && agent.transcriptPath
-  if (!file) return { error: 'no transcript recorded for this session yet (it appears with the next hook event)' }
+  if (!file) return { error: 'no transcript recorded for this session yet (it appears with the next hook event)', notYet: true }
   if (!isTranscriptFile(file)) return { error: 'transcript path is not an absolute .jsonl file' }
   try {
     return transcript().readTranscript(file, opts)
   } catch (err) {
-    if (err.code === 'ENOENT') return { error: `transcript not found: ${file}` }
+    if (err.code === 'ENOENT') return { error: `transcript not found: ${file}`, notYet: true }
     return { error: `cannot read transcript: ${err.message}` }
   }
 }

@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:flutter/material.dart';
 
 /// A question Claude asked (AskUserQuestion) and is waiting on, answered
@@ -20,10 +21,15 @@ class QuestionRequestCard extends StatefulWidget {
     required this.onAnswer,
     required this.onDecline,
     this.margin = EdgeInsets.zero,
+    this.agentName,
     super.key,
   });
 
   final PendingPermissionRequest request;
+
+  /// The asking agent's name for people ("Claude Code", "Codex"); null
+  /// when its kind is not known.
+  final String? agentName;
   final bool busy;
 
   /// Question -> answer (several picks joined with ", ").
@@ -122,8 +128,9 @@ class _QuestionRequestCardState extends State<QuestionRequestCard> {
               Expanded(
                 child: Text(
                   request.questions.length > 1
-                      ? 'Claude asks ${request.questions.length} questions'
-                      : 'Claude asks',
+                      ? '${agentSubject(widget.agentName)} asks '
+                            '${request.questions.length} questions'
+                      : '${agentSubject(widget.agentName)} asks',
                   style: theme.textTheme.titleSmall,
                 ),
               ),

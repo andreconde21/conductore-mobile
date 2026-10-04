@@ -10,7 +10,13 @@ const { log } = require('./log')
 
 const TTL_MS = 5000
 const CACHE_MAX = 64
-const FORMAT = '#{session_name}\t#{window_index}\t#{pane_id}\t#{pane_current_path}\t#{window_name}\t#{pane_pid}'
+// Fixed-shape fields first, free text last. tmux 3.3+ prints a tab as `_`
+// when it thinks the client is not UTF-8 (LANG/LC_* unset or C, as under
+// systemd or in a minimal container), which would leave one unsplittable
+// field; `-u` makes it pass tabs through on every version, and
+// parseTmuxContext still recovers the pane from the `_` form.
+const FORMAT = '#{pane_id}\t#{pane_pid}\t#{window_index}\t#{session_name}\t#{window_name}\t#{pane_current_path}'
+const MANGLED = /^(%\d+)_(\d+)_(\d+)_/
 
 const cache = new Map() // `${socket}\0${pane}` -> { at, value }
 
@@ -28,7 +34,7 @@ function tmuxContext (header, now = Date.now()) {
   const key = `${socket}\0${pane}`
   const hit = cache.get(key)
   if (hit && now - hit.at < TTL_MS) return Promise.resolve(hit.value)
-  const args = []
+  const args = ['-u']
   if (socket) args.push('-S', socket)
   args.push('display-message', '-p')
   if (pane) args.push('-t', pane)
@@ -38,10 +44,8 @@ function tmuxContext (header, now = Date.now()) {
       let value = null
       if (err) log('context', 'tmux context failed', err.message)
       else {
-        const [session, window, paneId, currentPath, windowName, panePid] = String(stdout).replace(/\n$/, '').split('\t')
-        // The server's socket and the pane's process let the prompt relay
-        // check, before typing, that the pane still is this agent's.
-        value = { session, window: Number(window), paneId, currentPath, windowName, socket, panePid: Number(panePid) || null }
+        value = parseTmuxContext(stdout, socket)
+        if (!value) log('context', 'tmux context unparsable', JSON.stringify(String(stdout).slice(0, 200)))
       }
       cache.delete(key)
       cache.set(key, { at: Date.now(), value })
@@ -49,6 +53,24 @@ function tmuxContext (header, now = Date.now()) {
       resolve(value)
     })
   })
+}
+
+// Parses one line of FORMAT. The server's socket and the pane's process let
+// the prompt relay check, before typing, that the pane still is this
+// agent's. A tab-mangled line (see FORMAT) still yields the pane, its
+// process and window index; the free-text fields are then unknown (null),
+// since `_` is also a common character in them.
+function parseTmuxContext (stdout, socket = null) {
+  const line = String(stdout).replace(/\n$/, '')
+  const parts = line.split('\t')
+  if (parts.length >= 6 && /^%\d+$/.test(parts[0])) {
+    const [paneId, panePid, window, session, windowName] = parts
+    const currentPath = parts.slice(5).join('\t')
+    return { session, window: Number(window), paneId, currentPath, windowName, socket, panePid: Number(panePid) || null }
+  }
+  const m = MANGLED.exec(line)
+  if (m) return { session: null, window: Number(m[3]), paneId: m[1], currentPath: null, windowName: null, socket, panePid: Number(m[2]) || null }
+  return null
 }
 
 function herdrContext (header) {
@@ -204,4 +226,4 @@ function _reset () {
   cache.clear()
 }
 
-module.exports = { enrich, tmuxContext, herdrContext, herdrLocation, herdrEnv, parsePaneList, tmuxSocket, _reset }
+module.exports = { enrich, tmuxContext, parseTmuxContext, FORMAT, herdrContext, herdrLocation, herdrEnv, parsePaneList, tmuxSocket, _reset }

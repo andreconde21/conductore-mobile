@@ -4,6 +4,7 @@ import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
@@ -32,6 +33,7 @@ class SessionConnectFlow {
     required this.runnerFactory,
     required this.preferences,
     this.recentDirectories,
+    this.agentKinds,
     bool watchLifecycle = false,
     bool Function()? mayMoveHerdrFocus,
     Duration? herdrRefreshInterval,
@@ -58,6 +60,10 @@ class SessionConnectFlow {
   /// Recent working directories per host: the picker's "Recent dirs" and
   /// the terminal's "cd to…". Null hides both.
   final RecentDirectoriesController? recentDirectories;
+
+  /// What a machine's companion reported about its agent kinds (the new
+  /// workspace's agent choice); null without a companion monitor.
+  final AgentKindCatalog Function(String hostId)? agentKinds;
 
   /// Herdr focus across the app's sessions: re-focus on tab switch, deep
   /// links, and the command channel behind the Herdr gestures.
@@ -217,6 +223,7 @@ class SessionConnectFlow {
               : ConnectPickerTab.tmux,
           recentDirectories: directories,
           mayMoveHerdrFocus: herdr.mayMoveFocus,
+          agentKinds: agentKinds?.call(host.id),
         );
       } finally {
         unawaited(runner.close());
@@ -225,12 +232,11 @@ class SessionConnectFlow {
     if (result == null) {
       return null;
     }
-    unawaited(
-      preferences.save(
-        host.id,
-        saved.withChoice(result.target, remember: result.remember),
-      ),
-    );
+    var updated = saved.withChoice(result.target, remember: result.remember);
+    if (result.agent case final agent?) {
+      updated = updated.copyWith(lastAgent: agent);
+    }
+    unawaited(preferences.save(host.id, updated));
     return open(host, result.target);
   }
 

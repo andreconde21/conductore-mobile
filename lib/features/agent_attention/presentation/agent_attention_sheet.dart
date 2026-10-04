@@ -5,6 +5,7 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
@@ -450,6 +451,10 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
                   PendingRequestCard(
                     key: ValueKey('request-${request.id}'),
                     request: request,
+                    agentName: agentKindLabel(
+                      agent.kind,
+                      controller.agentKinds(host.id),
+                    ),
                     busy: controller.isDeciding(request.id),
                     onDecide: (verdict) => answerPermissionRequest(
                       context,

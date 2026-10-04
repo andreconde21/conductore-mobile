@@ -80,7 +80,7 @@ void main() {
     expect(tmuxRunners, hasLength(1));
     expect(
       body(tmuxRunners.single.commands.single),
-      "tmux select-window -t '%12' ';' select-pane -t '%12'",
+      "tmux -u select-window -t '%12' ';' select-pane -t '%12'",
     );
     expect(tmuxRunners.single.closed, isTrue);
     // Never the Herdr path, which would have taken the cwd for a workspace.
@@ -118,7 +118,7 @@ void main() {
     expect(workspace.activeSession, shown);
     expect(
       body(runners.single.commands.single),
-      "tmux select-window -t '%12' ';' select-pane -t '%12'",
+      "tmux -u select-window -t '%12' ';' select-pane -t '%12'",
     );
   });
 

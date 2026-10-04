@@ -157,8 +157,11 @@ class _English extends GuideStrings {
   @override
   String brainFailed(String reason) => switch (reason) {
     'outdated' => 'The brain machine needs a companion update.',
-    'claude-missing' => 'Claude Code is not installed on the brain machine.',
-    'not-logged-in' => 'Claude is not logged in on the brain machine.',
+    'claude-missing' ||
+    'agent-missing' => 'No coding agent is installed on the brain machine.',
+    'not-logged-in' =>
+      'The coding agent is not logged in on the brain '
+          'machine.',
     'timeout' => 'The brain machine took too long.',
     'busy' => 'The brain machine is busy. Try again.',
     'unreachable' => "I can't reach the brain machine.",
@@ -414,8 +417,9 @@ class _Portuguese extends GuideStrings {
   @override
   String brainFailed(String reason) => switch (reason) {
     'outdated' => 'A máquina cérebro precisa de atualizar o companion.',
-    'claude-missing' => 'O Claude Code não está instalado na máquina cérebro.',
-    'not-logged-in' => 'O Claude não tem sessão iniciada na máquina cérebro.',
+    'claude-missing' ||
+    'agent-missing' => 'Não há nenhum agente instalado na máquina cérebro.',
+    'not-logged-in' => 'O agente não tem sessão iniciada na máquina cérebro.',
     'timeout' => 'A máquina cérebro demorou demasiado.',
     'busy' => 'A máquina cérebro está ocupada. Tenta outra vez.',
     'unreachable' => 'Não consigo chegar à máquina cérebro.',

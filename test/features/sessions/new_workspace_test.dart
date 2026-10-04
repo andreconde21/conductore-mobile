@@ -1,5 +1,6 @@
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/sessions/data/workspace_creator.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/new_workspace.dart';
@@ -77,12 +78,12 @@ void main() {
       );
     });
 
-    test('tmux creates detached in the folder, then types claude', () {
+    test('tmux creates detached in the folder, then types the agent', () {
       final script = scriptOf(
         NewWorkspaceCommands.tmuxCreate(
           name: 'my app',
           folder: '/srv/a b',
-          startClaude: true,
+          agentCommand: 'claude',
         ),
       );
       expect(script, contains("dir='/srv/a b'\n"));
@@ -93,11 +94,33 @@ void main() {
       expect(script, endsWith("tmux send-keys -t '=my app:' claude Enter"));
     });
 
-    test('Claude starts in the new pane', () {
+    test('the chosen agent starts in the new pane', () {
       expect(
-        NewWorkspaceCommands.herdrStartClaude('w2:p1'),
+        NewWorkspaceCommands.herdrStartAgent('w2:p1', 'claude'),
         contains('exec herdr pane run w2:p1 claude'),
       );
+      expect(
+        NewWorkspaceCommands.herdrStartAgent('w2:p1', 'cursor-agent'),
+        contains('exec herdr pane run w2:p1 cursor-agent'),
+      );
+    });
+
+    test('agent detection asks command -v for each, quietly', () {
+      final script = scriptOf(
+        NewWorkspaceCommands.detectAgents(['claude', 'cursor-agent']),
+      );
+      expect(script, contains('PATH="\$HOME/.local/bin:'));
+      expect(
+        script,
+        contains(
+          'for c in claude cursor-agent; do command -v "\$c" >/dev/null '
+          "2>&1 && printf '%s\\n' \"\$c\"; done; exit 0",
+        ),
+      );
+      expect(NewWorkspaceCommands.parseInstalledAgents('claude\n\ncodex \n'), {
+        'claude',
+        'codex',
+      });
     });
 
     test('names and folders', () {
@@ -126,30 +149,33 @@ void main() {
   group('WorkspaceCreator', () {
     const ok = AgentCommandResult(stdout: '', stderr: '', exitCode: 0);
 
-    test('a Herdr workspace, then Claude in its pane; opens by id', () async {
-      final runner = ScriptedAgentCommandRunner([
-        const AgentCommandResult(stdout: _created, stderr: '', exitCode: 0),
-        ok,
-      ]);
-      final target = await WorkspaceCreator(runner).create(
-        const NewWorkspaceRequest(
-          kind: MultiplexerKind.herdr,
-          name: '',
-          folder: '~/my proj',
-          startClaude: true,
-        ),
-      );
-      expect(
-        target,
-        const ConnectTarget.herdr(workspaceId: 'w2', label: 'my proj'),
-      );
-      expect(runner.commands, hasLength(2));
-      // Named after the folder when no name was given.
-      expect(scriptOf(runner.commands.first), contains("--label 'my proj'"));
-      expect(runner.commands.last, contains('pane run w2:p1 claude'));
-      // "Phone may move Herdr focus" is off by default.
-      expect(scriptOf(runner.commands.first), endsWith('--no-focus'));
-    });
+    test(
+      'a Herdr workspace, then the agent in its pane; opens by id',
+      () async {
+        final runner = ScriptedAgentCommandRunner([
+          const AgentCommandResult(stdout: _created, stderr: '', exitCode: 0),
+          ok,
+        ]);
+        final target = await WorkspaceCreator(runner).create(
+          const NewWorkspaceRequest(
+            kind: MultiplexerKind.herdr,
+            name: '',
+            folder: '~/my proj',
+            agent: KnownAgentKind('codex', 'Codex', 'codex'),
+          ),
+        );
+        expect(
+          target,
+          const ConnectTarget.herdr(workspaceId: 'w2', label: 'my proj'),
+        );
+        expect(runner.commands, hasLength(2));
+        // Named after the folder when no name was given.
+        expect(scriptOf(runner.commands.first), contains("--label 'my proj'"));
+        expect(runner.commands.last, contains('pane run w2:p1 codex'));
+        // "Phone may move Herdr focus" is off by default.
+        expect(scriptOf(runner.commands.first), endsWith('--no-focus'));
+      },
+    );
 
     test('with the setting on, the new workspace is focused', () async {
       final runner = ScriptedAgentCommandRunner([
@@ -244,6 +270,67 @@ void main() {
             'A tmux session named "api" already exists.',
           ),
         ),
+      );
+    });
+  });
+  group('installed agents (CON-071)', () {
+    setUp(WorkspaceCreator.clearDetectedAgents);
+
+    test('only the candidates found, in their order; asked once per '
+        'machine while fresh', () async {
+      var now = DateTime(2026, 10, 4, 12);
+      final runner = ScriptedAgentCommandRunner([
+        const AgentCommandResult(
+          stdout: 'cursor-agent\nclaude\n',
+          stderr: '',
+          exitCode: 0,
+        ),
+        const AgentCommandResult(stdout: 'gemini\n', stderr: '', exitCode: 0),
+      ]);
+      final creator = WorkspaceCreator(runner, clock: () => now);
+      final candidates = agentLaunchCandidates();
+      final found = await creator.installedAgents('h', candidates);
+      expect([for (final a in found) a.kind], ['claude', 'cursor']);
+      expect(runner.commands.single, contains('command -v'));
+
+      await creator.installedAgents('h', candidates);
+      expect(runner.commands, hasLength(1));
+
+      now = now.add(WorkspaceCreator.detectionTtl);
+      final later = await creator.installedAgents('h', candidates);
+      expect([for (final a in later) a.kind], ['gemini']);
+      expect(runner.commands, hasLength(2));
+    });
+
+    test('a machine that cannot be asked is a failure', () async {
+      final runner = ScriptedAgentCommandRunner([
+        const AgentCommandResult(stdout: '', stderr: 'boom', exitCode: 2),
+      ]);
+      await expectLater(
+        WorkspaceCreator(runner).installedAgents('h', agentLaunchCandidates()),
+        throwsA(isA<NewWorkspaceFailure>()),
+      );
+    });
+
+    test('candidates come from data: the known agents, plus any kind the '
+        'companion reports with a launch command', () {
+      final catalog = AgentKindCatalog.fromJson({
+        'codex': {'label': 'Codex CLI'},
+        'aider': {'label': 'Aider', 'launch': 'aider'},
+        'odd': {'label': 'Odd', 'launch': 'touch x; y'},
+        'nolaunch': {'label': 'No launch'},
+      });
+      final candidates = agentLaunchCandidates(catalog);
+      expect(
+        [for (final c in candidates) (c.kind, c.label, c.command)],
+        [
+          ('claude', 'Claude Code', 'claude'),
+          ('codex', 'Codex CLI', 'codex'),
+          ('opencode', 'OpenCode', 'opencode'),
+          ('gemini', 'Gemini CLI', 'gemini'),
+          ('cursor', 'Cursor', 'cursor-agent'),
+          ('aider', 'Aider', 'aider'),
+        ],
       );
     });
   });
