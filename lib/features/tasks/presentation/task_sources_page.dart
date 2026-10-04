@@ -149,6 +149,8 @@ class _TaskSourcesPageState extends State<TaskSourcesPage> {
     final where = switch (s.kind) {
       TaskSourceKind.markdownFolder => s['folder'],
       TaskSourceKind.github => s['repo'],
+      TaskSourceKind.githubProjects =>
+        '${s['owner'] ?? '?'} #${s['number'] ?? '?'}',
       TaskSourceKind.gitlab => s['project'],
       TaskSourceKind.jira ||
       TaskSourceKind.jiraServer => s['project'] ?? s['jql'],

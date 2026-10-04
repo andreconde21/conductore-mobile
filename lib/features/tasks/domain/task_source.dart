@@ -271,6 +271,32 @@ enum TaskSourceKind {
       ),
     ],
   ),
+  githubProjects(
+    'github-projects',
+    'GitHub Projects',
+    'Items of a GitHub project (v2) board and their status field.',
+    TaskSourceCapabilities(),
+    'Personal access token (classic: project, repo; or fine-grained)',
+    [
+      TaskSourceField('owner', 'Owner', hint: 'my-org or my-user'),
+      TaskSourceField('number', 'Project number', hint: '3'),
+      TaskSourceField(
+        'statusField',
+        'Status field',
+        hint: 'Status',
+        required: false,
+        help: 'A single-select field of the project.',
+      ),
+      TaskSourceField(
+        'apiBase',
+        'API URL',
+        hint: 'https://api.github.com',
+        required: false,
+        kind: TaskSourceFieldKind.url,
+        help: 'Only for GitHub Enterprise Server (https://host/api/v3).',
+      ),
+    ],
+  ),
   gitlab(
     'gitlab',
     'GitLab Issues',

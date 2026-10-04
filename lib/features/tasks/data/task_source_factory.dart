@@ -1,4 +1,5 @@
 import 'package:conduit/features/tasks/data/azure_boards_task_source.dart';
+import 'package:conduit/features/tasks/data/github_projects_task_source.dart';
 import 'package:conduit/features/tasks/data/github_task_source.dart';
 import 'package:conduit/features/tasks/data/gitlab_task_source.dart';
 import 'package:conduit/features/tasks/data/jira_task_source.dart';
@@ -29,6 +30,11 @@ TaskSource createTaskSource(
       call: companion,
     ),
     TaskSourceKind.github => GitHubTaskSource(config, token: t, client: client),
+    TaskSourceKind.githubProjects => GitHubProjectsTaskSource(
+      config,
+      token: t,
+      client: client,
+    ),
     TaskSourceKind.gitlab => GitLabTaskSource(config, token: t, client: client),
     TaskSourceKind.jira || TaskSourceKind.jiraServer => JiraTaskSource(
       config,
