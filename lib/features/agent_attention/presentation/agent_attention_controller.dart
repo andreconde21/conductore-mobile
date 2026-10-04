@@ -1154,6 +1154,9 @@ class AgentAttentionController extends ChangeNotifier {
   }
 
   void _onTick(_HostMonitor monitor) {
+    // Refreshes an unchanged status now and then (the platform drops one
+    // nobody refreshed), even while the long-poll has nothing new.
+    _syncStatus();
     if (monitor.skipTicks > 0) {
       monitor.skipTicks -= 1;
       return;
