@@ -210,7 +210,12 @@ String normalizeAgentKind(String kind) {
 String? otherAgentKindName(String kind) {
   final key = normalizeAgentKind(kind);
   if (key == defaultAgentKind) return null;
-  return const {'codex': 'Codex', 'opencode': 'OpenCode'}[key] ?? key;
+  return const {
+        'codex': 'Codex',
+        'opencode': 'OpenCode',
+        'cursor': 'Cursor',
+      }[key] ??
+      key;
 }
 
 /// Transcript formats the Chat View renders: Claude Code's `entries`, and

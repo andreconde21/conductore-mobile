@@ -509,8 +509,12 @@ abstract final class AgentNotificationPolicy {
     final first = requests.firstOrNull;
     // A question has no Allow: its answer needs the app (the card's
     // options), so a tap opens it instead.
+    // Nor does a request the agent's own prompt answers (Cursor).
     final actionable =
-        first != null && !first.isQuestion && !preferences.summaryOnly;
+        first != null &&
+        !first.isQuestion &&
+        !first.watchOnly &&
+        !preferences.summaryOnly;
     return AgentNotification(
       hostId: hostId,
       agentId: agent.id,

@@ -112,11 +112,13 @@ class GuideWorld {
       if (!agent.ended) agent,
   ];
 
-  /// Every pending request, oldest agent state first.
+  /// Every pending request the phone can answer, oldest agent state
+  /// first (a watch-only one is answered in the agent's terminal).
   List<GuidePending> get pending => [
     for (final agent in agents)
       if (!agent.ended)
-        for (final request in agent.pending) GuidePending(agent, request),
+        for (final request in agent.pending)
+          if (!request.watchOnly) GuidePending(agent, request),
   ];
 
   /// [requestId] on [hostId], if it is still waiting.

@@ -261,6 +261,7 @@ class PendingPermissionRequest {
     this.repo,
     this.questions = const [],
     this.answers,
+    this.watchOnly = false,
   });
 
   /// The Claude Code tool that asks the user questions.
@@ -300,6 +301,10 @@ class PendingPermissionRequest {
   /// `decide` ([withAnswers]); never reported by the companion.
   final Map<String, String>? answers;
 
+  /// The agent asks in its own terminal prompt and the phone can only
+  /// watch (`answerable: false`: Cursor, whose hooks cannot allow).
+  final bool watchOnly;
+
   /// A question Claude asked (AskUserQuestion). Claude Code ignores a plain
   /// Allow for it: it takes answers ([withAnswers]) or a Deny.
   bool get isQuestion => toolName == questionTool;
@@ -311,7 +316,10 @@ class PendingPermissionRequest {
   /// Whether a trust or rule may answer requests like this one (high risk
   /// always asks, and so does a question).
   bool get trustable =>
-      !isQuestion && risk != null && risk!.level != PermissionRiskLevel.high;
+      !isQuestion &&
+      !watchOnly &&
+      risk != null &&
+      risk!.level != PermissionRiskLevel.high;
 
   /// This request with the user's [answers], for `decide`.
   PendingPermissionRequest withAnswers(Map<String, String> answers) =>
@@ -327,6 +335,7 @@ class PendingPermissionRequest {
         repo: repo,
         questions: questions,
         answers: Map.unmodifiable(answers),
+        watchOnly: watchOnly,
       );
 
   /// Longest tool input kept on the phone; anything beyond is truncated
@@ -346,7 +355,8 @@ class PendingPermissionRequest {
         listEquals(other.suggestedRules, suggestedRules) &&
         other.repo == repo &&
         listEquals(other.questions, questions) &&
-        mapEquals(other.answers, answers);
+        mapEquals(other.answers, answers) &&
+        other.watchOnly == watchOnly;
   }
 
   @override
@@ -361,6 +371,7 @@ class PendingPermissionRequest {
     Object.hashAll(suggestedRules),
     repo,
     Object.hashAll(questions),
+    watchOnly,
   );
 }
 
