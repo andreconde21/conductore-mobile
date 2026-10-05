@@ -289,7 +289,8 @@ class UsageSummary {
   static UsageLimit? _freshest(List<UsageLimit> limits) =>
       limits.isEmpty ? null : limits.reduce(fresherLimit);
 
-  /// Accounts no machine uses right now (the home bar's "+N accounts").
+  /// Accounts no machine uses right now (the home card shows the accounts
+  /// line only with some).
   int get otherAccountCount => accounts.where((a) => !a.active).length;
 
   /// Accounts cswap lost the login of ("Needs re-login").
