@@ -19,6 +19,9 @@ UsageLevel usageLevelFor(double percent) {
   return UsageLevel.normal;
 }
 
+/// Older than this, the home card says how old its figures are.
+const kUsageStaleAfter = Duration(minutes: 15);
+
 /// What the app knows about one machine's usage.
 class MachineUsage {
   const MachineUsage({
@@ -288,6 +291,30 @@ class UsageSummary {
 
   /// Accounts no machine uses right now (the home bar's "+N accounts").
   int get otherAccountCount => accounts.where((a) => !a.active).length;
+
+  /// Accounts cswap lost the login of ("Needs re-login").
+  int get reloginCount => accounts.where((a) => a.needsLogin).length;
+
+  /// When the rings' figures were measured: the newest of the active
+  /// limits' report times, else the newest fetch. Null before any.
+  DateTime? get updatedAt {
+    DateTime? newest(Iterable<DateTime?> times) {
+      DateTime? best;
+      for (final at in times.nonNulls) {
+        if (best == null || at.isAfter(best)) best = at;
+      }
+      return best;
+    }
+
+    return newest([fiveHour?.reportedAt, weekly?.reportedAt]) ??
+        newest(machines.map((m) => m.fetchedAt));
+  }
+
+  /// [updatedAt] is older than [kUsageStaleAfter].
+  bool isStale(DateTime now) {
+    final at = updatedAt;
+    return at != null && now.difference(at) > kUsageStaleAfter;
+  }
 
   /// Another account with clearly more headroom than the active one, once
   /// the active one is at least half used: what "Switch to best" would
