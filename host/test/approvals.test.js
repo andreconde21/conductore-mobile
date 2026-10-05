@@ -88,7 +88,9 @@ test('status reports the capability and a risk label on every pending request', 
   assert.deepEqual(req.risk, { level: 'high', reason: 'Deletes recursively (rm -rf): node_modules' })
   assert.equal(req.batchable, false)
   assert.equal(req.repo, repo)
-  assert.equal(req.suggestedRules[0], 'Bash(rm *)')
+  // Narrowest first: exactly this call.
+  assert.equal(req.suggestedRules[0], 'Bash(rm -rf node_modules)')
+  assert.equal(req.suggestedRules[1], 'Bash(rm *)')
   await cli('decide', req.id, 'deny')
   assert.equal(JSON.parse((await p).stdout).hookSpecificOutput.decision.behavior, 'deny')
 })
@@ -172,7 +174,14 @@ test('a question is never answered by a rule, nor trusted (CON-062)', async () =
   // An allow without answers would run AskUserQuestion with no answers (or
   // be ignored, leaving the dialog in the terminal): the user answers it.
   const add = await cli('rules', 'add', 'AskUserQuestion', '--scope', 'any')
-  assert.equal(add.code, 0)
+  assert.equal(add.code, 1)
+  assert.match(add.json.error, /always asks/)
+  // Even a rule written by hand (any tool) never answers it.
+  await cli('rules', 'add', 'Bash(true)')
+  const file = path.join(home, 'rules.json')
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+  data.rules.push({ id: 'rquestion01', rule: 'AskUserQuestion', scope: { kind: 'any' }, expiresAt: null, endsWithSession: null, source: 'cli', createdAt: Date.now(), hits: 0, lastUsedAt: null })
+  fs.writeFileSync(file, JSON.stringify(data))
   const input = { questions: [{ question: 'Ship it?', header: 'Ship', multiSelect: false, options: [{ label: 'Yes' }, { label: 'No' }] }] }
   const p = hook(perm('qa', 'AskUserQuestion', input))
   const [req] = await pendingOf('qa')
@@ -183,7 +192,7 @@ test('a question is never answered by a rule, nor trusted (CON-062)', async () =
   const d = await cli('decide', req.id, 'answer', '--answers', JSON.stringify({ 'Ship it?': 'Yes' }))
   assert.equal(d.code, 0)
   assert.deepEqual(JSON.parse((await p).stdout).hookSpecificOutput.decision.updatedInput.answers, { 'Ship it?': 'Yes' })
-  await cli('rules', 'remove', add.json.rule.id)
+  for (const r of (await cli('rules')).json.rules) await cli('rules', 'remove', r.id)
 })
 
 test('adding a rule answers waiting requests it covers; remove revokes it', async () => {
@@ -192,7 +201,7 @@ test('adding a rule answers waiting requests it covers; remove revokes it', asyn
   const pending = await pendingOf('w1', 2)
   const src = pending.find(p => p.summary.endsWith('a.ts'))
   assert.equal(src.risk.level, 'medium')
-  assert.deepEqual(src.suggestedRules, ['Edit(src/**)', 'Edit(**)'])
+  assert.deepEqual(src.suggestedRules, ['Edit(src/a.ts)', 'Edit(src/**)', 'Edit(**)'])
   const add = await cli('rules', 'add', 'Edit(src/**)', '--scope', 'repo', '--path', repo)
   assert.deepEqual(add.json.approved, [src.id])
   assert.ok(allowed(await p1))

@@ -68,13 +68,14 @@ const USAGE = `usage: conductore-hostd <command>
   config [get [<key>] | set <key> <value>]
                                   herdr-sidebar on|off, tmux-live off|on,
                                   worktree-location
-  decide <requestId> allow|deny|always [--message "..."]
+  decide <requestId> allow|deny|always [--message "..."] [--session <sessionId>]
   decide <requestId> answer --answers '{"<question>":"<answer>"}'
   approve-low [--ids <id,id,...>] [--session <sessionId>]
                                   allow every waiting low-risk request (only
                                   the listed ones with --ids); others skipped
   trust <requestId> [--rule 'Tool(pattern)'] [--scope repo|session|any]
         [--minutes 60 | --until-session-end | --forever] [--path <dir>]
+        [--session <sessionId>]
                                   save a rule from a waiting request, allow it
                                   and every waiting request the rule covers
   rules [list]                    approval rules and time-boxed trust
@@ -284,7 +285,7 @@ async function decide (args) {
     try { answers = JSON.parse(String(flags.answers)) } catch { return fail('answer needs --answers <json>: {"<question>": "<answer>"}') }
   }
   try {
-    const [res] = await client.request({ op: 'decide', requestId, decision, message: flags.message || null, answers }, { timeoutMs: 5000 })
+    const [res] = await client.request({ op: 'decide', requestId, decision, message: flags.message || null, answers, sessionId: typeof flags.session === 'string' ? flags.session : undefined }, { timeoutMs: 5000 })
     if (!res || res.error) return fail(res ? res.error : 'no reply')
     return out(res)
   } catch (err) {
@@ -337,6 +338,8 @@ async function trustCmd (args) {
     requestId,
     rule: typeof flags.rule === 'string' ? flags.rule : undefined,
     scope: typeof flags.scope === 'string' ? flags.scope : undefined,
+    // The agent the request must belong to (refused otherwise).
+    sessionId: typeof flags.session === 'string' ? flags.session : undefined,
     path: typeof flags.path === 'string' ? path.resolve(flags.path) : undefined,
     minutes,
     untilSessionEnd: !!flags['until-session-end'],
