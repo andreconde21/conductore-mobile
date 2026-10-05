@@ -4,8 +4,15 @@ import 'package:conduit/features/agent_attention/data/conductore_host_attention_
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
+import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_notification_settings.dart';
+import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/test_doubles.dart';
 
 /// CON-079: the ongoing notification read "8 active sessions · 6 stuck ·
 /// 116 done · 4 idle", five lines "agent-a205b124f4354e391 @ development…"
@@ -298,5 +305,46 @@ void main() {
         'Idle',
       ]);
     });
+  });
+
+  test('the controller lists a machine\'s agents once however many of its '
+      'Herdr workspaces are open', () async {
+    final workspace = TerminalWorkspaceController(FreshTerminalRepository());
+    final notifier = RecordingAgentNotifier();
+    final controller = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => ScriptedAgentCommandRunner([
+        const AgentCommandResult(
+          stdout: '{"version":"1.5.1"}',
+          stderr: '',
+          exitCode: 0,
+        ),
+        AgentCommandResult(stdout: _devCentral, stderr: '', exitCode: 0),
+      ]),
+      provider: const HerdrAttentionProvider(),
+      companionProvider: const ConductoreHostAttentionProvider(),
+      notifier: notifier,
+      notificationPreferences: MemoryAgentNotificationPreferencesStore(
+        const AgentNotificationPreferences(),
+      ),
+      statusThrottle: AgentStatusThrottle(interval: Duration.zero),
+      pollInterval: const Duration(days: 1),
+      clock: () => _now,
+    );
+    controller
+      ..setAppForeground(false)
+      ..machineName = (id) => id == 'dev' ? 'development-central' : null;
+    addTearDown(controller.dispose);
+    addTearDown(workspace.dispose);
+    final machine = buildHost('dev').copyWith(agentAttentionEnabled: true);
+    for (final w in ['w8', 'wX', 'w14']) {
+      await workspace
+          .open(machine.copyWith(id: 'dev#herdr:$w', name: 'dev: $w'))
+          .connect();
+    }
+    await pumpEventQueue();
+    expect(notifier.status?.title, '2 working · 2 idle');
+    expect(notifier.status?.lines, hasLength(4));
+    expect(notifier.status?.lines[1], startsWith('lf-seguros-web · Working'));
   });
 }
