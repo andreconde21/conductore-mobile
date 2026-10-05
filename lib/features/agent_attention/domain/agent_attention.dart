@@ -1,4 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
+import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:flutter/foundation.dart';
 
 /// The attention-relevant state of one remote agent, normalized across
@@ -473,8 +474,7 @@ class AgentInfo {
     if (raw == null || !raw.contains('/')) {
       return null;
     }
-    final parts = raw.split('/').where((part) => part.isNotEmpty);
-    return parts.isEmpty ? raw : parts.last;
+    return projectFromPath(raw) ?? raw;
   }
 
   /// A copy with [pendingRequests] and optionally [state] replaced.

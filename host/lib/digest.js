@@ -187,7 +187,9 @@ function stuckFlags (agent, act, now, t = THRESHOLDS) {
     if (e[0] < from) continue
     if (e[1] === 'f') {
       failed.set(e[2], (failed.get(e[2]) || 0) + 1)
-      errors.set(e[4], (errors.get(e[4]) || 0) + 1)
+      // An error with no text (or one whose label is gone) is no "same
+      // error": different failures would all match "unknown" (CON-079).
+      if (labels[e[4]]) errors.set(e[4], (errors.get(e[4]) || 0) + 1)
     }
     if (e[1] === 'c' || e[1] === 'f') runs.set(e[2], (runs.get(e[2]) || 0) + 1)
   }
@@ -197,7 +199,7 @@ function stuckFlags (agent, act, now, t = THRESHOLDS) {
   if (f && f[1] >= t.sameError) {
     flags.push({ rule: 'same-failure', reason: `\`${labels[f[0]] || 'a command'}\` failed ${f[1]} times` })
   } else if (er && er[1] >= t.sameError) {
-    flags.push({ rule: 'same-failure', reason: `The same error ${er[1]} times: ${labels[er[0]] || 'unknown'}` })
+    flags.push({ rule: 'same-failure', reason: `The same error ${er[1]} times: ${labels[er[0]]}` })
   }
   const r = [...runs.entries()].filter(([h]) => !ROUTINE_COMMAND.test(labels[h] || '')).sort((a, b) => b[1] - a[1])[0]
   if (r && r[1] >= t.sameCommand && !(f && f[0] === r[0] && f[1] >= t.sameError)) {

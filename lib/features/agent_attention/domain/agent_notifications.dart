@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
+import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:flutter/foundation.dart';
@@ -698,13 +699,8 @@ abstract final class AgentNotificationPolicy {
   }
 
   /// The agent's project (else its name): "api".
-  static String agentLabel(AgentInfo agent) {
-    final project = agent.projectLabel?.trim();
-    if (project != null && project.isNotEmpty) {
-      return project;
-    }
-    return agent.name.trim().isEmpty ? 'Agent' : agent.name.trim();
-  }
+  static String agentLabel(AgentInfo agent) =>
+      agentDisplayName(project: agent.projectLabel, name: agent.name);
 
   /// Names one need: the pending request ids for approvals, else the
   /// state's sequence when the provider numbers them.

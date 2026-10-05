@@ -352,7 +352,9 @@ mixin ChatThreadExtras on State<ChatViewPage> {
     final hostId = widget.hostId;
     final host = hostId == null
         ? null
-        : attention.monitoredHosts.where((h) => h.id == hostId).firstOrNull;
+        : attention.monitoredHosts
+              .where((h) => h.id == baseHostId(hostId))
+              .firstOrNull;
     await showAgentMessageSheet(
       context,
       messenger: AgentMessenger(attention: attention),
@@ -417,7 +419,7 @@ mixin ChatThreadExtras on State<ChatViewPage> {
         talkbawt.settings.relay == TalkbawtRelayMode.talkbawt &&
         baseHostId(target.host.id) != baseHostId(here)) {
       final from = attention.monitoredHosts
-          .where((h) => h.id == here)
+          .where((h) => h.id == baseHostId(here))
           .firstOrNull;
       if (from != null) {
         await relayThroughTalkbawt(

@@ -1,8 +1,10 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
+import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:flutter/foundation.dart';
 
 /// What an agent waiting for input is waiting for (the companion's
@@ -382,6 +384,13 @@ class AgentOngoingStatus {
 
 /// One agent as the ongoing status lists it.
 typedef AgentStatusEntry = ({
+  /// The machine's saved host id: one Conductore session per Herdr
+  /// workspace or tmux session each monitor the same machine, so the same
+  /// agent comes once per session and is counted once per machine.
+  String machineId,
+
+  /// The machine's name, shown only when agents of several machines are
+  /// listed.
   String hostName,
   AgentInfo agent,
   bool companion,
@@ -395,68 +404,74 @@ typedef AgentStatusEntry = ({
 
 /// Builds the ongoing status notification. Pure.
 abstract final class AgentStatusSummary {
-  /// Agents listed in the expanded notification.
+  /// Lines in the expanded notification: agents, then "+N more".
   static const maxLines = 6;
+
+  /// Agents listed before "+N more".
+  static const maxAgents = 5;
 
   /// Longest progress text on a line.
   static const maxProgressLength = 60;
 
-  /// The status of [entries] (ended agents left out); null when no agent is
-  /// left, so the notification goes.
-  static AgentOngoingStatus? build(List<AgentStatusEntry> entries) {
-    final hosts = {for (final entry in entries) entry.hostName};
-    final rows = <({int rank, String line})>[];
-    var needsYou = 0;
-    var working = 0;
-    var stuck = 0;
-    var done = 0;
-    var idle = 0;
+  /// How long an idle agent (its turn ended, or finished) stays listed
+  /// after its last change.
+  static const idleWindow = Duration(minutes: 30);
+
+  /// The status of [entries]; null when no agent is left, so the
+  /// notification goes. One line per live agent: the same agent seen by
+  /// several sessions of a machine, or by Herdr next to its hook (same
+  /// pane), counts once, the hook-reported one winning; agents idle for
+  /// longer than [idleWindow] at [now] are left out.
+  static AgentOngoingStatus? build(
+    List<AgentStatusEntry> entries, {
+    DateTime? now,
+  }) {
+    final rows = <_Row>[];
+    final byKey = <String, int>{};
     for (final entry in entries) {
+      final row = _Row(entry, _describe(entry));
+      if (row.rank == _idle && _stale(entry.agent, now)) continue;
       final agent = entry.agent;
-      final (rank, label, progress) = _describe(entry);
-      switch (rank) {
-        case 0:
-          needsYou += 1;
-        case 1:
-          stuck += 1;
-        case 2:
-          working += 1;
-        default:
-          if (label == _done) {
-            done += 1;
-          } else {
-            idle += 1;
-          }
+      final keys = [
+        '${entry.machineId}/id/${agent.id}',
+        if (agent.pane case final pane? when pane.isNotEmpty)
+          '${entry.machineId}/pane/$pane',
+      ];
+      final at = keys.map((key) => byKey[key]).nonNulls.firstOrNull;
+      if (at == null) {
+        for (final key in keys) {
+          byKey[key] = rows.length;
+        }
+        rows.add(row);
+      } else {
+        if (_better(row, rows[at])) rows[at] = row;
+        for (final key in keys) {
+          byKey[key] = at;
+        }
       }
-      final name = _name(agent);
-      final where = hosts.length > 1 ? ' @ ${entry.hostName}' : '';
-      final tail = progress == null || progress.isEmpty
-          ? ''
-          : ' · ${_cap(progress)}';
-      rows.add((rank: rank, line: '$name$where · $label$tail'));
     }
     if (rows.isEmpty) {
       return null;
     }
+    final machines = {for (final row in rows) row.entry.machineId};
     // Stable within a rank: the provider's order (newest first).
     final ordered = [
-      for (var rank = 0; rank <= 3; rank++)
+      for (var rank = _needsYou; rank <= _idle; rank++)
         for (final row in rows)
-          if (row.rank == rank) row.line,
+          if (row.rank == rank) _line(row, withMachine: machines.length > 1),
     ];
+    int count(int rank) => rows.where((row) => row.rank == rank).length;
+    final needsYou = count(_needsYou);
+    final working = count(_working);
+    final idle = count(_idle);
     final total = rows.length;
     final parts = [
       if (needsYou > 0) '$needsYou ${needsYou == 1 ? 'needs' : 'need'} you',
-      if (stuck > 0) '$stuck stuck',
       if (working > 0) '$working working',
-      if (done > 0) '$done done',
       if (idle > 0) '$idle idle',
     ];
     final lines = ordered.length > maxLines
-        ? [
-            ...ordered.take(maxLines - 1),
-            '+${ordered.length - maxLines + 1} more',
-          ]
+        ? [...ordered.take(maxAgents), '+${ordered.length - maxAgents} more']
         : ordered;
     return AgentOngoingStatus(
       title: parts.join(' · '),
@@ -467,6 +482,37 @@ abstract final class AgentStatusSummary {
     );
   }
 
+  static const _needsYou = 0;
+  static const _working = 1;
+  static const _idle = 2;
+
+  static bool _stale(AgentInfo agent, DateTime? now) {
+    final at = agent.stateChangedAt;
+    return now != null && at != null && now.difference(at) > idleWindow;
+  }
+
+  /// Which of two sightings of one agent to keep: the hook-reported one
+  /// over Herdr's, then the more urgent, then the newer.
+  static bool _better(_Row candidate, _Row kept) {
+    final hook = !isHerdrOnlyAgent(candidate.entry.agent);
+    final keptHook = !isHerdrOnlyAgent(kept.entry.agent);
+    if (hook != keptHook) return hook;
+    if (candidate.rank != kept.rank) return candidate.rank < kept.rank;
+    final at = candidate.entry.agent.stateChangedAt;
+    final keptAt = kept.entry.agent.stateChangedAt;
+    return at != null && (keptAt == null || at.isAfter(keptAt));
+  }
+
+  /// "lf-seguros-web · Working · Fixing the login (dev-central)".
+  static String _line(_Row row, {required bool withMachine}) {
+    final progress = row.progress;
+    final tail = progress == null || progress.isEmpty
+        ? ''
+        : ' · ${_cap(progress)}';
+    final where = withMachine ? ' (${row.entry.hostName})' : '';
+    return '${_name(row.entry.agent)} · ${row.label}$tail$where';
+  }
+
   /// "api (Codex)" / "api".
   static String _name(AgentInfo agent) {
     final kind = otherAgentKindName(agent.kind);
@@ -474,18 +520,19 @@ abstract final class AgentStatusSummary {
     return kind == null ? label : '$label ($kind)';
   }
 
-  static const _done = 'Done';
-
-  /// Rank (0 needs you, 1 stuck, 2 working, 3 done or idle), state label
-  /// and progress text.
+  /// Rank (needs you, working or idle), state label and progress text. A
+  /// stuck flag shows in the line ("Stuck · `npm test` failed 3 times")
+  /// and counts under the agent's state.
   static (int, String, String?) _describe(AgentStatusEntry entry) {
     final agent = entry.agent;
     final message = _firstLine(agent.lastMessage);
     final first = agent.pendingRequests.firstOrNull;
     if (first != null) {
-      return (0, 'Needs you', AgentNotificationPolicy.itemLine(first));
+      return (_needsYou, 'Needs you', AgentNotificationPolicy.itemLine(first));
     }
     final stuck = entry.stuck?.trim();
+    final isStuck = stuck != null && stuck.isNotEmpty;
+    final topic = agentTopic(summary: entry.detail, lastMessage: message);
     switch (agent.state) {
       case AgentAttentionState.needsInput || AgentAttentionState.blocked:
         switch (UrgentNotificationPolicy.waitKind(
@@ -493,43 +540,30 @@ abstract final class AgentStatusSummary {
           companion: entry.companion,
         )) {
           case AgentWaitKind.question:
-            return (0, 'Asks', message);
+            return (_needsYou, 'Asks', message);
           case AgentWaitKind.error:
             final error = agent.lastError;
             return (
-              0,
+              _needsYou,
               'Error',
               error == null ? message : error.replaceAll('_', ' '),
             );
           case AgentWaitKind.turnEnded:
-            if (stuck != null && stuck.isNotEmpty) {
-              return (1, 'Stuck', stuck);
-            }
-            return (3, _done, entry.detail ?? message);
+            return isStuck ? (_idle, 'Stuck', stuck) : (_idle, 'Idle', topic);
         }
       case AgentAttentionState.working:
-        if (stuck != null && stuck.isNotEmpty) {
-          return (1, 'Stuck', stuck);
-        }
+        if (isStuck) return (_working, 'Stuck', stuck);
         final tool = agent.lastToolName?.trim();
         return (
-          2,
+          _working,
           'Working',
-          tool != null && tool.isNotEmpty ? tool : entry.detail ?? message,
+          topic ?? (tool != null && tool.isNotEmpty ? tool : null),
         );
       case AgentAttentionState.idle ||
           AgentAttentionState.finished ||
           AgentAttentionState.unknown:
-        break;
+        return isStuck ? (_idle, 'Stuck', stuck) : (_idle, 'Idle', topic);
     }
-    if (stuck != null && stuck.isNotEmpty) {
-      return (1, 'Stuck', stuck);
-    }
-    return (
-      3,
-      agent.state == AgentAttentionState.finished ? _done : 'Idle',
-      entry.detail ?? message,
-    );
   }
 
   static String? _firstLine(String? message) {
@@ -546,6 +580,18 @@ abstract final class AgentStatusSummary {
         ? '${line.substring(0, maxProgressLength)}…'
         : line;
   }
+}
+
+class _Row {
+  _Row(this.entry, (int, String, String?) described)
+    : rank = described.$1,
+      label = described.$2,
+      progress = described.$3;
+
+  final AgentStatusEntry entry;
+  final int rank;
+  final String label;
+  final String? progress;
 }
 
 /// When the ongoing status may be posted: at most once per [interval],

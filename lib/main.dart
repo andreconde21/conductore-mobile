@@ -278,6 +278,7 @@ void main() {
   // facts stay fresh in the background while they are wanted, and each new
   // answer re-checks the alerts and the ongoing status.
   agentAttention.stuckReasonFor = digest.cachedStuckFor;
+  agentAttention.machineName = (id) => hostsController.findById(id)?.name;
   void syncStuckFacts() {
     final preferences = agentAttention.notificationPreferences;
     digest.keepFactsFresh(

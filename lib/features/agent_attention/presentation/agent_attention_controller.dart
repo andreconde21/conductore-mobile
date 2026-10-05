@@ -183,6 +183,11 @@ class AgentAttentionController extends ChangeNotifier {
   /// digest; call [resyncNotifications] when its answer changes.
   String? Function(String hostId, String agentId)? stuckReasonFor;
 
+  /// The saved machine's name for its id (the app wires it to the hosts
+  /// store), for the monitor's machine: a session's own host is named
+  /// after its Herdr workspace or tmux session too ("dev: lf-seguros-web").
+  String? Function(String savedHostId)? machineName;
+
   final AgentStatusThrottle _statusThrottle;
   final DateTime Function() _clock;
   Timer? _statusTimer;
@@ -214,15 +219,26 @@ class AgentAttentionController extends ChangeNotifier {
   /// The provider [hostId] resolved to, or the default before its first
   /// poll.
   AgentAttentionProvider providerFor(String hostId) =>
-      _monitors[hostId]?.provider ?? _provider;
+      _monitorFor(hostId)?.provider ?? _provider;
 
-  /// Hosts currently monitored, in workspace order.
-  List<SavedHost> get monitoredHosts => [
-    for (final session in _workspace.sessions)
-      if (_monitors.containsKey(session.host.id)) session.host,
-  ];
+  /// Machines currently monitored, one each (its saved id, whichever of
+  /// its sessions are open), in workspace order.
+  List<SavedHost> get monitoredHosts {
+    final seen = <String>{};
+    return [
+      for (final session in _workspace.sessions)
+        if (_monitors[baseHostId(session.host.id)] case final monitor?
+            when seen.add(monitor.host.id))
+          monitor.host,
+    ];
+  }
 
-  bool isMonitoring(String hostId) => _monitors.containsKey(hostId);
+  bool isMonitoring(String hostId) => _monitors.containsKey(baseHostId(hostId));
+
+  /// The monitor of [hostId]'s machine: every session of a machine (a
+  /// shell, each Herdr workspace or tmux session opened) shares one
+  /// monitor, one poll loop and one set of agents (CON-079).
+  _HostMonitor? _monitorFor(String hostId) => _monitors[baseHostId(hostId)];
 
   /// Connected SSH machines with agent monitoring off, one session each,
   /// so the Agents panel can offer to turn it on.
@@ -258,21 +274,21 @@ class AgentAttentionController extends ChangeNotifier {
   /// own connection while [host] is monitored, which the caller must not
   /// close, else a new one the caller owns (`owned`) and closes.
   (AgentCommandRunner, {bool owned}) runnerFor(SavedHost host) {
-    final monitor = _monitors[host.id];
+    final monitor = _monitorFor(host.id);
     if (monitor != null) {
       return (monitor.runner, owned: false);
     }
     return (_runnerFactory(host), owned: true);
   }
 
-  AgentHostStatus? statusFor(String hostId) => _monitors[hostId]?.status;
+  AgentHostStatus? statusFor(String hostId) => _monitorFor(hostId)?.status;
 
   /// Whether a decision for [requestId] is in flight.
   bool isDeciding(String requestId) => _deciding.contains(requestId);
 
   /// Whether [hostId] is currently on its long-poll (foreground only).
   @visibleForTesting
-  bool isWatching(String hostId) => _monitors[hostId]?.watching ?? false;
+  bool isWatching(String hostId) => _monitorFor(hostId)?.watching ?? false;
 
   /// Agents needing attention across every monitored host.
   int get attentionCount {
@@ -332,7 +348,7 @@ class AgentAttentionController extends ChangeNotifier {
   }
 
   Future<void> refresh(String hostId) async {
-    final monitor = _monitors[hostId];
+    final monitor = _monitorFor(hostId);
     if (monitor == null || !monitor.pollable) {
       return;
     }
@@ -353,7 +369,7 @@ class AgentAttentionController extends ChangeNotifier {
 
   /// Sends the provider's focus command for [agent], if there is one.
   Future<void> focusAgent(String hostId, AgentInfo agent) async {
-    final monitor = _monitors[hostId];
+    final monitor = _monitorFor(hostId);
     if (monitor == null) {
       return;
     }
@@ -377,7 +393,7 @@ class AgentAttentionController extends ChangeNotifier {
     PendingPermissionRequest request,
     PermissionVerdict verdict,
   ) async {
-    final monitor = _monitors[hostId];
+    final monitor = _monitorFor(hostId);
     if (monitor == null) {
       throw const AppFailure('This machine is not being monitored.');
     }
@@ -482,7 +498,7 @@ class AgentAttentionController extends ChangeNotifier {
     final request = answering
         ? asked.withAnswers({question: action.text})
         : asked;
-    final monitor = _monitors[host.id];
+    final monitor = _monitorFor(host.id);
     try {
       if (monitor != null) {
         final provider = monitor.provider ?? await _resolveProvider(monitor);
@@ -538,7 +554,7 @@ class AgentAttentionController extends ChangeNotifier {
       return action.question;
     }
     for (final agent
-        in _monitors[hostId]?.status.agents ?? const <AgentInfo>[]) {
+        in _monitorFor(hostId)?.status.agents ?? const <AgentInfo>[]) {
       for (final request in agent.pendingRequests) {
         if (request.id == action.requestId && request.questions.length == 1) {
           return request.questions.single.question;
@@ -563,7 +579,7 @@ class AgentAttentionController extends ChangeNotifier {
       await failed('Nothing to send.');
       return;
     }
-    final monitor = _monitors[host.id];
+    final monitor = _monitorFor(host.id);
     final runner = monitor?.runner ?? _runnerFactory(host);
     try {
       await ConductoreChatClient(runner).send(action.agentId, text);
@@ -651,7 +667,7 @@ class AgentAttentionController extends ChangeNotifier {
 
   /// Whether [hostId]'s companion keeps approval rules and rates requests.
   bool supportsSmartApprovals(String hostId) {
-    final monitor = _monitors[hostId];
+    final monitor = _monitorFor(hostId);
     return monitor != null &&
         monitor.provider is SmartApprovalsProvider &&
         (monitor.capabilities?.contains(smartApprovalsCapability) ?? false);
@@ -660,16 +676,16 @@ class AgentAttentionController extends ChangeNotifier {
   /// Whether [hostId]'s companion snapshots each agent turn (Review mode
   /// and "Undo this turn"; capability `snapshots`).
   bool supportsSnapshots(String hostId) =>
-      _monitors[hostId]?.capabilities?.contains(snapshotsCapability) ?? false;
+      _monitorFor(hostId)?.capabilities?.contains(snapshotsCapability) ?? false;
 
   /// Whether [hostId]'s companion reported [capability] (`status`).
   bool companionSupports(String hostId, String capability) =>
-      _monitors[hostId]?.capabilities?.contains(capability) ?? false;
+      _monitorFor(hostId)?.capabilities?.contains(capability) ?? false;
 
   /// What each agent kind on [hostId] supports: the companion's report,
   /// else what companions before agent adapters implied (Claude Code only).
   AgentKindCatalog agentKinds(String hostId) =>
-      _monitors[hostId]?.kinds ?? AgentKindCatalog.legacy;
+      _monitorFor(hostId)?.kinds ?? AgentKindCatalog.legacy;
 
   /// Every waiting request on the monitored hosts, oldest first.
   List<PendingApproval> get pendingApprovals {
@@ -734,7 +750,7 @@ class AgentAttentionController extends ChangeNotifier {
     var result = const BatchApprovalResult();
     Object? firstError;
     for (final MapEntry(key: host, value: ids) in byHost.entries) {
-      final monitor = _monitors[host];
+      final monitor = _monitorFor(host);
       if (monitor == null) {
         continue;
       }
@@ -787,7 +803,7 @@ class AgentAttentionController extends ChangeNotifier {
     String? rule,
     String source = 'trust',
   }) async {
-    final monitor = _monitors[hostId];
+    final monitor = _monitorFor(hostId);
     final provider = _smartOf(monitor?.provider);
     if (monitor == null || provider == null) {
       throw const AppFailure(
@@ -911,7 +927,7 @@ class AgentAttentionController extends ChangeNotifier {
       (runner) => _runChecked(runner, command(provider)),
     );
     final result = provider.parseRuleReply(stdout);
-    final monitor = _monitors[host.id];
+    final monitor = _monitorFor(host.id);
     if (monitor != null && !_disposed) {
       for (final id in result.approved) {
         _removeRequest(monitor, id);
@@ -931,7 +947,7 @@ class AgentAttentionController extends ChangeNotifier {
   /// The monitor's provider when it resolved one (a Herdr host has none),
   /// else the companion.
   SmartApprovalsProvider? _smartProvider(SavedHost host) {
-    final resolved = _monitors[host.id]?.provider;
+    final resolved = _monitorFor(host.id)?.provider;
     return _smartOf(resolved ?? _companionProvider);
   }
 
@@ -1081,22 +1097,32 @@ class AgentAttentionController extends ChangeNotifier {
     if (_disposed) {
       return;
     }
-    final wanted = <String, TerminalSessionController>{
-      for (final session in _workspace.sessions)
-        if (monitoringEnabled(session.host) &&
-            !session.host.isLocal &&
-            session.isConnected)
-          session.host.id: session,
-    };
-
-    for (final hostId in _monitors.keys.toList()) {
-      if (!wanted.containsKey(hostId)) {
-        _stopMonitor(hostId);
+    // One monitor per machine: its sessions (a shell, each Herdr
+    // workspace or tmux session opened) all show the same agents.
+    final wanted = <String, List<TerminalSessionController>>{};
+    for (final session in _workspace.sessions) {
+      if (monitoringEnabled(session.host) &&
+          !session.host.isLocal &&
+          session.isConnected) {
+        (wanted[baseHostId(session.host.id)] ??= []).add(session);
       }
     }
-    for (final MapEntry(key: hostId, value: session) in wanted.entries) {
-      if (!_monitors.containsKey(hostId)) {
-        _startMonitor(session);
+
+    for (final machineId in _monitors.keys.toList()) {
+      if (!wanted.containsKey(machineId)) {
+        _stopMonitor(machineId);
+      }
+    }
+    for (final MapEntry(key: machineId, value: sessions) in wanted.entries) {
+      final monitor = _monitors[machineId];
+      if (monitor == null) {
+        _startMonitor(machineId, sessions.first);
+      } else if (!sessions.contains(monitor.session)) {
+        // Its session closed while another of the machine is open: the
+        // monitor follows that one and keeps what it knows.
+        monitor.session.removeListener(_syncMonitors);
+        monitor.session = sessions.first;
+        monitor.session.addListener(_syncMonitors);
       }
     }
     // Sessions notify for much that changes nothing here (a title, a
@@ -1112,13 +1138,14 @@ class AgentAttentionController extends ChangeNotifier {
   /// [monitoredHosts] and [unmonitoredHosts] as last notified.
   List<SavedHost?>? _listedHosts;
 
-  void _startMonitor(TerminalSessionController session) {
+  void _startMonitor(String machineId, TerminalSessionController session) {
+    final host = _machineHost(machineId, session.host);
     final monitor = _HostMonitor(
-      host: session.host,
+      host: host,
       session: session,
-      runner: _runnerFactory(session.host),
+      runner: _runnerFactory(host),
     );
-    _monitors[session.host.id] = monitor;
+    _monitors[machineId] = monitor;
     // React to this session disconnecting even when the workspace itself
     // does not notify.
     session.addListener(_syncMonitors);
@@ -1134,6 +1161,23 @@ class AgentAttentionController extends ChangeNotifier {
       _startTimer(monitor);
       unawaited(_poll(monitor));
     }
+  }
+
+  /// The machine a session runs on, under its saved id and name: a Herdr
+  /// workspace's session is "dev: lf-seguros-web" under `dev#herdr:w8`.
+  SavedHost _machineHost(String machineId, SavedHost sessionHost) {
+    if (sessionHost.id == machineId) return sessionHost;
+    final target = ConnectTarget.fromSessionHostId(sessionHost.id);
+    final suffix = target == null ? null : ': ${target.title}';
+    final name =
+        machineName?.call(machineId) ??
+        (suffix != null && sessionHost.name.endsWith(suffix)
+            ? sessionHost.name.substring(
+                0,
+                sessionHost.name.length - suffix.length,
+              )
+            : sessionHost.name);
+    return sessionHost.copyWith(id: machineId, name: name);
   }
 
   void _stopMonitor(String hostId) {
@@ -1172,7 +1216,7 @@ class AgentAttentionController extends ChangeNotifier {
   /// Polls [hostId] immediately, ignoring any failure backoff.
   @visibleForTesting
   Future<void> pollNow(String hostId) async {
-    final monitor = _monitors[hostId];
+    final monitor = _monitorFor(hostId);
     if (monitor != null) {
       await _poll(monitor);
     }
@@ -1181,7 +1225,7 @@ class AgentAttentionController extends ChangeNotifier {
   /// Simulates one periodic tick for [hostId], honoring the failure backoff.
   @visibleForTesting
   Future<void> tickNow(String hostId) async {
-    final monitor = _monitors[hostId];
+    final monitor = _monitorFor(hostId);
     if (monitor == null) {
       return;
     }
@@ -1607,14 +1651,16 @@ class AgentAttentionController extends ChangeNotifier {
     if (notifier == null || _disposed) {
       return;
     }
+    final now = _clock();
     final status = _notificationPreferences.mode.showsOngoing
-        ? AgentStatusSummary.build([
+        ? AgentStatusSummary.build(now: now, [
             for (final monitor in _monitors.values)
               for (final agent in monitor.status.agents)
                 if (!(monitor.provider?.id == companionProviderId &&
                     agent.state == AgentAttentionState.finished &&
                     !isHerdrOnlyAgent(agent)))
                   (
+                    machineId: monitor.host.id,
                     hostName: monitor.host.name,
                     agent: agent,
                     companion:
@@ -1625,7 +1671,6 @@ class AgentAttentionController extends ChangeNotifier {
                   ),
           ])
         : null;
-    final now = _clock();
     final offer = _statusThrottle.offer(status, now);
     if (offer.retryAfter case final wait?) {
       _statusTimer ??= Timer(wait, () {
@@ -1718,8 +1763,11 @@ class _HostMonitor {
     required this.runner,
   });
 
+  /// The machine, under its saved id.
   final SavedHost host;
-  final TerminalSessionController session;
+
+  /// The open session of the machine the monitor follows (any one).
+  TerminalSessionController session;
   final AgentCommandRunner runner;
 
   Timer? timer;

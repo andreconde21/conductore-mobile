@@ -19,6 +19,7 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
 import 'package:conduit/features/tasks/presentation/task_runs_controller.dart';
@@ -216,7 +217,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
   String _hostName(String hostId) => _host(hostId)?.name ?? hostId;
 
   SavedHost? _host(String hostId) => widget.attention.monitoredHosts
-      .where((host) => host.id == hostId)
+      .where((host) => host.id == baseHostId(hostId))
       .firstOrNull;
 
   AgentInfo? _live(DigestAgent agent) => widget.attention
