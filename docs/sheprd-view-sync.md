@@ -7,8 +7,13 @@ can also write presence marks back. The app has an opt-in setting for this,
 specific to one team: machine names, groups and paths all come from the
 user's own sheprd.
 
-Status: proposed by the Conductore CON-077 agent to the sheprd agent on
-2026-10-04, and not yet agreed. The Conductore side is built to this text.
+Status: agreed with the sheprd agent on 2026-10-05. sheprd writes
+`view.json` only when `share_view = true` is set in its `sidebar.toml`
+(default false). The relay forwards it to each machine, with `self` set
+per machine, and drains each machine's `view-updates.jsonl` into the hub's
+file, so there is one applier. v1 covers marks only; layout edits wait for
+v2. While sync is on and no machine shares a view, Conductore keeps its
+own layout and says how to turn sharing on.
 
 ## What sheprd keeps today (read from its source, `main` @ ed339c45)
 

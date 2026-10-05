@@ -534,6 +534,19 @@ class SettingsSectionBody extends StatelessWidget {
             onChanged: (on) => unawaited(projects.setSheprdSync(on)),
           ),
         ),
+        ListenableBuilder(
+          listenable: projects,
+          builder: (context, _) => switch (projects.sheprdNotSharing) {
+            final text? => Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: SettingsNote(
+                text,
+                key: const ValueKey('settings-sheprd-not-sharing'),
+              ),
+            ),
+            null => const SizedBox.shrink(),
+          },
+        ),
       ],
       if (CompanionPreferences.instance case final companion?) ...[
         _gap,

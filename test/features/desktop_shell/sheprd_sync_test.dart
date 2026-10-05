@@ -541,5 +541,52 @@ void main() {
       controller.clearMarkNotice();
       expect(controller.markNotice, isNull);
     });
+
+    testWidgets('synced with no view.json anywhere: the app keeps its own '
+        'layout and says how to share sheprd\'s view', (tester) async {
+      await tester.runAsync(() => controller.addProject('Mine', rules: ['sf']));
+      final own = controller.layout;
+      await tester.runAsync(() => controller.setSheprdSync(true));
+      // Nothing heard yet: no notice.
+      expect(controller.sheprdNotSharing, isNull);
+      controller
+        ..applyViewReply(laptop, '{"ok":true,"found":false}')
+        ..applyViewReply(dev, '{"ok":true,"found":false}');
+      expect(controller.mirroring, isFalse);
+      expect(controller.layout, own);
+      expect(controller.canEditLayout, isTrue);
+      expect(controller.sheprdNotSharing, contains('share_view = true'));
+      final groups = controller.build(tree(), hosts: [laptop, dev]);
+      expect(groups.first.name, 'Mine');
+      expect(
+        groups.every((g) => g.entries.every((e) => e.sheprd.isEmpty)),
+        isTrue,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: controller,
+              builder: (context, _) =>
+                  ProjectViewBar(controller: controller, needsYou: 0),
+            ),
+          ),
+        ),
+      );
+      expect(
+        find.textContaining("sheprd isn't sharing its view yet"),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('project-mark-notice-close')),
+        findsNothing,
+      );
+
+      // Once a machine shares it, the view mirrors sheprd.
+      controller.applyViewReply(dev, _reply('dev-box'));
+      expect(controller.mirroring, isTrue);
+      expect(controller.sheprdNotSharing, isNull);
+      expect(controller.layout.groups.single.name, 'Storefront');
+    });
   });
 }

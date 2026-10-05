@@ -58,7 +58,7 @@ class ProjectViewBar extends StatelessWidget {
           ),
         );
     final active = controller.activeOnly;
-    final notice = controller.markNotice;
+    final notice = controller.markNotice ?? controller.sheprdNotSharing;
     final bar = Padding(
       padding: EdgeInsets.fromLTRB(dense ? 6 : 0, 0, 0, dense ? 2 : 4),
       child: Row(
@@ -146,14 +146,15 @@ class ProjectViewBar extends StatelessWidget {
                   ),
                 ),
               ),
-              IconButton(
-                key: const ValueKey('project-mark-notice-close'),
-                tooltip: 'Dismiss',
-                iconSize: 14,
-                visualDensity: VisualDensity.compact,
-                onPressed: controller.clearMarkNotice,
-                icon: const Icon(Icons.close_rounded),
-              ),
+              if (controller.markNotice != null)
+                IconButton(
+                  key: const ValueKey('project-mark-notice-close'),
+                  tooltip: 'Dismiss',
+                  iconSize: 14,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: controller.clearMarkNotice,
+                  icon: const Icon(Icons.close_rounded),
+                ),
             ],
           ),
         ),
@@ -269,9 +270,9 @@ class _ViewMenu extends StatelessWidget {
 String sheprdSyncStatus(ProjectLayoutController controller) {
   final view = controller.sheprdView;
   if (view == null) {
-    return controller.hasMachineLayout
-        ? 'Synced with sheprd: its sidebar.toml (no view state yet)'
-        : 'Synced with sheprd: waiting for its view';
+    return controller.sheprdNotSharing != null
+        ? "Sync with sheprd: sheprd isn't sharing its view yet"
+        : 'Sync with sheprd: waiting for its view';
   }
   return view.stale
       ? 'Synced with sheprd: not running, view may be old'
@@ -443,7 +444,7 @@ List<ProjectEntryAction> projectEntryActions(
   required ProjectGroup project,
   SidebarNode? row,
 }) {
-  if (controller != null && controller.sheprdSync) {
+  if (controller != null && controller.mirroring) {
     final targets = sheprdTargets(entry, row ?? entry.node);
     if (targets.isEmpty) return const [];
     return [
