@@ -42,7 +42,13 @@ const DEFAULT_PERMISSION_TIMEOUT_S = 120
 const MAX_PERMISSION_TIMEOUT_S = 600
 const PROBE_EVERY_MS = 1000
 const OBSERVE_EVERY_MS = 2000
+// state.json, activity.json and turns.json are written at most once per
+// FLUSH_EVERY_MS (and at least SNAPSHOT_DEBOUNCE_MS after the first change
+// of a burst), plus on shutdown. They are only read when the daemon is not
+// running (the CLI's fallback, the next daemon's start), so a few seconds
+// of lag cost nothing; rewriting ~260 KB every busy second did.
 const SNAPSHOT_DEBOUNCE_MS = 1000
+const FLUSH_EVERY_MS = 5000
 const WATCH_FALLBACK_MS = 2000
 const TMP_MAX_AGE_MS = 60 * 60 * 1000
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
@@ -52,6 +58,11 @@ const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
 function usageThrottleMs () {
   const v = Number(process.env.CONDUCTORE_USAGE_THROTTLE_MS)
   return Number.isFinite(v) && v >= 0 ? v : 10000
+}
+
+function flushEveryMs () {
+  const v = Number(process.env.CONDUCTORE_FLUSH_MS)
+  return Number.isFinite(v) && v >= 0 ? v : FLUSH_EVERY_MS
 }
 
 function requestId () {
@@ -243,6 +254,8 @@ class Daemon {
     this.watchFallback = null
     this.idleTimer = null
     this.snapshotTimer = null
+    this.lastFlushAt = 0
+    this.flushedSeq = null
     this.pruneTimer = null
     this.probeTimer = null
     this.stopping = false
@@ -618,10 +631,7 @@ class Daemon {
     // Started tasks (CON-037): finish runs, start queued ones under the cap.
     require('./task-runs').onAgents(this.state.agents)
     if (pruneRelevant) this.schedulePrune()
-    if (!this.snapshotTimer) {
-      this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
-      this.snapshotTimer.unref()
-    }
+    this.scheduleFlush()
   }
 
   trimChanges () {
@@ -684,18 +694,31 @@ class Daemon {
     this.pruneTimer.unref()
   }
 
+  // Writes what changed since the last flush: state.json when the
+  // sequence moved, activity.json and turns.json when dirty.
   flushSnapshot () {
-    try { writeSnapshotSync(this.state) } catch (err) { log('daemon', 'snapshot failed', err.message) }
+    this.lastFlushAt = Date.now()
+    if (this.flushedSeq !== this.state.seq) {
+      try { writeSnapshotSync(this.state); this.flushedSeq = this.state.seq } catch (err) { log('daemon', 'snapshot failed', err.message) }
+    }
     try { writeActivitySync(this.activity) } catch (err) { log('daemon', 'activity snapshot failed', err.message) }
     try { writeTurnsSync(this.turns) } catch (err) { log('daemon', 'turns snapshot failed', err.message) }
   }
 
-  // The turn store changes after the event path returned (a snapshot
-  // finished); the same debounce writes it.
-  scheduleSnapshot () {
-    if (this.snapshotTimer || !this.turns.dirty) return
-    this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
+  // One pending flush at a time, FLUSH_EVERY_MS after the last one.
+  scheduleFlush () {
+    if (this.snapshotTimer || this.stopping) return
+    const every = flushEveryMs()
+    const wait = Math.max(Math.min(SNAPSHOT_DEBOUNCE_MS, every), this.lastFlushAt + every - Date.now())
+    this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, wait)
     this.snapshotTimer.unref()
+  }
+
+  // The turn store changes after the event path returned (a snapshot
+  // finished); the same throttle writes it.
+  scheduleSnapshot () {
+    if (!this.turns.dirty) return
+    this.scheduleFlush()
   }
 
   // --- socket -----------------------------------------------------------------
@@ -953,4 +976,4 @@ function run () {
   return d
 }
 
-module.exports = { Daemon, run, loadSnapshot, writeFifo, fifoAlive, isOurFifo }
+module.exports = { Daemon, run, loadSnapshot, writeFifo, fifoAlive, isOurFifo, FLUSH_EVERY_MS }
