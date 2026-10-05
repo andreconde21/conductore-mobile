@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/platform_features.dart';
@@ -92,8 +93,10 @@ import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/routing_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/secure_host_key_verifier.dart';
+import 'package:conduit/features/terminal/data/secure_mosh_server_ledger_store.dart';
 import 'package:conduit/features/terminal/data/secure_recent_directories_store.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/terminal/domain/mosh_server_ledger.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/prompt_image_scope.dart';
@@ -185,6 +188,9 @@ void main() {
     mosh: MoshTerminalRepository(
       hostKeyVerifier,
       cleanupRunner: hostChannels.runner,
+      ledger: MoshServerLedger(
+        const SecureMoshServerLedgerStore(secureStorage),
+      ),
     ),
     local: LocalTerminalRepository(
       resolveLaunch: localShellController.requireLaunch,
@@ -198,6 +204,14 @@ void main() {
   final workspaceController = TerminalWorkspaceController(
     terminalRepository,
     ConnectivityPlusNetwork(),
+  );
+  // Quitting the desktop app closes its sessions, so their mosh-servers
+  // end instead of waiting for a client that is gone.
+  AppLifecycleListener(
+    onExitRequested: () async {
+      await workspaceController.disconnectAll();
+      return AppExitResponse.exit;
+    },
   );
   final sftpRepository = hostChannels.files;
   const sftpBookmarksRepository = SecureSftpBookmarksRepository(secureStorage);

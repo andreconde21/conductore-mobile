@@ -8,11 +8,13 @@ import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/data/shared_command_runners.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/terminal/data/mosh_shutdown.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/mosh_server_cleanup.dart';
+import 'package:conduit/features/terminal/domain/mosh_server_ledger.dart';
 import 'package:conduit/features/terminal/domain/predictive_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/roaming_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
@@ -22,17 +24,25 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
 
 class MoshTerminalRepository implements SshTerminalRepository {
-  const MoshTerminalRepository(this._hostKeyVerifier, {this.cleanupRunner});
+  const MoshTerminalRepository(
+    this._hostKeyVerifier, {
+    this.cleanupRunner,
+    this.ledger,
+  });
 
   final HostKeyVerifier _hostKeyVerifier;
 
   /// A command channel to [host] (the machine's shared side connection):
   /// it starts mosh-server, so a machine whose side connection is up (the
   /// home board, the agent monitor, Herdr's focus) needs no SSH handshake
-  /// of its own for it, and stops a session's mosh-server after it was
-  /// left without a client (a Herdr detach). Null disables both; hosts
-  /// that ask for a security-key touch per connection never use it.
+  /// of its own for it, and stops a session's mosh-server when its close
+  /// could not reach it. Null disables both; hosts that ask for a
+  /// security-key touch per connection never use it.
   final AgentCommandRunner Function(SavedHost host)? cleanupRunner;
+
+  /// The mosh-servers this device started: each bootstrap first ends the
+  /// ones on that machine no session holds any more. Null disables it.
+  final MoshServerLedger? ledger;
 
   SshClientFactory get _clientFactory => SshClientFactory(_hostKeyVerifier);
 
@@ -43,8 +53,17 @@ class MoshTerminalRepository implements SshTerminalRepository {
     required int rows,
   }) async {
     SSHClient? client;
+    final ledger = this.ledger;
+    final machine = MoshServerLedger.machineOf(host);
+    int? startedPid;
     try {
-      final started = await bootstrapOnSideChannel(host);
+      // This device's earlier servers there that nothing uses any more (a
+      // killed app's, one whose close did not get through) end in the
+      // same command that starts the new one.
+      final abandoned =
+          await ledger?.abandoned(machine) ?? const <MoshServerHandle>[];
+      final command = bootstrapCommand(host, abandoned: abandoned);
+      final started = await bootstrapOnSideChannel(host, command: command);
       var server = started?.server;
       var address = started?.address;
       if (server == null) {
@@ -52,31 +71,61 @@ class MoshTerminalRepository implements SshTerminalRepository {
         client = await withInteractiveHostKeyCheck<SSHClient>(
           () => _clientFactory.connect(host),
         );
-        server = await _bootstrap(client, host);
+        server = await _bootstrap(client, host, command);
         final socket = client.socket;
         address = socket is TcpSshSocket ? socket.remoteAddress : null;
         client.close();
         client = null;
       }
 
-      final session = await MoshSession.connect(
-        server: server,
-        cipher: MoshPacketCipher.aesOcb(server.key),
-        address: address,
-        columns: columns,
-        rows: rows,
+      final handle = MoshServerHandle(
+        port: server.port,
+        pid: MoshServerHandle.parsePid(server.rawOutput),
+        portArgument: _portArgument(host),
       );
+      startedPid = handle.pid;
+      if (ledger != null) {
+        await ledger.forget(machine, [
+          for (final ended in abandoned) ?ended.pid,
+        ]);
+        await ledger.record(machine, handle);
+      }
+
+      final cipher = MoshPacketCipher.aesOcb(server.key);
+      final remote =
+          address ?? (await InternetAddress.lookup(server.host)).first;
+      final shutdown = await MoshServerShutdown.bind(
+        address: remote,
+        port: server.port,
+        cipher: cipher,
+      );
+      final MoshSession session;
+      try {
+        session = await MoshSession.connect(
+          server: server,
+          cipher: cipher,
+          address: remote,
+          columns: columns,
+          rows: rows,
+        );
+      } catch (_) {
+        shutdown.close();
+        rethrow;
+      }
       return MoshTerminalSession(
         session,
-        server: MoshServerHandle(
-          port: server.port,
-          pid: MoshServerHandle.parsePid(server.rawOutput),
-          portArgument: _portArgument(host),
-        ),
+        server: handle,
         cleanupRunner: cleanupRunnerFor(host),
+        shutdown: shutdown,
+        ledger: ledger,
+        machine: machine,
       );
     } catch (error) {
       client?.close();
+      // Never reached by a client: it exits on its own within a minute.
+      if (startedPid != null) {
+        unawaited(ledger?.release(machine, startedPid));
+      }
       throw ConnectionFailure(
         'Could not start a Mosh session on ${host.host}:${host.port}.',
         error,
@@ -115,17 +164,23 @@ class MoshTerminalRepository implements SshTerminalRepository {
         : '${bootstrap.serverPort}:${bootstrap.serverPortEnd}';
   }
 
-  /// The `mosh-server new` command for [host], with an idle timeout so a
-  /// server left without its client exits eventually.
+  /// The `mosh-server new` command for [host], with the timeouts that let
+  /// a server left without its client exit on its own, after ending the
+  /// [abandoned] servers.
   @visibleForTesting
-  static String bootstrapCommand(SavedHost host) =>
+  static String bootstrapCommand(
+    SavedHost host, {
+    Iterable<MoshServerHandle> abandoned = const [],
+  }) =>
+      '${killAllCommand(abandoned)}'
       '$moshServerTimeoutEnv ${_bootstrapFor(host).command()}';
 
   /// How long the side connection may take to start mosh-server (not to
   /// connect) before the terminal opens a connection of its own: a stale
   /// side connection must not hold the terminal up for a whole connection
   /// timeout. A mosh-server started too late exits on its own, after a
-  /// minute without a client.
+  /// minute without a client (checked against mosh 1.4.0), so it is not
+  /// a second session.
   static const sideChannelBootstrapTimeout = Duration(seconds: 4);
 
   /// Starts mosh-server over [cleanupRunnerFor] [host], with the address
@@ -137,12 +192,12 @@ class MoshTerminalRepository implements SshTerminalRepository {
   /// fails here, rather than being tried twice.
   @visibleForTesting
   Future<({MoshServerConfig server, InternetAddress? address})?>
-  bootstrapOnSideChannel(SavedHost host) async {
+  bootstrapOnSideChannel(SavedHost host, {String? command}) async {
     final runner = cleanupRunnerFor(host)?.call();
     if (runner == null) return null;
     try {
       final result = await runner.run(
-        bootstrapCommand(host),
+        command ?? bootstrapCommand(host),
         timeout: sideChannelBootstrapTimeout,
       );
       return (
@@ -165,12 +220,16 @@ class MoshTerminalRepository implements SshTerminalRepository {
     }
   }
 
-  Future<MoshServerConfig> _bootstrap(SSHClient client, SavedHost host) async {
+  Future<MoshServerConfig> _bootstrap(
+    SSHClient client,
+    SavedHost host,
+    String command,
+  ) async {
     // Through sh, so the `VAR=value cmd` prefix works under any login shell.
     final session = await SshClientFactory.withinSetupTimeout(
       host,
       client,
-      client.execute(posixShellCommand(bootstrapCommand(host))),
+      client.execute(posixShellCommand(command)),
     );
     final output = StringBuffer();
 
@@ -196,14 +255,27 @@ class MoshTerminalSession
     implements
         SshTerminalSession,
         RoamingTerminalSession,
-        PredictiveTerminalSession,
-        ReapableTerminalSession {
-  MoshTerminalSession(this._session, {this.server, this.cleanupRunner}) {
+        PredictiveTerminalSession {
+  MoshTerminalSession(
+    this._session, {
+    this.server,
+    this.cleanupRunner,
+    this._shutdown,
+    this._ledger,
+    this._machine = '',
+  }) {
     _errorSubscription = _session.errors.listen((error) {
       if (!_closed) {
         _stderr.add(utf8.encode('$error\r\n'));
       }
     });
+    // Before [close], [done] only completes when the server ends the
+    // session itself (its shell exited).
+    unawaited(
+      _session.done.then((_) {
+        if (!_closed) _serverEnded = true;
+      }),
+    );
   }
 
   final MoshSession _session;
@@ -211,12 +283,26 @@ class MoshTerminalSession
   /// The mosh-server behind this session, when the bootstrap named it.
   final MoshServerHandle? server;
 
-  /// A command channel to the machine for [reapServer]; null disables it.
+  /// A command channel to the machine, to stop the server when the
+  /// shutdown request got no answer; null disables it.
   final AgentCommandRunner Function()? cleanupRunner;
+
+  final MoshServerShutdown? _shutdown;
+  final MoshServerLedger? _ledger;
+  final String _machine;
+
+  /// How long [close] waits, in the background, for the server to answer
+  /// its shutdown request before it stops the server over SSH.
+  static const shutdownAckTimeout = Duration(seconds: 2);
 
   final _stderr = StreamController<List<int>>.broadcast();
   StreamSubscription<Object>? _errorSubscription;
   bool _closed = false;
+  bool _serverEnded = false;
+
+  /// Resolves once [close] knows what became of the server.
+  @visibleForTesting
+  Future<void> serverSettled = Future.value();
 
   @override
   Stream<List<int>> get stdout => _session.stdout;
@@ -262,24 +348,47 @@ class MoshTerminalSession
     await _session.rehome();
   }
 
+  /// Closes the client and ends its server: the server is asked to end
+  /// the session (as `mosh` does when it quits) unless it already has, and
+  /// stopped over SSH when it does not answer. dart_mosh cannot resume a
+  /// session from a new client, so a server left running would never be
+  /// used again. The request goes out before this returns; the rest
+  /// happens in the background.
   @override
   Future<void> close() async {
     if (_closed) {
       return;
     }
     _closed = true;
+    serverSettled = _endServer();
     await _errorSubscription?.cancel();
     await _session.close();
     await _stderr.close();
   }
 
-  @override
-  Future<void> reapServer() async {
-    final handle = server;
-    final runner = cleanupRunner;
-    if (handle == null || runner == null) {
+  Future<void> _endServer() async {
+    final shutdown = _shutdown;
+    final pid = server?.pid;
+    if (_serverEnded) {
+      shutdown?.close();
+      if (pid != null) await _ledger?.forget(_machine, [pid]);
       return;
     }
-    await reapMoshServer(handle, runner);
+    var ended = false;
+    if (shutdown != null) {
+      final acknowledged = shutdown.acknowledged(shutdownAckTimeout);
+      shutdown.send(_session.send(const []));
+      ended = await acknowledged;
+      shutdown.close();
+    }
+    final handle = server;
+    final runner = cleanupRunner;
+    if (!ended && handle != null && runner != null) {
+      ended = await reapMoshServer(handle, runner);
+    }
+    if (pid == null) return;
+    await (ended
+        ? _ledger?.forget(_machine, [pid])
+        : _ledger?.release(_machine, pid));
   }
 }

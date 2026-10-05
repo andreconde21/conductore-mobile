@@ -4,3 +4,6 @@ tags:
   # tools/render-screenshots.sh.
   screenshots:
     skip: "README screenshots: run tools/render-screenshots.sh"
+  # Mosh server lifecycle against a throwaway sshd + mosh container
+  # (docs/mosh-sessions.md); skipped unless CONDUCTORE_MOSH_DOCKER is set.
+  docker:
