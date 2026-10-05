@@ -198,6 +198,17 @@ class SettingsSectionBody extends StatelessWidget {
       onChanged: theme.setRestoreSessionsOnLaunch,
     ),
     _gap,
+    SettingsSwitchCard(
+      switchKey: const ValueKey('keep-screen-on'),
+      icon: Icons.light_mode_outlined,
+      title: keepScreenOnTitle,
+      subtitle:
+          'Only while a connected terminal is on screen and the app is in '
+          'front. Off: the screen sleeps and locks as usual.',
+      value: theme.keepScreenOn,
+      onChanged: theme.setKeepScreenOn,
+    ),
+    _gap,
     // Brings its own bottom gap (and nothing without a SessionViewScope).
     const SessionViewSettingsTile(),
     SettingsSwitchCard(

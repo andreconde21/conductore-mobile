@@ -39,6 +39,7 @@ class ThemePreferences {
     this.restoreSessionsOnLaunch = true,
     this.multiplexerTabs = MultiplexerTabsMode.compact,
     this.herdrMayMoveFocus = false,
+    this.keepScreenOn,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
   });
@@ -110,6 +111,10 @@ class ThemePreferences {
   /// default, and kept per device: it is never synced.
   final bool herdrMayMoveFocus;
 
+  /// "Keep screen on while a terminal is open"; null follows the device's
+  /// default (on for phones, off for desktop). Kept per device.
+  final bool? keepScreenOn;
+
   /// The saved machine whose Omarchy theme the app follows; null when the
   /// app uses [palette].
   final String? omarchySyncHostId;
@@ -161,6 +166,7 @@ class ThemePreferencesRepository {
       'conductore.restore_sessions_on_launch.v1';
   static const _multiplexerTabsKey = 'conductore.multiplexer_tabs_phone.v1';
   static const _herdrMayMoveFocusKey = 'conductore.herdr_may_move_focus.v1';
+  static const _keepScreenOnKey = 'conductore.keep_screen_on.v1';
 
   static const _loadKeys = [
     _themeModeKey,
@@ -192,6 +198,7 @@ class ThemePreferencesRepository {
     _multiplexerTabsKey,
     _pasteImagesAsFilesKey,
     _herdrMayMoveFocusKey,
+    _keepScreenOnKey,
   ];
 
   final FlutterSecureStorage _storage;
@@ -239,6 +246,7 @@ class ThemePreferencesRepository {
     final rawRestoreSessionsOnLaunch = await read(_restoreSessionsOnLaunchKey);
     final rawMultiplexerTabs = await read(_multiplexerTabsKey);
     final rawHerdrMayMoveFocus = await read(_herdrMayMoveFocusKey);
+    final rawKeepScreenOn = await read(_keepScreenOnKey);
     final rawPasteImagesAsFiles = await read(_pasteImagesAsFilesKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
@@ -293,6 +301,11 @@ class ThemePreferencesRepository {
         orElse: () => MultiplexerTabsMode.compact,
       ),
       herdrMayMoveFocus: rawHerdrMayMoveFocus == 'true',
+      keepScreenOn: switch (rawKeepScreenOn) {
+        'true' => true,
+        'false' => false,
+        _ => null,
+      },
       pasteImagesAsFiles:
           rawPasteImagesAsFiles == null || rawPasteImagesAsFiles == 'true',
       omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
@@ -439,6 +452,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _herdrMayMoveFocusKey,
       value: preferences.herdrMayMoveFocus.toString(),
+    );
+    await _storage.write(
+      key: _keepScreenOnKey,
+      value: preferences.keepScreenOn?.toString() ?? '',
     );
     await _storage.write(
       key: _pasteImagesAsFilesKey,
