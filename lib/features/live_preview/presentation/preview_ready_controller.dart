@@ -22,8 +22,10 @@ enum PreviewPortSource {
 /// offers it as a "Preview ready" chip.
 ///
 /// Two signals feed [offer]:
-/// * New listening TCP ports, polled every [interval] only while the
-///   session is in the foreground ([setForeground]). The companion's
+/// * New listening TCP ports, polled only while the session is in the
+///   foreground ([setForeground]): first after [interval], then backing
+///   off to [maxInterval] while nothing new appears, and not at all while
+///   an offer is shown (CON-089). The companion's
 ///   `ports` command is asked first; when it is missing or too old the
 ///   phone diffs `ss` output itself. The first poll is the baseline, so
 ///   servers that were already running are not announced.
@@ -35,12 +37,14 @@ class PreviewReadyController extends ChangeNotifier {
   PreviewReadyController({
     required this._runnerFactory,
     this.interval = defaultInterval,
+    this.maxInterval = defaultMaxInterval,
     this.startDelay = defaultStartDelay,
     this.screenDebounce = defaultScreenDebounce,
     this._canPoll,
   });
 
   static const defaultInterval = Duration(seconds: 5);
+  static const defaultMaxInterval = Duration(seconds: 30);
   static const defaultStartDelay = Duration(seconds: 2);
   static const defaultScreenDebounce = Duration(milliseconds: 500);
   static const _commandTimeout = Duration(seconds: 8);
@@ -48,6 +52,12 @@ class PreviewReadyController extends ChangeNotifier {
   final AgentCommandRunner Function() _runnerFactory;
   final bool Function()? _canPoll;
   final Duration interval;
+
+  /// The longest gap between two polls once they keep finding nothing.
+  final Duration maxInterval;
+
+  /// The gap before the next poll; doubles up to [maxInterval].
+  Duration _nextInterval = Duration.zero;
 
   /// Wait before the first poll after coming to the foreground, so
   /// flicking through tabs opens no connections.
@@ -95,10 +105,8 @@ class PreviewReadyController extends ChangeNotifier {
     _screenTimer?.cancel();
     _screenTimer = null;
     if (foreground) {
-      _timer = Timer(startDelay, () {
-        unawaited(poll());
-        _timer = Timer.periodic(interval, (_) => unawaited(poll()));
-      });
+      _nextInterval = interval;
+      _schedulePoll(startDelay);
       _scheduleScreenScan();
     } else {
       _closeRunner();
@@ -125,6 +133,27 @@ class PreviewReadyController extends ChangeNotifier {
       if (rows != null && _foreground && !_disposed) scanScreen(rows());
     });
   }
+
+  void _schedulePoll(Duration delay) {
+    _timer?.cancel();
+    _timer = Timer(delay, () => unawaited(_pollAndReschedule()));
+  }
+
+  Future<void> _pollAndReschedule() async {
+    _timer = null;
+    if (!_foreground || _disposed || _offer != null) return;
+    await poll();
+    if (!_foreground || _disposed || _timer != null) return;
+    // A port was found: no more polls until it is handled.
+    if (_offer != null) return;
+    _schedulePoll(_nextInterval);
+    final doubled = _nextInterval * 2;
+    _nextInterval = doubled > maxInterval ? maxInterval : doubled;
+  }
+
+  /// Whether a port poll is scheduled (tests).
+  @visibleForTesting
+  bool get pollScheduled => _timer?.isActive ?? false;
 
   void _closeRunner() {
     final runner = _runner;
@@ -234,6 +263,7 @@ class PreviewReadyController extends ChangeNotifier {
     if (_offer?.port == port) {
       _offer = null;
       notifyListeners();
+      _resumePolling();
     }
   }
 
@@ -243,6 +273,14 @@ class PreviewReadyController extends ChangeNotifier {
     _handled.add(offer.port);
     _offer = null;
     notifyListeners();
+    _resumePolling();
+  }
+
+  /// Polling stopped while an offer was shown; it goes on, slowly.
+  void _resumePolling() {
+    if (_foreground && !_disposed && _timer == null) {
+      _schedulePoll(_nextInterval);
+    }
   }
 
   @override

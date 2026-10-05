@@ -342,7 +342,7 @@ void main() {
         provider: const ConductoreHostAttentionProvider(),
         pollInterval: const Duration(days: 1),
       );
-      attention.setAppForeground(false);
+      attention.setLongPoll(false);
       final views = SessionViewController(
         InMemorySessionViewPreferencesRepository(
           const SessionViewPreferences(defaultView: SessionView.chat),

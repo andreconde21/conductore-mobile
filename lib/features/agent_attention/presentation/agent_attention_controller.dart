@@ -199,7 +199,7 @@ class AgentAttentionController extends ChangeNotifier {
   void Function(SavedHost host, Set<String> capabilities)?
   onCompanionCapabilities;
   bool _appActive = true;
-  bool _foreground = true;
+  bool _longPoll = true;
   bool _disposed = false;
 
   /// Longest run of skipped ticks after repeated failures (with the default
@@ -287,7 +287,7 @@ class AgentAttentionController extends ChangeNotifier {
   /// Whether a decision for [requestId] is in flight.
   bool isDeciding(String requestId) => _deciding.contains(requestId);
 
-  /// Whether [hostId] is currently on its long-poll (foreground only).
+  /// Whether [hostId] is currently on its long-poll.
   @visibleForTesting
   bool isWatching(String hostId) => _monitorFor(hostId)?.watching ?? false;
 
@@ -327,16 +327,17 @@ class AgentAttentionController extends ChangeNotifier {
     }
   }
 
-  /// Switches between the long-poll (foreground) and periodic polling
-  /// only (background). On Android polling itself stays active in the
-  /// background (see [setAppActive]); the long-poll is foreground-only so
-  /// a backgrounded app does not hold an exec channel open for minutes.
-  void setAppForeground(bool foreground) {
-    if (_foreground == foreground || _disposed) {
+  /// Turns the companion long-poll on or off; off leaves the periodic poll.
+  /// The app keeps it on whenever monitoring is active, in the Android
+  /// background too (CON-089): it is silent while nothing changes, about
+  /// 65 execs an hour per machine against 240 for a 15 s poll, and it
+  /// notifies sooner.
+  void setLongPoll(bool enabled) {
+    if (_longPoll == enabled || _disposed) {
       return;
     }
-    _foreground = foreground;
-    if (!foreground) {
+    _longPoll = enabled;
+    if (!enabled) {
       // Loops notice on their next iteration; the in-flight long-poll
       // returns by itself within the provider's timeout.
       return;
@@ -347,6 +348,30 @@ class AgentAttentionController extends ChangeNotifier {
       }
     }
   }
+
+  /// The app is in the background: the fallback tick (status refresh, and
+  /// a poll only while the long-poll is down) slows to
+  /// [_backgroundTickInterval].
+  void setInBackground(bool background) {
+    if (_inBackground == background || _disposed) {
+      return;
+    }
+    _inBackground = background;
+    for (final monitor in _monitors.values) {
+      if (monitor.timer != null) _startTimer(monitor);
+    }
+  }
+
+  bool _inBackground = false;
+
+  static const _backgroundTickInterval = Duration(seconds: 60);
+
+  /// The fallback tick's interval now.
+  @visibleForTesting
+  Duration get tickInterval =>
+      !_inBackground || _pollInterval > _backgroundTickInterval
+      ? _pollInterval
+      : _backgroundTickInterval;
 
   Future<void> refresh(String hostId) async {
     final monitor = _monitorFor(hostId);
@@ -1325,7 +1350,7 @@ class AgentAttentionController extends ChangeNotifier {
 
   void _startTimer(_HostMonitor monitor) {
     monitor.timer?.cancel();
-    monitor.timer = Timer.periodic(_pollInterval, (_) => _onTick(monitor));
+    monitor.timer = Timer.periodic(tickInterval, (_) => _onTick(monitor));
   }
 
   void _onTick(_HostMonitor monitor) {
@@ -1336,7 +1361,7 @@ class AgentAttentionController extends ChangeNotifier {
       monitor.skipTicks -= 1;
       return;
     }
-    if (monitor.watching && _foreground) {
+    if (monitor.watching && _longPoll) {
       // The long-poll delivers changes as they happen; the periodic poll is
       // only the fallback while it is not running.
       return;
@@ -1461,7 +1486,7 @@ class AgentAttentionController extends ChangeNotifier {
   bool _shouldWatch(_HostMonitor monitor) {
     return !_disposed &&
         _appActive &&
-        _foreground &&
+        _longPoll &&
         !monitor.watching &&
         monitor.pollable &&
         monitor.status.unavailableReason == null &&
@@ -1471,7 +1496,7 @@ class AgentAttentionController extends ChangeNotifier {
         monitor.session.isConnected;
   }
 
-  /// Long-polls the host for changes until the app leaves the foreground,
+  /// Long-polls the host for changes until the long-poll is turned off,
   /// the host disconnects, or a poll fails (the periodic poll then takes
   /// over with its backoff, and its next success restarts the loop).
   Future<void> _watchLoop(_HostMonitor monitor) async {
@@ -1484,7 +1509,7 @@ class AgentAttentionController extends ChangeNotifier {
         final provider = monitor.provider;
         if (_disposed ||
             !_appActive ||
-            !_foreground ||
+            !_longPoll ||
             provider == null ||
             !provider.supportsWatch ||
             !_monitors.containsKey(monitor.host.id) ||

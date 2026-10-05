@@ -163,6 +163,10 @@ void main() {
       await tester.pump(PreviewReadyController.defaultStartDelay);
       expect(runner.commands, hasLength(1));
       await tester.pump(const Duration(seconds: 5));
+      expect(runner.commands, hasLength(2));
+      // Nothing new: the next gap doubles (CON-089).
+      await tester.pump(const Duration(seconds: 5));
+      expect(runner.commands, hasLength(2));
       await tester.pump(const Duration(seconds: 5));
       expect(runner.commands, hasLength(3));
 
@@ -180,6 +184,32 @@ void main() {
       screen.dispose();
     },
   );
+
+  testWidgets('backs off to 30 s and stops while a port is offered '
+      '(CON-089)', (tester) async {
+    final runner = ScriptedAgentCommandRunner([_ok(_ports(1))]);
+    final controller = PreviewReadyController(
+      runnerFactory: () => runner,
+      canPoll: () => true,
+    )..setForeground(true);
+    // Polls at 2, 7, 17, 37, 67, 97 s.
+    await tester.pump(const Duration(seconds: 2));
+    for (final gap in [5, 10, 20, 30, 30]) {
+      await tester.pump(Duration(seconds: gap));
+    }
+    expect(runner.commands, hasLength(6));
+
+    controller.scanScreen(['Local: http://localhost:5173/']);
+    expect(controller.offer?.port, 5173);
+    await tester.pump(const Duration(seconds: 30));
+    expect(runner.commands, hasLength(6), reason: 'a port was found');
+    expect(controller.pollScheduled, isFalse);
+
+    controller.dismiss();
+    await tester.pump(const Duration(seconds: 30));
+    expect(runner.commands, hasLength(7));
+    controller.dispose();
+  });
 
   test('skips polls while the session is disconnected', () async {
     final runner = ScriptedAgentCommandRunner([_ok(_ports(1))]);

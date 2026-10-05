@@ -490,6 +490,10 @@ class ScriptedAgentCommandRunner implements AgentCommandRunner {
     if (step is AgentCommandResult) {
       return step;
     }
+    // A result that comes later (or never: a long-poll that waits).
+    if (step is Future<AgentCommandResult>) {
+      return step;
+    }
     // ignore: only_throw_errors
     throw step;
   }

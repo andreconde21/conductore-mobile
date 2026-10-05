@@ -340,26 +340,82 @@ class SessionPreviewBuilder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<SharedViewSnapshot?>(
-      valueListenable: session.sharedView,
-      builder: (context, shared, _) {
-        if (shared != null) {
-          return RepaintBoundary(
-            key: const ValueKey('shared-view-preview'),
-            child: builder(context, shared.preview, shared),
+    return SharedViewWatch(
+      session: session,
+      child: ValueListenableBuilder<SharedViewSnapshot?>(
+        valueListenable: session.sharedView,
+        builder: (context, shared, _) {
+          if (shared != null) {
+            return RepaintBoundary(
+              key: const ValueKey('shared-view-preview'),
+              child: builder(context, shared.preview, shared),
+            );
+          }
+          return TerminalSnapshotBuilder(
+            terminal: session.terminal,
+            builder: (context) => builder(
+              context,
+              StyledTerminalPreview.capture(session.terminal),
+              null,
+            ),
           );
-        }
-        return TerminalSnapshotBuilder(
-          terminal: session.terminal,
-          builder: (context) => builder(
-            context,
-            StyledTerminalPreview.capture(session.terminal),
-            null,
-          ),
-        );
-      },
+        },
+      ),
     );
   }
+}
+
+/// Marks [session]'s preview as on screen while [child] is mounted and its
+/// tickers run (no route or hidden tab covers it), so Herdr reads the
+/// shared views of those sessions only (CON-089).
+class SharedViewWatch extends StatefulWidget {
+  const SharedViewWatch({
+    required this.session,
+    required this.child,
+    super.key,
+  });
+
+  final TerminalSessionController session;
+  final Widget child;
+
+  @override
+  State<SharedViewWatch> createState() => _SharedViewWatchState();
+}
+
+class _SharedViewWatchState extends State<SharedViewWatch> {
+  VoidCallback? _unwatch;
+  TerminalSessionController? _watched;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(SharedViewWatch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  void _sync() {
+    final session = TickerMode.valuesOf(context).enabled
+        ? widget.session
+        : null;
+    if (identical(session, _watched)) return;
+    _unwatch?.call();
+    _watched = session;
+    _unwatch = session?.watchSharedView();
+  }
+
+  @override
+  void dispose() {
+    _unwatch?.call();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// The small "Herdr · 05:54" caption on a preview that shows a

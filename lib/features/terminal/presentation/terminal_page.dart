@@ -283,7 +283,7 @@ class _TerminalPageState extends State<TerminalPage>
       );
       unawaited(_dictation!.checkAvailability());
     }
-    unawaited(WakelockPlus.enable());
+    widget.themeController.addListener(_syncWakelock);
     SecurityKeyInteraction.instance.registerPinPrompt(_promptSecurityKeyPin);
     SecurityKeyInteraction.instance.registerSelectionPrompt(
       _promptSecurityKeySelection,
@@ -295,9 +295,11 @@ class _TerminalPageState extends State<TerminalPage>
       onStateChange: (state) {
         _appResumed = state == AppLifecycleState.resumed;
         _syncPreviewWatchers();
+        _syncWakelock();
       },
     );
     _syncPreviewWatchers();
+    _syncWakelock();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusedSession = widget.workspace.activeSession;
       _focusNode.requestFocus();
@@ -471,7 +473,9 @@ class _TerminalPageState extends State<TerminalPage>
     if (onScreen != _onScreen) {
       _onScreen = onScreen;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncPreviewWatchers();
+        if (!mounted) return;
+        _syncPreviewWatchers();
+        _syncWakelock();
       });
     }
     final shareTarget = ShareTargetScope.maybeOf(context);
@@ -525,7 +529,8 @@ class _TerminalPageState extends State<TerminalPage>
       _fileTabs.removeListener(_handleShellViewsChanged);
       _shellSync?.dispose();
     }
-    unawaited(WakelockPlus.disable());
+    widget.themeController.removeListener(_syncWakelock);
+    if (_wakelockHeld) unawaited(WakelockPlus.disable().catchError((_) {}));
     _setSystemUiFullscreen(false);
     _shareTarget?.removeListener(_consumeSharedDraft);
     _shareTarget?.detachTerminalPage();
@@ -618,6 +623,26 @@ class _TerminalPageState extends State<TerminalPage>
 
   /// Creates watchers for new sessions, drops those of closed ones, and
   /// lets only the active session's watcher poll.
+  /// Whether this page holds the screen wakelock.
+  bool _wakelockHeld = false;
+
+  /// Keeps the screen on only while a connected terminal is actually in
+  /// front: the setting is on (default on phones, off on desktop), the app
+  /// is resumed and no route or dashboard covers the page (CON-089).
+  void _syncWakelock() {
+    final active = widget.workspace.activeSession;
+    final want =
+        widget.themeController.keepScreenOn &&
+        _appResumed &&
+        _onScreen &&
+        (widget.shell?.isVisible() ?? true) &&
+        active != null &&
+        active.isConnected;
+    if (want == _wakelockHeld) return;
+    _wakelockHeld = want;
+    unawaited(WakelockPlus.toggle(enable: want).catchError((_) {}));
+  }
+
   void _syncPreviewWatchers() {
     final sessions = widget.workspace.sessions.toSet();
     _previewWatchers.removeWhere((session, watcher) {
@@ -914,6 +939,7 @@ class _TerminalPageState extends State<TerminalPage>
     });
     _syncRemoteClipboardSubscriptions();
     _syncPreviewWatchers();
+    _syncWakelock();
     final active = widget.workspace.activeSession;
     if (active == null || active == _focusedSession) return;
     _focusedSession = active;

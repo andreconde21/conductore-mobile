@@ -297,6 +297,32 @@ class TerminalSessionController extends ChangeNotifier {
     if (!_disposed) _sharedView.value = snapshot;
   }
 
+  int _sharedViewWatchers = 0;
+
+  /// Whether a preview of this session is on screen ([watchSharedView]):
+  /// only those are read again from Herdr (CON-089).
+  bool get sharedViewWatched => _sharedViewWatchers > 0;
+
+  /// Called when [sharedViewWatched] changes; set by whoever reads the
+  /// shared views.
+  void Function(TerminalSessionController session)? onSharedViewWatched;
+
+  /// A preview of this session came on screen; call the returned function
+  /// when it leaves.
+  VoidCallback watchSharedView() {
+    _sharedViewWatchers += 1;
+    if (_sharedViewWatchers == 1) onSharedViewWatched?.call(this);
+    var done = false;
+    return () {
+      if (done) return;
+      done = true;
+      _sharedViewWatchers -= 1;
+      if (_sharedViewWatchers == 0 && !_disposed) {
+        onSharedViewWatched?.call(this);
+      }
+    };
+  }
+
   /// What Herdr shows instead of this session's own workspace (the focused
   /// workspace's name) while another screen has its shared focus and this
   /// device may not move it; null while it shows this session's own.

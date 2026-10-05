@@ -797,7 +797,7 @@ void main() {
       provider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    agentAttention.setAppForeground(false);
+    agentAttention.setLongPoll(false);
     addTearDown(agentAttention.dispose);
     final flow = SessionConnectFlow(
       hostsController: hostsController,
@@ -1769,7 +1769,7 @@ void main() {
       companionProvider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    attention.setAppForeground(false);
+    attention.setLongPoll(false);
     addTearDown(attention.dispose);
     final session = workspace.open(
       workstation.copyWith(agentMonitor: AgentMonitorKind.companion),
@@ -2061,7 +2061,7 @@ void main() {
       companionProvider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    attention.setAppForeground(false);
+    attention.setLongPoll(false);
     addTearDown(attention.dispose);
     final digest = DigestController(
       source: AttentionDigestHostSource(attention: attention),

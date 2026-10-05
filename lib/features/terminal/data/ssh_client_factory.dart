@@ -5,6 +5,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/fido_hardware_key_ctap_device.dart';
 import 'package:conduit/features/terminal/data/openssh_security_key_signer.dart';
+import 'package:conduit/features/terminal/data/ssh_keepalive_policy.dart';
 import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
@@ -84,7 +85,12 @@ class SshClientFactory {
   final SshKeyPairParser _keyPairParser;
   SSHKeyPair? _externalAuthIdentity;
 
-  Future<SSHClient> connect(SavedHost host) async {
+  /// Opens a connection to [host]; its keep-alive follows
+  /// [SshKeepalivePolicy.instance] for a [role] connection.
+  Future<SSHClient> connect(
+    SavedHost host, {
+    SshConnectionRole role = SshConnectionRole.side,
+  }) async {
     SSHSocket? socket;
     try {
       socket = await TcpSshSocket.connect(
@@ -93,7 +99,8 @@ class SshClientFactory {
         timeout: Duration(seconds: host.connectionTimeoutSeconds),
       );
       final identities = _identitiesFor(host);
-      return SSHClient(
+      final keepalive = SshKeepalivePolicy.instance;
+      final client = SSHClient(
         socket,
         username: host.username.trim(),
         identities: identities,
@@ -108,7 +115,10 @@ class SshClientFactory {
             fingerprint: _formatFingerprint(fingerprint),
           );
         },
+        keepAliveInterval: keepalive.intervalFor(role),
       );
+      keepalive.register(client, role);
+      return client;
     } catch (_) {
       unawaited(socket?.close() ?? Future<void>.value());
       rethrow;

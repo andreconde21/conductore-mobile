@@ -73,7 +73,7 @@ void main() {
       provider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    controller.setAppForeground(false);
+    controller.setLongPoll(false);
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
     final session = workspace.open(host);
@@ -418,7 +418,7 @@ void main() {
         provider: const ConductoreHostAttentionProvider(),
         pollInterval: const Duration(days: 1),
       );
-      attention.setAppForeground(false);
+      attention.setLongPoll(false);
       final session = workspace.open(host);
       await tester.runAsync(session.connect);
       expect(attention.isMonitoring(host.id), isFalse);
@@ -451,7 +451,7 @@ void main() {
         provider: const ConductoreHostAttentionProvider(),
         pollInterval: const Duration(days: 1),
       );
-      attention.setAppForeground(false);
+      attention.setLongPoll(false);
       final session = workspace.open(host);
       await tester.runAsync(session.connect);
       await pumpPage(tester, workspace, attention: attention);
@@ -490,7 +490,7 @@ void main() {
         provider: const ConductoreHostAttentionProvider(),
         pollInterval: const Duration(days: 1),
       );
-      attention.setAppForeground(false);
+      attention.setLongPoll(false);
       final companion = CompanionSetupController(
         runnerFactory: (_) => runner,
         sftpRepository: NoNetworkSftpRepository(),

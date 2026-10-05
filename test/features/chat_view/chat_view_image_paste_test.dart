@@ -426,7 +426,7 @@ void main() {
       runnerFactory: (_) => ScriptedAgentCommandRunner([status, status]),
       provider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
-    )..setAppForeground(false);
+    )..setLongPoll(false);
     addTearDown(attention.dispose);
     addTearDown(workspace.dispose);
     await tester.runAsync(workspace.open(host).connect);

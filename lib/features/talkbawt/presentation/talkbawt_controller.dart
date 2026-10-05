@@ -55,6 +55,7 @@ class TalkbawtController extends ChangeNotifier {
     DateTime Function()? now,
     this.watchWait = 45,
     this.retryDelay = const Duration(seconds: 30),
+    this.minWatchGap = const Duration(seconds: 2),
     this.pairedInterval = const Duration(seconds: 5),
     Random? random,
   }) : _now = now ?? DateTime.now,
@@ -70,6 +71,9 @@ class TalkbawtController extends ChangeNotifier {
   /// Seconds one `talkbawt watch` is held on the server.
   final int watchWait;
   final Duration retryDelay;
+
+  /// Least time between the starts of two watches on one machine.
+  final Duration minWatchGap;
   final Duration pairedInterval;
 
   static const storageKey = 'conductore.talkbawt.v1';
@@ -434,6 +438,7 @@ class TalkbawtController extends ChangeNotifier {
     while (!_disposed && _foreground && _watchGeneration == generation) {
       final host = _findHost(hostId);
       if (host == null) return;
+      final started = DateTime.now();
       try {
         await watchOnce(host, wait: watchWait);
       } catch (_) {
@@ -441,6 +446,10 @@ class TalkbawtController extends ChangeNotifier {
         await Future<void>.delayed(retryDelay);
       }
       if (!_threads.any((t) => t.hostId == hostId && t.live)) return;
+      // A watch that answers at once (changes, or an old server ignoring
+      // the wait) must not spin (CON-089).
+      final gap = minWatchGap - DateTime.now().difference(started);
+      if (gap > Duration.zero) await Future<void>.delayed(gap);
     }
   }
 

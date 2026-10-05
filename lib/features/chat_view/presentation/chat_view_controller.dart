@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_initializing_formals
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -103,6 +104,18 @@ class ChatViewController extends ChangeNotifier {
 
   final List<TranscriptEntry> _entries = [];
 
+  /// Where each read's entries begin in the transcript file, oldest first,
+  /// with how many entries it brought: the window drops whole reads from
+  /// its front and can page back to them exactly.
+  final List<({int start, int count})> _chunks = [];
+
+  /// Most transcript entries kept (CON-089): past [_maxEntries] plus a
+  /// slack, the oldest reads are dropped down to it, and "load older"
+  /// brings them back. Each growing poll rebuilds the items of the window
+  /// only, so a long session no longer gets slower.
+  static const _maxEntries = 1500;
+  static const _trimSlack = 500;
+
   /// Set once the companion answers in the neutral format (every agent but
   /// Claude Code): the window it pages by cursor instead of [_offset].
   NeutralChatWindow? _neutral;
@@ -133,15 +146,19 @@ class ChatViewController extends ChangeNotifier {
 
   Timer? _timer;
 
-  /// Polls in a row that brought nothing while the agent was not working.
-  /// A quiet chat polls less often: every [_pollInterval], then twice and
-  /// four times that after [_quietPollsPerStep] quiet polls each. Anything
+  /// Polls in a row that brought nothing. A quiet chat polls less often:
+  /// every [_pollInterval] (or [_workingPollInterval] while the agent
+  /// works), then twice, four and, when idle, eight times that after
+  /// [_quietPollsPerStep] quiet polls each (CON-089: a working agent that
+  /// writes nothing new no longer costs a read every second). Anything
   /// new, a send, or the agent monitor seeing a change resets it (the
   /// monitor's long-poll still wakes the chat at once).
   int _quietPolls = 0;
   static const _quietPollsPerStep = 10;
 
-  int get _quietFactor => _quietPolls >= 2 * _quietPollsPerStep
+  int get _quietFactor => _quietPolls >= 3 * _quietPollsPerStep
+      ? 8
+      : _quietPolls >= 2 * _quietPollsPerStep
       ? 4
       : _quietPolls >= _quietPollsPerStep
       ? 2
@@ -288,7 +305,8 @@ class ChatViewController extends ChangeNotifier {
     }
   }
 
-  /// Polls every second while the agent works, at the idle pace otherwise.
+  /// Polls every second while the agent works, at the idle pace otherwise,
+  /// both slowing down while nothing new comes.
   void _retime() {
     if (!_visible || _unsupported != null || _disposed) {
       return;
@@ -296,7 +314,7 @@ class ChatViewController extends ChangeNotifier {
     final activity = this.activity;
     final interval =
         activity == ChatActivity.working || activity == ChatActivity.thinking
-        ? _workingPollInterval
+        ? _workingPollInterval * math.min(_quietFactor, 4)
         : _pollInterval * _quietFactor;
     if (_timer != null && _timerInterval == interval) {
       return;
@@ -359,10 +377,15 @@ class ChatViewController extends ChangeNotifier {
           _entries
             ..clear()
             ..addAll(page.entries);
+          _chunks
+            ..clear()
+            ..add((start: page.start, count: page.entries.length));
           _start = page.start;
           _olderExhausted = false;
-        } else {
+        } else if (page.entries.isNotEmpty) {
           _entries.addAll(page.entries);
+          _chunks.add((start: offset, count: page.entries.length));
+          _trimWindow();
         }
         final grew = page.entries.isNotEmpty || offset == null || page.reset;
         _offset = page.offset;
@@ -408,6 +431,28 @@ class ChatViewController extends ChangeNotifier {
       if (!_disposed) notifyListeners();
     }
   }
+
+  /// Drops the oldest reads once the window holds more than
+  /// [_maxEntries] + [_trimSlack] entries, keeping at least [_maxEntries];
+  /// [loadOlder] reads them again.
+  void _trimWindow() {
+    if (_entries.length <= _maxEntries + _trimSlack) return;
+    var drop = 0;
+    // Whole reads only, and never below [_maxEntries]: one big read (the
+    // first tail) stays rather than leaving a nearly empty window.
+    while (_chunks.length > 1 &&
+        _entries.length - drop - _chunks.first.count >= _maxEntries) {
+      drop += _chunks.removeAt(0).count;
+    }
+    if (drop == 0) return;
+    _entries.removeRange(0, drop);
+    _start = _chunks.first.start;
+    _olderExhausted = false;
+  }
+
+  /// Entries in the window (tests).
+  @visibleForTesting
+  int get windowEntries => _entries.length;
 
   /// One neutral read from the window's cursor; whether another page
   /// follows at once.
@@ -477,6 +522,7 @@ class ChatViewController extends ChangeNotifier {
         _olderExhausted = true;
       } else {
         _entries.insertAll(0, page.entries);
+        _chunks.insert(0, (start: page.start, count: page.entries.length));
         _start = page.start;
         _items = ChatItemBuilder.build(_entries);
       }

@@ -56,18 +56,21 @@ class SessionFocusFrame extends StatelessWidget {
       children: [
         child,
         if (cover)
-          ValueListenableBuilder<SharedViewSnapshot?>(
-            valueListenable: session.sharedView,
-            builder: (context, shared, _) => shared == null
-                ? const SizedBox.shrink()
-                : _SharedViewCover(
-                    shared: shared,
-                    palette: palette,
-                    brightness: brightness,
-                    fontFamily: fontFamily,
-                    onTakeFocus: herdrActions?.takeFocusOnce,
-                    agentView: !showSharedView,
-                  ),
+          SharedViewWatch(
+            session: session,
+            child: ValueListenableBuilder<SharedViewSnapshot?>(
+              valueListenable: session.sharedView,
+              builder: (context, shared, _) => shared == null
+                  ? const SizedBox.shrink()
+                  : _SharedViewCover(
+                      shared: shared,
+                      palette: palette,
+                      brightness: brightness,
+                      fontFamily: fontFamily,
+                      onTakeFocus: herdrActions?.takeFocusOnce,
+                      agentView: !showSharedView,
+                    ),
+            ),
           ),
         if (!showSharedView && herdrActions != null)
           Positioned(

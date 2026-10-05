@@ -61,7 +61,7 @@ class ContinuityController extends ChangeNotifier
     this.idleGap = const Duration(minutes: 5),
     this.activityStep = const Duration(minutes: 2),
     this.draftLifetime = const Duration(days: 7),
-    Duration publishInterval = const Duration(seconds: 10),
+    Duration publishInterval = defaultPublishInterval,
     this.observeLifecycle = true,
   }) : _store = store,
        _sync = sync,
@@ -76,6 +76,11 @@ class ContinuityController extends ChangeNotifier
   }
 
   static String? _none() => null;
+
+  /// At most one push per this while the place or a draft keeps changing
+  /// (CON-089: 10 s meant a full device sync every 10 s while typing).
+  /// Leaving the screen still pushes at once.
+  static const defaultPublishInterval = Duration(seconds: 30);
 
   final ContinuityStore _store;
   final ContinuitySyncLink _sync;

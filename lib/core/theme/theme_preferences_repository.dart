@@ -7,6 +7,7 @@ import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/data/ssh_keepalive_policy.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
@@ -39,6 +40,8 @@ class ThemePreferences {
     this.restoreSessionsOnLaunch = true,
     this.multiplexerTabs = MultiplexerTabsMode.compact,
     this.herdrMayMoveFocus = false,
+    this.keepScreenOn,
+    this.sshKeepaliveSeconds = SshKeepalivePolicy.defaultForegroundSeconds,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
   });
@@ -110,6 +113,14 @@ class ThemePreferences {
   /// default, and kept per device: it is never synced.
   final bool herdrMayMoveFocus;
 
+  /// "Keep screen on while a terminal is open"; null follows the device's
+  /// default (on for phones, off for desktop). Kept per device.
+  final bool? keepScreenOn;
+
+  /// Seconds between SSH keep-alives while the app is in front; 0 is off.
+  /// Kept per device.
+  final int sshKeepaliveSeconds;
+
   /// The saved machine whose Omarchy theme the app follows; null when the
   /// app uses [palette].
   final String? omarchySyncHostId;
@@ -161,6 +172,8 @@ class ThemePreferencesRepository {
       'conductore.restore_sessions_on_launch.v1';
   static const _multiplexerTabsKey = 'conductore.multiplexer_tabs_phone.v1';
   static const _herdrMayMoveFocusKey = 'conductore.herdr_may_move_focus.v1';
+  static const _keepScreenOnKey = 'conductore.keep_screen_on.v1';
+  static const _sshKeepaliveSecondsKey = 'conductore.ssh_keepalive_seconds.v1';
 
   static const _loadKeys = [
     _themeModeKey,
@@ -192,6 +205,8 @@ class ThemePreferencesRepository {
     _multiplexerTabsKey,
     _pasteImagesAsFilesKey,
     _herdrMayMoveFocusKey,
+    _keepScreenOnKey,
+    _sshKeepaliveSecondsKey,
   ];
 
   final FlutterSecureStorage _storage;
@@ -239,6 +254,10 @@ class ThemePreferencesRepository {
     final rawRestoreSessionsOnLaunch = await read(_restoreSessionsOnLaunchKey);
     final rawMultiplexerTabs = await read(_multiplexerTabsKey);
     final rawHerdrMayMoveFocus = await read(_herdrMayMoveFocusKey);
+    final rawKeepScreenOn = await read(_keepScreenOnKey);
+    final sshKeepaliveSeconds = int.tryParse(
+      await read(_sshKeepaliveSecondsKey) ?? '',
+    );
     final rawPasteImagesAsFiles = await read(_pasteImagesAsFilesKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
@@ -293,6 +312,15 @@ class ThemePreferencesRepository {
         orElse: () => MultiplexerTabsMode.compact,
       ),
       herdrMayMoveFocus: rawHerdrMayMoveFocus == 'true',
+      keepScreenOn: switch (rawKeepScreenOn) {
+        'true' => true,
+        'false' => false,
+        _ => null,
+      },
+      sshKeepaliveSeconds:
+          SshKeepalivePolicy.choices.contains(sshKeepaliveSeconds)
+          ? sshKeepaliveSeconds!
+          : SshKeepalivePolicy.defaultForegroundSeconds,
       pasteImagesAsFiles:
           rawPasteImagesAsFiles == null || rawPasteImagesAsFiles == 'true',
       omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
@@ -439,6 +467,14 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _herdrMayMoveFocusKey,
       value: preferences.herdrMayMoveFocus.toString(),
+    );
+    await _storage.write(
+      key: _sshKeepaliveSecondsKey,
+      value: preferences.sshKeepaliveSeconds.toString(),
+    );
+    await _storage.write(
+      key: _keepScreenOnKey,
+      value: preferences.keepScreenOn?.toString() ?? '',
     );
     await _storage.write(
       key: _pasteImagesAsFilesKey,

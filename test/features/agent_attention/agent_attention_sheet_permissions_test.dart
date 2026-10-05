@@ -43,7 +43,7 @@ void main() {
       provider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    controller.setAppForeground(false);
+    controller.setLongPoll(false);
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
     final session = workspace.open(monitoredHost('h'));

@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import android.provider.Settings
+import com.gwitko.conduit.BackgroundServicePolicy.StopReason
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -75,8 +76,13 @@ class MainActivity : FlutterFragmentActivity() {
             when (call.method) {
                 "start" -> {
                     val sessionCount = call.argument<Int>("sessionCount") ?: 0
-                    BackgroundConnectionService.start(this, sessionCount)
-                    result.success(null)
+                    try {
+                        BackgroundConnectionService.start(this, sessionCount)
+                        result.success(null)
+                    } catch (e: RuntimeException) {
+                        // ForegroundServiceStartNotAllowedException (12+).
+                        result.error("start_refused", e.message, null)
+                    }
                 }
                 "stop" -> {
                     BackgroundConnectionService.stop(this)
@@ -173,6 +179,11 @@ class MainActivity : FlutterFragmentActivity() {
         textToSpeech = null
         shareTarget?.dispose()
         shareTarget = null
+        // Back out of the app: the engine and its sessions go with this
+        // activity, so nothing is left for the service to keep (CON-089).
+        if (isFinishing && !isChangingConfigurations) {
+            BackgroundConnectionService.stop(this)
+        }
         super.onDestroy()
     }
 
@@ -245,19 +256,42 @@ class BackgroundConnectionService : Service() {
         val sessionCount = intent?.getIntExtra(SESSION_COUNT_EXTRA, 0) ?: 0
         AgentOngoingNotification.serviceSessions = sessionCount
         val notification = AgentOngoingNotification.build(this, sessionCount)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                AgentOngoingNotification.NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(AgentOngoingNotification.NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    AgentOngoingNotification.NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(AgentOngoingNotification.NOTIFICATION_ID, notification)
+            }
+        } catch (e: RuntimeException) {
+            // Android 12+ refuses a start from the background, and Android
+            // 15+ once the 6 h dataSync budget is spent: stop instead of
+            // crashing the app.
+            stopKeepingStatus(StopReason.START_REFUSED)
         }
-        return START_STICKY
+        return BackgroundServicePolicy.startMode()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /** The app was swiped away: its sessions are gone, so is the service. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        stopKeepingStatus(StopReason.TASK_REMOVED)
+        super.onTaskRemoved(rootIntent)
+    }
+
+    /**
+     * Android 15+: the dataSync budget (6 h per 24 h) ran out. The service
+     * must stop within seconds or the system crashes the app. The budget
+     * refills while the app is in front; Dart starts it again next time the
+     * app goes to the background.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        stopKeepingStatus(StopReason.TIMEOUT)
+    }
 
     override fun onDestroy() {
         if (running === this) running = null
@@ -267,11 +301,15 @@ class BackgroundConnectionService : Service() {
 
     /**
      * Stops the service; a status notification outlives it (detached from
-     * the service and re-posted as a plain ongoing one).
+     * the service and re-posted as a plain ongoing one) unless [reason]
+     * says nothing will refresh it.
      */
-    private fun stopKeepingStatus() {
+    private fun stopKeepingStatus(reason: StopReason = StopReason.REQUESTED) {
         AgentOngoingNotification.serviceSessions = null
-        val keep = AgentOngoingNotification.status != null
+        val keep = BackgroundServicePolicy.keepsStatus(
+            reason,
+            hasStatus = AgentOngoingNotification.status != null,
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(if (keep) STOP_FOREGROUND_DETACH else STOP_FOREGROUND_REMOVE)
         } else {

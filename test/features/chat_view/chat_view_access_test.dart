@@ -59,7 +59,7 @@ void main() {
       pollInterval: const Duration(days: 1),
       persistMonitoringEnabled: (id) async => persisted.add(id),
     );
-    controller.setAppForeground(false);
+    controller.setLongPoll(false);
     addTearDown(() {
       if (!stopped) controller.dispose();
     });

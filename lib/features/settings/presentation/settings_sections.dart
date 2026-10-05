@@ -34,6 +34,7 @@ import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
 import 'package:conduit/features/tasks/presentation/tasks_entry.dart';
+import 'package:conduit/features/terminal/data/ssh_keepalive_policy.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
@@ -196,6 +197,32 @@ class SettingsSectionBody extends StatelessWidget {
           'Herdr sessions reattach; plain shells start fresh.',
       value: theme.restoreSessionsOnLaunch,
       onChanged: theme.setRestoreSessionsOnLaunch,
+    ),
+    _gap,
+    SettingsSwitchCard(
+      switchKey: const ValueKey('keep-screen-on'),
+      icon: Icons.light_mode_outlined,
+      title: keepScreenOnTitle,
+      subtitle:
+          'Only while a connected terminal is on screen and the app is in '
+          'front. Off: the screen sleeps and locks as usual.',
+      value: theme.keepScreenOn,
+      onChanged: theme.setKeepScreenOn,
+    ),
+    _gap,
+    SettingsSegmentCard<int>(
+      key: const ValueKey('ssh-keepalive-setting'),
+      icon: Icons.network_ping_rounded,
+      title: sshKeepaliveTitle,
+      description:
+          'How often SSH connections check the link while the app is in '
+          'front. Longer saves battery and data; in the background '
+          'terminals check every 2 minutes and other connections not at '
+          'all. Off: a dropped network is noticed only on the next use.',
+      values: SshKeepalivePolicy.choices,
+      label: (seconds) => seconds == 0 ? 'Off' : '$seconds s',
+      selected: theme.sshKeepaliveSeconds,
+      onChanged: theme.setSshKeepaliveSeconds,
     ),
     _gap,
     // Brings its own bottom gap (and nothing without a SessionViewScope).

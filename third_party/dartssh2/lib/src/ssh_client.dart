@@ -179,8 +179,17 @@ class SSHClient {
   final SSHAgentHandler? agentHandler;
 
   /// The interval at which to send a keep-alive message through the [ping]
-  /// method. Set this to null to disable automatic keep-alive messages.
-  final Duration? keepAliveInterval;
+  /// method. Set this to null to disable automatic keep-alive messages. It
+  /// can change on a live connection.
+  Duration? get keepAliveInterval => _keepAlive.interval;
+
+  set keepAliveInterval(Duration? value) => _keepAlive.interval = value;
+
+  /// How long [ping] waits for the server's reply. Without one in time the
+  /// link is taken for dead and the connection is closed with an
+  /// [SSHSocketError] (like OpenSSH's ServerAliveCountMax), instead of
+  /// waiting for the TCP timeout. Null waits forever.
+  final Duration? keepAliveTimeout;
 
   /// Function called when additional host keys are received. This is an OpenSSH
   /// extension. May not be called if the server does not support the extension.
@@ -216,10 +225,12 @@ class SSHClient {
     this.onAuthenticated,
     this.onX11Forward,
     this.agentHandler,
-    this.keepAliveInterval = const Duration(seconds: 10),
+    Duration? keepAliveInterval = const Duration(seconds: 10),
+    this.keepAliveTimeout = const Duration(seconds: 15),
     this.disableHostkeyVerification = false,
     String ident = 'DartSSH_2.0',
   }) : ident = _validateIdent(ident) {
+    _keepAlive = SSHKeepAlive(ping: ping, interval: keepAliveInterval);
     _transport = SSHTransport(
       socket,
       isServer: false,
@@ -284,9 +295,7 @@ class SSHClient {
 
   final _remoteForwards = <SSHRemoteForward>{};
 
-  late final _keepAlive = keepAliveInterval != null
-      ? SSHKeepAlive(ping: ping, interval: keepAliveInterval!)
-      : null;
+  late final SSHKeepAlive _keepAlive;
 
   SSHAuthMethod? _currentAuthMethod;
 
@@ -672,7 +681,25 @@ class SSHClient {
   Future<void> ping() async {
     await _authenticated.future;
     _sendMessage(SSH_Message_Global_Request.keepAlive());
-    await _globalRequestReplyQueue.next;
+    final reply = Future.value(_globalRequestReplyQueue.next);
+    final timeout = keepAliveTimeout;
+    if (timeout == null) {
+      await reply;
+      return;
+    }
+    await reply.timeout(
+      timeout,
+      onTimeout: () {
+        // Global replies come in order: a late one would answer the next
+        // request. The link is dead anyway, so the connection goes.
+        final error = SSHSocketError(
+          TimeoutException('No keep-alive reply from the server', timeout),
+        );
+        _closeChannels();
+        _transport.closeWithError(error);
+        throw error;
+      },
+    );
   }
 
   /// Shutdown the entire SSH connection. Sessions and channels will also be
@@ -704,7 +731,7 @@ class SSHClient {
         SSHAuthAbortError('Connection closed before authentication', error),
       );
     }
-    _keepAlive?.stop();
+    _keepAlive.stop();
 
     // Complete any pending channel-open waiters so callers (e.g.
     // forwardLocalUnix) don't hang forever when the connection drops.
@@ -810,7 +837,7 @@ class SSHClient {
     printDebug?.call('SSHClient._handleUserauthSuccess');
     _authenticated.complete();
     onAuthenticated?.call();
-    _keepAlive?.start();
+    _keepAlive.start();
   }
 
   void _handleUserauthFailure(Uint8List payload) {

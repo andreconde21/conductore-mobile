@@ -52,7 +52,7 @@ void main() {
           runnerFactory: (_) => ScriptedAgentCommandRunner([ok(status)]),
           provider: const ConductoreHostAttentionProvider(),
           pollInterval: const Duration(days: 1),
-        )..setAppForeground(false);
+        )..setLongPoll(false);
         h.attention = attention;
         h.sessionViews = SessionViewController(
           InMemorySessionViewPreferencesRepository(

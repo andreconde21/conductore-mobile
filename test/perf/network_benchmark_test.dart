@@ -204,17 +204,18 @@ void main() {
         case Scene.home:
           boards.setVisible(true);
           detachUsage = usage.attachView();
-          attention.setAppForeground(true);
+          attention.setLongPoll(true);
         case Scene.background:
-          // Android: monitoring goes on, the long-poll and the pages stop.
+          // Android: monitoring and its long-poll go on, the pages stop
+          // (CON-089).
           attention
             ..setAppActive(true)
-            ..setAppForeground(false);
+            ..setInBackground(true);
           usage.setAppActive(false);
         case Scene.terminal:
           break;
         case Scene.chat:
-          attention.setAppForeground(true);
+          attention.setLongPoll(true);
           final (runner, owned: _) = attention.runnerFor(machines.first);
           chat = ChatViewController(runner: runner, sessionId: 's-1')
             ..setVisible(true);
@@ -225,7 +226,7 @@ void main() {
         // The terminal page in front: the monitor's long-poll, the tab
         // strip (a 2 s tmux poll, or the pushed feed) and the preview
         // watcher's port poll.
-        attention.setAppForeground(true);
+        attention.setLongPoll(true);
         final feed = hub.feedFor(machines.first)!;
         tabs = MultiplexerTabsController(
           backend: TmuxTabsBackend(

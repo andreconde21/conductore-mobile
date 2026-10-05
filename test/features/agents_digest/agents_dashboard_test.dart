@@ -153,7 +153,7 @@ void main() {
       companionProvider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    attention.setAppForeground(false);
+    attention.setLongPoll(false);
     store = MemoryDigestPreferencesStore(preferences);
     digest = DigestController(
       source: AttentionDigestHostSource(attention: attention),

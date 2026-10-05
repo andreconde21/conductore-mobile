@@ -36,10 +36,22 @@ class _TaskBatchesPanelState extends State<TaskBatchesPanel> {
   int get limit => widget.limit;
   String Function(String hostId) get hostName => widget.hostName;
 
+  VoidCallback? _detach;
+
+  /// Follows the runs while this panel is on screen (its tickers run).
   @override
-  void initState() {
-    super.initState();
-    if (widget.watch) unawaited(controller.watch());
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final follow = widget.watch && TickerMode.valuesOf(context).enabled;
+    if (follow == (_detach != null)) return;
+    _detach?.call();
+    _detach = follow ? controller.attachView() : null;
+  }
+
+  @override
+  void dispose() {
+    _detach?.call();
+    super.dispose();
   }
 
   @override

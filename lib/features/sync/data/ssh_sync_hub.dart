@@ -5,6 +5,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/sync/domain/sync_hub.dart';
 import 'package:conduit/features/sync/domain/sync_hub_commands.dart';
 import 'package:flutter/foundation.dart';
@@ -63,9 +64,23 @@ class SshSyncHub implements SyncHub {
     ];
   }
 
+  /// An SFTP session on [runner]'s connection when it can carry one (no
+  /// new handshake per sync, CON-089), else a connection of its own.
+  Future<SftpSession> _files() async {
+    if (runner case final SftpChannelRunner shared) {
+      try {
+        final session = await shared.openSftp();
+        if (session != null) return session;
+      } on Object {
+        // The shared connection failed: a fresh one below.
+      }
+    }
+    return sftp.connect(host);
+  }
+
   @override
   Future<Uint8List> readBundle(String vaultId) async {
-    final session = await sftp.connect(host);
+    final session = await _files();
     try {
       return await session.read(
         SyncHubCommands.bundlePath(vaultId),
@@ -85,7 +100,7 @@ class SshSyncHub implements SyncHub {
   }) async {
     await _run(SyncHubCommands.prepare());
     final metaBytes = Uint8List.fromList(utf8.encode('${meta.encode()}\n'));
-    final session = await sftp.connect(host);
+    final session = await _files();
     try {
       await session.write(
         SyncHubCommands.uploadPath(vaultId, deviceId, 'bundle'),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
@@ -79,7 +81,7 @@ void main() {
     );
     // The long-poll loop is exercised explicitly; elsewhere the scripted
     // runner would feed it forever.
-    controller.setAppForeground(foreground);
+    controller.setLongPoll(foreground);
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
     return (workspace, controller, runner, notifier);
@@ -409,7 +411,38 @@ void main() {
   });
 
   group('long-poll', () {
-    test('runs events in the foreground and falls back on failure', () async {
+    test(
+      'keeps running in the background; only the tick slows (CON-089)',
+      () async {
+        final (workspace, controller, runner, _) = build([
+          version,
+          working,
+          Completer<AgentCommandResult>().future, // events: waits
+        ], foreground: true);
+        await workspace.open(monitoredHost('h')).connect();
+        await pumpEventQueue();
+        expect(controller.isWatching('h'), isTrue);
+
+        controller.setInBackground(true);
+        await pumpEventQueue();
+        expect(controller.isWatching('h'), isTrue);
+        expect(runner.commands.last, contains('events --since 1 --timeout 55'));
+      },
+    );
+
+    test('the background tick is at least a minute', () {
+      final controller = AgentAttentionController(
+        workspace: TerminalWorkspaceController(FreshTerminalRepository()),
+        runnerFactory: (_) => ScriptedAgentCommandRunner(const []),
+        provider: const HerdrAttentionProvider(),
+      );
+      addTearDown(controller.dispose);
+      expect(controller.tickInterval, const Duration(seconds: 15));
+      controller.setInBackground(true);
+      expect(controller.tickInterval, const Duration(seconds: 60));
+    });
+
+    test('runs events and falls back on failure', () async {
       final (workspace, controller, runner, notifier) = build([
         version,
         working,
@@ -434,7 +467,7 @@ void main() {
       expect(controller.statusFor('h')?.error, contains('channel closed'));
     });
 
-    test('is not started while backgrounded', () async {
+    test('is not started while turned off', () async {
       final (workspace, controller, runner, _) = build([version, working]);
       await workspace.open(monitoredHost('h')).connect();
       await pumpEventQueue();

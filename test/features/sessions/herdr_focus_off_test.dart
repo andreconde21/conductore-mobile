@@ -255,6 +255,13 @@ void main() {
     final two = await attach('w2');
     workspace.activate(one);
     await settle();
+    // Not on screen: not read (CON-089).
+    expect(server.herdrArgs.any((a) => a.startsWith('pane read')), isFalse);
+
+    // Its preview comes on screen.
+    final unwatch = two.watchSharedView();
+    addTearDown(unwatch);
+    await settle();
 
     expect(one.sharedView.value, isNull);
     final shared = two.sharedView.value!;
@@ -264,6 +271,41 @@ void main() {
       server.herdrArgs.any((a) => a.startsWith('pane read w2:p1')),
       isTrue,
     );
+  });
+
+  test('the refresh reads only servers with a preview on screen '
+      '(CON-089)', () async {
+    await focus.dispose();
+    focus = HerdrSessionFocus(
+      workspace: workspace,
+      runnerFactory: (_) => server.runner(),
+      reattachRefocusDelay: Duration.zero,
+      refreshInterval: const Duration(milliseconds: 10),
+    );
+    server.focusFromElsewhere('w1');
+    final one = await attach('w1');
+    await attach('w2');
+    workspace.activate(one);
+    await settle();
+    int lists() =>
+        server.herdrArgs.where((a) => a.startsWith('workspace list')).length;
+
+    final idle = lists();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await settle();
+    expect(lists(), idle, reason: 'no preview on screen: no timer');
+
+    final unwatch = one.watchSharedView();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await settle();
+    expect(lists(), greaterThan(idle + 1));
+
+    unwatch();
+    await settle();
+    final after = lists();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await settle();
+    expect(lists(), after);
   });
 
   testWidgets('the setting can be turned on at run time', (tester) async {

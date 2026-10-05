@@ -5,6 +5,7 @@ import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/ssh_error_formatter.dart';
+import 'package:conduit/features/terminal/data/ssh_keepalive_policy.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
@@ -29,7 +30,7 @@ class DartSshTerminalRepository implements SshTerminalRepository {
     try {
       // Opened by the user, who may decide on a changed host key.
       client = await withInteractiveHostKeyCheck<SSHClient>(
-        () => _clientFactory.connect(host),
+        () => _clientFactory.connect(host, role: SshConnectionRole.terminal),
       );
 
       final shell = await SshClientFactory.withinSetupTimeout(

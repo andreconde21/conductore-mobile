@@ -79,6 +79,8 @@ void main() {
       loadDefaults: () async => storedDefaults,
       saveDefaults: (json) async => storedDefaults = json,
     );
+    // No polling timer outlives a widget test; refreshes are explicit.
+    runs.setAppActive(false);
   });
 
   Future<void> pumpList(WidgetTester tester) async {

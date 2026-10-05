@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
@@ -7,6 +8,7 @@ import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/data/ssh_keepalive_policy.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
@@ -44,6 +46,8 @@ class ThemeController extends ChangeNotifier {
   bool _restoreSessionsOnLaunch = true;
   MultiplexerTabsMode _multiplexerTabs = MultiplexerTabsMode.compact;
   bool _herdrMayMoveFocus = false;
+  bool? _keepScreenOn;
+  int _sshKeepaliveSeconds = SshKeepalivePolicy.defaultForegroundSeconds;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
@@ -113,6 +117,13 @@ class ThemeController extends ChangeNotifier {
   /// Whether this device may move Herdr's shared focus on its own (see
   /// `HerdrSessionFocus`). Off by default; never synced.
   bool get herdrMayMoveFocus => _herdrMayMoveFocus;
+
+  /// "Keep screen on while a terminal is open": on for phones and off for
+  /// desktop unless the user chose (CON-089).
+  bool get keepScreenOn => _keepScreenOn ?? !PlatformFeatures.isDesktop;
+
+  /// Seconds between SSH keep-alives while the app is in front; 0 is off.
+  int get sshKeepaliveSeconds => _sshKeepaliveSeconds;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
@@ -150,6 +161,8 @@ class ThemeController extends ChangeNotifier {
     _restoreSessionsOnLaunch = preferences.restoreSessionsOnLaunch;
     _multiplexerTabs = preferences.multiplexerTabs;
     _herdrMayMoveFocus = preferences.herdrMayMoveFocus;
+    _keepScreenOn = preferences.keepScreenOn;
+    _sshKeepaliveSeconds = preferences.sshKeepaliveSeconds;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
     _voice = preferences.voice;
@@ -400,6 +413,24 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setKeepScreenOn(bool enabled) async {
+    if (keepScreenOn == enabled && _keepScreenOn != null) {
+      return;
+    }
+    _keepScreenOn = enabled;
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> setSshKeepaliveSeconds(int seconds) async {
+    if (_sshKeepaliveSeconds == seconds) {
+      return;
+    }
+    _sshKeepaliveSeconds = seconds;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setMultiplexerTabs(MultiplexerTabsMode value) async {
     if (_multiplexerTabs == value) {
       return;
@@ -488,6 +519,8 @@ class ThemeController extends ChangeNotifier {
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,
         multiplexerTabs: _multiplexerTabs,
         herdrMayMoveFocus: _herdrMayMoveFocus,
+        keepScreenOn: _keepScreenOn,
+        sshKeepaliveSeconds: _sshKeepaliveSeconds,
         omarchySyncHostId: _omarchySyncHostId,
         omarchySyncedTheme: _omarchySyncedTheme,
       ),
