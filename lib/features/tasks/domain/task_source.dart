@@ -22,26 +22,28 @@ enum TaskStatusCategory {
   /// categories of its own).
   static TaskStatusCategory guess(String name) {
     final n = name.toLowerCase().replaceAll(RegExp('[ _]'), '-');
-    const done = {
-      'done',
-      'closed',
-      'complete',
-      'completed',
-      'resolved',
-      'merged',
-      'pr-merged',
-      'deployed',
-      'cancelled',
-      'canceled',
-      'wontfix',
-      'removed',
-    };
     const todo = {'backlog', 'todo', 'to-do', 'open', 'new', 'proposed'};
-    if (done.contains(n)) return TaskStatusCategory.done;
+    if (doneNames.contains(n)) return TaskStatusCategory.done;
     if (todo.contains(n)) return TaskStatusCategory.todo;
     if (n.isEmpty) return TaskStatusCategory.unknown;
     return TaskStatusCategory.inProgress;
   }
+
+  /// The status names [guess] takes as done (lower case, `-` for spaces).
+  static const doneNames = {
+    'done',
+    'closed',
+    'complete',
+    'completed',
+    'resolved',
+    'merged',
+    'pr-merged',
+    'deployed',
+    'cancelled',
+    'canceled',
+    'wontfix',
+    'removed',
+  };
 }
 
 /// One status a task can be moved to. [id] is what the tracker takes (a
@@ -209,6 +211,17 @@ abstract class TaskSource {
 
   /// Adds [text] as a comment on [task].
   Future<void> comment(TaskItem task, String text);
+}
+
+/// A source that lists only open tasks unless asked for the done ones too,
+/// and says how many tasks matched before its limit (the markdown folder).
+abstract interface class WindowedTaskSource implements TaskSource {
+  /// Whether [TaskSource.list] includes done tasks.
+  abstract bool includeDone;
+
+  /// How many tasks matched the last [TaskSource.list]; more than it
+  /// returned when the limit cut it. Null before a list.
+  int? get lastTotal;
 }
 
 /// A field of a source's settings form.

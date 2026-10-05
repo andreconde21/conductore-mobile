@@ -256,6 +256,11 @@ class _TasksPageState extends State<TasksPage> {
           for (final s in _c.sources)
             if (_c.tasksOf(s.id).error case final error?) (s.name, error),
         ];
+        final partial = [
+          for (final s in _c.sources)
+            if (_c.tasksOf(s.id) case final t when t.partial)
+              (s, t.tasks.length, t.total!),
+        ];
         return RefreshIndicator(
           onRefresh: _c.refresh,
           child: ListView.builder(
@@ -263,7 +268,9 @@ class _TasksPageState extends State<TasksPage> {
             physics: const AlwaysScrollableScrollPhysics(),
             itemCount: tasks.length + 1,
             itemBuilder: (context, i) {
-              if (i == 0) return _header(context, all, errors, tasks.length);
+              if (i == 0) {
+                return _header(context, all, errors, partial, tasks.length);
+              }
               final task = tasks[i - 1];
               return _TaskTile(
                 task: task,
@@ -287,6 +294,7 @@ class _TasksPageState extends State<TasksPage> {
     BuildContext context,
     List<TaskItem> all,
     List<(String, String)> errors,
+    List<(TaskSourceConfig, int, int)> partial,
     int shown,
   ) {
     final theme = Theme.of(context);
@@ -370,6 +378,13 @@ class _TasksPageState extends State<TasksPage> {
                     () => _filter = _filter.copyWith(project: () => v),
                   ),
                 ),
+              if (_c.hasDoneToggle)
+                FilterChip(
+                  key: const ValueKey('tasks-show-done'),
+                  label: const Text('Show done'),
+                  selected: _c.showDone,
+                  onSelected: (v) => unawaited(_c.setShowDone(v)),
+                ),
               PopupMenuButton<TaskSort>(
                 key: const ValueKey('tasks-sort'),
                 tooltip: 'Sort',
@@ -397,6 +412,16 @@ class _TasksPageState extends State<TasksPage> {
               child: Text(
                 '$name: $error',
                 style: TextStyle(color: theme.colorScheme.error),
+              ),
+            ),
+          for (final (source, count, total) in partial)
+            Padding(
+              key: ValueKey('tasks-partial-${source.id}'),
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '${source.name}: showing the newest $count of $total '
+                '${_c.showDone ? '' : 'open '}tasks.',
+                style: theme.textTheme.bodySmall,
               ),
             ),
           Padding(

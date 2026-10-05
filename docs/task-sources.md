@@ -36,7 +36,7 @@ abstract class TaskSource {
 
 | Kind | API | Auth | Statuses | Paging |
 |---|---|---|---|---|
-| Markdown folder | the companion's `tasks` command | SSH to the machine | the files' `status:` values | up to 5000 files |
+| Markdown folder | the companion's `tasks` command | SSH to the machine | the files' `status:` values | the newest 500 (`limit`), open ones unless "Show done" |
 | GitHub Issues | REST v3 (`api.github.com` or GHES `/api/v3`) | PAT, Bearer | open, closed | `page` |
 | GitHub Projects (v2) | GraphQL | PAT, Bearer | the project's single-select field ("Status") | cursor |
 | GitLab Issues | REST v4 (gitlab.com or self-managed) | PAT, `PRIVATE-TOKEN` | opened, closed | `page` |
@@ -56,7 +56,12 @@ same way: newest update first, then source name, then key, with numbers in
 keys compared as numbers. Each task shows a badge naming its source, and
 a task that belongs to a project (a markdown folder of project folders)
 shows a small label naming it; the Project filter narrows the list to one
-project.
+project (only projects with tasks in the list are offered).
+
+A markdown folder lists open tasks only (it asks the companion to leave
+out the done statuses below); the "Show done" chip asks again with them.
+When the folder matched more tasks than the limit, the list says
+"<source>: showing the newest N of M tasks".
 
 Only `https://` addresses are used (plain `http://` for localhost only).
 Tokens live in this device's secure storage, one key per source
@@ -147,4 +152,16 @@ folder or one of its real project folders, never a symlink; writes go
 through a temp file next to the task file and a rename. `list` returns at
 most 5000 tasks and stops reading after 8 seconds; either cap sets
 `truncated: true`. In a tree it also returns `projects`, the project
-folders read.
+folders that have tasks.
+
+`list` takes optional filters: `statuses` and `excludeStatuses` (status
+names, compared ignoring case, with spaces and `_` read as `-`),
+`projects` (project folders; others are not read), `updatedSince` (an ISO
+time, against `updated_at` or else the file's mtime) and `limit` (at most
+5000). It returns the matching tasks newest first, at most `limit`, with
+`total` (how many matched) and `statuses` (seen in every task read, so a
+status picker stays complete). `--gzip` after the `-` packs a reply over
+4 KB as `{"encoding":"gzip","data":"<base64>"}`, as the other commands
+do; older companions ignore the flag and the filters, and the app applies
+them itself. On /data/projectstasks the app's default request (open tasks,
+limit 500) is 177 KB, 49 KB gzipped, against 860 KB for every task.

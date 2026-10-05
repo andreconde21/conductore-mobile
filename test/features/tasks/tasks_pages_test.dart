@@ -1,3 +1,4 @@
+import 'package:conduit/features/tasks/data/markdown_folder_task_source.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
 import 'package:conduit/features/tasks/presentation/tasks_page.dart';
@@ -8,7 +9,7 @@ import 'task_fakes.dart';
 
 void main() {
   late MemoryTaskSourcesStore store;
-  late Map<String, FakeTaskSource> sources;
+  late Map<String, TaskSource> sources;
   late TaskSourcesController controller;
 
   setUp(() {
@@ -186,10 +187,86 @@ void main() {
     expect(find.byKey(const ValueKey('task-a/1')), findsOneWidget);
   });
 
+  testWidgets('a markdown folder: open tasks, Show done, showing N of M', (
+    tester,
+  ) async {
+    final inputs = <Map<String, Object?>>[];
+    sources['md'] = MarkdownFolderTaskSource(
+      const TaskSourceConfig(
+        id: 'md',
+        kind: TaskSourceKind.markdownFolder,
+        name: 'ProjectsTasks',
+        settings: {'host': 'h1', 'folder': '/data/projectstasks'},
+      ),
+      call: (host, op, input) async {
+        inputs.add(input);
+        final done = !input.containsKey('excludeStatuses');
+        return {
+          'ok': true,
+          'total': done ? 900 : 700,
+          'tasks': [
+            {
+              'id': 'amedia/AM-1',
+              'title': 'Open',
+              'status': 'todo',
+              'project': 'amedia',
+            },
+            if (done)
+              {
+                'id': 'old/OLD-1',
+                'title': 'Shipped',
+                'status': 'done',
+                'project': 'old',
+              },
+          ],
+        };
+      },
+    );
+    await controller.save(
+      const TaskSourceConfig(
+        id: 'md',
+        kind: TaskSourceKind.markdownFolder,
+        name: 'ProjectsTasks',
+        settings: {'host': 'h1', 'folder': '/data/projectstasks'},
+      ),
+    );
+    await pump(tester);
+
+    expect(inputs.single['excludeStatuses'], contains('done'));
+    expect(find.byKey(const ValueKey('task-md/amedia/AM-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-md/old/OLD-1')), findsNothing);
+    expect(
+      find.text('ProjectsTasks: showing the newest 1 of 700 open tasks.'),
+      findsOneWidget,
+    );
+    // Only projects with tasks are offered.
+    await tester.tap(find.byKey(const ValueKey('tasks-filter-project')));
+    await tester.pumpAndSettle();
+    expect(find.text('amedia'), findsWidgets);
+    expect(find.text('old'), findsNothing);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('tasks-show-done')));
+    await tester.pumpAndSettle();
+    expect(inputs.last.containsKey('excludeStatuses'), isFalse);
+    expect(find.byKey(const ValueKey('task-md/old/OLD-1')), findsOneWidget);
+    expect(
+      find.text('ProjectsTasks: showing the newest 2 of 900 tasks.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('tasks-show-done')));
+    await tester.pumpAndSettle();
+    expect(inputs.last['excludeStatuses'], contains('done'));
+    expect(find.byKey(const ValueKey('task-md/old/OLD-1')), findsNothing);
+  });
+
   testWidgets('no projects: no Project filter', (tester) async {
     await addTwoSources();
     await pump(tester);
     expect(find.byKey(const ValueKey('tasks-filter-project')), findsNothing);
+    expect(find.byKey(const ValueKey('tasks-show-done')), findsNothing);
   });
 
   testWidgets('sorting by status groups to do, in progress, done', (
@@ -219,7 +296,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('task-status-option-done')));
     await tester.pumpAndSettle();
-    expect(sources['a']!.moves, [('1', 'done')]);
+    expect((sources['a']! as FakeTaskSource).moves, [('1', 'done')]);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('task-status')),
@@ -234,7 +311,9 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('task-comment-send')));
     await tester.pumpAndSettle();
-    expect(sources['a']!.comments, [('1', 'Started from the phone')]);
+    expect((sources['a']! as FakeTaskSource).comments, [
+      ('1', 'Started from the phone'),
+    ]);
     expect(find.text('Started from the phone'), findsOneWidget);
 
     // Back on the list, the task shows its new status.

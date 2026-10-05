@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/features/agent_attention/data/companion_reply.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/tasks/data/task_http.dart';
@@ -16,8 +17,9 @@ typedef CompanionTasksCall =
 
 /// The open markdown tasks folder (docs/task-sources.md) on one machine,
 /// through its companion's `tasks` command: the companion only touches
-/// that folder.
-class MarkdownFolderTaskSource implements TaskSource {
+/// that folder. A list asks for the newest [maxTasksPerSource] tasks, open
+/// ones only unless [includeDone].
+class MarkdownFolderTaskSource implements WindowedTaskSource {
   MarkdownFolderTaskSource(this.config, {required this.call});
 
   @override
@@ -26,6 +28,12 @@ class MarkdownFolderTaskSource implements TaskSource {
 
   /// Statuses seen by the last [list], after the format's defaults.
   List<String> _statuses = const [];
+
+  @override
+  bool includeDone = false;
+
+  @override
+  int? lastTotal;
 
   @override
   TaskSourceCapabilities get capabilities => config.kind.capabilities;
@@ -105,22 +113,34 @@ class MarkdownFolderTaskSource implements TaskSource {
 
   @override
   Future<List<TaskItem>> list() async {
-    final json = await _run('list');
+    final json = await _run('list', {
+      'limit': maxTasksPerSource,
+      if (!includeDone)
+        'excludeStatuses': TaskStatusCategory.doneNames.toList(),
+    });
     _statuses = [
       if (json['statuses'] case final List<Object?> list)
         for (final s in list)
           if (s is String) s,
     ];
+    // An older companion ignores the filters: apply them here too.
     final tasks = [
       if (json['tasks'] case final List<Object?> list)
         for (final t in list)
           if (t is Map) _task(t),
     ];
+    if (!includeDone) {
+      tasks.removeWhere((t) => t.status?.category == TaskStatusCategory.done);
+    }
     tasks.sort(
       (a, b) =>
           (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0)),
     );
-    return tasks;
+    final total = json['total'];
+    lastTotal = total is int ? total : tasks.length;
+    return tasks.length > maxTasksPerSource
+        ? tasks.sublist(0, maxTasksPerSource)
+        : tasks;
   }
 
   @override
@@ -147,14 +167,14 @@ class MarkdownFolderTaskSource implements TaskSource {
 }
 
 /// [CompanionTasksCall] over a machine's command runner: the JSON goes on
-/// stdin, never in the command line.
+/// stdin, never in the command line; a large reply comes back gzipped.
 Future<Map<String, Object?>> runCompanionTasks(
   AgentCommandRunner runner,
   String op,
   Map<String, Object?> input,
 ) => runCompanionJson(
   runner,
-  'tasks $op -',
+  'tasks $op - $companionGzipFlag',
   stdin: input,
   outdated: 'Update the companion on that machine: it predates task folders.',
 );
@@ -194,7 +214,9 @@ Future<Map<String, Object?>> runCompanionJson(
   }
   Map<String, Object?>? json;
   try {
-    final decoded = jsonDecode(result.stdout.trim().split('\n').last);
+    final decoded = jsonDecode(
+      unpackCompanionReply(result.stdout.trim().split('\n').last),
+    );
     if (decoded is Map) json = Map<String, Object?>.from(decoded);
   } catch (_) {}
   if (json == null) {
