@@ -170,6 +170,53 @@ void main() {
     );
   });
 
+  test('forget cleans up through the companion; keep toggles; the report '
+      'says what stayed (CON-088)', () async {
+    final c = controller();
+    companionRuns = [
+      {...run('r1', status: 'finished', outcome: 'done'), 'keep': true},
+    ];
+    await c.refresh('h1');
+    final r1 = c.runsOn('h1').single;
+    expect(r1.keep, isTrue);
+    expect(r1.agentOpen, isTrue);
+    await c.keep('h1', 'r1', on: false);
+    await c.keep('h1', 'r1');
+    await c.forget('h1', 'r1', deleteBranch: true);
+    expect(calls.map((c) => c.$2), [
+      'task-runs list',
+      'task-runs keep r1 off',
+      'task-runs list',
+      'task-runs keep r1',
+      'task-runs list',
+      'task-runs forget r1 --delete-branch',
+      'task-runs list',
+    ]);
+    expect(
+      TaskRunsController.forgetNote({
+        'worktree': 'removed',
+        'branch': 'deleted',
+      }),
+      isNull,
+    );
+    expect(
+      TaskRunsController.forgetNote({
+        'worktree': 'kept',
+        'worktreeReason': 'it has uncommitted or untracked changes',
+        'worktreePath': '/w/k-1',
+        'branch': 'kept',
+        'branchReason': 'its worktree is kept',
+      }),
+      'Worktree kept: it has uncommitted or untracked changes (/w/k-1)\n'
+      'Branch kept: its worktree is kept',
+    );
+    companionRuns = [
+      {...run('r2', status: 'finished'), 'agentStopped': 'closed'},
+    ];
+    await c.refresh('h1');
+    expect(c.runsOn('h1').single.agentOpen, isFalse);
+  });
+
   test('doneStatus prefers done over cancelled', () {
     final options = [
       const TaskStatusOption(

@@ -154,3 +154,33 @@ test('a Herdr without events.subscribe is read by snapshot', async () => {
   watch.stop()
   await fake.stop()
 })
+
+test('a stop while the subscribe is pending closes the subscription it gets (no leak)', async () => {
+  for (const restart of [false, true]) {
+    let opened = 0
+    let closed = 0
+    const releases = []
+    const subscribeFn = () => new Promise(resolve => releases.push(() => {
+      opened++
+      resolve({ closed: false, close () { if (!this.closed) { this.closed = true; closed++ } } })
+    }))
+    const request = async (socket, method) => method === 'ping' ? { version: 'x', protocol: 22 } : { workspaces: [], panes: [] }
+    const watch = new HerdrWatch({ id: 'herdr', socket: '/nonexistent' }, new LiveStore(), { request, subscribeFn })
+    watch.start()
+    await until(() => releases.length === 1)
+    watch.stop()
+    // Started again meanwhile: the old connect must not install its handle.
+    if (restart) { watch.start(); await until(() => releases.length === 2) }
+    releases[0]()
+    await sleep(20)
+    assert.equal(closed, 1, `the handle of the stopped connect is closed (restart ${restart})`)
+    assert.ok(!watch.a || watch.a.closed === false, 'only a live handle stays')
+    if (restart) {
+      releases[1]()
+      await until(() => !!watch.a)
+      assert.equal(opened - closed, 1, 'exactly one subscription open after the restart')
+    }
+    watch.stop()
+    assert.equal(opened, closed, 'nothing open after the last stop')
+  }
+})

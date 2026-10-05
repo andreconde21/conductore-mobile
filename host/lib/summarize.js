@@ -180,8 +180,16 @@ const NOT_LOGGED_IN = /not logged in|please run \/login|invalid api key|oauth to
 
 // Runs claude with the prompt on stdin. Resolves
 // { code, signal, stdout, stderr, timedOut, spawnError }. `args` defaults to
-// the summary's own (the guide passes its own fixed ones).
-function runClaude (bin, prompt, { maxWords, args, timeoutMs, env, onChild, cwd }) {
+// the summary's own (the guide passes its own fixed ones). The codex and
+// opencode brains run through it too.
+//
+// At the timeout the whole process group gets SIGTERM, then SIGKILL, and
+// the call settles at the latest SETTLE_AFTER_KILL_MS later even when a
+// straggler that left the group still holds a pipe open: the caller's lock
+// never waits on it.
+const SETTLE_AFTER_KILL_MS = 1500
+
+function runClaude (bin, prompt, { maxWords, args, timeoutMs, env, onChild, cwd, maxStdout = 1024 * 1024 }) {
   return new Promise(resolve => {
     let child
     try {
@@ -200,21 +208,30 @@ function runClaude (bin, prompt, { maxWords, args, timeoutMs, env, onChild, cwd 
     let stderr = ''
     let timedOut = false
     let settled = false
-    const cap = (acc, d) => acc.length < 1024 * 1024 ? acc + d : acc
+    let late = null
+    const cap = max => (acc, d) => acc.length < max ? acc + d : acc
+    const capOut = cap(maxStdout)
+    const capErr = cap(1024 * 1024)
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
-    child.stdout.on('data', d => { stdout = cap(stdout, d) })
-    child.stderr.on('data', d => { stderr = cap(stderr, d) })
-    const timer = setTimeout(() => {
-      timedOut = true
-      killGroup(child)
-    }, timeoutMs)
+    child.stdout.on('data', d => { stdout = capOut(stdout, d) })
+    child.stderr.on('data', d => { stderr = capErr(stderr, d) })
     const settle = r => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      clearTimeout(late)
       resolve(r)
     }
+    const timer = setTimeout(() => {
+      timedOut = true
+      killGroup(child)
+      late = setTimeout(() => {
+        killGroup(child, 'SIGKILL')
+        try { child.stdout.destroy(); child.stderr.destroy() } catch {}
+        settle({ code: null, signal: 'SIGKILL', stdout, stderr, timedOut })
+      }, SETTLE_AFTER_KILL_MS)
+    }, timeoutMs)
     child.on('error', err => settle({ spawnError: err }))
     child.on('close', (code, signal) => {
       // Whatever it started and left behind goes with it.

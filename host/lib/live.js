@@ -6,9 +6,13 @@
 // for the phone's `events` long-poll.
 //
 // It only runs while a phone asks for it: a status or events request with
-// --live, --herdr-agents or --only live starts it, and it stops
-// IDLE_STOP_MS after the last one. A machine nobody looks at holds no
-// subscription and no control client.
+// --live, --herdr-agents or --only live starts it. --live (a screen showing
+// the machine's live state) keeps all of it for IDLE_STOP_MS after the last
+// ask; --herdr-agents alone (the agent monitor's polls, also in the
+// background) keeps only the Herdr watches, never the tmux control client,
+// and only for AGENTS_STOP_MS. An events long-poll counts as asking until
+// it ends. A machine nobody looks at holds no subscription and no control
+// client.
 //
 // It also derives the agents only Herdr knows (any of its agent kinds in a
 // pane that no Conductore adapter reports), with a grace period for new
@@ -21,6 +25,10 @@ const herdrApi = require('./herdr-api')
 const { log } = require('./log')
 
 const IDLE_STOP_MS = 15 * 60 * 1000
+// Long: Android defers a backgrounded app's network work (Doze, app
+// standby), and a bridge that stops between two polls makes Herdr-only
+// agents vanish and come back (notification churn).
+const AGENTS_STOP_MS = 10 * 60 * 1000
 const NEW_AGENT_GRACE_MS = 5000
 const WORKING_HYSTERESIS_MS = 5000
 const DISCOVER_EVERY_MS = 60 * 1000
@@ -94,8 +102,11 @@ class LiveBridge {
   // Herdr sockets hooks reported.
   // tmuxEnabled(): the `tmux-live` setting (off by default: the control
   // client shows in the user's tmux, see docs/herdr-live.md).
-  constructor ({ onChange, companionAgents = () => [], extraSockets = () => [], now = Date.now, makeHerdr, makeTmux, tmuxEnabled = () => false } = {}) {
+  // held(): { live, agents }, what the open long-polls ask for: wanted for
+  // as long as they wait.
+  constructor ({ onChange, companionAgents = () => [], extraSockets = () => [], now = Date.now, makeHerdr, makeTmux, tmuxEnabled = () => false, held = () => ({}) } = {}) {
     this.tmuxEnabled = tmuxEnabled
+    this.held = held
     this.onChangeCb = onChange || (() => {})
     this.companionAgents = companionAgents
     this.extraSockets = extraSockets
@@ -107,6 +118,8 @@ class LiveBridge {
     this.herdr = new Map() // server id -> HerdrWatch
     this.tmux = null
     this.lastWanted = 0
+    this.liveUntil = 0 // --live wants everything until then
+    this.agentsUntil = 0 // --herdr-agents wants the Herdr watches until then
     this.stopTimer = null
     this.discoverTimer = null
     // Herdr-only agents.
@@ -116,13 +129,47 @@ class LiveBridge {
     this.agentsDirty = false
   }
 
-  // A phone asked: start (or keep running) for IDLE_STOP_MS more.
-  touch () {
-    this.lastWanted = this.now()
+  // A phone asked: start (or keep running). kind 'live' keeps everything
+  // for IDLE_STOP_MS more, 'agents' (herdr-agents only) the Herdr watches
+  // for AGENTS_STOP_MS more.
+  touch (kind = 'live') {
+    const now = this.now()
+    this.lastWanted = now
+    if (kind === 'agents') this.agentsUntil = Math.max(this.agentsUntil, now + AGENTS_STOP_MS)
+    else this.liveUntil = Math.max(this.liveUntil, now + IDLE_STOP_MS)
     if (!this.running) this.start()
+    else this.syncTmux()
+    this.armStop()
+  }
+
+  // Whether a --live ask is current (tmux and the full entity set).
+  liveWanted () {
+    return this.now() < this.liveUntil
+  }
+
+  armStop () {
     clearTimeout(this.stopTimer)
-    this.stopTimer = setTimeout(() => this.stop(), IDLE_STOP_MS)
+    this.stopTimer = null
+    if (!this.running) return
+    const now = this.now()
+    const live = this.liveUntil - now
+    const until = Math.max(this.liveUntil, this.agentsUntil) - now
+    // Wake when --live lapses (tmux goes) and when nothing is wanted.
+    const next = live > 0 && live < until ? live : until
+    this.stopTimer = setTimeout(() => this.checkWanted(), Math.max(0, next) + 5)
     if (this.stopTimer.unref) this.stopTimer.unref()
+  }
+
+  // Stops what nobody wants any more.
+  checkWanted () {
+    if (!this.running) return
+    const held = this.held() || {}
+    if (held.live) this.touch('live')
+    if (held.agents) this.touch('agents')
+    const now = this.now()
+    if (now >= this.liveUntil && now >= this.agentsUntil) return this.stop()
+    this.syncTmux()
+    this.armStop()
   }
 
   start () {
@@ -136,7 +183,7 @@ class LiveBridge {
   // server entity says so (`state: "off"`) and the phone polls tmux.
   syncTmux () {
     if (!this.running) return
-    if (this.tmuxEnabled()) {
+    if (this.tmuxEnabled() && this.liveWanted()) {
       if (!this.tmux) {
         this.store.remove('srv:tmux')
         this.tmux = this.makeTmux(this.store)
@@ -185,7 +232,8 @@ class LiveBridge {
   stop () {
     if (!this.running) return
     this.running = false
-    log('live', 'bridge stopped (no phone asked for 15 min)')
+    log('live', 'bridge stopped (no phone asked for it)')
+    this.liveUntil = this.agentsUntil = 0
     clearTimeout(this.stopTimer)
     clearTimeout(this.discoverTimer)
     clearTimeout(this.agentTimer)
@@ -297,4 +345,4 @@ class LiveBridge {
   }
 }
 
-module.exports = { LiveStore, LiveBridge, IDLE_STOP_MS, NEW_AGENT_GRACE_MS, WORKING_HYSTERESIS_MS }
+module.exports = { LiveStore, LiveBridge, IDLE_STOP_MS, AGENTS_STOP_MS, NEW_AGENT_GRACE_MS, WORKING_HYSTERESIS_MS }

@@ -23,6 +23,10 @@ const fs = require('fs')
 const args = process.argv.slice(2)
 fs.appendFileSync(${JSON.stringify(tmuxLog)}, JSON.stringify(args) + '\\n')
 if (args[0] === 'new-window') process.stdout.write('%42 @7 main\\n')
+if (args[0] === 'display-message') {
+  if (!process.env.FAKE_TMUX_DISPLAY) { process.stderr.write("can't find pane"); process.exit(1) }
+  process.stdout.write(process.env.FAKE_TMUX_DISPLAY + '\\n')
+}
 `, { mode: 0o755 })
 
 process.env.CONDUCTORE_HOME = path.join(home, '.conductore')
@@ -283,4 +287,212 @@ test('worktree off: the run works in the repository, links only a fresh agent', 
   const fresh = { sessionId: 'new', cwd: dir, state: 'working', startedAt: Date.now() }
   ;({ runs: [after] } = await runs.list([old, fresh]))
   assert.equal(after.sessionId, 'new')
+})
+
+// --- cleaning up (CON-088) -----------------------------------------------------
+
+const config = require('../lib/config')
+const setKeep = v => { fs.mkdirSync(process.env.CONDUCTORE_HOME, { recursive: true }); config.set('task-agent-keep', v) }
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+// A fake Herdr answering pane.get with `pane` and recording every call.
+async function fakeHerdr (pane) {
+  const sock = path.join(tempDir('cnd-runs-hd-'), 'h.sock')
+  const calls = []
+  const server = net.createServer(c => {
+    let buf = ''
+    c.on('data', d => {
+      buf += d
+      let i
+      while ((i = buf.indexOf('\n')) !== -1) {
+        const msg = JSON.parse(buf.slice(0, i))
+        buf = buf.slice(i + 1)
+        calls.push(msg)
+        const p = typeof pane === 'function' ? pane() : pane
+        let reply
+        if (msg.method === 'tab.create') reply = { result: { type: 'tab_created', tab: { tab_id: 't9', workspace_id: 'w1' }, root_pane: { pane_id: 'p9' } } }
+        else if (msg.method === 'pane.get') reply = p ? { result: { type: 'pane_info', pane: p } } : { error: { code: 'pane_not_found', message: 'no pane' } }
+        else reply = { result: { type: 'ok' } }
+        c.write(JSON.stringify({ id: msg.id, ...reply }) + '\n')
+      }
+    })
+  })
+  await new Promise(resolve => server.listen(sock, resolve))
+  return { sock, calls, close: () => server.close() }
+}
+
+async function finishedRun (opts = {}) {
+  const dir = repo()
+  const wtRoot = tempDir('cnd-runs-wt-')
+  const { runs: [r] } = await runs.start({ repo: dir, agent: 'claude', place: 'none', location: `${wtRoot}/<branch>`, tasks: [task(opts.key || 'K-1')], ...opts.start })
+  const agent = { sessionId: `s-${r.id}`, cwd: r.worktree, state: 'ended', lastEvent: 'SessionEnd', startedAt: Date.now(), ...opts.agent }
+  await runs.list([agent])
+  return { dir, run: (await runs.list(null)).runs.find(x => x.id === r.id) }
+}
+
+test('a run whose agent never appears fails (no-agent) and frees its slot', async () => {
+  reset()
+  const dir = repo()
+  const wtRoot = tempDir('cnd-runs-wt-')
+  process.env.CONDUCTORE_TASK_NO_AGENT_MS = '2000'
+  try {
+    const { runs: [a, b] } = await runs.start({ repo: dir, agent: 'claude', place: 'none', cap: 1, location: `${wtRoot}/<branch>`, tasks: [task('NA-1'), task('NA-2')] })
+    assert.equal(b.status, 'queued')
+    await runs.list([])
+    assert.equal((await runs.list(null)).runs.find(r => r.id === a.id).status, 'running', 'not before the limit')
+    await sleep(2100)
+    const listed = await runs.list([])
+    const ra = listed.runs.find(r => r.id === a.id)
+    assert.equal(ra.status, 'failed')
+    assert.equal(ra.errorCode, 'no-agent')
+    assert.equal(listed.runs.find(r => r.id === b.id).status, 'running', 'the queued run took the slot')
+  } finally {
+    delete process.env.CONDUCTORE_TASK_NO_AGENT_MS
+  }
+})
+
+test('herdr: a done run keeps its agent for the keep time, then its own pane is closed; a pane that is no longer the run\'s is left alone', async () => {
+  reset()
+  const dir = repo()
+  const wtRoot = tempDir('cnd-runs-wt-')
+  let pane = null
+  const h = await fakeHerdr(() => pane)
+  process.env.CONDUCTORE_HERDR_SOCKETS = h.sock
+  try {
+    setKeep('24')
+    const { runs: [r] } = await runs.start({ repo: dir, agent: 'claude', place: 'herdr', workspaceId: 'w1', location: `${wtRoot}/<branch>`, tasks: [task('HS-1')] })
+    assert.equal(r.status, 'running', r.error)
+    pane = { pane_id: 'p9', tab_id: 't9', workspace_id: 'w1', cwd: r.worktree, foreground_cwd: path.join(r.worktree, 'src') }
+    const agent = { sessionId: 'hs1', cwd: r.worktree, state: 'working', lastEvent: 'UserPromptSubmit', startedAt: Date.now() }
+    await runs.list([agent])
+    Object.assign(agent, { state: 'waiting_input', lastEvent: 'Stop' })
+    await runs.list([agent])
+    let run = (await runs.list(null)).runs[0]
+    assert.equal(run.status, 'finished')
+    // Within the keep time: open.
+    assert.equal(await runs.reap(), 0)
+    assert.ok(!h.calls.some(c => c.method === 'pane.close'))
+    // Past it (here: an hour later than 0 h), its pane closes, verified first.
+    setKeep('0')
+    assert.equal(await runs.reap(), 1)
+    const close = h.calls.filter(c => c.method === 'pane.close')
+    assert.deepEqual(close.map(c => c.params), [{ pane_id: 'p9' }])
+    run = (await runs.list(null)).runs[0]
+    assert.equal(run.agentStopped, 'closed')
+    assert.equal(await runs.reap(), 0, 'once')
+
+    // Same pane id, now somewhere else (Herdr restarted, ids reused): not ours.
+    const { runs: [r2] } = await runs.start({ repo: dir, agent: 'claude', place: 'herdr', workspaceId: 'w1', location: `${wtRoot}/<branch>`, tasks: [task('HS-2')] })
+    await runs.cancel(r2.id)
+    pane = { pane_id: 'p9', tab_id: 't9', workspace_id: 'w1', cwd: '/elsewhere' }
+    h.calls.length = 0
+    await runs.reap()
+    assert.ok(!h.calls.some(c => c.method === 'pane.close'), 'never closes a pane that is not the run\'s')
+    assert.equal((await runs.list(null)).runs.find(x => x.id === r2.id).agentStopped, 'not-ours')
+  } finally {
+    h.close()
+    delete process.env.CONDUCTORE_HERDR_SOCKETS
+    setKeep('24')
+  }
+})
+
+test('tmux: the run\'s own pane is killed once its window and cwd match; keep holds it; forever never stops', async () => {
+  reset()
+  const dir = repo()
+  const wtRoot = tempDir('cnd-runs-wt-')
+  try {
+    const { runs: [r, kept] } = await runs.start({ repo: dir, agent: 'claude', place: 'tmux', cap: 2, location: `${wtRoot}/<branch>`, tasks: [task('TS-1'), task('TS-2')] })
+    await runs.cancel(r.id)
+    await runs.cancel(kept.id)
+    await runs.keepRun(kept.id)
+    setKeep('forever')
+    assert.equal(await runs.reap(), 0)
+    setKeep('0')
+    process.env.FAKE_TMUX_DISPLAY = `@8 ${r.worktree}`
+    fs.writeFileSync(tmuxLog, '')
+    await runs.reap()
+    const calls = () => fs.readFileSync(tmuxLog, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l))
+    assert.ok(!calls().some(c => c[0] === 'kill-pane'), 'another window: not ours')
+    reset()
+    const { runs: [r3] } = await runs.start({ repo: dir, agent: 'claude', place: 'tmux', location: `${wtRoot}/<branch>`, tasks: [task('TS-3')] })
+    await runs.cancel(r3.id)
+    process.env.FAKE_TMUX_DISPLAY = `@7 ${r3.worktree}`
+    fs.writeFileSync(tmuxLog, '')
+    assert.equal(await runs.reap(), 1)
+    assert.deepEqual(calls().find(c => c[0] === 'kill-pane'), ['kill-pane', '-t', '%42'])
+    assert.ok(!calls().some(c => c.includes('kill-window') || c.includes('kill-session') || c.includes('kill-server')))
+    assert.equal((await runs.list(null)).runs[0].agentStopped, 'closed')
+  } finally {
+    delete process.env.FAKE_TMUX_DISPLAY
+    setKeep('24')
+  }
+})
+
+test('forget: removes a clean worktree, its merged branch and the prompt folder; keeps a dirty one and an unmerged branch unless asked', async () => {
+  reset()
+  // Clean, no commits (merged into HEAD).
+  let { dir, run } = await finishedRun({ key: 'F-1' })
+  let out = await runs.forget(run.id)
+  assert.equal(out.worktree, 'removed')
+  assert.equal(out.branch, 'deleted')
+  assert.equal(fs.existsSync(run.worktree), false)
+  assert.equal(git(dir, 'branch', '--list', run.branch), '')
+  assert.equal(fs.existsSync(path.dirname(run.promptFile)), false, 'prompt folder gone')
+  assert.equal(git(dir, 'branch', '--show-current'), 'main', 'main worktree untouched')
+
+  // Dirty: kept, with the reason; the branch too.
+  ;({ dir, run } = await finishedRun({ key: 'F-2' }))
+  fs.writeFileSync(path.join(run.worktree, 'new.txt'), 'work\n')
+  out = await runs.forget(run.id)
+  assert.equal(out.worktree, 'kept')
+  assert.match(out.worktreeReason, /uncommitted|untracked/)
+  assert.equal(out.branch, 'kept')
+  assert.ok(fs.existsSync(path.join(run.worktree, 'new.txt')), 'the work is still there')
+  assert.equal(fs.existsSync(path.dirname(run.promptFile)), false)
+
+  // Committed work, not merged: the worktree goes (clean), the branch stays
+  // unless asked.
+  ;({ dir, run } = await finishedRun({ key: 'F-3' }))
+  fs.writeFileSync(path.join(run.worktree, 'b.txt'), 'b\n')
+  git(run.worktree, 'add', '.')
+  git(run.worktree, 'commit', '-qm', 'work')
+  out = await runs.forget(run.id)
+  assert.equal(out.worktree, 'removed')
+  assert.equal(out.branch, 'kept')
+  assert.match(out.branchReason, /not merged/)
+  assert.notEqual(git(dir, 'branch', '--list', run.branch), '')
+  ;({ dir, run } = await finishedRun({ key: 'F-4' }))
+  fs.writeFileSync(path.join(run.worktree, 'c.txt'), 'c\n')
+  git(run.worktree, 'add', '.')
+  git(run.worktree, 'commit', '-qm', 'work')
+  out = await runs.forget(run.id, { deleteBranch: true })
+  assert.equal(out.branch, 'deleted')
+
+  // Without a worktree: the repository is never removed.
+  reset()
+  const repoOnly = repo()
+  const { runs: [n] } = await runs.start({ repo: repoOnly, agent: 'claude', place: 'none', worktree: false, tasks: [task('F-5')] })
+  await runs.cancel(n.id)
+  out = await runs.forget(n.id)
+  assert.equal(out.worktree, 'none')
+  assert.ok(fs.existsSync(path.join(repoOnly, 'a.txt')))
+})
+
+test('the CLI: keep and forget/remove with --delete-branch', async () => {
+  reset()
+  const { run } = await finishedRun({ key: 'CK-1' })
+  const out = []
+  const write = process.stdout.write
+  process.stdout.write = s => { out.push(JSON.parse(s)); return true }
+  try {
+    await runs.runsCli(['keep', run.id], { agents: async () => [] })
+    await runs.runsCli(['keep', run.id, 'off'], { agents: async () => [] })
+    await runs.runsCli(['remove', run.id, '--delete-branch'], { agents: async () => [] })
+  } finally {
+    process.stdout.write = write
+  }
+  assert.equal(out[0].run.keep, true)
+  assert.equal(out[1].run.keep, false)
+  assert.equal(out[2].worktree, 'removed')
+  assert.equal(out[2].branch, 'deleted')
 })

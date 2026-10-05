@@ -42,7 +42,14 @@ const DEFAULT_PERMISSION_TIMEOUT_S = 120
 const MAX_PERMISSION_TIMEOUT_S = 600
 const PROBE_EVERY_MS = 1000
 const OBSERVE_EVERY_MS = 2000
+// state.json, activity.json and turns.json are written at most once per
+// FLUSH_EVERY_MS (and at least SNAPSHOT_DEBOUNCE_MS after the first change
+// of a burst), plus on shutdown. They are only read when the daemon is not
+// running (the CLI's fallback, the next daemon's start), so a few seconds
+// of lag cost nothing; rewriting ~260 KB every busy second did.
 const SNAPSHOT_DEBOUNCE_MS = 1000
+const FLUSH_EVERY_MS = 5000
+const TURNS_PRUNE_EVERY_MS = 6 * 60 * 60 * 1000
 const WATCH_FALLBACK_MS = 2000
 const TMP_MAX_AGE_MS = 60 * 60 * 1000
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
@@ -52,6 +59,11 @@ const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
 function usageThrottleMs () {
   const v = Number(process.env.CONDUCTORE_USAGE_THROTTLE_MS)
   return Number.isFinite(v) && v >= 0 ? v : 10000
+}
+
+function flushEveryMs () {
+  const v = Number(process.env.CONDUCTORE_FLUSH_MS)
+  return Number.isFinite(v) && v >= 0 ? v : FLUSH_EVERY_MS
 }
 
 function requestId () {
@@ -243,6 +255,8 @@ class Daemon {
     this.watchFallback = null
     this.idleTimer = null
     this.snapshotTimer = null
+    this.lastFlushAt = 0
+    this.flushedSeq = null
     this.pruneTimer = null
     this.probeTimer = null
     this.stopping = false
@@ -254,6 +268,10 @@ class Daemon {
       onChange: r => this.onLive(r),
       companionAgents: () => Object.values(this.state.agents),
       tmuxEnabled: () => config.get('tmux-live') === 'on',
+      held: () => {
+        const ps = [...this.pollers]
+        return { live: ps.some(p => p.live), agents: ps.some(p => p.herdrAgents) }
+      },
       extraSockets: () => [...new Set(Object.values(this.state.agents).map(a => a.herdr && a.herdr.socket).filter(Boolean))]
     })
     this.sidebar = new Sidebar({
@@ -307,6 +325,16 @@ class Daemon {
     this.expireAgents()
     this.commit(state.prune(this.state))
     this.turns.prune()
+    // A daemon that lives for days (a phone polling) still drops quiet
+    // sessions' turns and refs, and collects their objects (turns.js).
+    this.turnsPruneTimer = setInterval(() => { this.turns.prune(); this.scheduleSnapshot() }, TURNS_PRUNE_EVERY_MS)
+    this.turnsPruneTimer.unref()
+    // Started tasks (CON-088): runs whose agent never came fail, done runs'
+    // agents close after their keep time. Reads nothing while nothing is due.
+    const sweepRuns = () => require('./task-runs').sweep(this.state.agents).catch(err => log('task-runs', `sweep failed: ${err.message}`))
+    this.taskRunsTimer = setInterval(sweepRuns, require('./task-runs').SWEEP_EVERY_MS)
+    this.taskRunsTimer.unref()
+    sweepRuns()
     this.schedulePrune()
     this.flushSnapshot()
     this.importParkedUsage()
@@ -355,7 +383,14 @@ class Daemon {
     clearTimeout(this.idleTimer)
     const ms = paths.idleExitMs()
     if (!ms) return
-    this.idleTimer = setTimeout(() => { log('daemon', 'idle, exiting'); this.shutdown(0) }, ms)
+    this.idleTimer = setTimeout(() => {
+      // A request still waiting for an answer (a hook on its FIFO, a
+      // watched prompt) would not survive a restart: pending requests are
+      // not persisted. Wait for it.
+      if (this.waiters.size || Object.values(this.state.agents).some(a => a.pending && a.pending.length)) return this.touch()
+      log('daemon', 'idle, exiting')
+      this.shutdown(0)
+    }, ms)
     this.idleTimer.unref()
   }
 
@@ -618,10 +653,7 @@ class Daemon {
     // Started tasks (CON-037): finish runs, start queued ones under the cap.
     require('./task-runs').onAgents(this.state.agents)
     if (pruneRelevant) this.schedulePrune()
-    if (!this.snapshotTimer) {
-      this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
-      this.snapshotTimer.unref()
-    }
+    this.scheduleFlush()
   }
 
   trimChanges () {
@@ -684,24 +716,36 @@ class Daemon {
     this.pruneTimer.unref()
   }
 
+  // Writes what changed since the last flush: state.json when the
+  // sequence moved, activity.json and turns.json when dirty.
   flushSnapshot () {
-    try { writeSnapshotSync(this.state) } catch (err) { log('daemon', 'snapshot failed', err.message) }
+    this.lastFlushAt = Date.now()
+    if (this.flushedSeq !== this.state.seq) {
+      try { writeSnapshotSync(this.state); this.flushedSeq = this.state.seq } catch (err) { log('daemon', 'snapshot failed', err.message) }
+    }
     try { writeActivitySync(this.activity) } catch (err) { log('daemon', 'activity snapshot failed', err.message) }
     try { writeTurnsSync(this.turns) } catch (err) { log('daemon', 'turns snapshot failed', err.message) }
   }
 
-  // The turn store changes after the event path returned (a snapshot
-  // finished); the same debounce writes it.
-  scheduleSnapshot () {
-    if (this.snapshotTimer || !this.turns.dirty) return
-    this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, SNAPSHOT_DEBOUNCE_MS)
+  // One pending flush at a time, FLUSH_EVERY_MS after the last one.
+  scheduleFlush () {
+    if (this.snapshotTimer || this.stopping) return
+    const every = flushEveryMs()
+    const wait = Math.max(Math.min(SNAPSHOT_DEBOUNCE_MS, every), this.lastFlushAt + every - Date.now())
+    this.snapshotTimer = setTimeout(() => { this.snapshotTimer = null; this.flushSnapshot() }, wait)
     this.snapshotTimer.unref()
+  }
+
+  // The turn store changes after the event path returned (a snapshot
+  // finished); the same throttle writes it.
+  scheduleSnapshot () {
+    if (!this.turns.dirty) return
+    this.scheduleFlush()
   }
 
   // --- socket -----------------------------------------------------------------
 
   onConnection (c) {
-    this.touch()
     let buf = ''
     let handled = false
     c.setEncoding('utf8')
@@ -728,7 +772,25 @@ class Daemon {
     c.write(JSON.stringify(obj) + '\n')
   }
 
+  // The idle exit restarts on hook activity and on what a person does;
+  // the phone's own polls (status and events, including --herdr-agents,
+  // and ping) do not restart it unless a live screen asks (--live). A
+  // phone that only polls in the background thus meets a fresh daemon
+  // every few hours (the CLI starts one on its next call) instead of one
+  // that never exits.
+  static isPoll (req) {
+    return (req.op === 'ping' || req.op === 'status' || req.op === 'events') && !req.live
+  }
+
+  // The live bridge for what the request asked: everything for --live,
+  // the Herdr watches only for --herdr-agents.
+  touchLive (req) {
+    if (req.live) this.live.touch('live')
+    else if (req.herdrAgents) this.live.touch('agents')
+  }
+
   async handle (req, c) {
+    if (!Daemon.isPoll(req)) this.touch()
     switch (req.op) {
       case 'ping': {
         const cpu = process.cpuUsage()
@@ -747,7 +809,7 @@ class Daemon {
       case 'status':
         await this.drain()
         if (req.live || req.herdrAgents) {
-          this.live.touch()
+          this.touchLive(req)
           await this.live.ready()
         }
         this.expireAgents()
@@ -762,7 +824,7 @@ class Daemon {
         this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES, activity: this.activity.toJSON(), now: Date.now() }); c.end(); return
       case 'events':
         await this.drain()
-        if (req.live || req.herdrAgents) this.live.touch()
+        this.touchLive(req)
         this.expireAgents()
         return this.handleEvents(req, c)
       case 'decide':
@@ -873,6 +935,8 @@ class Daemon {
     if (!Number.isFinite(timeout) || timeout < 0) timeout = DEFAULT_POLL_TIMEOUT_S
     timeout = Math.min(timeout, MAX_POLL_TIMEOUT_S)
     const poller = { socket: c, since, timer: null, live: !!req.live, herdrAgents: !!req.herdrAgents, onlyLive: !!req.onlyLive }
+    // A long-poll wants the bridge until it ends: its window starts then.
+    c.once('close', () => { if (!this.stopping) this.touchLive(req) })
     // If the client's cursor is not covered by our buffer, resync with a snapshot.
     const oldest = this.changes.length ? this.changes[0].seq : this.state.seq + 1
     if (since > this.state.seq || (since < oldest - 1 && this.changes.length)) {
@@ -931,6 +995,8 @@ class Daemon {
     }
     for (const t of [this.snapshotTimer, this.pruneTimer, this.idleTimer]) clearTimeout(t)
     clearInterval(this.probeTimer)
+    clearInterval(this.turnsPruneTimer)
+    clearInterval(this.taskRunsTimer)
     clearInterval(this.observeTimer)
     clearInterval(this.watchFallback)
     // A snapshot still running is dropped (its temp index goes with tmp/'s
@@ -953,4 +1019,4 @@ function run () {
   return d
 }
 
-module.exports = { Daemon, run, loadSnapshot, writeFifo, fifoAlive, isOurFifo }
+module.exports = { Daemon, run, loadSnapshot, writeFifo, fifoAlive, isOurFifo, FLUSH_EVERY_MS }

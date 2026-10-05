@@ -188,6 +188,10 @@ class HerdrWatch {
     this.cPanes = ''
     this.paneIds = []
     this.stopped = true
+    // Bumped by every start and stop: a connect still awaiting a reply
+    // from an earlier run sees it changed and gives up (closing what it
+    // opened), so a stop mid-connect leaks no subscription.
+    this.generation = 0
     this.failures = 0
     this.timers = { snapshot: null, safety: null, retry: null }
     this.snapshotting = null
@@ -216,26 +220,35 @@ class HerdrWatch {
   start () {
     if (!this.stopped) return
     this.stopped = false
+    this.generation += 1
     this.connect()
   }
 
   async connect () {
     if (this.stopped) return
+    const gen = this.generation
+    const stale = () => this.stopped || gen !== this.generation
     let pong
     try {
       pong = await this.request(this.server.socket, 'ping', {}, { timeoutMs: 2000 })
     } catch (err) {
+      if (stale()) return
       return this.down(err, err.code === 'ENOENT' ? 'none' : 'down')
     }
+    if (stale()) return
     this.info = { version: str(pong && pong.version), protocol: Number.isInteger(pong && pong.protocol) ? pong.protocol : null }
     if (this.info.protocol !== null && this.info.protocol < MIN_PROTOCOL) this.mode = 'snapshot'
     if (this.mode === 'events') {
       try {
-        this.a = await this.subscribe(this.server.socket, LIFECYCLE.map(type => ({ type })), {
+        const a = await this.subscribe(this.server.socket, LIFECYCLE.map(type => ({ type })), {
           onEvent: msg => this.onEvent(msg),
-          onClose: () => this.lost('lifecycle subscription closed')
+          onClose: () => { if (this.a === a) this.lost('lifecycle subscription closed') }
         })
+        if (stale()) { a.close(); return }
+        if (this.a) this.a.close()
+        this.a = a
       } catch (err) {
+        if (stale()) return
         if (api.unknownMethod(err) || err.code === 'unsupported') {
           // No events here: fall back to reading the snapshot on a timer.
           this.mode = 'snapshot'
@@ -367,6 +380,7 @@ class HerdrWatch {
 
   stop ({ forget = true } = {}) {
     this.stopped = true
+    this.generation += 1
     for (const t of Object.values(this.timers)) clearTimeout(t)
     this.timers = { snapshot: null, safety: null, retry: null }
     this.closeConnections()

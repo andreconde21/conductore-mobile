@@ -47,6 +47,8 @@ class TaskRun {
     this.markDone = false,
     this.herdrPaneId,
     this.tmuxPaneId,
+    this.keep = false,
+    this.agentStopped,
     this.createdAt,
     this.finishedAt,
   });
@@ -86,11 +88,27 @@ class TaskRun {
   final bool markDone;
   final String? herdrPaneId;
   final String? tmuxPaneId;
+
+  /// The user asked to keep the agent open past the companion's keep time
+  /// (`task-runs keep`, CON-088).
+  final bool keep;
+
+  /// How the companion stopped the done run's agent (`closed`,
+  /// `signalled`, `gone`, `not-ours`, `unreachable`), once it did.
+  final String? agentStopped;
   final DateTime? createdAt;
   final DateTime? finishedAt;
 
   bool get active =>
       status == TaskRunStatus.starting || status == TaskRunStatus.running;
+
+  /// Done, with an agent the companion may still close (a Herdr or tmux
+  /// pane it opened), so keeping it open means something.
+  bool get agentOpen =>
+      !active &&
+      status != TaskRunStatus.queued &&
+      agentStopped == null &&
+      (herdrPaneId != null || tmuxPaneId != null);
 
   /// Finished well: the agent ended its turn.
   bool get succeeded => status == TaskRunStatus.finished && outcome == 'done';
@@ -138,6 +156,8 @@ class TaskRun {
       tmuxPaneId: json['tmux'] is Map
           ? _s((json['tmux']! as Map)['paneId'])
           : null,
+      keep: json['keep'] == true,
+      agentStopped: _s(json['agentStopped']),
       createdAt: _ms(json['createdAt']),
       finishedAt: _ms(json['finishedAt']),
     );

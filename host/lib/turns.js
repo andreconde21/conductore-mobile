@@ -16,7 +16,10 @@
 // older than KEEP_MS go, with their refs. Every repo is also swept for
 // snapshot refs older than KEEP_MS (at most once per SWEEP_EVERY_MS), so
 // refs whose record was lost still go. Deleted refs leave unreachable
-// objects that git gc removes as usual; no reflog keeps them.
+// objects (no reflog keeps them): after a prune that deleted refs, at most
+// once per GC_EVERY_MS per repo, snapshots.collect() prunes the unreachable
+// loose objects past the keep time and packs the rest, in the same queue
+// (one git at a time, nice 10).
 
 const snapshots = require('./snapshots')
 const { log, debug } = require('./log')
@@ -28,6 +31,7 @@ const MAX_FILES = 50
 const MAX_QUEUE = 100
 const PROMPT_MAX = 160
 const SWEEP_EVERY_MS = 6 * 60 * 60 * 1000
+const GC_EVERY_MS = 24 * 60 * 60 * 1000
 const WAIT_MAX_MS = 25000
 const CHANGING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash'])
 
@@ -51,15 +55,16 @@ function snapInfo (r) {
 
 class Turns {
   // The git operations are injectable for tests.
-  constructor (data, { snapshot = snapshots.snapshot, changes = snapshots.changes, listRefs = snapshots.listRefs, deleteRefs = snapshots.deleteRefs } = {}) {
+  constructor (data, { snapshot = snapshots.snapshot, changes = snapshots.changes, listRefs = snapshots.listRefs, deleteRefs = snapshots.deleteRefs, collect = snapshots.collect } = {}) {
     this.sessions = {}
     this.swept = {}
+    this.collected = {} // repo -> when collect() last ran there
     this.dirty = false
     this.queue = []
     this.running = null
     this.pendingBySession = new Map()
     this.waiters = []
-    this.ops = { snapshot, changes, listRefs, deleteRefs }
+    this.ops = { snapshot, changes, listRefs, deleteRefs, collect }
     this.onDirty = null // the daemon's snapshot debounce
     this.enabled = process.env.CONDUCTORE_SNAPSHOTS !== '0'
     if (data && data.sessions && typeof data.sessions === 'object') {
@@ -67,6 +72,7 @@ class Turns {
         if (s && Array.isArray(s.turns)) this.sessions[sid] = { cwd: s.cwd || null, lastAt: Number(s.lastAt) || 0, endedAt: s.endedAt || null, next: Number(s.next) || 1, turns: s.turns }
       }
       if (data.swept && typeof data.swept === 'object') this.swept = data.swept
+      if (data.collected && typeof data.collected === 'object') this.collected = data.collected
     }
   }
 
@@ -149,7 +155,7 @@ class Turns {
     if (this.queue.length >= MAX_QUEUE) {
       log('snapshot', `queue full, skipped ${job.kind} of ${job.sid} turn ${job.n}`)
       const t = this.turn(job.sid, job.n)
-      if (t && job.kind !== 'prune') { t[job.kind] = { skipped: 'busy', ms: 0, at: Date.now() }; this.dirty = true }
+      if (t && job.kind !== 'prune' && job.kind !== 'collect') { t[job.kind] = { skipped: 'busy', ms: 0, at: Date.now() }; this.dirty = true }
       return
     }
     this.queue.push(job)
@@ -182,6 +188,7 @@ class Turns {
 
   async runJob (job) {
     if (job.kind === 'prune') return this.runPrune(job)
+    if (job.kind === 'collect') return this.runCollect(job)
     const turn = this.turn(job.sid, job.n)
     if (!turn) return
     const ref = snapshots.refFor(job.sid, job.n, job.kind)
@@ -293,6 +300,24 @@ class Turns {
     const doomed = job.sweep ? refs.filter(r => r.at < old).map(r => r.ref) : refs.map(r => r.ref)
     const n = await this.ops.deleteRefs(job.repo, doomed, deadline)
     if (n) debug('snapshot', `pruned ${n} refs in ${job.repo}`)
+    if (n) this.maybeCollect(job.repo)
+  }
+
+  // Objects the deleted refs left: queued behind whatever is waiting (a
+  // turn's snapshot goes first), once per GC_EVERY_MS per repo.
+  maybeCollect (repo, now = Date.now()) {
+    if (now - (this.collected[repo] || 0) < envInt('CONDUCTORE_SNAPSHOT_GC_EVERY_MS', GC_EVERY_MS)) return
+    if (this.queue.some(j => j.kind === 'collect' && j.repo === repo)) return
+    this.collected[repo] = now
+    for (const [r, at] of Object.entries(this.collected)) if (now - at > KEEP_MS) delete this.collected[r]
+    this.dirty = true
+    this.enqueue({ kind: 'collect', repo })
+  }
+
+  async runCollect (job) {
+    const r = await this.ops.collect(job.repo, { expireMs: keepMs() })
+    if (r && !r.ok) log('snapshot', `gc of ${job.repo} skipped: ${r.skipped}`)
+    else if (r && !r.skipped) debug('snapshot', `gc of ${job.repo}: ${r.before} -> ${r.after} loose objects`)
   }
 
   // --- reading --------------------------------------------------------------------
@@ -336,7 +361,7 @@ class Turns {
   }
 
   toJSON () {
-    return { v: 1, sessions: this.sessions, swept: this.swept }
+    return { v: 1, sessions: this.sessions, swept: this.swept, collected: this.collected }
   }
 }
 

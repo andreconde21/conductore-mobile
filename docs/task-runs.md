@@ -75,8 +75,9 @@ command per agent:
 
 An adapter can override its launch command with `launchArgs()`.
 
-`conductore-hostd task-runs [list | cancel <id> | forget <id> | cap <n>]`
-reports every run, linked to its agent. The run's states are `queued`,
+`conductore-hostd task-runs [list | cancel <id> | keep <id> [off] | forget
+<id> [--delete-branch] | cap <n>]` (`remove` is `forget`) reports every run,
+linked to its agent. The run's states are `queued`,
 `starting`, `running`, `finished`, `failed` and `cancelled`, plus:
 
 - `outcome`: `done`, `error` or `gone`;
@@ -101,7 +102,40 @@ reports every run, linked to its agent. The run's states are `queued`,
   does it through the task's source with this device's token. It picks the
   source's first done status that is not a cancellation, adds a comment
   naming the branch, and does this once per run.
-- **What is never done:** nothing kills an agent or removes a worktree.
+- **No agent:** a run whose agent never reports from its worktree within
+  10 minutes (a missing binary, a shell that never ran the line) fails with
+  `errorCode: "no-agent"` and frees its slot.
+
+## Cleaning up (CON-088)
+
+- **Stopping the agent:** a finished, cancelled or no-agent run keeps its
+  agent open for review for the `task-agent-keep` setting (`conductore-hostd
+  config set task-agent-keep <hours>|forever`; default 24 hours). Then the
+  daemon (checked every minute) closes the run's own place:
+  - Herdr: `pane.close` of the run's pane, only after `pane.get` shows the
+    same tab and a cwd inside the worktree;
+  - tmux: `kill-pane` of the run's pane, only after `display-message` shows
+    the same window and a cwd inside the worktree;
+  - none: SIGTERM to the agent's own process, only while its pid and start
+    time still match.
+
+  Never by name or pattern. A pane that no longer passes the check is left
+  alone (`agentStopped: "not-ours"`). The outcome is in `agentStopped`
+  (`closed`, `signalled`, `gone`, `not-ours`, `unreachable`).
+- **Keeping it:** `task-runs keep <id>` keeps that run's agent open until
+  the run is forgotten (`keep <id> off` undoes it).
+- **Forgetting a run** (`forget`, or `remove`) stops its agent at once, then:
+  - removes the worktree with `git worktree remove` only when `git status`
+    shows it clean; otherwise it stays and the answer says why
+    (`worktree: "kept"`, `worktreeReason`, `worktreePath`);
+  - deletes the branch only when its worktree is gone and the branch is
+    merged into the repository's HEAD (`git branch -d`), or with
+    `--delete-branch` (`git branch -D`);
+  - always removes the run's prompt folder.
+
+  A run without a worktree (`worktree: false`) never touches the
+  repository. Runs dropped from the list past the newest 200 done ones lose
+  their prompt folder too.
 
 Tested on temp repositories (host/test/worktree.test.js and
 host/test/task-runs.test.js, with a fake Herdr socket and a fake tmux), and
@@ -137,5 +171,7 @@ per source.
 Started tasks show by batch on the Agents dashboard and under Tasks ›
 Started tasks. Each batch has a progress bar (finished, running, waiting,
 failed) and each run has its state, branch and actions (copy the command,
-stop following, remove). The app follows the runs only once one of those
+stop following, keep the agent open, remove and clean up, remove and delete
+the branch). Removing says what the companion kept (a worktree with
+changes, an unmerged branch). The app follows the runs only once one of those
 views has shown them, so no timer runs at startup.

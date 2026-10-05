@@ -362,6 +362,32 @@ echo '{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":10,"o
   assert.equal(slow.error, 'timeout')
 })
 
+test('brain: a hung opencode is killed as a process group at the timeout, children too, and the call settles', async () => {
+  const bin = path.join(root, 'fakebin-hang')
+  fs.mkdirSync(bin, { recursive: true })
+  const pidFile = path.join(root, 'grandchild.pid')
+  // A child that keeps stdout open and ignores SIGTERM, under a parent
+  // that dies on it: only a group SIGKILL ends both.
+  fs.writeFileSync(path.join(bin, 'opencode'), `#!/bin/sh
+cat >/dev/null
+sh -c 'trap "" TERM; echo $$ > ${pidFile}; while :; do sleep 1; done' &
+wait
+`, { mode: 0o755 })
+  const runner = opencode.brain.locate({ PATH: `${bin}:/usr/bin:/bin`, HOME: emptyDir })
+  let child = null
+  const started = Date.now()
+  const o = await runner.run({ system: 's', prompt: 'p', timeoutMs: 400, onChild: c => { child = c } })
+  assert.equal(o.error, 'timeout')
+  assert.ok(Date.now() - started < 4000, `settled ${Date.now() - started} ms after start`)
+  assert.ok(child && child.spawnargs, 'the caller got the child (for its signal handler)')
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'))
+  let alive = true
+  for (let i = 0; i < 50 && alive; i++) {
+    try { process.kill(pid, 0); await new Promise(resolve => setTimeout(resolve, 50)) } catch { alive = false }
+  }
+  assert.equal(alive, false, 'the grandchild is gone')
+})
+
 test('only an opencode process is taken for the agent', () => {
   assert.equal(opencode.identifyProcess(process.pid), null)
   assert.equal(opencode.identifyProcess(0), null)

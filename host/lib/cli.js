@@ -67,7 +67,8 @@ const USAGE = `usage: conductore-hostd <command>
                                   to view-updates.jsonl: {ok, id}
   config [get [<key>] | set <key> <value>]
                                   herdr-sidebar on|off, tmux-live off|on,
-                                  worktree-location
+                                  worktree-location, task-agent-keep
+                                  <hours>|forever
   decide <requestId> allow|deny|always [--message "..."]
   decide <requestId> answer --answers '{"<question>":"<answer>"}'
   approve-low [--ids <id,id,...>] [--session <sessionId>]
@@ -142,8 +143,12 @@ const USAGE = `usage: conductore-hostd <command>
   task-start -                    start tasks as agents: worktree, branch,
                                   Herdr tab / tmux window, agent with the
                                   prompt; queued past the cap
-  task-runs [list | cancel <id> | forget <id> | cap <n>]
-                                  started tasks, linked to their agents
+  task-runs [list | cancel <id> | keep <id> [off] |
+             forget <id> [--delete-branch] | cap <n>]
+                                  started tasks, linked to their agents;
+                                  forget (or remove) closes the agent,
+                                  removes a clean worktree, a merged (or
+                                  --delete-branch) branch, the prompt
   talkbawt <command>              Talkbawt threads and handoffs: create,
                                   read, post, watch, revoke, mine, deliver
                                   to an agent, the bundled server (serve);

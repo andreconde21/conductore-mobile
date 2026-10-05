@@ -9,7 +9,8 @@
 //                       markDone?} on stdin: queues one run per task and
 //                       attempt, then starts as many as the cap allows
 //   task-runs [list]    every run, linked to its agent
-//   task-runs cancel <id> | forget <id> | cap <n>
+//   task-runs cancel <id> | keep <id> [off] | forget <id> [--delete-branch]
+//             | cap <n>      (remove is forget)
 //
 // A run goes queued -> starting -> running -> finished (or failed,
 // cancelled). Starting it creates the worktree (worktree.js), writes the
@@ -27,7 +28,23 @@
 // or its session ends. The cap counts starting and running runs across
 // every batch; when one finishes, the daemon starts the next queued run
 // (onAgents, called on every agent change) so a batch advances without
-// the phone. Nothing here ever kills an agent or removes a worktree.
+// the phone. A run whose agent never shows up within NO_AGENT_MS fails
+// (no-agent) and frees its slot.
+//
+// Cleaning up (CON-088). A finished, cancelled or no-agent run keeps its
+// agent open for review for the `task-agent-keep` setting (24 h by
+// default, `forever`, or 0), unless the run is marked `keep`; then its
+// agent is stopped by closing the run's own Herdr pane or tmux pane, after
+// checking that the pane is still the run's (same tab or window, cwd in
+// the worktree), or, for place none, by SIGTERM to the agent's own process
+// once its pid and start time still match. Never by name or pattern. The
+// daemon checks this every minute (sweep); a CLI list does too.
+// `forget` stops the agent at once, removes the worktree only when it is
+// clean (`git worktree remove`, never --force; otherwise it is kept and
+// reported), deletes the branch only when it is merged into the
+// repository's HEAD (`git branch -d`) or the user asked (--delete-branch:
+// `-D`), and always removes the run's prompt folder. Runs dropped from the
+// file (past KEEP_DONE) lose their prompt folder too.
 
 const fs = require('fs')
 const path = require('path')
@@ -43,6 +60,9 @@ const MAX_PROMPT = 100000
 const DEFAULT_CAP = 3
 const KEEP_DONE = 200
 const LOCK_STALE_MS = 30000
+const NO_AGENT_MS = 10 * 60 * 1000
+const SWEEP_EVERY_MS = 60 * 1000
+const MAX_STOP_TRIES = 5
 
 // How each agent kind starts interactively with a first prompt; an adapter
 // may provide its own `launchArgs(prompt)` instead (lib/adapters).
@@ -81,6 +101,7 @@ function save (data) {
   if (done.length > KEEP_DONE) {
     const drop = new Set(done.slice(0, done.length - KEEP_DONE).map(r => r.id))
     data.runs = data.runs.filter(r => !drop.has(r.id))
+    for (const id of drop) try { fs.rmSync(runDir(id), { recursive: true, force: true }) } catch {}
   }
   const tmp = `${file()}.${process.pid}.tmp`
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 })
@@ -333,10 +354,20 @@ const realpath = p => { try { return fs.realpathSync(p) } catch { return p } }
 
 // Links runs to the agents (a list or the daemon's map) and finishes the
 // runs whose agent ended its first turn. True when anything changed.
-function link (data, agents) {
+function link (data, agents, { now = Date.now(), noAgentMs = noAgentLimit() } = {}) {
   const list = Array.isArray(agents) ? agents : Object.values(agents || {})
   let changed = false
   for (const r of data.runs) {
+    if (r.status === 'running' && !r.sessionId && now - (r.startedAt || now) > noAgentMs) {
+      // A missing binary, a shell that never ran the line, an agent that
+      // left the worktree at once: the slot goes to the next run.
+      r.status = 'failed'
+      r.errorCode = 'no-agent'
+      r.error = `no agent appeared in the worktree within ${Math.round(noAgentMs / 60000)} min`
+      r.finishedAt = now
+      changed = true
+      continue
+    }
     if (!isActive(r) || !r.worktree) continue
     const wt = realpath(r.worktree)
     // Without a worktree the repository is shared: only an agent that
@@ -358,6 +389,7 @@ function link (data, agents) {
     const before = JSON.stringify([r.sessionId, r.agentState, r.sawWorking, r.status])
     r.sessionId = agent.sessionId
     r.agentKind = agent.kind || 'claude'
+    if (agent.process && agent.process.pid && agent.process.startTime) r.agentProcess = { pid: agent.process.pid, startTime: agent.process.startTime }
     r.agentState = agent.state
     if (agent.state === 'working' || agent.state === 'needs_permission') r.sawWorking = true
     const turnEnded = r.sawWorking && agent.state === 'waiting_input' && (agent.lastEvent === 'Stop' || agent.lastEvent === 'StopFailure')
@@ -386,6 +418,7 @@ async function list (agents, deps = {}) {
     })
   }
   if (finished || hasQueued) await advance(deps)
+  if (agents) await reap(deps)
   const data = load()
   return { ok: true, cap: data.cap, runs: data.runs }
 }
@@ -410,6 +443,145 @@ function onAgents (agents, deps = {}) {
   if (pending.unref) pending.unref()
 }
 
+// --- stopping agents and cleaning up (CON-088) --------------------------------
+
+function noAgentLimit () {
+  const v = Number(process.env.CONDUCTORE_TASK_NO_AGENT_MS)
+  return Number.isFinite(v) && v >= 0 ? v : NO_AGENT_MS
+}
+
+// How long a done run's agent stays open: ms, or Infinity.
+function keepMs () {
+  const v = String(require('./config').get('task-agent-keep') || '24')
+  return v === 'forever' ? Infinity : Number(v) * 60 * 60 * 1000
+}
+
+const insideOf = (p, root) => {
+  if (!p || !root) return false
+  const a = realpath(p)
+  const b = realpath(root)
+  return a === b || a.startsWith(b + path.sep)
+}
+
+// Whether the run left an agent we may have to stop.
+const hasAgentPlace = r => !!((r.herdr && r.herdr.paneId) || (r.tmux && r.tmux.paneId) || (r.place === 'none' && r.agentProcess))
+
+// Stops the run's agent by closing its own pane or window. Resolves
+// { result } with result closed | signalled | gone | not-ours | none, or
+// { retry: reason } when the place could not be reached.
+async function stopAgent (run, deps = {}) {
+  if (run.herdr && run.herdr.paneId) return (deps.stopHerdr || stopHerdr)(run)
+  if (run.tmux && run.tmux.paneId) return (deps.stopTmux || stopTmux)(run)
+  if (run.agentProcess) {
+    const proc = require('./proc')
+    if (!proc.sameProcess(run.agentProcess)) return { result: 'gone' }
+    try { process.kill(run.agentProcess.pid, 'SIGTERM') } catch { return { result: 'gone' } }
+    return { result: 'signalled' }
+  }
+  return { result: 'none' }
+}
+
+async function stopHerdr (run) {
+  const api = require('./herdr-api')
+  const h = run.herdr
+  const socket = h.socket || (api.serverById(h.server) || {}).socket
+  if (!socket) return { retry: 'no Herdr server' }
+  let pane
+  try {
+    const res = await api.request(socket, 'pane.get', { pane_id: h.paneId })
+    pane = (res && res.pane) || res
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED' || err.code === 'timeout') return { retry: `herdr: ${err.code}` }
+    return { result: 'gone' }
+  }
+  if (!pane || pane.pane_id !== h.paneId) return { result: 'gone' }
+  if (h.tabId && pane.tab_id && pane.tab_id !== h.tabId) return { result: 'not-ours' }
+  if (!insideOf(pane.foreground_cwd || pane.cwd, run.worktree)) return { result: 'not-ours' }
+  try {
+    await api.request(socket, 'pane.close', { pane_id: h.paneId })
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED' || err.code === 'timeout') return { retry: `herdr: ${err.code}` }
+    return { result: 'gone' }
+  }
+  return { result: 'closed' }
+}
+
+async function stopTmux (run) {
+  const t = run.tmux
+  // The window id first: a path may hold spaces, an id never does.
+  const r = await tmux(['display-message', '-p', '-t', t.paneId, '#{window_id} #{pane_current_path}'])
+  // No such pane (or no tmux server any more): nothing left to close.
+  if (!r.ok) return { result: 'gone' }
+  const sp = r.stdout.indexOf(' ')
+  const windowId = sp === -1 ? r.stdout : r.stdout.slice(0, sp)
+  const cwd = sp === -1 ? '' : r.stdout.slice(sp + 1)
+  if (t.windowId && windowId !== t.windowId) return { result: 'not-ours' }
+  if (!insideOf(cwd, run.worktree)) return { result: 'not-ours' }
+  const k = await tmux(['kill-pane', '-t', t.paneId])
+  return { result: k.ok ? 'closed' : 'gone' }
+}
+
+// Records a stop's outcome on the run.
+async function noteStop (id, outcome) {
+  await locked(data => {
+    const r = data.runs.find(x => x.id === id)
+    if (!r) return false
+    if (outcome.retry) {
+      r.stopTries = (r.stopTries || 0) + 1
+      if (r.stopTries < MAX_STOP_TRIES) return
+      outcome = { result: 'unreachable' }
+    }
+    r.agentStopped = outcome.result
+    r.agentStoppedAt = Date.now()
+  })
+}
+
+// When a done run's agent is due to stop (ms), or null.
+function stopDue (r, keep = keepMs()) {
+  if (isActive(r) || r.status === 'queued' || r.keep || r.agentStopped || !hasAgentPlace(r)) return null
+  if (r.status === 'failed' && r.errorCode !== 'no-agent') return null
+  if (keep === Infinity) return null
+  return (r.finishedAt || 0) + keep
+}
+
+// Stops the agents of runs past their keep time.
+async function reap (deps = {}) {
+  const now = deps.now || Date.now()
+  const keep = keepMs()
+  const due = load().runs.filter(r => { const at = stopDue(r, keep); return at !== null && at <= now })
+  for (const run of due) {
+    let outcome
+    try { outcome = await stopAgent(run, deps) } catch (err) { outcome = { retry: err.message } }
+    log('task-runs', `run ${run.id}: agent ${outcome.result || `not stopped (${outcome.retry})`}`)
+    await noteStop(run.id, outcome)
+  }
+  return due.length
+}
+
+// The daemon's minute timer: times out runs with no agent, stops agents
+// past their keep time. Reads the file only when it changed or something
+// is due.
+let sweepState = { mtime: null, nextDue: Infinity }
+async function sweep (agents, deps = {}) {
+  let mtime
+  try { mtime = fs.statSync(file()).mtimeMs } catch { return }
+  const now = deps.now || Date.now()
+  if (mtime === sweepState.mtime && now < sweepState.nextDue) return
+  const data = load()
+  const keep = keepMs()
+  const noAgent = noAgentLimit()
+  const relevant = data.runs.some(r => r.status === 'running' || r.status === 'queued' || stopDue(r, keep) !== null)
+  if (relevant) await list(agents, deps)
+  let nextDue = Infinity
+  for (const r of load().runs) {
+    if (r.status === 'running' && !r.sessionId) nextDue = Math.min(nextDue, (r.startedAt || now) + noAgent)
+    const at = stopDue(r, keep)
+    if (at !== null) nextDue = Math.min(nextDue, at)
+  }
+  try { mtime = fs.statSync(file()).mtimeMs } catch {}
+  sweepState = { mtime, nextDue }
+}
+
 async function cancel (id) {
   let found = null
   await locked(data => {
@@ -425,17 +597,86 @@ async function cancel (id) {
   return { ok: true, run: found }
 }
 
-async function forget (id) {
-  let found = false
+// Keeps (or no longer keeps) a run's agent open past the keep time.
+async function keepRun (id, on = true) {
+  let found = null
+  await locked(data => {
+    const r = data.runs.find(x => x.id === id)
+    if (!r) return false
+    r.keep = on
+    found = r
+  })
+  if (!found) throw new RunError('not-found', `no run ${id}`)
+  return { ok: true, run: found }
+}
+
+// Whether the branch is merged into the repository's HEAD.
+async function merged (repo, branch) {
+  const r = await worktree.git(['merge-base', '--is-ancestor', '--end-of-options', `refs/heads/${branch}`, 'HEAD'], { cwd: repo })
+  return r.ok
+}
+
+// Forgets a done run and cleans up after it: the agent, a clean worktree,
+// a merged (or asked for) branch, the prompt folder. Resolves what was
+// done with each.
+async function forget (id, { deleteBranch = false, deps = {} } = {}) {
+  let run = null
   await locked(data => {
     const r = data.runs.find(x => x.id === id)
     if (!r || r.status === 'queued' || isActive(r)) return false
-    found = true
+    run = { ...r }
     data.runs = data.runs.filter(x => x.id !== id)
   })
-  if (!found) throw new RunError('not-found', `no finished run ${id}`)
+  if (!run) throw new RunError('not-found', `no finished run ${id}`)
+  const out = { ok: true, agent: 'none', worktree: 'none', branch: 'none' }
+  if (!run.agentStopped && hasAgentPlace(run)) {
+    try {
+      const o = await stopAgent(run, deps)
+      out.agent = o.result || 'unreachable'
+    } catch { out.agent = 'unreachable' }
+  } else if (run.agentStopped) out.agent = run.agentStopped
+  let wtGone = false
+  if (run.useWorktree !== false && run.worktree && run.repo && realpath(run.worktree) !== realpath(run.repo)) {
+    if (!fs.existsSync(run.worktree)) {
+      await worktree.git(['worktree', 'prune'], { cwd: run.repo })
+      out.worktree = 'gone'
+      wtGone = true
+    } else {
+      const st = await worktree.git(['status', '--porcelain', '--untracked-files=all'], { cwd: run.worktree })
+      if (!st.ok) out.worktree = 'kept'
+      else if (st.stdout.trim()) {
+        out.worktree = 'kept'
+        out.worktreeReason = 'it has uncommitted or untracked changes'
+      } else {
+        try {
+          await worktree.remove({ repo: run.repo, path: run.worktree })
+          out.worktree = 'removed'
+          wtGone = true
+        } catch (err) {
+          out.worktree = 'kept'
+          out.worktreeReason = err.message
+        }
+      }
+      if (out.worktree === 'kept') out.worktreePath = run.worktree
+    }
+  }
+  if (run.useWorktree !== false && run.branch && run.repo) {
+    const exists = await worktree.git(['show-ref', '--verify', '--quiet', `refs/heads/${run.branch}`], { cwd: run.repo })
+    if (!exists.ok) out.branch = 'gone'
+    else if (!wtGone) {
+      out.branch = 'kept'
+      out.branchReason = 'its worktree is kept'
+    } else if (deleteBranch || await merged(run.repo, run.branch)) {
+      const d = await worktree.git(['branch', deleteBranch ? '-D' : '-d', '--', run.branch], { cwd: run.repo })
+      out.branch = d.ok ? 'deleted' : 'kept'
+      if (!d.ok) out.branchReason = d.stderr.slice(0, 200)
+    } else {
+      out.branch = 'kept'
+      out.branchReason = 'not merged (forget it with --delete-branch to delete it)'
+    }
+  }
   try { fs.rmSync(runDir(id), { recursive: true, force: true }) } catch {}
-  return { ok: true }
+  return out
 }
 
 async function setCap (n) {
@@ -469,16 +710,17 @@ async function startCli (args, { readStdin }) {
 
 async function runsCli (args, { agents }) {
   const write = obj => { process.stdout.write(JSON.stringify(obj) + '\n'); return obj.error ? 1 : 0 }
-  const [op = 'list', arg] = args
+  const [op = 'list', arg, ...rest] = args
   try {
     if (op === 'list') return write(await list(await agents()))
     if (op === 'cancel') return write(await cancel(arg))
-    if (op === 'forget') return write(await forget(arg))
+    if (op === 'keep') return write(await keepRun(arg, rest[0] !== 'off'))
+    if (op === 'forget' || op === 'remove') return write(await forget(arg, { deleteBranch: rest.includes('--delete-branch') }))
     if (op === 'cap') return write(await setCap(Number(arg)))
   } catch (err) {
     return write({ error: err.message, code: err.code || 'failed' })
   }
-  return write({ error: 'usage: conductore-hostd task-runs [list | cancel <id> | forget <id> | cap <n>]', code: 'usage' })
+  return write({ error: 'usage: conductore-hostd task-runs [list | cancel <id> | keep <id> [off] | forget <id> [--delete-branch] | cap <n>]', code: 'usage' })
 }
 
-module.exports = { start, advance, list, link, onAgents, cancel, forget, setCap, launchLine, slug, startCli, runsCli, RunError, LAUNCH, file }
+module.exports = { start, advance, list, link, onAgents, cancel, forget, keepRun, reap, sweep, stopAgent, setCap, SWEEP_EVERY_MS, NO_AGENT_MS, launchLine, slug, startCli, runsCli, RunError, LAUNCH, file }
