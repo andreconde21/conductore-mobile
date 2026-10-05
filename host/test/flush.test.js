@@ -112,3 +112,44 @@ test("the phone's polls do not restart the idle exit; hook activity, user ops an
     d.sidebar.stop()
   }
 })
+
+test('an idle restart keeps the agents (state.json), and never happens while a request is pending', async () => {
+  const { PassThrough } = require('stream')
+  process.env.CONDUCTORE_IDLE_EXIT_S = '0.05'
+  const d = new Daemon()
+  let exits = 0
+  d.shutdown = () => { exits++ }
+  try {
+    const event = (body) => d.process({ header: { kind: 'hook' }, body: { cwd: root, ...body } })
+    await event({ session_id: 'r1', hook_event_name: 'SessionStart' })
+    await event({ session_id: 'r1', hook_event_name: 'UserPromptSubmit', prompt: 'go' })
+    // A watched (observe-only) pending request, as Gemini and Cursor report.
+    d.state.agents.r1.pending = [{ id: 'q1', toolName: 'Bash', summary: 'make', createdAt: Date.now() }]
+    d.touch()
+    await sleep(250)
+    assert.equal(exits, 0, 'no idle exit while a request waits')
+    d.state.agents.r1.pending = []
+    d.touch()
+    await sleep(250)
+    assert.equal(exits, 1, 'idle exit once nothing waits')
+    // What the next daemon starts from: the shutdown flush.
+    d.flushSnapshot()
+    const next = new Daemon()
+    assert.equal(next.state.agents.r1.state, 'working')
+    assert.equal(next.state.seq, d.state.seq)
+    const c = new PassThrough()
+    let reply = ''
+    c.on('data', b => { reply += b })
+    await next.handle({ op: 'status' }, c)
+    assert.ok(JSON.parse(reply.split('\n')[0]).agents.some(a => a.sessionId === 'r1'), 'the phone sees the agent after the restart')
+    next.live.stop()
+    next.sidebar.stop()
+  } finally {
+    delete process.env.CONDUCTORE_IDLE_EXIT_S
+    clearTimeout(d.idleTimer)
+    clearTimeout(d.snapshotTimer)
+    clearTimeout(d.pruneTimer)
+    d.live.stop()
+    d.sidebar.stop()
+  }
+})

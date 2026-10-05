@@ -383,7 +383,14 @@ class Daemon {
     clearTimeout(this.idleTimer)
     const ms = paths.idleExitMs()
     if (!ms) return
-    this.idleTimer = setTimeout(() => { log('daemon', 'idle, exiting'); this.shutdown(0) }, ms)
+    this.idleTimer = setTimeout(() => {
+      // A request still waiting for an answer (a hook on its FIFO, a
+      // watched prompt) would not survive a restart: pending requests are
+      // not persisted. Wait for it.
+      if (this.waiters.size || Object.values(this.state.agents).some(a => a.pending && a.pending.length)) return this.touch()
+      log('daemon', 'idle, exiting')
+      this.shutdown(0)
+    }, ms)
     this.idleTimer.unref()
   }
 

@@ -25,7 +25,10 @@ const herdrApi = require('./herdr-api')
 const { log } = require('./log')
 
 const IDLE_STOP_MS = 15 * 60 * 1000
-const AGENTS_STOP_MS = 3 * 60 * 1000
+// Long: Android defers a backgrounded app's network work (Doze, app
+// standby), and a bridge that stops between two polls makes Herdr-only
+// agents vanish and come back (notification churn).
+const AGENTS_STOP_MS = 10 * 60 * 1000
 const NEW_AGENT_GRACE_MS = 5000
 const WORKING_HYSTERESIS_MS = 5000
 const DISCOVER_EVERY_MS = 60 * 1000
