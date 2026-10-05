@@ -433,11 +433,15 @@ class ChatViewController extends ChangeNotifier {
   }
 
   /// Drops the oldest reads once the window holds more than
-  /// [_maxEntries] + [_trimSlack] entries; [loadOlder] reads them again.
+  /// [_maxEntries] + [_trimSlack] entries, keeping at least [_maxEntries];
+  /// [loadOlder] reads them again.
   void _trimWindow() {
     if (_entries.length <= _maxEntries + _trimSlack) return;
     var drop = 0;
-    while (_chunks.length > 1 && _entries.length - drop > _maxEntries) {
+    // Whole reads only, and never below [_maxEntries]: one big read (the
+    // first tail) stays rather than leaving a nearly empty window.
+    while (_chunks.length > 1 &&
+        _entries.length - drop - _chunks.first.count >= _maxEntries) {
       drop += _chunks.removeAt(0).count;
     }
     if (drop == 0) return;
