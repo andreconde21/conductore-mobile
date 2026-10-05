@@ -786,8 +786,15 @@ class ConduitApp extends StatefulWidget {
 class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
   final _backgroundKeepalive = const TerminalBackgroundKeepalive();
   AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
-  bool _keepaliveRunning = false;
-  int _keepaliveSessionCount = 0;
+
+  /// The Android keepalive service; null where there is none.
+  late final BackgroundKeepaliveSync? _keepaliveSync =
+      PlatformFeatures.backgroundKeepalive
+      ? BackgroundKeepaliveSync(
+          start: (count) => _backgroundKeepalive.start(sessionCount: count),
+          stop: _backgroundKeepalive.stop,
+        )
+      : null;
   bool _notificationPermissionRequested = false;
 
   /// Reports the phone's place (Chat View, terminal, home) to continuity.
@@ -812,6 +819,8 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     }
     WidgetsBinding.instance.addObserver(this);
     widget.workspaceController.addListener(_syncBackgroundKeepalive);
+    // Reconciles a service still running from an earlier engine.
+    _syncBackgroundKeepalive();
     widget.themeController.addListener(_syncTerminalPreferences);
     widget.lockController.addListener(_syncShareTargetGate);
     _syncTerminalPreferences();
@@ -884,32 +893,13 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
   }
 
   void _syncBackgroundKeepalive() {
-    if (!PlatformFeatures.backgroundKeepalive) {
+    final keepaliveSync = _keepaliveSync;
+    if (keepaliveSync == null) {
       return;
     }
     final sessionCount = widget.workspaceController.liveSessionCount;
     _maybeRequestNotificationPermission(sessionCount);
-    final shouldRun =
-        sessionCount > 0 &&
-        (_lifecycleState == AppLifecycleState.hidden ||
-            _lifecycleState == AppLifecycleState.paused);
-
-    if (shouldRun == _keepaliveRunning &&
-        (!shouldRun || sessionCount == _keepaliveSessionCount)) {
-      return;
-    }
-
-    _keepaliveRunning = shouldRun;
-    _keepaliveSessionCount = shouldRun ? sessionCount : 0;
-    unawaited(
-      (shouldRun
-              ? _backgroundKeepalive.start(sessionCount: sessionCount)
-              : _backgroundKeepalive.stop())
-          .catchError((_) {
-            _keepaliveRunning = !shouldRun;
-            _keepaliveSessionCount = 0;
-          }),
-    );
+    keepaliveSync.sync(sessionCount: sessionCount, lifecycle: _lifecycleState);
   }
 
   void _maybeRequestNotificationPermission(int sessionCount) {
@@ -935,9 +925,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     widget.lockController.removeListener(_stopGuideWhenLocked);
     widget.guideWake?.setListener(null);
     _continuityTracker?.dispose();
-    if (PlatformFeatures.backgroundKeepalive) {
-      unawaited(_backgroundKeepalive.stop().catchError((_) {}));
-    }
+    _keepaliveSync?.dispose();
     _launchRequests.dispose();
     super.dispose();
   }
