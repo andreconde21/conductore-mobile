@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 1.6.2 (2026-10-05)
 
 - feat: `tasks` reads a folder of project folders (CON-084, e.g. /data/projectstasks): a folder with no task files of its own lists one level of subfolders (skipping `_` and `.` names and symlinks) as projects, with ids `<project>/<id>` and a `project` field; `read`, `status` and `comment` take those ids (one level only, no `..`, the project folder must be a real directory inside the folder). A list stops at 5000 tasks or 8 s (`truncated`).
 - feat: `tasks list` takes filters (`statuses`, `excludeStatuses`, `projects`, `updatedSince`) and a `limit`, returns tasks newest first with `total`, and `--gzip` packs a large reply. `projects` lists only project folders with tasks.
