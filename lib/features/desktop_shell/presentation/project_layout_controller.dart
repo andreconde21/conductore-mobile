@@ -121,7 +121,7 @@ class ProjectLayoutController extends ChangeNotifier {
 
   static const sheprdNotSharingText =
       "sheprd isn't sharing its view yet: set share_view = true in sheprd's "
-      'sidebar.toml (needs a sheprd with view sharing). Until then the '
+      'sidebar.toml (sheprd ≥ 0.9.3-15). Until then the '
       'app keeps its own projects.';
 
   /// A mark sheprd did not apply in time ("not running?"), until
@@ -200,6 +200,11 @@ class ProjectLayoutController extends ChangeNotifier {
     for (final entry in group.entries)
       if ((!entry.hidden || showHidden) && (!activeOnly || entry.active)) entry,
   ];
+
+  /// Whether the agent [row] of [entry] is left out by the active filter
+  /// because sheprd's user removed it from the active view.
+  bool removedFromActive(ProjectEntry entry, SidebarNode row) =>
+      activeOnly && (entry.sheprdOf(row)?.removed ?? false);
 
   /// Groups the view lists: Other and (with the active filter) projects
   /// with nothing to show are left out, like in sheprd.

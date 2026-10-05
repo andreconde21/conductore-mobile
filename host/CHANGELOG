@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- feat: `sheprd-view` passes on each agent's `removed` flag (sheprd 0.9.3-15: taken out of the active view until its next state change).
+
 ## 1.6.0 (2026-10-05)
 
 - feat: `sheprd-view` and `sheprd-view-update` (capability `sheprd-view`, CON-077, `docs/sheprd-view-sync.md`): sheprd's view (`~/.local/state/sheprd/view.json`: layout, per-agent presence and marks) read-only and checked against contract v1 (size cap, version, keys), and presence changes (unread, read, dismiss, keep, unkeep) appended as one validated line to `view-updates.jsonl` under an `O_EXCL` lock file, refused past 256 KiB or through a symlink. Nothing else on disk is touched; `sidebar.toml` is never written.
