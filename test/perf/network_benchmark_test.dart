@@ -206,10 +206,11 @@ void main() {
           detachUsage = usage.attachView();
           attention.setLongPoll(true);
         case Scene.background:
-          // Android: monitoring goes on, the long-poll and the pages stop.
+          // Android: monitoring and its long-poll go on, the pages stop
+          // (CON-089).
           attention
             ..setAppActive(true)
-            ..setLongPoll(false);
+            ..setInBackground(true);
           usage.setAppActive(false);
         case Scene.terminal:
           break;
