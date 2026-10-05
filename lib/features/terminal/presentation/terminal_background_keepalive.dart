@@ -28,10 +28,9 @@ class BackgroundKeepaliveSync {
   /// survived, the Dart side did not): a fresh start never assumes that
   /// nothing is running.
   BackgroundKeepaliveSync({
-    required Future<void> Function(int sessionCount) start,
-    required Future<void> Function() stop,
-  }) : _start = start,
-       _stop = stop {
+    required this._start,
+    required this._stop,
+  }) {
     unawaited(_stop().catchError((_) {}));
   }
 
