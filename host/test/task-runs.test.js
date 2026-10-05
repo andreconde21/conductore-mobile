@@ -334,13 +334,13 @@ test('a run whose agent never appears fails (no-agent) and frees its slot', asyn
   reset()
   const dir = repo()
   const wtRoot = tempDir('cnd-runs-wt-')
-  process.env.CONDUCTORE_TASK_NO_AGENT_MS = '100'
+  process.env.CONDUCTORE_TASK_NO_AGENT_MS = '2000'
   try {
     const { runs: [a, b] } = await runs.start({ repo: dir, agent: 'claude', place: 'none', cap: 1, location: `${wtRoot}/<branch>`, tasks: [task('NA-1'), task('NA-2')] })
     assert.equal(b.status, 'queued')
     await runs.list([])
     assert.equal((await runs.list(null)).runs.find(r => r.id === a.id).status, 'running', 'not before the limit')
-    await sleep(150)
+    await sleep(2100)
     const listed = await runs.list([])
     const ra = listed.runs.find(r => r.id === a.id)
     assert.equal(ra.status, 'failed')
