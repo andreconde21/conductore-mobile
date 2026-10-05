@@ -36,7 +36,7 @@ abstract class TaskSource {
 
 | Kind | API | Auth | Statuses | Paging |
 |---|---|---|---|---|
-| Markdown folder | the companion's `tasks` command | SSH to the machine | the files' `status:` values | up to 2000 files |
+| Markdown folder | the companion's `tasks` command | SSH to the machine | the files' `status:` values | up to 5000 files |
 | GitHub Issues | REST v3 (`api.github.com` or GHES `/api/v3`) | PAT, Bearer | open, closed | `page` |
 | GitHub Projects (v2) | GraphQL | PAT, Bearer | the project's single-select field ("Status") | cursor |
 | GitLab Issues | REST v4 (gitlab.com or self-managed) | PAT, `PRIVATE-TOKEN` | opened, closed | `page` |
@@ -53,7 +53,10 @@ Every source loads at most 500 tasks (`maxTasksPerSource`), newest first.
 The task list combines every source, or only the sources you choose. It
 sorts by last update, status, source or key, and always breaks ties the
 same way: newest update first, then source name, then key, with numbers in
-keys compared as numbers. Each task shows a badge naming its source.
+keys compared as numbers. Each task shows a badge naming its source, and
+a task that belongs to a project (a markdown folder of project folders)
+shows a small label naming it; the Project filter narrows the list to one
+project.
 
 Only `https://` addresses are used (plain `http://` for localhost only).
 Tokens live in this device's secure storage, one key per source
@@ -107,12 +110,41 @@ Free markdown.
   included.
 - Files without frontmatter (a README) and dot files are skipped.
 
+### A folder of project folders
+
+A folder with no task files of its own (no top-level `.md` file with
+frontmatter) is read as a tree, the way ProjectsTasks lays out
+`/data/projectstasks`:
+
+```
+projectstasks/
+  README.md              skipped: no frontmatter
+  docker-compose.yml     skipped: not .md
+  _config/  _registry/   skipped: names starting with _ (or .)
+  amedia/AM-1.md         task amedia/AM-1, project amedia
+  conductore-mobile/CON-084.md
+```
+
+- Only one level of subfolders is read; each is a project. Names starting
+  with `_` or `.` and symlinked folders are skipped, as is anything deeper.
+- A task's id is `<project>/<id>` and it carries `project: "<project>"`;
+  its `key` is still the frontmatter `id` (else the file name).
+- `read`, `status` and `comment` take those ids: exactly one `/`, both
+  parts plain names, no `..`, and the project folder must be a real
+  directory (not a symlink) directly inside the folder.
+- Once a folder has a task file of its own it is flat: subfolders are not
+  read.
+
 ### Companion command
 
 `conductore-hostd tasks <list|read|status|comment> -` takes one JSON
 object on stdin (`{folder, id?, status?, text?, author?}`) and prints JSON
 (capability `tasks-folder`). It only touches the given folder: the folder
 must be an existing absolute directory (or `~/…`) other than `/`; ids are
-plain file names without separators or `..`; a task file must be a regular
-file directly inside the folder, never a symlink; writes go through a temp
-file in the folder and a rename.
+plain file names without `..`, with at most one project folder before them
+(`project/id`); a task file must be a regular file directly inside the
+folder or one of its real project folders, never a symlink; writes go
+through a temp file next to the task file and a rename. `list` returns at
+most 5000 tasks and stops reading after 8 seconds; either cap sets
+`truncated: true`. In a tree it also returns `projects`, the project
+folders read.

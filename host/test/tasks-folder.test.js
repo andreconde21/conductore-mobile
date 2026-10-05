@@ -138,3 +138,107 @@ test('bad input gives usage errors', async () => {
   assert.equal((await tasks('list', 'not json')).code, 1)
   assert.equal((await tasks('nope', {})).json.code, 'usage')
 })
+
+// A folder shaped like /data/projectstasks (CON-084): one folder per
+// project, `_` folders and stray files at the top, and a symlinked folder.
+function projectsTree () {
+  const root = tempDir('cnd-tasks-tree-')
+  const write = (rel, text) => {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+    fs.writeFileSync(path.join(root, rel), text)
+  }
+  write('README.md', '# ProjectsTasks\n')
+  write('docker-compose.yml', 'services: {}\n')
+  write('body.html', '<p></p>\n')
+  write('conductore-mobile/CON-001.md', CARD)
+  write('conductore-mobile/CON-002.md', '---\nid: CON-002\ntitle: Two\nstatus: done\n---\n')
+  write('conductore-mobile/README.md', '# not a task\n')
+  write('amedia/AM-1.md', '---\nid: AM-1\ntitle: Amedia one\nstatus: todo\n---\n')
+  write('amedia/deep/AM-9.md', '---\nid: AM-9\ntitle: Too deep\n---\n')
+  write('_registry/REG-1.md', '---\nid: REG-1\ntitle: Registry\n---\n')
+  write('_config/agents.md', '---\ntitle: config\n---\n')
+  write('.git/HEAD.md', '---\ntitle: git\n---\n')
+  write('web/package.json', '{}\n')
+  const outside = tempDir('cnd-tasks-outside-')
+  fs.writeFileSync(path.join(outside, 'OUT-1.md'), '---\nid: OUT-1\ntitle: Outside\n---\n')
+  fs.symlinkSync(outside, path.join(root, 'linked'))
+  return { root, outside }
+}
+
+test('a folder of project folders lists each project\'s tasks as project/id', async () => {
+  const { root } = projectsTree()
+  const { code, json } = await tasks('list', { folder: root })
+  assert.equal(code, 0)
+  assert.deepEqual(json.tasks.map(t => t.id), ['amedia/AM-1', 'conductore-mobile/CON-001', 'conductore-mobile/CON-002'])
+  assert.deepEqual(json.tasks.map(t => t.project), ['amedia', 'conductore-mobile', 'conductore-mobile'])
+  assert.deepEqual(json.tasks.map(t => t.key), ['AM-1', 'CON-001', 'CON-002'])
+  assert.deepEqual(json.projects, ['amedia', 'conductore-mobile', 'web'], '_ and . folders and symlinks are not projects')
+  assert.equal(json.truncated, false)
+})
+
+test('a folder with task files of its own stays flat', async () => {
+  const { root } = projectsTree()
+  fs.writeFileSync(path.join(root, 'TOP-1.md'), '---\nid: TOP-1\ntitle: Top\n---\n')
+  const { json } = await tasks('list', { folder: root })
+  assert.deepEqual(json.tasks.map(t => t.id), ['TOP-1'])
+  assert.equal(json.tasks[0].project, undefined)
+  assert.equal(json.projects, undefined)
+})
+
+test('read, status and comment take project/id', async () => {
+  const { root } = projectsTree()
+  const id = 'conductore-mobile/CON-001'
+  const read = await tasks('read', { folder: root, id })
+  assert.equal(read.code, 0)
+  assert.equal(read.json.task.id, id)
+  assert.equal(read.json.task.project, 'conductore-mobile')
+  assert.match(read.json.task.body, /From the phone/)
+  const moved = await tasks('status', { folder: root, id, status: 'review' })
+  assert.equal(moved.code, 0)
+  assert.equal(moved.json.task.status, 'review')
+  const commented = await tasks('comment', { folder: root, id, text: 'from the tree' })
+  assert.equal(commented.code, 0)
+  assert.equal(commented.json.task.comments[0].body, 'from the tree')
+  const after = fs.readFileSync(path.join(root, 'conductore-mobile', 'CON-001.md'), 'utf8')
+  assert.match(after, /^status: review$/m)
+  assert.deepEqual(fs.readdirSync(path.join(root, 'conductore-mobile')).sort(), ['CON-001.md', 'CON-002.md', 'README.md'], 'no temp file left')
+})
+
+test('project ids that escape or skip the rules are refused', async () => {
+  const { root, outside } = projectsTree()
+  const ids = [
+    'linked/OUT-1', // a symlinked folder
+    '_registry/REG-1', // an underscore folder
+    '.git/HEAD',
+    'amedia/deep/AM-9', // two levels
+    'amedia/../conductore-mobile/CON-001',
+    '../amedia/AM-1',
+    'amedia/',
+    '/amedia/AM-1',
+    'amedia//AM-1',
+    'amedia\\AM-1',
+    'nope/AM-1',
+    'README/x' // a file, not a folder
+  ]
+  for (const id of ids) {
+    for (const [op, extra] of [['read', {}], ['status', { status: 'done' }], ['comment', { text: 'x' }]]) {
+      const { code, json } = await tasks(op, { folder: root, id, ...extra })
+      assert.equal(code, 1, `${op} ${id}`)
+      assert.ok(json.error, `${op} ${id}`)
+    }
+  }
+  assert.equal(fs.readFileSync(path.join(outside, 'OUT-1.md'), 'utf8'), '---\nid: OUT-1\ntitle: Outside\n---\n', 'symlink target untouched')
+  assert.equal(fs.readFileSync(path.join(root, '_registry', 'REG-1.md'), 'utf8'), '---\nid: REG-1\ntitle: Registry\n---\n')
+})
+
+test('a tree list stops at the task cap and the scan time cap', () => {
+  const { listTasks } = require('../lib/tasks-folder')
+  const { root } = projectsTree()
+  const capped = listTasks({ folder: root }, { maxTasks: 2 })
+  assert.deepEqual(capped.tasks.map(t => t.id), ['amedia/AM-1', 'conductore-mobile/CON-001'])
+  assert.equal(capped.truncated, true)
+  const late = listTasks({ folder: root }, { maxScanMs: -1 })
+  assert.deepEqual(late.tasks, [])
+  assert.equal(late.truncated, true)
+  assert.equal(listTasks({ folder: root }).truncated, false)
+})

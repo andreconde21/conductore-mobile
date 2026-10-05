@@ -5,11 +5,15 @@
 // One JSON object on stdin: {folder, id?, status?, text?, author?}.
 //
 // A folder holds one `<id>.md` per task: YAML frontmatter (flat keys,
-// scalars and simple lists) then a markdown body. Only that folder is ever
-// touched: the folder must be an existing absolute directory (not `/`),
-// ids are plain file names (no separators, no dot-dot), a task file must be
-// a regular file (never a symlink) directly inside the folder, and writes go
-// through a temp file in the same folder and a rename. Status changes only
+// scalars and simple lists) then a markdown body. A folder without task
+// files of its own is a tree (CON-084): each subfolder one level down is a
+// project (names starting with `_` or `.`, and symlinks, are skipped) and
+// its tasks' ids are `<project>/<id>`. Only that folder is ever touched:
+// the folder must be an existing absolute directory (not `/`), ids are
+// plain file names (no dot-dot) with at most one project folder before
+// them, a task file must be a regular file (never a symlink) directly
+// inside the folder or a real project subfolder, and writes go through a
+// temp file next to it and a rename. Status changes only
 // rewrite the `status:` (and an existing `updated_at:`) line; comments are
 // appended under a `## Comments` heading. Everything else stays byte for
 // byte, line endings included.
@@ -18,7 +22,10 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const MAX_FILES = 2000
+// Caps on one list: tasks returned, and time spent reading (the phone
+// gives up after 20 s).
+const MAX_TASKS = 5000
+const MAX_SCAN_MS = 8000
 const MAX_FILE_BYTES = 1024 * 1024
 const MAX_COMMENT = 20000
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
@@ -46,11 +53,34 @@ function resolveFolder (raw) {
   return real
 }
 
-// The task file for id inside folder; it must exist unless allowMissing.
+// A project subfolder's name: a plain name not starting with `_` or `.`.
+const isProjectName = name => ID_RE.test(name) && !name.startsWith('_') && !name.includes('..')
+
+// The real directory a task id lives in: folder itself, or for
+// `<project>/<id>` a real (not symlinked) project subfolder directly inside
+// it.
+function taskDir (folder, id) {
+  const bad = () => new TasksError('bad-id', 'id must be a file name without the .md (letters, digits, . _ -), optionally after one project folder: project/id')
+  if (typeof id !== 'string' || id.includes('..')) throw bad()
+  const parts = id.split('/')
+  if (parts.length > 2 || !ID_RE.test(parts[parts.length - 1])) throw bad()
+  if (parts.length === 1) return { dir: folder, name: parts[0] }
+  if (!isProjectName(parts[0])) throw bad()
+  const dir = path.join(folder, parts[0])
+  let st
+  try { st = fs.lstatSync(dir) } catch { throw new TasksError('not-found', `no task ${id}`) }
+  if (!st.isDirectory()) throw new TasksError('bad-id', `${parts[0]} is not a folder`)
+  let real
+  try { real = fs.realpathSync(dir) } catch { throw new TasksError('not-found', `no task ${id}`) }
+  if (real !== dir || path.dirname(real) !== folder) throw new TasksError('bad-id', 'id escapes the folder')
+  return { dir, name: parts[1] }
+}
+
+// The task file for id inside folder; it must exist.
 function taskFile (folder, id) {
-  if (typeof id !== 'string' || !ID_RE.test(id) || id.includes('..')) throw new TasksError('bad-id', 'id must be a file name without the .md (letters, digits, . _ -)')
-  const file = path.join(folder, `${id}.md`)
-  if (path.dirname(file) !== folder) throw new TasksError('bad-id', 'id escapes the folder')
+  const { dir, name } = taskDir(folder, id)
+  const file = path.join(dir, `${name}.md`)
+  if (path.dirname(file) !== dir) throw new TasksError('bad-id', 'id escapes the folder')
   let st
   try { st = fs.lstatSync(file) } catch { throw new TasksError('not-found', `no task ${id}`) }
   if (!st.isFile()) throw new TasksError('bad-id', `${id}.md is not a regular file`)
@@ -135,7 +165,7 @@ function parseComments (body) {
   return out
 }
 
-function describe (id, text, st, withBody) {
+function describe (id, text, st, withBody, project) {
   const fm = splitFrontmatter(text)
   if (!fm) return null
   const f = fm.fields
@@ -154,6 +184,7 @@ function describe (id, text, st, withBody) {
     updatedAt: str(f.updated_at) || null,
     mtimeMs: Math.round(st.mtimeMs)
   }
+  if (project) task.project = project
   if (withBody) {
     task.body = body
     task.comments = parseComments(body)
@@ -164,14 +195,13 @@ function describe (id, text, st, withBody) {
 
 // --- operations ------------------------------------------------------------
 
-function listTasks ({ folder }) {
-  const dir = resolveFolder(folder)
-  const names = fs.readdirSync(dir).filter(n => n.endsWith('.md') && !n.startsWith('.')).sort()
-  const tasks = []
-  const seen = new Set()
-  let truncated = false
+// The tasks in one directory, appended to out (up to max, until
+// deadline); false once a cap is hit.
+function readTasksIn (dir, prefix, project, out, { max, deadline }) {
+  let names
+  try { names = fs.readdirSync(dir).filter(n => n.endsWith('.md') && !n.startsWith('.')).sort() } catch { return true }
   for (const name of names) {
-    if (tasks.length >= MAX_FILES) { truncated = true; break }
+    if (out.length >= max || Date.now() > deadline) return false
     const id = name.slice(0, -3)
     if (!ID_RE.test(id)) continue
     let st
@@ -179,19 +209,41 @@ function listTasks ({ folder }) {
     if (!st.isFile() || st.size > MAX_FILE_BYTES) continue
     let text
     try { text = fs.readFileSync(path.join(dir, name), 'utf8') } catch { continue }
-    const task = describe(id, text, st, false)
-    if (!task) continue
-    if (task.status) seen.add(task.status)
-    tasks.push(task)
+    const task = describe(prefix + id, text, st, false, project)
+    if (task) out.push(task)
   }
+  return true
+}
+
+// limits: tests' smaller caps.
+function listTasks ({ folder }, { maxTasks = MAX_TASKS, maxScanMs = MAX_SCAN_MS } = {}) {
+  const dir = resolveFolder(folder)
+  const caps = { max: maxTasks, deadline: Date.now() + maxScanMs }
+  const tasks = []
+  let complete = readTasksIn(dir, '', null, tasks, caps)
+  let projects = null
+  if (complete && tasks.length === 0) {
+    // A tree: one level of project folders, never through a symlink.
+    projects = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && isProjectName(e.name))
+      .map(e => e.name)
+      .sort()
+    for (const project of projects) {
+      complete = readTasksIn(path.join(dir, project), `${project}/`, project, tasks, caps)
+      if (!complete) break
+    }
+  }
+  const seen = new Set(tasks.map(t => t.status).filter(Boolean))
   const statuses = [...DEFAULT_STATUSES, ...[...seen].filter(s => !DEFAULT_STATUSES.includes(s)).sort()]
-  return { ok: true, folder: dir, tasks, statuses, truncated }
+  const out = { ok: true, folder: dir, tasks, statuses, truncated: !complete }
+  if (projects) out.projects = projects
+  return out
 }
 
 function readTask ({ folder, id }) {
   const dir = resolveFolder(folder)
   const { file, st } = taskFile(dir, id)
-  const task = describe(id, fs.readFileSync(file, 'utf8'), st, true)
+  const task = describe(id, fs.readFileSync(file, 'utf8'), st, true, id.includes('/') ? id.split('/')[0] : null)
   if (!task) throw new TasksError('no-frontmatter', `${id}.md has no frontmatter`)
   return { ok: true, task }
 }
