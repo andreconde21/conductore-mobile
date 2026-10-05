@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 1.6.1 (2026-10-05)
 
 - feat: `sheprd-view` passes on each agent's `removed` flag (sheprd 0.9.3-15: taken out of the active view until its next state change).
 

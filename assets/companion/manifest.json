@@ -1,5 +1,5 @@
 {
-  "version": "1.6.0",
+  "version": "1.6.1",
   "archive": "companion.tar.gz",
   "files": {
     "README.md": "62584d3851173fc3e4b29ed1fd2495f832e9416f6d0abebc8581aa3c0395051e",
@@ -36,7 +36,7 @@
     "lib/live.js": "c7ed786eb8b0bd7342d88ab4787d74913724c7bd94091cbcade47b882c8a54d8",
     "lib/log.js": "9ba8a3a5b87df77433e285da1ff9d279fa3be9e50fa62a6bd83437ae1d999fd1",
     "lib/pane.js": "2a8724ef56bb3321409deff38ce594d102be369a2671fd60f8d37ec602580590",
-    "lib/paths.js": "a29eb022cc29be61d0ecf57051164b7420f4e46ebac1dedf059f86f080203ace",
+    "lib/paths.js": "397277ee7d756f63fe289b67afc30d38663c59b18a734404ac140d5d2a19fe53",
     "lib/permission.js": "c43ab47450ba0c136004a7b52e9bf9faa1b1c178f92b5cac94dfeefd3966c103",
     "lib/ports.js": "e6e1cec8d5b2deb5e68f5642f268e2d1e5d83fb0985e8b34c508344174f9a2b2",
     "lib/pricing.js": "360b9f70bdbde122e3322f204d1a4a2368956c31ef908de37ecbe0bf727cb10b",
@@ -46,7 +46,7 @@
     "lib/rules.js": "c392ae1fcac39e88b31d5157a15bc9285385d8874e5865ccc25b017f70929678",
     "lib/settings.js": "b9eea9a6bbe6be7e6e0c8c030cfb55bf824e273d8a10046e796f592ac3699992",
     "lib/shell.js": "4538e791d520cab8abb62e85470d296a49942bbe4f4c7a0d96ec38b86e2752e5",
-    "lib/sheprd.js": "cf53b5ff015f4974206d100f22d61c037d4b40593124360efb0284e17ccefaaa",
+    "lib/sheprd.js": "7e4b59c6f875a695ec3228d00442c69c8ad2d73a0ceee407cdc817a5d52c1347",
     "lib/sidebar.js": "60fab021ee33082e334279428b0b79945f8c36a1f5ab6d7019d9ebeb63edd848",
     "lib/snapshots.js": "351cd33bdea4c4aefa5645079a04cd8f0dda2eeb30321681c8c965cfdbaf0f7a",
     "lib/spool.js": "bc49d6b1734cf5751c60dc5af03b2677b6519ce0040fece2c5c482114c90de94",
@@ -64,7 +64,7 @@
     "lib/turns.js": "5bf69c07cdd574b7ef3f9d97c12224ceca02cb5bdd3c996a645e29e153e2aac9",
     "lib/usage.js": "79cb0f33e257481765d081ccebfb9c254d534670dc0066f3746088e5e4daf73b",
     "lib/worktree.js": "214e9e147c1d6926eea063cb023a81ef7d5935e6a278d598861998228f17e0d2",
-    "package.json": "47788a2b81a75f88353b22f6538e283392d5d29b67d5d285cd025118c914743a",
+    "package.json": "3fd05d82d7dfe64c18cc279bcf355f4b9f3cd799f0ca21337df5d6404d3c2600",
     "vendor/talkbawt/LICENSE": "c52febe8360c39966ab50e4e7b173165c212d9aa6ebf53bd5fdda416f6f57700",
     "vendor/talkbawt/README.md": "e779e697b3b8fefae5ec84e3096438a221e86bde725536056f3aa9a0c5318cb9",
     "vendor/talkbawt/src/app.mjs": "349f837f64504c5773b01d44da36740f8837706f3a52ac9facc4c6bf1626dadc",
