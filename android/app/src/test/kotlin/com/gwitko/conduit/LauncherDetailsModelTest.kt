@@ -79,7 +79,7 @@ class LauncherDetailsModelTest {
     @Test
     fun noSnapshotMeansNoItemsAndNotMonitoring() {
         assertTrue(LauncherDetailsModel.items(null, tokens, pkg, activity).isEmpty())
-        assertArrayEquals(arrayOf<Any?>(0, 0, 0L, -1, -1), LauncherDetailsModel.summary(null, 0L))
+        assertArrayEquals(arrayOf<Any?>(0, 0, 0L, -1, -1, 2), LauncherDetailsModel.summary(null, 0L))
     }
 
     @Test
@@ -87,11 +87,80 @@ class LauncherDetailsModelTest {
         val snapshot = AgentStatusSnapshot.parse(payload)
         // 7d's window already reset at this time: 0, not the stale 85.
         assertArrayEquals(
-            arrayOf<Any?>(1, 2, 1790000000000L, 42, 0),
+            arrayOf<Any?>(1, 2, 1790000000000L, 42, 0, 2),
             LauncherDetailsModel.summary(snapshot, 1790000000000L),
         )
         val noLimits = AgentStatusSnapshot.parse(payload.replace(""""limits":[""", """"x":["""))
-        assertArrayEquals(arrayOf<Any?>(1, 2, 1790000000000L, -1, -1), LauncherDetailsModel.summary(noLimits, 0L))
+        assertArrayEquals(arrayOf<Any?>(1, 2, 1790000000000L, -1, -1, 2), LauncherDetailsModel.summary(noLimits, 0L))
+    }
+
+    // As Dart's LauncherPrompt.encodeAll writes them (CON-082).
+    private val prompts = LauncherPrompt.parseAll(
+        """
+        [{"id":"host-1/s1","hostId":"host-1","agentId":"s1","requestId":"r1",
+          "question":"Approve Bash: npm test · Medium risk",
+          "options":[{"label":"Allow","verdict":"allow"},{"label":"Always allow","verdict":"always"},
+                     {"label":"Deny","verdict":"deny"}],
+          "replyVerdict":null,"answers":"","note":null},
+         {"id":"host-2/s2","hostId":"host-2","agentId":"s2","requestId":"r2",
+          "question":"Approve Bash: git push --force · High risk","options":null,
+          "replyVerdict":null,"answers":"","note":"High-risk request: open it in Conductore"},
+         {"id":"host-1/s4","hostId":"host-1","agentId":"s4","requestId":"reply","question":"Old question",
+          "options":null,"replyVerdict":"reply","answers":"","note":null}]
+        """.trimIndent(),
+    )
+
+    private fun column(row: Array<Any?>, name: String) = row[LauncherDetailsModel.ITEM_COLUMNS.indexOf(name)]
+
+    @Test
+    fun anAgentNeedingYouCarriesItsQuestionAndOptions() {
+        val rows = LauncherDetailsModel.items(AgentStatusSnapshot.parse(payload), tokens, pkg, activity, prompts)
+        val api = rows.first { it[1] == "api" }
+        assertEquals(LauncherDetailsModel.ITEM_COLUMNS.size, api.size)
+        assertEquals("Approve Bash: npm test · Medium risk", column(api, "question"))
+        assertEquals("""["Allow","Always allow","Deny"]""", column(api, "options"))
+        assertEquals(1, column(api, "answerable"))
+        assertNull(column(api, "answer_note"))
+        // High risk: shown, never answerable from the launcher.
+        val ops = rows.first { it[1] == "ops" }
+        assertEquals("Approve Bash: git push --force · High risk", column(ops, "question"))
+        assertNull(column(ops, "options"))
+        assertEquals(0, column(ops, "answerable"))
+        assertEquals("High-risk request: open it in Conductore", column(ops, "answer_note"))
+    }
+
+    @Test
+    fun agentsNotNeedingYouHaveNoQuestionEvenWithAStalePrompt() {
+        val rows = LauncherDetailsModel.items(AgentStatusSnapshot.parse(payload), tokens, pkg, activity, prompts)
+        // web (working) still has a prompt from before: never served.
+        for (name in listOf("web", "done", "old")) {
+            val row = rows.first { it[1] == name }
+            for (col in listOf("question", "options", "answerable", "answer_note")) assertNull(column(row, col))
+        }
+    }
+
+    @Test
+    fun anAgentNeedingYouWithoutAPromptIsNotAnswerable() {
+        val row = items().first { it[1] == "api" }
+        assertNull(column(row, "question"))
+        assertNull(column(row, "options"))
+        assertEquals(0, column(row, "answerable"))
+        assertEquals("Open it in Conductore to answer", column(row, "answer_note"))
+    }
+
+    @Test
+    fun promptsParseOptionsAndReplies() {
+        assertEquals(
+            listOf(LauncherOption("Allow", "allow"), LauncherOption("Always allow", "always"), LauncherOption("Deny", "deny")),
+            prompts.getValue("host-1/s1").options,
+        )
+        val reply = prompts.getValue("host-1/s4")
+        assertNull(reply.options)
+        assertEquals("reply", reply.replyVerdict)
+        assertTrue(reply.answerable)
+        assertTrue(!prompts.getValue("host-2/s2").answerable)
+        assertTrue(LauncherPrompt.parseAll("not json").isEmpty())
+        assertTrue(LauncherPrompt.parseAll(null).isEmpty())
     }
 
     @Test

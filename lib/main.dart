@@ -1174,6 +1174,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                       _launchRequests.request(HomeLaunchRequest.usage),
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
+                    launcherActions: PlatformLauncherActions.instance,
                     agentAttention: widget.agentAttention,
                     findHost: (hostId) async {
                       await widget.hostsController.selfMachineKnown();

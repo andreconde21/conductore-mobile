@@ -75,3 +75,15 @@ abstract class AgentPermissionActionSource {
   /// nothing can, e.g. the app is locked, so the platform can say so).
   void setListener(bool Function()? listener);
 }
+
+/// Where answers from the launcher's details sheet (Yoke, CON-082)
+/// arrive from. The platform only hands one over while the app runs and
+/// waits (a few seconds) for the outcome, so the listener answers with
+/// it: null once done, else why it failed. With no listener (the app is
+/// locked, or not on its home page yet) the platform tells the launcher
+/// to open Conductore.
+abstract class LauncherActionSource {
+  void setListener(
+    Future<String?> Function(AgentPermissionAction action)? listener,
+  );
+}

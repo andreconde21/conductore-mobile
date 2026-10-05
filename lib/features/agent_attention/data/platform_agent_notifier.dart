@@ -75,6 +75,8 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
         case 'openAgentAvailable':
           PlatformAgentOpenRequests.instance._listener?.call();
           return null;
+        case 'launcherAction':
+          return PlatformLauncherActions.instance.handle(call.arguments);
       }
       return null;
     });
@@ -153,6 +155,69 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
               question: item['question'] as String? ?? '',
             ),
     ];
+  }
+}
+
+/// Answers from the launcher's details sheet (CON-082), over the same
+/// channel: the native provider calls `launcherAction` with the action and
+/// waits for `{ok, error}`; null means nobody can take it now (no
+/// listener: the app is locked or not on its home page).
+class PlatformLauncherActions implements LauncherActionSource {
+  PlatformLauncherActions._();
+
+  static final instance = PlatformLauncherActions._();
+
+  Future<String?> Function(AgentPermissionAction action)? _listener;
+
+  @override
+  void setListener(
+    Future<String?> Function(AgentPermissionAction action)? listener,
+  ) {
+    _listener = listener;
+    PlatformAgentAttentionNotifier._installHandler();
+  }
+
+  /// The channel call: [arguments] as the native side sends them.
+  @visibleForTesting
+  Future<Map<String, Object?>?> handle(Object? arguments) async {
+    final listener = _listener;
+    if (listener == null) {
+      return null;
+    }
+    final action = parseAction(arguments);
+    if (action == null) {
+      return {'ok': false, 'error': 'Unknown action'};
+    }
+    final error = await listener(action);
+    return {'ok': error == null, 'error': error};
+  }
+
+  @visibleForTesting
+  static AgentPermissionAction? parseAction(Object? raw) {
+    if (raw is! Map) {
+      return null;
+    }
+    String? text(String key) => raw[key] is String ? raw[key] as String : null;
+    final hostId = text('hostId');
+    final agentId = text('agentId');
+    final requestId = text('requestId');
+    final verdict = text('verdict');
+    if (hostId == null ||
+        hostId.isEmpty ||
+        agentId == null ||
+        agentId.isEmpty ||
+        requestId == null ||
+        verdict == null) {
+      return null;
+    }
+    return AgentPermissionAction(
+      notificationId: '',
+      hostId: hostId,
+      agentId: agentId,
+      requestId: requestId,
+      verdict: verdict,
+      text: text('text') ?? '',
+    );
   }
 }
 

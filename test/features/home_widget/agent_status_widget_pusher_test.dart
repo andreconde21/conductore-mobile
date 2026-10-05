@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
 import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
@@ -41,6 +42,50 @@ void main() {
     addTearDown(pusher.dispose);
     return (source, channel, pusher);
   }
+
+  testWidgets('pushes the launcher prompts first, and only when changed', (
+    tester,
+  ) async {
+    final source = ChangeNotifier();
+    final channel = FakeAgentStatusWidgetChannel();
+    var prompts = const [
+      LauncherPrompt(
+        hostId: 'h',
+        agentId: 's-1',
+        requestId: 'reply',
+        question: 'Which branch?',
+        replyVerdict: 'reply',
+      ),
+    ];
+    var revision = 0;
+    final pusher = AgentStatusWidgetPusher(
+      source: source,
+      snapshot: () => AgentStatusSnapshot(
+        monitoring: true,
+        attentionCount: revision++,
+        agents: const [],
+        updatedAt: DateTime.utc(2026),
+      ),
+      launcherPrompts: () => prompts,
+      channel: channel,
+    );
+    addTearDown(pusher.dispose);
+    pusher.start();
+    await tester.pump();
+    expect(channel.pushedPrompts.single, prompts);
+    expect(channel.pushed, hasLength(1));
+
+    // Same prompts: the snapshot goes, the prompts do not.
+    source.notifyListeners();
+    await tester.pump(debounce);
+    expect(channel.pushed, hasLength(2));
+    expect(channel.pushedPrompts, hasLength(1));
+
+    prompts = const [];
+    source.notifyListeners();
+    await tester.pump(debounce);
+    expect(channel.pushedPrompts.last, isEmpty);
+  });
 
   testWidgets('pushes once on start', (tester) async {
     final (_, channel, pusher) = build();

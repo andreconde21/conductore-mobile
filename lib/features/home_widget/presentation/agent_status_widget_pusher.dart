@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
@@ -23,14 +24,19 @@ import 'package:flutter/foundation.dart';
 /// that differs from the last one pushed only by its times (the update
 /// time, and the "as of" of the dashboard's cached facts) is skipped until
 /// [unchangedRefresh] has passed (the widget shows times to the minute).
+///
+/// With [launcherPrompts], what the launcher's details sheet may answer
+/// (CON-082) goes along, before the snapshot, whenever it changed.
 class AgentStatusWidgetPusher {
   AgentStatusWidgetPusher({
     required Listenable source,
     required AgentStatusSnapshot Function() snapshot,
     required AgentStatusWidgetChannel channel,
+    List<LauncherPrompt> Function()? launcherPrompts,
     this.debounce = const Duration(milliseconds: 500),
   }) : _source = source,
        _snapshot = snapshot,
+       _launcherPrompts = launcherPrompts,
        _channel = channel;
 
   /// Wires the pusher to the live [AgentAttentionController].
@@ -60,6 +66,7 @@ class AgentStatusWidgetPusher {
         theme: theme?.call(),
         pcTheme: pcTheme?.call(),
       ),
+      launcherPrompts: () => controller.launcherPrompts,
       channel: channel,
       debounce: debounce,
     );
@@ -67,6 +74,8 @@ class AgentStatusWidgetPusher {
 
   final Listenable _source;
   final AgentStatusSnapshot Function() _snapshot;
+  final List<LauncherPrompt> Function()? _launcherPrompts;
+  List<LauncherPrompt>? _lastPrompts;
   final AgentStatusWidgetChannel _channel;
   final Duration debounce;
 
@@ -203,6 +212,15 @@ class AgentStatusWidgetPusher {
     try {
       do {
         _pushAgain = false;
+        try {
+          if (_launcherPrompts?.call() case final prompts?
+              when !listEquals(prompts, _lastPrompts)) {
+            await _channel.pushLauncherPrompts(prompts);
+            _lastPrompts = prompts;
+          }
+        } catch (_) {
+          // The launcher sheet is best-effort too.
+        }
         try {
           final snapshot = _snapshot();
           final content = contentOf(snapshot);
