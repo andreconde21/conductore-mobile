@@ -55,3 +55,24 @@ String agentDisplayName({String? project, String? name}) {
   }
   return 'Agent';
 }
+
+/// What an agent is about, for a line under or after its name: the
+/// dashboard's [summary], else its [lastMessage] unless that is only the
+/// agent's generic notice ("Claude is waiting for your input"). Null when
+/// neither says anything.
+String? agentTopic({String? summary, String? lastMessage}) {
+  final digest = summary?.trim();
+  if (digest != null && digest.isNotEmpty) return digest;
+  final message = lastMessage?.trim() ?? '';
+  if (message.isEmpty || isGenericNotice(message)) return null;
+  return message;
+}
+
+/// "Claude is waiting for your input", "Codex needs your permission":
+/// the agent's notification text, which names nothing.
+bool isGenericNotice(String message) => _genericNotice.hasMatch(message.trim());
+
+final _genericNotice = RegExp(
+  r'^\w+( \w+)? (is waiting for your input|needs your (permission|attention))',
+  caseSensitive: false,
+);

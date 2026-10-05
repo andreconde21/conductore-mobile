@@ -13,6 +13,7 @@ import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
@@ -501,19 +502,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         session.host.id,
         agent.id,
       );
-      if (summary != null && summary.trim().isNotEmpty) return summary;
-      final message = agent.lastMessage?.trim() ?? '';
-      if (message.isNotEmpty && !_genericNotice.hasMatch(message)) {
-        return message;
-      }
+      final topic = agentTopic(
+        summary: summary,
+        lastMessage: agent.lastMessage,
+      );
+      if (topic != null) return topic;
     }
     return null;
   }
-
-  static final _genericNotice = RegExp(
-    r'^\w+( \w+)? (is waiting for your input|needs your (permission|attention))',
-    caseSensitive: false,
-  );
 
   /// Gives each open Herdr session its workspace's live label, so titles
   /// everywhere (home, tabs, switcher, sidebar) name the workspace, not

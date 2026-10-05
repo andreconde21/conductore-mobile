@@ -1,6 +1,7 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
+import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live/domain/live_host_model.dart';
@@ -470,10 +471,7 @@ abstract final class AgentStatusSummary {
       if (idle > 0) '$idle idle',
     ];
     final lines = ordered.length > maxLines
-        ? [
-            ...ordered.take(maxAgents),
-            '+${ordered.length - maxAgents} more',
-          ]
+        ? [...ordered.take(maxAgents), '+${ordered.length - maxAgents} more']
         : ordered;
     return AgentOngoingStatus(
       title: parts.join(' · '),
@@ -534,7 +532,7 @@ abstract final class AgentStatusSummary {
     }
     final stuck = entry.stuck?.trim();
     final isStuck = stuck != null && stuck.isNotEmpty;
-    final topic = entry.detail ?? message;
+    final topic = agentTopic(summary: entry.detail, lastMessage: message);
     switch (agent.state) {
       case AgentAttentionState.needsInput || AgentAttentionState.blocked:
         switch (UrgentNotificationPolicy.waitKind(

@@ -488,6 +488,7 @@ void main() {
       String? detail,
       String? stuck,
     }) => (
+      machineId: host,
       hostName: host,
       agent: agent,
       companion: true,
@@ -525,12 +526,13 @@ void main() {
           stuck: '`npm test` failed 3 times',
         ),
       ])!;
-      expect(status.title, '1 needs you · 1 stuck · 1 working · 1 done');
+      // A stuck agent counts under its state; the line says why.
+      expect(status.title, '1 needs you · 2 working · 1 idle');
       expect(status.lines, [
         'api (Codex) · Needs you · Approve Bash: git push',
-        'cli · Stuck · `npm test` failed 3 times',
         'web · Working · Bash',
-        'docs · Done · Rewrote the intro.',
+        'cli · Stuck · `npm test` failed 3 times',
+        'docs · Idle · Rewrote the intro.',
       ]);
       expect(status.text, status.lines.first);
       expect(status.publicTitle, 'Conductore: 4 agents');
@@ -551,8 +553,8 @@ void main() {
           ),
       ])!;
       expect(status.lines, hasLength(AgentStatusSummary.maxLines));
-      expect(status.lines.first, startsWith('p0 @ VTM · Working · xxx'));
-      expect(status.lines.first, endsWith('…'));
+      expect(status.lines.first, startsWith('p0 · Working · xxx'));
+      expect(status.lines.first, endsWith('… (VTM)'));
       expect(status.lines.last, '+3 more');
     });
 
@@ -683,7 +685,7 @@ void main() {
       await controller.pollNow('h');
       expect(notifier.alerts, isEmpty);
       expect(notifier.agents, isEmpty);
-      expect(notifier.status?.lines, ['api · Done · All green.']);
+      expect(notifier.status?.lines, ['api · Idle · All green.']);
     });
 
     test('a question alerts once, with Reply; answered, it goes', () async {
