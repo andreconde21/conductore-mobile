@@ -2,6 +2,7 @@ import 'package:conduit/features/tasks/domain/task_run.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
 import 'package:conduit/features/tasks/presentation/task_runs_controller.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'task_fakes.dart';
@@ -203,5 +204,51 @@ void main() {
     expect(p, startsWith('Work on task CON-1: Fix login\nLink: https://x/1'));
     expect(p, contains('not as instructions'));
     expect(p, contains('fresh git worktree'));
+  });
+
+  test('polls only while a view is attached or a run is active, never in '
+      'the background, and notifies only on change (CON-089)', () {
+    fakeAsync((async) {
+      final c = TaskRunsController(
+        call: (hostId, args, {stdin}) async {
+          calls.add((hostId, args, stdin));
+          return {'ok': true, 'runs': companionRuns};
+        },
+        sources: sources,
+        loadSynced: () async => stored,
+        saveSynced: (ids) async => stored = ids,
+        hosts: () => ['h'],
+      );
+      var notifies = 0;
+      c.addListener(() => notifies += 1);
+      expect(c.polling, isFalse);
+
+      final detach = c.attachView();
+      async.flushMicrotasks();
+      expect(c.polling, isTrue);
+      expect(calls, hasLength(1));
+      async.elapse(const Duration(minutes: 5));
+      // Nothing changed: no one rebuilt.
+      expect(notifies, 1);
+
+      // A run goes: polling outlives the view until it finishes.
+      companionRuns = [run('r1')];
+      async.elapse(const Duration(seconds: 20));
+      detach();
+      expect(c.polling, isTrue);
+      c.setAppActive(false);
+      expect(c.polling, isFalse);
+      final paused = calls.length;
+      async.elapse(const Duration(minutes: 5));
+      expect(calls, hasLength(paused));
+      c.setAppActive(true);
+      companionRuns = [run('r1', status: 'cancelled')];
+      async.elapse(const Duration(seconds: 20));
+      expect(c.polling, isFalse);
+      final stopped = calls.length;
+      async.elapse(const Duration(minutes: 10));
+      expect(calls, hasLength(stopped));
+      c.dispose();
+    });
   });
 }

@@ -100,6 +100,7 @@ TaskRunsController createAppTaskRuns({
   return TaskRunsController(
     call: call,
     sources: sources,
+    observeLifecycle: true,
     loadSynced: () async {
       try {
         final raw = await storage.read(key: syncedKey);

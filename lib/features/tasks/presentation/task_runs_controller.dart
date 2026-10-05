@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:conduit/features/tasks/domain/task_run.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
 import 'package:conduit/features/tasks/domain/task_start_defaults.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 /// Runs `conductore-hostd <args>` on [hostId], [stdin] as JSON on its
 /// input; the decoded reply (throws [TaskSourceFailure]).
@@ -31,7 +32,28 @@ class TaskRunsController extends ChangeNotifier {
     this.loadDefaults,
     this.saveDefaults,
     this.hosts,
-  });
+    this.every = const Duration(seconds: 20),
+    this.allEvery = 15,
+    bool observeLifecycle = false,
+  }) {
+    if (observeLifecycle) {
+      _lifecycle = AppLifecycleListener(
+        onStateChange: (state) => setAppActive(
+          state == AppLifecycleState.resumed ||
+              state == AppLifecycleState.inactive,
+        ),
+      );
+    }
+  }
+
+  /// How often machines with waiting or going runs are asked.
+  final Duration every;
+
+  /// While a view is on screen, every machine of [hosts] is asked every
+  /// [allEvery] ticks (the first tick too).
+  final int allEvery;
+
+  AppLifecycleListener? _lifecycle;
 
   /// The machines whose companion starts tasks: asked now and then, so
   /// runs started elsewhere (another device, the CLI) show too.
@@ -60,11 +82,63 @@ class TaskRunsController extends ChangeNotifier {
     hostId,
   ).where((r) => r.active || r.status == TaskRunStatus.queued).length;
 
-  /// Asks every machine of [hosts] once, then keeps following: called
-  /// when Tasks or the dashboard shows started tasks.
-  Future<void> watch() async {
-    if (_poll == null) startPolling();
-    await refreshAll(hosts?.call() ?? const []);
+  /// Asks every machine of [hosts] once and follows them while the
+  /// returned function is not called: Tasks or the dashboard is on screen.
+  ///
+  /// CON-089: polling used to start at the first visit and never stop.
+  /// Now it runs while a view is attached, or while a run waits or goes
+  /// (to move its task to done), never in the background, and stops once
+  /// neither holds.
+  VoidCallback attachView() {
+    _views += 1;
+    _syncPolling();
+    unawaited(refreshAll(hosts?.call() ?? const []));
+    var attached = true;
+    return () {
+      if (!attached) return;
+      attached = false;
+      _views -= 1;
+      _syncPolling();
+    };
+  }
+
+  int _views = 0;
+  bool _appActive = true;
+  int _tick = 0;
+
+  /// Pauses all polling while the app is in the background.
+  void setAppActive(bool active) {
+    if (_appActive == active) return;
+    _appActive = active;
+    _syncPolling();
+  }
+
+  /// Whether the timer runs (tests).
+  @visibleForTesting
+  bool get polling => _poll != null;
+
+  void _syncPolling() {
+    final wanted = !_disposed && _appActive && (_views > 0 || anyActive);
+    if (!wanted) {
+      _poll?.cancel();
+      _poll = null;
+    } else if (_poll == null) {
+      _tick = 0;
+      _poll = Timer.periodic(every, (_) => _onTick());
+    }
+  }
+
+  void _onTick() {
+    final all = _views > 0 && _tick++ % allEvery == 0;
+    final ids = {
+      if (all) ...?hosts?.call(),
+      for (final MapEntry(key: hostId, value: runs) in _runs.entries)
+        if (runs.any((r) => r.active || r.status == TaskRunStatus.queued))
+          hostId,
+    };
+    for (final id in ids) {
+      unawaited(refresh(id));
+    }
   }
 
   /// Refreshes [hostIds] side by side.
@@ -130,17 +204,27 @@ class TaskRunsController extends ChangeNotifier {
   }
 
   /// Reads [hostId]'s runs, then syncs the finished ones.
+  /// Notifies only when the runs or the error changed.
   Future<void> refresh(String hostId) async {
+    final before = (_raw[hostId], _errors[hostId]);
     try {
       final json = await call(hostId, 'task-runs list');
+      _raw[hostId] = jsonEncode(json['runs']);
       _runs[hostId] = _parse(json);
       _errors.remove(hostId);
     } on Object catch (e) {
       _errors[hostId] = '$e';
     }
-    notifyListeners();
+    if (_disposed) return;
+    if ((_raw[hostId], _errors[hostId]) != before) notifyListeners();
+    // A run that finished may end the polling; a new one may start it.
+    _syncPolling();
     await _syncDone(hostId);
   }
+
+  /// Each machine's last `runs` reply as received, to tell a change.
+  final Map<String, String> _raw = {};
+  bool _disposed = false;
 
   Future<void> cancel(String hostId, String runId) async {
     await call(hostId, 'task-runs cancel $runId');
@@ -158,36 +242,12 @@ class TaskRunsController extends ChangeNotifier {
     await refresh(hostId);
   }
 
-  /// Refreshes the machines with waiting or going runs every [every], and
-  /// every machine of [hosts] every [allEvery] ticks (the first tick too).
-  void startPolling({
-    Duration every = const Duration(seconds: 20),
-    int allEvery = 15,
-  }) {
-    _poll?.cancel();
-    var tick = 0;
-    _poll = Timer.periodic(every, (_) {
-      final all = tick++ % allEvery == 0;
-      final ids = {
-        if (all) ...?hosts?.call(),
-        for (final MapEntry(key: hostId, value: runs) in _runs.entries)
-          if (runs.any((r) => r.active || r.status == TaskRunStatus.queued))
-            hostId,
-      };
-      for (final id in ids) {
-        unawaited(refresh(id));
-      }
-    });
-  }
-
-  void stopPolling() {
-    _poll?.cancel();
-    _poll = null;
-  }
-
   @override
   void dispose() {
-    stopPolling();
+    _disposed = true;
+    _lifecycle?.dispose();
+    _poll?.cancel();
+    _poll = null;
     super.dispose();
   }
 
