@@ -1,14 +1,19 @@
-# Launcher details provider (CON-075)
+# Launcher details provider (CON-075, v2 CON-082)
 
 André's launcher Yoke (an OLauncher fork; `com.outsmartis.yoke`, debug
 builds `com.outsmartis.yoke.debug`) opens a
 details sheet when Conductore's icon is long-pressed. Conductore supplies the
-sheet's content through a read-only `ContentProvider`. This page is the
-contract between the two apps.
+sheet's content through a `ContentProvider`, and since contract 2
+(CON-082) takes answers to waiting agents through `ContentProvider.call`.
+This page is the contract between the two apps.
 
 Code: `android/app/src/main/kotlin/com/gwitko/conduit/LauncherDetailsProvider.kt`
-(the provider) and `LauncherDetailsModel.kt` (the rows, unit-tested in
-`android/app/src/test/.../LauncherDetailsModelTest.kt`).
+(the provider), `LauncherDetailsModel.kt` (the rows, unit-tested in
+`android/app/src/test/.../LauncherDetailsModelTest.kt`) and
+`LauncherActions.kt` (the prompts and the `call` actions, unit-tested in
+`LauncherActionsTest.kt`). The Dart side: `LauncherPrompt`
+(`lib/features/agent_attention/domain/launcher_prompt.dart`) and
+`AgentAttentionController.completeLauncherAction`.
 
 ## Discovery
 
@@ -71,6 +76,10 @@ Ties keep Conductore's own order.
 | `progress` | int | Always `-1` (unknown) for now: no agent provider reports progress. |
 | `updated_at` | long | Epoch ms the agent entered its state; the snapshot's time when the provider does not report it. |
 | `deep_link` | string or null | Opens that session (below). Null when the agent has no ids. |
+| `question` | string or null | Contract 2. What the agent asks (below), at most 600 characters. Null unless `state` is `needsInput` or `blocked`, or when unknown. |
+| `options` | string or null | Contract 2. A JSON array of the choice labels, e.g. `["Allow","Always allow","Deny"]`. Null when there are no choices. |
+| `answerable` | int or null | Contract 2. 1: the launcher may answer (`choose` when `options` is set, else `reply`); 0: it may not. Null unless `state` is `needsInput` or `blocked`. |
+| `answer_note` | string or null | Contract 2. When `answerable` is 0: why, for the sheet (e.g. `High-risk request: open it in Conductore`). Null otherwise. |
 
 ## `content://<authority>/summary`
 
@@ -83,6 +92,7 @@ Exactly one row.
 | `updated_at` | long | Epoch ms of the last snapshot (0 before the first). |
 | `limit_5h_pct` | int | Claude's 5-hour window used, 0-100 (0 once it reset); -1 unknown. |
 | `limit_7d_pct` | int | Claude's weekly window, the same way. |
+| `contract_version` | int | `2` (this page). Absent (projection fails) from a Conductore with contract 1. |
 
 ## `content://<authority>/themes`
 
@@ -160,3 +170,107 @@ stopped monitoring) opens the agents dashboard instead.
   theme travels in the same snapshot.
 - When Conductore's engine goes away, the snapshot is marked not monitoring:
   `items` is empty and `monitoring` is 0, the limits and the PC theme stay.
+
+## Contract 2: questions and answers (CON-082)
+
+### What `/items` carries
+
+Only rows whose `state` is `needsInput` or `blocked` have the four new
+columns set; every other row has them null. Conductore derives them from the
+agent's live status:
+
+| What waits | `question` | `options` | `answerable` / `answer_note` |
+| --- | --- | --- | --- |
+| A permission request (low, medium or unrated risk) | `Approve <tool>: <summary> · <risk>`, the risk reason on the next line | `["Allow","Always allow","Deny"]` | 1 |
+| A high-risk permission request | the same | null | 0, `High-risk request: open it in Conductore` |
+| A request only the agent's own prompt answers (Gemini CLI, Cursor: `terminalOnly`) | the same | null | 0, `Answer it in the terminal` |
+| A question (AskUserQuestion) with one single-choice question | the question | its option labels | 1 |
+| A question with one free-text (or number) question | the question | null | 1 (`reply` answers it) |
+| Several questions, or a pick-several question | the questions, one per line | null | 0, a note |
+| A question from a companion that does not send its questions | its summary | null | 0, `Open it in Conductore to answer` |
+| Nothing pending (the agent waits for the user's next message) | its last message | null | 1 when Conductore can type into it, else 0 |
+
+When several requests wait, the row is about the first one, and `question`
+ends with `(+N more waiting)`. `Always allow` is Claude Code's "Yes, and
+don't ask again" (Conductore's `always` decision).
+
+`question` and `options` carry the agent's own text, so they are **not
+lock-screen safe**. Conductore stores them apart from the widget snapshot
+(their own preferences file, `launcher_prompts`), which the home-screen
+widget, the quick-settings tile and the notifications never read; only this
+provider serves them, behind the same permission. Do not show them on
+Yoke's lock screen either. They are cleared when Conductore's engine stops.
+
+### Answering: `ContentProvider.call`
+
+```kotlin
+val result = contentResolver.call(
+    Uri.parse("content://com.outsmartis.conductore.launcherdetails"),
+    "choose",             // or "reply"
+    itemId,               // the row's `id`
+    bundleOf("index" to 0), // or bundleOf("text" to "Use main")
+)
+val ok = result?.getBoolean("ok") == true
+val error = result?.getString("error")
+```
+
+- `reply`: extras `text` (String, at most 4000 characters, not blank). The
+  text is typed into the agent and submitted (Enter), through the companion's
+  `send`, which targets the agent's own pane (Herdr's shared focus never
+  moves). For a free-text question it is the answer to that question.
+- `choose`: extras `index` (Int, 0-based into `options`).
+- The result Bundle: `ok` (Boolean) and `error` (String, null when `ok`).
+  When Conductore has not finished after 5 seconds, the call returns
+  `ok = true` and `queued = true`: the answer is still being sent and its
+  outcome is not known (a failure then shows nowhere but in the app's own
+  state). Otherwise `ok` is the real outcome.
+- After a successful answer Conductore calls `notifyChange` on `/items` (and
+  the next snapshot updates it again).
+- Call it off the main thread: it may block for up to 5 seconds.
+
+The permission (`com.outsmartis.permission.READ_LAUNCHER_DETAILS`) is
+checked on the calling UID inside `call`; a caller without it gets a
+`SecurityException`, as a query does.
+
+| `error` | When |
+| --- | --- |
+| `Unlock your phone first` | The device is locked (`KeyguardManager.isDeviceLocked`), the same rule as the notification buttons. |
+| `Open Conductore first` | Conductore's engine is not running or monitors no machine, or its app lock is up (the answer is only taken on its unlocked home page). |
+| `That agent isn't waiting any more` | Unknown or stale item id, an agent no longer `needsInput`/`blocked`, or a request answered meanwhile (also an option that no longer matches the request). |
+| the row's `answer_note` | The row is not answerable (high risk, terminal-only, several questions, ...). |
+| `Pick one of its options` / `It takes a reply, not an option` | `reply` on a row with `options`, or `choose` on one without. |
+| `No option N: it has M (0 to M-1)` / `Missing the option index` | A bad `index`. |
+| `Type a message first` / `Too long: at most 4000 characters` | A bad `text`. |
+| `Already sending an answer to that agent` | One action per item at a time. |
+| `Unknown method <m>` | Anything but `reply` and `choose`. |
+| other text | What failed while sending, as Conductore words it. |
+
+### How it runs
+
+The provider never opens SSH or starts a Flutter engine. It hands the answer
+to the running app over the notification channel
+(`conduit/agent_notifications`, method `launcherAction`), and the app
+completes it with the same code a notification button uses
+(`completePermissionAction`: `decide` for Allow / Always / Deny and answers,
+`send` for a reply), after checking it against what it would offer for that
+agent now. Unlike a notification tap it is not queued for later: when the
+app cannot take it, the call says so (`Open Conductore first`), and a failure
+does not rewrite the agent's notification.
+
+### Differences from Yoke's proposal
+
+- Extra columns `answerable` and `answer_note`: with `options` null, a row
+  is either a reply box (`answerable` 1) or not answerable from the launcher
+  (0, with the reason). Yoke's proposal had no way to tell them apart.
+- `question` is null when Conductore has nothing to say (e.g. no last
+  message), not an empty string.
+- `Always allow` is offered for every permission request that is not high
+  risk; high-risk and terminal-only requests have no options at all.
+- Several questions and pick-several questions are not answerable (no
+  options, `answerable` 0). A free-text question takes `reply`.
+- `queued`: after 5 seconds without an outcome `ok` is true and `queued`
+  true, rather than waiting longer.
+- A caller without the permission gets a `SecurityException`, not
+  `ok = false`.
+- The extra refusals above (locked phone, app not running, one action per
+  item, length and index checks).
