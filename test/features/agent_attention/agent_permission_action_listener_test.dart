@@ -56,6 +56,7 @@ void main() {
   pump(
     WidgetTester tester, {
     List<AgentPermissionAction> queued = const [],
+    bool Function()? mayAct,
   }) async {
     final source = _QueueSource()..queue.addAll(queued);
     final runner = ScriptedAgentCommandRunner([
@@ -80,6 +81,7 @@ void main() {
         home: Scaffold(
           body: AgentPermissionActionListener(
             source: source,
+            mayAct: mayAct ?? () => true,
             agentAttention: controller,
             findHost: (hostId) async {
               await hostsLoaded.future;
@@ -131,6 +133,80 @@ void main() {
     // Unmounted (e.g. the app locked): the platform is told nobody listens.
     await tester.pumpWidget(const SizedBox());
     expect(source.listener, isNull);
+  });
+
+  testWidgets('a closed app lock leaves taps queued, answered after unlock', (
+    tester,
+  ) async {
+    var unlocked = false;
+    final (source, runner, _, hostsLoaded) = await pump(
+      tester,
+      queued: const [tap],
+      mayAct: () => unlocked,
+    );
+    hostsLoaded.complete();
+    await tester.runAsync(pumpEventQueue);
+    // Mounted but the app lock refuses (away past its delay): nothing is
+    // decided, the tap stays queued and the platform is told so.
+    expect(runner.commands, isEmpty);
+    expect(source.queue, [tap]);
+    expect(source.listener?.call(), isFalse);
+    await tester.runAsync(pumpEventQueue);
+    expect(runner.commands, isEmpty);
+    expect(source.queue, [tap]);
+
+    unlocked = true;
+    expect(source.listener?.call(), isTrue);
+    await tester.runAsync(pumpEventQueue);
+    await tester.pump();
+    expect(runner.commands.single, contains('decide req-1 allow'));
+  });
+
+  testWidgets('the app lock is re-checked right before each answer', (
+    tester,
+  ) async {
+    var checks = 0;
+    final (_, runner, _, hostsLoaded) = await pump(
+      tester,
+      queued: const [tap],
+      // Open when the queue is read, closed by the time it would answer.
+      mayAct: () => ++checks == 1,
+    );
+    hostsLoaded.complete();
+    await tester.runAsync(pumpEventQueue);
+    await tester.pump();
+    expect(checks, greaterThanOrEqualTo(2));
+    expect(runner.commands, isEmpty);
+  });
+
+  testWidgets('launcher answers need the app lock open', (tester) async {
+    final launcher = _LauncherSource();
+    final runner = ScriptedAgentCommandRunner(const []);
+    final workspace = TerminalWorkspaceController(FreshTerminalRepository());
+    final controller = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => runner,
+      provider: const HerdrAttentionProvider(),
+      companionProvider: const ConductoreHostAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    addTearDown(controller.dispose);
+    addTearDown(workspace.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AgentPermissionActionListener(
+          source: _QueueSource(),
+          launcherActions: launcher,
+          agentAttention: controller,
+          mayAct: () => false,
+          findHost: (hostId) async => buildHost(hostId),
+          child: const SizedBox(),
+        ),
+      ),
+    );
+    final error = await tester.runAsync(() => launcher.listener!(tap));
+    expect(error, 'Unlock Conductore first');
+    expect(runner.commands, isEmpty);
   });
 
   testWidgets('takes launcher answers only while mounted', (tester) async {

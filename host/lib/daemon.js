@@ -870,18 +870,12 @@ class Daemon {
     if (!['allow', 'deny', 'always', 'answer'].includes(decision)) {
       this.reply(c, { error: 'decision must be allow, deny, always or answer' }); c.end(); return
     }
-    const found = state.findPending(this.state, requestId)
-    if (!found) { this.reply(c, { error: `unknown request ${requestId}` }); c.end(); return }
-    if (found.request.answerable === false) {
-      // Watched only (Gemini): its agent's own prompt answers it.
-      this.reply(c, { error: 'this agent takes its answers in the terminal' }); c.end(); return
-    }
-    const waiter = this.waiters.get(requestId)
-    if (!waiter) {
-      // Pending but nobody waiting: the hook died; clean up.
-      this.commit(state.resolvePermission(this.state, requestId, 'gone'))
-      this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return
-    }
+    // Pending for that agent (when named) with its own hook waiting;
+    // watched-only (Gemini) and expired requests are refused.
+    const found = approvalOps.pendingRequest(this, requestId, req.sessionId)
+    if (found.error) { this.reply(c, { error: found.error }); c.end(); return }
+    const waiter = found.waiter
+    if (!waiter) { this.reply(c, { error: 'request expired; answer it in the terminal' }); c.end(); return }
     // A question takes answers or a deny. Claude Code ignores a plain allow
     // for it (the dialog stays in the terminal), so one is refused here and
     // the request stays pending for a real answer.

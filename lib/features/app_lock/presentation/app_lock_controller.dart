@@ -4,6 +4,26 @@ import 'package:flutter/foundation.dart';
 
 enum AppLockStatus { locked, checking, unlocked, unavailable }
 
+/// What the platform side needs to refuse actions taken while the app is
+/// in the background (notification buttons, the launcher): whether the app
+/// is locked, and when it locks again if it stays away (null: it does not).
+@immutable
+class AppLockActionState {
+  const AppLockActionState({required this.locked, this.relockAt});
+
+  final bool locked;
+  final DateTime? relockAt;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AppLockActionState &&
+      other.locked == locked &&
+      other.relockAt == relockAt;
+
+  @override
+  int get hashCode => Object.hash(locked, relockAt);
+}
+
 class AppLockController extends ChangeNotifier {
   /// [enabled] false (a platform without device authentication, see
   /// `PlatformFeatures.appLock`) starts unlocked and never locks, instead of
@@ -14,7 +34,10 @@ class AppLockController extends ChangeNotifier {
     this._preferences,
     DateTime Function()? clock,
   }) : _status = enabled ? AppLockStatus.locked : AppLockStatus.unlocked,
-       _clock = clock ?? DateTime.now;
+       _clock = clock ?? DateTime.now {
+    actionState = ValueNotifier(_actionState());
+    addListener(_publish);
+  }
 
   final AppAuthenticator _authenticator;
   final bool enabled;
@@ -36,6 +59,42 @@ class AppLockController extends ChangeNotifier {
   AppLockStatus get status => _status;
   String? get message => _message;
   bool get isUnlocked => _status == AppLockStatus.unlocked;
+
+  /// The lock as actions from outside the app must see it; changes when
+  /// the app locks, unlocks, leaves the screen or comes back, without
+  /// rebuilding what listens to the controller itself.
+  late final ValueNotifier<AppLockActionState> actionState;
+
+  /// When the app locks again if it stays in the background (null: it is
+  /// on screen, or does not lock again).
+  DateTime? get relockAt {
+    final since = _backgroundedAt;
+    final delay = _relockDelay.duration;
+    if (since == null || delay == null) return null;
+    return since.add(delay);
+  }
+
+  /// Whether an action taken from outside the app (a notification button,
+  /// the launcher, the voice guide) may run now: never while the app lock
+  /// is shown, nor once the app has been away for [relockDelay] (it locks
+  /// here, as it would on coming back).
+  bool admitsActions() {
+    if (!enabled) return true;
+    if (!isUnlocked) return false;
+    final deadline = relockAt;
+    if (deadline != null && _authenticated && !_clock().isBefore(deadline)) {
+      lock();
+      return false;
+    }
+    return true;
+  }
+
+  AppLockActionState _actionState() => AppLockActionState(
+    locked: enabled && !isUnlocked,
+    relockAt: enabled && isUnlocked && _authenticated ? relockAt : null,
+  );
+
+  void _publish() => actionState.value = _actionState();
 
   Future<void> unlock() async {
     if (_status == AppLockStatus.checking) {
@@ -131,6 +190,7 @@ class AppLockController extends ChangeNotifier {
   void appBackgrounded() {
     if (!enabled || !isUnlocked || !_authenticated) return;
     _backgroundedAt ??= _clock();
+    _publish();
   }
 
   /// The app is back on screen: locks again when it was away for at least
@@ -138,9 +198,17 @@ class AppLockController extends ChangeNotifier {
   void appResumed() {
     final since = _backgroundedAt;
     _backgroundedAt = null;
+    _publish();
     final delay = _relockDelay.duration;
     if (since == null || delay == null) return;
     if (!enabled || !isUnlocked || !_authenticated) return;
     if (_clock().difference(since) >= delay) lock();
+  }
+
+  @override
+  void dispose() {
+    removeListener(_publish);
+    actionState.dispose();
+    super.dispose();
   }
 }

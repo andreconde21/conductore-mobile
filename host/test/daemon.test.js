@@ -274,13 +274,14 @@ test('decide deny carries the message; unknown ids fail with exit 1', async () =
   })
 })
 
-test('decide always answers allow with updatedPermissions (suggestion preferred, else derived rule)', async () => {
+test('decide always saves a rule for exactly this call, never a broader suggestion', async () => {
+  // Claude Code's own suggestion may cover more than the user saw.
   const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'git *' }], behavior: 'allow', destination: 'localSettings' }
   const p1 = hook(ev('s1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'git status' }, permission_suggestions: [suggestion] }), { CONDUCTORE_PERMISSION_TIMEOUT: '20' })
   const r1 = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.[0])
   await cli('decide', r1.id, 'always')
   const out1 = JSON.parse((await p1).stdout)
-  assert.deepEqual(out1.hookSpecificOutput.decision, { behavior: 'allow', updatedPermissions: [suggestion] })
+  assert.deepEqual(out1.hookSpecificOutput.decision, { behavior: 'allow', updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'git status' }], behavior: 'allow', destination: 'localSettings' }] })
 
   const p2 = hook(ev('s1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'make build' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '20' })
   const r2 = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.[0])
@@ -292,6 +293,28 @@ test('decide always answers allow with updatedPermissions (suggestion preferred,
   const recorded = JSON.parse(fs.readFileSync(path.join(home, 'always-rules.json'), 'utf8'))
   assert.equal(recorded.length, 2)
   assert.equal(recorded[1].toolName, 'Bash')
+
+  // A `*` would be a wildcard in Claude Code's syntax: allowed once, no rule.
+  const p3 = hook(ev('s1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls *.md' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '20' })
+  const r3 = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.[0])
+  await cli('decide', r3.id, 'always')
+  assert.deepEqual(JSON.parse((await p3).stdout).hookSpecificOutput.decision, { behavior: 'allow' })
+})
+
+test('decide and trust refuse a request named for another agent', async () => {
+  const p = hook(ev('s1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'git status' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '20' })
+  const r = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.[0])
+  const wrong = await cli('decide', r.id, 'allow', '--session', 'someone-else')
+  assert.equal(wrong.code, 1)
+  assert.match(wrong.json.error, /not pending for that agent/)
+  const t = await cli('trust', r.id, '--session', 'someone-else')
+  assert.equal(t.code, 1)
+  assert.match(t.json.error, /not pending for that agent/)
+  assert.equal((await cli('decide', 'no-such-request', 'allow')).code, 1)
+  // Still pending, and answered for its own agent.
+  const ok = await cli('decide', r.id, 'deny', '--session', 's1')
+  assert.equal(ok.code, 0)
+  assert.equal(JSON.parse((await p).stdout).hookSpecificOutput.decision.behavior, 'deny')
 })
 
 const QUESTIONS = [

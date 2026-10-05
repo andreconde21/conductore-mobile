@@ -400,7 +400,13 @@ class AgentAttentionController extends ChangeNotifier {
     }
     final provider = monitor.provider ?? await _resolveProvider(monitor);
     try {
-      await _sendDecision(monitor.runner, provider, request, verdict);
+      await _sendDecision(
+        monitor.runner,
+        provider,
+        request,
+        verdict,
+        sessionId: _ownerOf(monitor, request.id),
+      );
     } on _RequestGone {
       // Answered elsewhere or timed out: the prompt is in the terminal now.
       if (!_disposed) {
@@ -515,7 +521,13 @@ class AgentAttentionController extends ChangeNotifier {
       if (monitor != null) {
         final provider = monitor.provider ?? await _resolveProvider(monitor);
         try {
-          await _sendDecision(monitor.runner, provider, request, verdict);
+          await _sendDecision(
+            monitor.runner,
+            provider,
+            request,
+            verdict,
+            sessionId: _ownerOf(monitor, action.requestId),
+          );
         } on _RequestGone {
           _removeRequest(monitor, action.requestId, stillWaiting: true);
           unawaited(_poll(monitor));
@@ -829,16 +841,23 @@ class AgentAttentionController extends ChangeNotifier {
     List<PendingApproval>? only,
   }) async {
     final chosen = only ?? lowRiskPending;
-    final byHost = <String, List<String>>{};
+    // One batch per host; per agent where the companion checks that each
+    // request is that agent's ([requestOwnerCapability]).
+    final batches = <(String, String?), List<String>>{};
     for (final pending in chosen) {
       if (hostId != null && pending.hostId != hostId) {
         continue;
       }
-      byHost.putIfAbsent(pending.hostId, () => []).add(pending.request.id);
+      final owner = companionSupports(pending.hostId, requestOwnerCapability)
+          ? pending.agent.id
+          : null;
+      batches
+          .putIfAbsent((pending.hostId, owner), () => [])
+          .add(pending.request.id);
     }
     var result = const BatchApprovalResult();
     Object? firstError;
-    for (final MapEntry(key: host, value: ids) in byHost.entries) {
+    for (final MapEntry(key: (host, owner), value: ids) in batches.entries) {
       final monitor = _monitorFor(host);
       if (monitor == null) {
         continue;
@@ -854,7 +873,7 @@ class AgentAttentionController extends ChangeNotifier {
       try {
         final stdout = await _runChecked(
           monitor.runner,
-          provider.approveLowCommand(ids),
+          provider.approveLowCommand(ids, sessionId: owner),
         );
         final batch = provider.parseBatch(stdout);
         result = result.merge(batch);
@@ -917,7 +936,12 @@ class AgentAttentionController extends ChangeNotifier {
     try {
       final stdout = await _runChecked(
         monitor.runner,
-        provider.trustCommand(request, draft, source: source),
+        provider.trustCommand(
+          request,
+          draft,
+          source: source,
+          sessionId: _ownerOf(monitor, request.id),
+        ),
       );
       result = provider.parseTrust(stdout);
     } on _RequestGone {
@@ -1093,13 +1117,31 @@ class AgentAttentionController extends ChangeNotifier {
     return result.stdout;
   }
 
+  /// The agent [requestId] is pending for, when [monitor]'s companion
+  /// checks ownership ([requestOwnerCapability]); else null (older
+  /// companions get the command they know).
+  String? _ownerOf(_HostMonitor monitor, String requestId) {
+    if (!(monitor.capabilities?.contains(requestOwnerCapability) ?? false)) {
+      return null;
+    }
+    for (final agent in monitor.status.agents) {
+      if (agent.pendingRequests.any((r) => r.id == requestId)) return agent.id;
+    }
+    return null;
+  }
+
   Future<void> _sendDecision(
     AgentCommandRunner runner,
     AgentAttentionProvider provider,
     PendingPermissionRequest request,
-    PermissionVerdict verdict,
-  ) async {
-    final command = provider.decideCommand(request, verdict);
+    PermissionVerdict verdict, {
+    String? sessionId,
+  }) async {
+    final command = provider.decideCommand(
+      request,
+      verdict,
+      sessionId: sessionId,
+    );
     if (command == null && request.isQuestion) {
       throw AppFailure(
         request.answerable

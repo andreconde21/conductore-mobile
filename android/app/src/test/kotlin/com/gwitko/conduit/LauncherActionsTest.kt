@@ -31,6 +31,7 @@ class LauncherActionsTest {
         var permitted = true
         var locked = false
         var listening = true
+        var appLocked = false
         val prompts = mutableMapOf<String, LauncherPrompt>()
         val dispatched = mutableListOf<Map<String, String>>()
 
@@ -45,6 +46,7 @@ class LauncherActionsTest {
         override fun callerPermitted() = permitted
         override fun deviceLocked() = locked
         override fun appListening() = listening
+        override fun appLocked() = appLocked
         override fun prompt(itemId: String) = prompts[itemId]
         override fun dispatch(action: Map<String, String>, done: (LauncherActions.Outcome?) -> Unit) {
             dispatched.add(action)
@@ -89,6 +91,15 @@ class LauncherActionsTest {
         val (env, actions) = setUp()
         env.locked = true
         assertEquals(LauncherActions.Outcome(false, "Unlock your phone first"), actions.choose("h/s1", 0))
+        assertTrue(env.dispatched.isEmpty())
+    }
+
+    @Test
+    fun aLockedAppIsRefusedEvenOnAnUnlockedPhone() {
+        val (env, actions) = setUp()
+        env.appLocked = true
+        assertEquals(LauncherActions.Outcome(false, "Unlock Conductore first"), actions.choose("h/s1", 0))
+        assertEquals(LauncherActions.Outcome(false, "Unlock Conductore first"), actions.reply("h/s3", "main"))
         assertTrue(env.dispatched.isEmpty())
     }
 

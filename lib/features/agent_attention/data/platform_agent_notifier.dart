@@ -84,6 +84,29 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
 
   static bool _handlerInstalled = false;
 
+  /// Tells the native side the app lock as background actions must see it
+  /// (`AppLockController.actionState`): notification buttons and the
+  /// launcher refuse while [locked], or from [relockAt] on. The native
+  /// side treats "never told" as locked.
+  static Future<void> setAppLockState({
+    required bool locked,
+    DateTime? relockAt,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+    try {
+      await channel.invokeMethod<void>('appLockState', {
+        'locked': locked,
+        'relockAtMillis': relockAt?.millisecondsSinceEpoch,
+      });
+    } on MissingPluginException {
+      // No native handler (tests).
+    } on PlatformException {
+      // Best effort: the native side stays at its last (or locked) state.
+    }
+  }
+
   @override
   Future<void> cancel({required String id}) => _invoke('cancel', {'id': id});
 

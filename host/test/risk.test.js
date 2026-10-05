@@ -24,7 +24,7 @@ const BASH = [
   ['tree -L 2', 'low'],
   ['du -sh node_modules', 'low'],
   ['which node', 'low'],
-  ['echo $PATH', 'low'],
+  ['echo $PATH', 'high', 'variables'],
   ['jq .version package.json', 'low'],
   ['sed -n 1,80p lib/cli.js', 'low'],
   ['awk \'{print $1}\' access.log | sort | uniq -c | sort -rn | head', 'low'],
@@ -88,7 +88,7 @@ const BASH = [
   ['./gradlew test', 'low'],
   ['ruff check .', 'low'],
   ['mypy src', 'low'],
-  ['source env.sh && flutter test', 'medium'],
+  ['source env.sh && flutter test', 'high'],
   ['CI=1 npm test', 'low'],
   ['timeout 60 npm test', 'low'],
   // Medium: edits, installs, builds, unknown
@@ -143,13 +143,13 @@ const BASH = [
   ['chmod +x scripts/run.sh', 'medium'],
   ['curl -sL https://github.com/foo/bar/releases/latest', 'medium'],
   ['wget https://registry.npmjs.org/lodash', 'medium'],
-  ['python -c "print(1)"', 'medium', 'inline'],
-  ['ls $(git rev-parse --show-toplevel)', 'medium', 'substitution'],
-  ['find . -name "*.orig" -exec cat {} \\;', 'medium'],
-  ['xargs -n1 echo < list.txt', 'low'],
+  ['python -c "print(1)"', 'high', 'inline'],
+  ['ls $(git rev-parse --show-toplevel)', 'high', 'substitution'],
+  ['find . -name "*.orig" -exec cat {} \\;', 'high', 'find -exec'],
+  ['xargs -n1 echo < list.txt', 'high', 'xargs'],
   ['unknowncmd --do-things', 'medium'],
   ['gh pr create --fill', 'medium'],
-  ['echo "unterminated', 'medium'],
+  ['echo "unterminated', 'high', 'unbalanced'],
   // High
   ['rm -rf node_modules', 'high', 'recursively'],
   ['rm -rf /', 'high'],
@@ -285,7 +285,7 @@ const TOOLS = [
   ['ExitPlanMode', { plan: 'x' }, 'medium', 'plan'],
   ['mcp__github__create_issue', { title: 'x' }, 'medium', 'MCP'],
   ['SomethingNew', {}, 'medium'],
-  ['Bash', { _truncated: true, preview: '…' }, 'medium', 'too large']
+  ['Bash', { _truncated: true, preview: '…' }, 'high', 'too large']
 ]
 
 test('tool classifier table', () => {

@@ -6,6 +6,7 @@
 // sh hook prints it unchanged.
 
 const fs = require('fs')
+const path = require('path')
 const paths = require('./paths')
 const { log } = require('./log')
 
@@ -16,20 +17,51 @@ const { log } = require('./log')
 // ExitPlanMode (checked in Claude Code 2.1.285).
 const INTERACTIVE_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
 
-// updatedPermissions for an "always" decision: prefer what Claude Code itself
-// suggested, else a rule scoped to this exact command/path.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+const READ_TOOLS = new Set(['Read', 'NotebookRead'])
+const DIR_TOOLS = new Set(['Grep', 'Glob', 'LS'])
+
+// The Claude Code rule that allows exactly this call and nothing more, or
+// null when its syntax cannot say that (a `*` would be a wildcard there; a
+// path with glob characters; a multi-line command).
+function exactRule (event) {
+  const tool = event.tool_name
+  const input = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {}
+  if (typeof tool !== 'string' || !tool || input._truncated) return null
+  const abs = p => (typeof p === 'string' && p ? path.resolve(typeof event.cwd === 'string' && event.cwd ? event.cwd : '/', p) : null)
+  const plainPath = p => p && !/[*?[\]{}\n]/.test(p)
+  if (tool === 'Bash') {
+    const c = typeof input.command === 'string' ? input.command.trim() : ''
+    return c && !/[*\n\r]/.test(c) && !c.endsWith(':') ? { toolName: 'Bash', ruleContent: c } : null
+  }
+  if (EDIT_TOOLS.has(tool) || READ_TOOLS.has(tool)) {
+    if (Array.isArray(input.files) && input.files.length > 1) return null
+    const p = abs(input.file_path || input.notebook_path || input.path)
+    return plainPath(p) ? { toolName: EDIT_TOOLS.has(tool) ? 'Edit' : 'Read', ruleContent: `/${p}` } : null
+  }
+  if (DIR_TOOLS.has(tool)) {
+    const p = abs(input.path || event.cwd)
+    return plainPath(p) ? { toolName: 'Read', ruleContent: `/${p}/**` } : null
+  }
+  if (tool === 'WebFetch') {
+    let host = null
+    try { host = new URL(String(input.url)).hostname.toLowerCase() } catch {}
+    return host && /^[a-z0-9.-]+$/.test(host) ? { toolName: 'WebFetch', ruleContent: `domain:${host}` } : null
+  }
+  return { toolName: tool }
+}
+
+// updatedPermissions for an "always" decision: a rule for exactly this
+// call (never Claude Code's own suggestion, which may cover more than the
+// user saw), or none when no rule can say just that (then it is an allow
+// once).
 function alwaysPermissions (event) {
   // A plan's "always" is "approve and auto-accept edits", Claude Code's own
   // second plan option: a mode for this session, never a rule that would
   // approve every later plan.
   if (event.tool_name === 'ExitPlanMode') return [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]
-  const suggested = (event.permission_suggestions || []).filter(s => s && s.type === 'addRules' && s.behavior === 'allow' && Array.isArray(s.rules) && s.rules.length)
-  if (suggested.length) return [suggested[0]]
-  const input = event.tool_input || {}
-  const rule = { toolName: event.tool_name }
-  if (event.tool_name === 'Bash' && typeof input.command === 'string') rule.ruleContent = input.command
-  else if (typeof input.file_path === 'string') rule.ruleContent = input.file_path
-  return [{ type: 'addRules', rules: [rule], behavior: 'allow', destination: 'localSettings' }]
+  const rule = exactRule(event)
+  return rule ? [{ type: 'addRules', rules: [rule], behavior: 'allow', destination: 'localSettings' }] : null
 }
 
 function recordAlwaysRule (event, updatedPermissions) {
@@ -94,6 +126,7 @@ function permissionOutput (event, decision, message, answers) {
   }
   if (decision === 'always') {
     const updatedPermissions = alwaysPermissions(event)
+    if (!updatedPermissions) return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', ...echo } } }
     recordAlwaysRule(event, updatedPermissions)
     return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', ...echo, updatedPermissions } } }
   }
@@ -104,4 +137,4 @@ function permissionOutput (event, decision, message, answers) {
   return null
 }
 
-module.exports = { alwaysPermissions, permissionOutput, answerInput, INTERACTIVE_TOOLS }
+module.exports = { alwaysPermissions, exactRule, permissionOutput, answerInput, INTERACTIVE_TOOLS }

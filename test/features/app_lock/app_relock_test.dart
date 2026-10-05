@@ -66,6 +66,51 @@ void main() {
       expect(controller.isUnlocked, isFalse);
     });
 
+    test('actions from outside the app need the app lock open', () async {
+      final locked = AppLockController(AlwaysAuthenticates(), clock: () => now);
+      expect(locked.admitsActions(), isFalse);
+      expect(locked.actionState.value.locked, isTrue);
+
+      // Unlocked and on screen.
+      expect(controller.admitsActions(), isTrue);
+      expect(
+        controller.actionState.value,
+        const AppLockActionState(locked: false),
+      );
+
+      // In the background, within the delay: still open; past it, the
+      // action is refused and the app locks there and then, not only on
+      // its return.
+      controller.appBackgrounded();
+      expect(
+        controller.actionState.value.relockAt,
+        now.add(const Duration(minutes: 1)),
+      );
+      now = now.add(const Duration(seconds: 30));
+      expect(controller.admitsActions(), isTrue);
+      now = now.add(const Duration(seconds: 31));
+      expect(controller.admitsActions(), isFalse);
+      expect(controller.isUnlocked, isFalse);
+      expect(controller.actionState.value.locked, isTrue);
+      expect(controller.actionState.value.relockAt, isNull);
+    });
+
+    test('back on screen, the re-lock deadline goes', () {
+      controller.appBackgrounded();
+      expect(controller.actionState.value.relockAt, isNotNull);
+      controller.appResumed();
+      expect(
+        controller.actionState.value,
+        const AppLockActionState(locked: false),
+      );
+    });
+
+    test('a platform without an app lock always admits actions', () {
+      final none = AppLockController(AlwaysAuthenticates(), enabled: false);
+      expect(none.admitsActions(), isTrue);
+      expect(none.actionState.value.locked, isFalse);
+    });
+
     test('not after "Continue without auth"', () async {
       final unavailable = AppLockController(
         UnavailableAuthenticator(),

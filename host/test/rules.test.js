@@ -58,11 +58,11 @@ test('Bash glob, prefix and exact forms', () => {
     ['Bash(npm test *)', 'npm test | sh', false],
     ['Bash(npm test *)', 'npm test | tee out.log', false],
     ['Bash(npm test *)', 'cd x', false],
-    // Substitutions never match a glob; the exact command still does.
+    // A command the parser does not fully understand matches nothing.
     ['Bash(npm test *)', 'npm test $(cat args)', false],
     ['Bash(npm test *)', 'npm test `whoami`', false],
-    ['Bash(npm test $(cat args))', 'npm test $(cat args)', true],
-    ['Bash', 'npm test $(cat args)', true],
+    ['Bash(npm test $(cat args))', 'npm test $(cat args)', false],
+    ['Bash', 'npm test $(cat args)', false],
     ['Bash(echo *)', 'echo "unterminated', false],
     // Other tools never match a Bash rule.
     ['Read', 'cat x', false]
@@ -72,11 +72,14 @@ test('Bash glob, prefix and exact forms', () => {
   assert.deepEqual(failures, [])
 })
 
-test('several rules can cover one compound command', () => {
+test('several statements are covered only by the exact command', () => {
   const list = [rec('Bash(npm run build *)'), rec('Bash(npm test *)')]
-  const m = rules.findMatch(list, { session_id: 's', tool_name: 'Bash', tool_input: { command: 'npm run build && npm test' } }, ctx, NOW)
-  assert.equal(m, list[0])
-  assert.equal(rules.findMatch(list, { session_id: 's', tool_name: 'Bash', tool_input: { command: 'npm run build && npm publish' } }, ctx, NOW), null)
+  const ev = command => ({ session_id: 's', tool_name: 'Bash', tool_input: { command } })
+  assert.equal(rules.findMatch(list, ev('npm run build && npm test'), ctx, NOW), null)
+  assert.equal(rules.findMatch(list, ev('npm run build && npm publish'), ctx, NOW), null)
+  const exact = rec('Bash(npm run build && npm test)')
+  assert.equal(rules.findMatch([exact], ev('npm run build && npm test'), ctx, NOW), exact)
+  assert.equal(rules.findMatch([exact], ev('npm run build ; npm test'), ctx, NOW), null)
 })
 
 test('path rules for Edit and Read families', () => {
@@ -177,24 +180,29 @@ test('makeRule validates and normalizes', () => {
   ]) assert.throws(() => rules.makeRule(bad, NOW), JSON.stringify(bad))
 })
 
-test('suggestions: specific first, then broader', () => {
+test('suggestions: exactly this call first, then broader', () => {
   const s = (tool, input, c = ctx) => rules.suggest(tool, input, c)
-  assert.deepEqual(s('Bash', { command: 'npm test -- --grep foo' }), ['Bash(npm test *)', 'Bash(npm *)', 'Bash(npm test -- --grep foo)', 'Bash'])
-  assert.deepEqual(s('Bash', { command: 'npm run test:unit' }).slice(0, 2), ['Bash(npm run test:unit *)', 'Bash(npm *)'])
-  assert.equal(s('Bash', { command: 'git status' })[0], 'Bash(git status *)')
-  assert.equal(s('Bash', { command: 'git -C ../x log -5' })[0], 'Bash(git -C ../x log *)')
-  assert.equal(s('Bash', { command: 'ls -la src' })[0], 'Bash(ls *)')
-  assert.equal(s('Bash', { command: 'python -m pytest -x' })[0], 'Bash(python -m pytest *)')
-  assert.equal(s('Bash', { command: 'cd web && npm test 2>&1 | tail -5' })[0], 'Bash(npm test *)')
-  assert.equal(s('Bash', { command: 'npm run build && npm test' })[0], 'Bash(npm run build && npm test)')
-  assert.deepEqual(s('Edit', { file_path: `${ROOT}/src/components/Button.tsx` }), ['Edit(src/components/**)', 'Edit(src/**)', 'Edit(**)'])
+  assert.deepEqual(s('Bash', { command: 'npm test -- --grep foo' }), ['Bash(npm test -- --grep foo)', 'Bash(npm test *)', 'Bash(npm *)', 'Bash'])
+  assert.deepEqual(s('Bash', { command: 'npm run test:unit' }).slice(0, 3), ['Bash(npm run test:unit)', 'Bash(npm run test:unit *)', 'Bash(npm *)'])
+  assert.equal(s('Bash', { command: 'git status' })[1], 'Bash(git status *)')
+  assert.equal(s('Bash', { command: 'git -C ../x log -5' })[1], 'Bash(git -C ../x log *)')
+  assert.equal(s('Bash', { command: 'ls -la src' })[1], 'Bash(ls *)')
+  assert.equal(s('Bash', { command: 'python -m pytest -x' })[1], 'Bash(python -m pytest *)')
+  assert.deepEqual(s('Bash', { command: 'cd web && npm test 2>&1 | tail -5' }).slice(0, 2), ['Bash(cd web && npm test 2>&1 | tail -5)', 'Bash(npm test *)'])
+  assert.deepEqual(s('Bash', { command: 'npm run build && npm test' }), ['Bash(npm run build && npm test)'])
+  assert.deepEqual(s('Bash', { command: 'git commit -m "fix (x)"' }).slice(0, 2), ['Bash(git commit -m "fix (x)")', 'Bash(git commit *)'])
+  // Nothing for what no rule may answer.
+  assert.deepEqual(s('Bash', { command: 'npm test $(cat args)' }), [])
+  assert.deepEqual(s('AskUserQuestion', { questions: [] }), [])
+  assert.deepEqual(s('ExitPlanMode', { plan: 'x' }), [])
+  assert.deepEqual(s('Edit', { file_path: `${ROOT}/src/components/Button.tsx` }), ['Edit(src/components/Button.tsx)', 'Edit(src/components/**)', 'Edit(src/**)', 'Edit(**)'])
   assert.deepEqual(s('Write', { file_path: `${ROOT}/README.md` }), ['Edit(/README.md)', 'Edit(**)'])
-  assert.deepEqual(s('Read', { file_path: '/etc/nginx/nginx.conf' }), ['Read(//etc/nginx/**)'])
+  assert.deepEqual(s('Read', { file_path: '/etc/nginx/nginx.conf' }), ['Read(//etc/nginx/nginx.conf)', 'Read(//etc/nginx/**)'])
   assert.deepEqual(s('WebFetch', { url: 'https://docs.rs/serde' }), ['WebFetch(domain:docs.rs)', 'WebFetch'])
   assert.deepEqual(s('mcp__github__create_issue', {}), ['mcp__github__create_issue', 'mcp__github'])
   assert.deepEqual(s('Task', {}), ['Task'])
   // Every suggestion matches the request it came from.
-  for (const [tool, input] of [['Bash', { command: 'npm test -- --grep foo' }], ['Bash', { command: 'cd web && npm test 2>&1 | tail -5' }], ['Bash', { command: 'npm run build && npm test' }], ['Edit', { file_path: `${ROOT}/src/components/Button.tsx` }], ['Read', { file_path: '/etc/nginx/nginx.conf' }], ['WebFetch', { url: 'https://docs.rs/serde' }]]) {
+  for (const [tool, input] of [['Bash', { command: 'npm test -- --grep foo' }], ['Bash', { command: 'cd web && npm test 2>&1 | tail -5' }], ['Bash', { command: 'npm run build && npm test' }], ['Bash', { command: 'git commit -m "fix (x)"' }], ['Edit', { file_path: `${ROOT}/src/components/Button.tsx` }], ['Read', { file_path: '/etc/nginx/nginx.conf' }], ['WebFetch', { url: 'https://docs.rs/serde' }]]) {
     for (const rule of s(tool, input)) {
       assert.ok(rules.findMatch([rec(rule)], { session_id: 's', tool_name: tool, tool_input: input }, ctx, NOW), `${rule} should match its own request`)
     }
@@ -231,8 +239,12 @@ test('repoRoot finds the git work tree, never above home', () => {
 })
 
 test('narrowest: exactly this call, never a glob', () => {
-  assert.equal(rules.narrowest('Bash', { command: 'npm  test -- --grep x' }, ctx), 'Bash(npm test -- --grep x)')
+  assert.equal(rules.narrowest('Bash', { command: 'npm  test -- --grep x' }, ctx), 'Bash(npm  test -- --grep x)')
   assert.equal(rules.narrowest('Bash', { command: 'rm *.log' }, ctx), null)
+  assert.equal(rules.narrowest('Bash', { command: 'echo $(id)' }, ctx), null)
+  assert.equal(rules.narrowest('ExitPlanMode', { plan: 'x' }, ctx), null)
+  assert.equal(rules.narrowest('AskUserQuestion', { questions: [] }, ctx), null)
+  assert.equal(rules.narrowest('Edit', { file_path: `${ROOT}/a.ts`, files: [`${ROOT}/a.ts`, `${ROOT}/b.ts`] }, ctx), null)
   assert.equal(rules.narrowest('Bash', { _truncated: true }, ctx), null)
   assert.equal(rules.narrowest('Edit', { file_path: `${ROOT}/src/a.ts` }, ctx), 'Edit(src/a.ts)')
   assert.equal(rules.narrowest('Write', { file_path: `${ROOT}/README.md` }, ctx), 'Edit(/README.md)')

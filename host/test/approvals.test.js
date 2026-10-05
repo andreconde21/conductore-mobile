@@ -81,14 +81,16 @@ const median = xs => { const s = [...xs].sort((a, b) => a - b); return s[Math.fl
 test('status reports the capability and a risk label on every pending request', async () => {
   await hook({ session_id: 'a1', cwd: repo, hook_event_name: 'SessionStart' })
   const st = await status()
-  assert.deepEqual(st.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'question-answers', 'tasks-folder', 'task-runs'])
-  assert.deepEqual((await cli('version')).json.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'question-answers', 'tasks-folder', 'task-runs'])
+  assert.deepEqual(st.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'question-answers', 'tasks-folder', 'task-runs', 'request-owner'])
+  assert.deepEqual((await cli('version')).json.capabilities, ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'question-answers', 'tasks-folder', 'task-runs', 'request-owner'])
   const p = hook(bash('a1', 'rm -rf node_modules'))
   const [req] = await pendingOf('a1')
   assert.deepEqual(req.risk, { level: 'high', reason: 'Deletes recursively (rm -rf): node_modules' })
   assert.equal(req.batchable, false)
   assert.equal(req.repo, repo)
-  assert.equal(req.suggestedRules[0], 'Bash(rm *)')
+  // Narrowest first: exactly this call.
+  assert.equal(req.suggestedRules[0], 'Bash(rm -rf node_modules)')
+  assert.equal(req.suggestedRules[1], 'Bash(rm *)')
   await cli('decide', req.id, 'deny')
   assert.equal(JSON.parse((await p).stdout).hookSpecificOutput.decision.behavior, 'deny')
 })
@@ -172,7 +174,14 @@ test('a question is never answered by a rule, nor trusted (CON-062)', async () =
   // An allow without answers would run AskUserQuestion with no answers (or
   // be ignored, leaving the dialog in the terminal): the user answers it.
   const add = await cli('rules', 'add', 'AskUserQuestion', '--scope', 'any')
-  assert.equal(add.code, 0)
+  assert.equal(add.code, 1)
+  assert.match(add.json.error, /always asks/)
+  // Even a rule written by hand (any tool) never answers it.
+  await cli('rules', 'add', 'Bash(true)')
+  const file = path.join(home, 'rules.json')
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+  data.rules.push({ id: 'rquestion01', rule: 'AskUserQuestion', scope: { kind: 'any' }, expiresAt: null, endsWithSession: null, source: 'cli', createdAt: Date.now(), hits: 0, lastUsedAt: null })
+  fs.writeFileSync(file, JSON.stringify(data))
   const input = { questions: [{ question: 'Ship it?', header: 'Ship', multiSelect: false, options: [{ label: 'Yes' }, { label: 'No' }] }] }
   const p = hook(perm('qa', 'AskUserQuestion', input))
   const [req] = await pendingOf('qa')
@@ -183,7 +192,7 @@ test('a question is never answered by a rule, nor trusted (CON-062)', async () =
   const d = await cli('decide', req.id, 'answer', '--answers', JSON.stringify({ 'Ship it?': 'Yes' }))
   assert.equal(d.code, 0)
   assert.deepEqual(JSON.parse((await p).stdout).hookSpecificOutput.decision.updatedInput.answers, { 'Ship it?': 'Yes' })
-  await cli('rules', 'remove', add.json.rule.id)
+  for (const r of (await cli('rules')).json.rules) await cli('rules', 'remove', r.id)
 })
 
 test('adding a rule answers waiting requests it covers; remove revokes it', async () => {
@@ -192,7 +201,7 @@ test('adding a rule answers waiting requests it covers; remove revokes it', asyn
   const pending = await pendingOf('w1', 2)
   const src = pending.find(p => p.summary.endsWith('a.ts'))
   assert.equal(src.risk.level, 'medium')
-  assert.deepEqual(src.suggestedRules, ['Edit(src/**)', 'Edit(**)'])
+  assert.deepEqual(src.suggestedRules, ['Edit(src/a.ts)', 'Edit(src/**)', 'Edit(**)'])
   const add = await cli('rules', 'add', 'Edit(src/**)', '--scope', 'repo', '--path', repo)
   assert.deepEqual(add.json.approved, [src.id])
   assert.ok(allowed(await p1))
@@ -272,6 +281,55 @@ test('approve-low approves only low-risk requests, across agents', async () => {
   assert.equal(again.json.skipped.length, 2)
   for (const p of (await status()).agents.flatMap(a => a.pending)) await cli('decide', p.id, 'deny')
   await Promise.all(hooks)
+})
+
+test('approve-low and trust judge each request as it is at decision time', async () => {
+  // A link that pointed into the repo when the request came now leads to a
+  // secrets folder: the stored label says low, the decision must not.
+  const secrets = path.join(userHome, '.ssh')
+  fs.mkdirSync(secrets, { recursive: true })
+  fs.writeFileSync(path.join(secrets, 'id_ed25519'), 'not a key')
+  fs.mkdirSync(path.join(repo, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(repo, 'docs', 'id_ed25519'), 'readme')
+  const link = path.join(repo, 'notes')
+  fs.symlinkSync(path.join(repo, 'docs'), link)
+  const p = hook(perm('c1', 'Read', { file_path: path.join(link, 'guide.md') }))
+  const [req] = await pendingOf('c1')
+  assert.equal(req.risk.level, 'low')
+  fs.unlinkSync(link)
+  fs.symlinkSync(secrets, link)
+  fs.writeFileSync(path.join(secrets, 'guide.md'), 'x')
+  const t = await cli('trust', req.id, '--minutes', '5')
+  assert.equal(t.code, 1)
+  assert.match(t.json.error, /high-risk/)
+  const r = await cli('approve-low', '--ids', req.id)
+  assert.deepEqual(r.json.approved, [])
+  assert.match(r.json.skipped[0].reason, /high risk/)
+  await cli('decide', req.id, 'deny')
+  await p
+  fs.unlinkSync(link)
+})
+
+test('approve-low and trust never take a plan; trust refuses a rule that does not cover the request', async () => {
+  const plan = hook(perm('c2', 'ExitPlanMode', { plan: 'do it' }))
+  const [req] = await pendingOf('c2')
+  const r = await cli('approve-low', '--ids', req.id)
+  assert.deepEqual(r.json.approved, [])
+  assert.match(r.json.skipped[0].reason, /plan/)
+  const t = await cli('trust', req.id)
+  assert.equal(t.code, 1)
+  assert.match(t.json.error, /plan always asks/)
+  await cli('decide', req.id, 'deny')
+  await plan
+  const p = hook(bash('c2', 'npm test'))
+  const [b] = await pendingOf('c2')
+  const wrong = await cli('trust', b.id, '--rule', 'Bash(git status *)')
+  assert.equal(wrong.code, 1)
+  assert.match(wrong.json.error, /does not cover this request/)
+  const narrow = await cli('trust', b.id, '--minutes', '5')
+  assert.equal(narrow.json.rule.rule, 'Bash(npm test)')
+  assert.ok(allowed(await p))
+  await cli('rules', 'remove', narrow.json.rule.id)
 })
 
 test('rules edit changes pattern and duration, keeps id and counters', async () => {

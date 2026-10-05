@@ -29,6 +29,9 @@ const MODEL = 'haiku'
 
 // The closed list the phone knows how to carry out.
 const ACTIONS = ['open', 'chat', 'terminal', 'approve', 'deny', 'approveAllSafe', 'trust', 'send', 'read', 'usage', 'catchUp', 'home', 'say']
+// Actions that answer an agent or send it text: the model only proposes
+// them; the phone asks the user and acts on a spoken yes (`confirm`).
+const CONFIRM = new Set(['approve', 'deny', 'approveAllSafe', 'trust', 'send'])
 
 const OUTPUT_SCHEMA = {
   type: 'object',
@@ -124,7 +127,9 @@ function normalizeAction (raw, context) {
     if (minutes < 1 || minutes > MAX_MINUTES) return said('incomplete')
   }
   if (['open', 'read'].includes(action) && !target) return said('incomplete')
-  return { action: { action, target, text, minutes, speak: action === 'say' && !speak ? 'Sorry, I did not understand.' : speak } }
+  const out = { action: { action, target, text, minutes, speak: action === 'say' && !speak ? 'Sorry, I did not understand.' : speak } }
+  if (CONFIRM.has(action)) out.confirm = true
+  return out
 }
 
 // input: the raw stdin text. Resolves the JSON object to print (never
@@ -156,6 +161,7 @@ async function guide ({ input, timeoutMs = DEFAULT_TIMEOUT_MS, lockFile, env = p
 module.exports = {
   SCHEMA,
   ACTIONS,
+  CONFIRM,
   OUTPUT_SCHEMA,
   MAX_INPUT_BYTES,
   DEFAULT_TIMEOUT_MS,

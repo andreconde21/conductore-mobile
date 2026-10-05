@@ -13,8 +13,11 @@
 //   liveness      the hook's parent is the OpenCode process (comm opencode)
 //   approvals     the plugin runs the hook as a blocking PermissionRequest and
 //                 replies through OpenCode's own client with what the hook
-//                 printed (hookAnswer): once / always / reject, question
-//                 answers. So, for the daemon, a hook like Claude Code's
+//                 printed (hookAnswer): once / reject, question answers.
+//                 "always" is a once: OpenCode's own always saves its broader
+//                 patterns (`npm *` for `npm test`), more than the user saw;
+//                 the phone saves a Conductore rule instead. So, for the
+//                 daemon, a hook like Claude Code's
 //   chat          OpenCode's SQLite database, read-only (node:sqlite, Node
 //                 22.5+), as neutral chat items paged by message id
 //   usage         tokens and cost OpenCode reports per assistant message
@@ -46,7 +49,7 @@ function capabilities () {
   return {
     events: 'plugin',
     approvals: 'hook',
-    always: true,
+    always: false,
     questions: true,
     plans: false,
     chat: 'items',
@@ -435,7 +438,8 @@ function hookAnswer (event, decision, message, answers) {
   }
   switch (decision) {
     case 'allow': return JSON.stringify({ reply: 'once' }) + '\n'
-    case 'always': return JSON.stringify({ reply: 'always' }) + '\n'
+    // OpenCode's always would save its own, broader patterns.
+    case 'always': return JSON.stringify({ reply: 'once' }) + '\n'
     case 'deny': {
       const out = { reply: 'reject' }
       if (typeof message === 'string' && message.trim()) out.message = message.trim().slice(0, 2000)

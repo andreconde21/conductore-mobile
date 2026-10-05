@@ -43,6 +43,28 @@ function applyRules (daemon) {
   return approved
 }
 
+// The pending request `requestId` names, checked against the daemon's
+// state as it is now: it must be pending for its agent (`sessionId`, when
+// the caller names one), and the hook waiting for it must be that agent's
+// and that request's. Returns { agent, request, waiter } or { error };
+// `waiter` is null when nobody waits any more (then it is resolved gone).
+function pendingRequest (daemon, requestId, sessionId) {
+  if (typeof requestId !== 'string' || !requestId) return { error: 'a request id is needed' }
+  const found = state.findPending(daemon.state, requestId)
+  if (!found) return { error: `unknown request ${requestId}` }
+  const { agent, request } = found
+  if (sessionId !== undefined && sessionId !== null && sessionId !== agent.sessionId) {
+    return { error: `request ${requestId} is not pending for that agent` }
+  }
+  if (request.answerable === false) return { error: 'this agent takes its answers in the terminal' }
+  const waiter = daemon.waiters.get(requestId) || null
+  if (waiter && (waiter.sessionId !== agent.sessionId || (waiter.event && waiter.event.request_id !== requestId))) {
+    return { error: `request ${requestId} does not belong to that agent` }
+  }
+  if (!waiter) daemon.commit(state.resolvePermission(daemon.state, requestId, 'gone'))
+  return { agent, request, waiter }
+}
+
 // "Always" on a high-risk request would let Claude Code skip asking for
 // good: it is answered as a one-time allow instead.
 function decideVerdict (request, decision) {
@@ -54,7 +76,10 @@ function decideVerdict (request, decision) {
 
 // "Approve all N safe": allows every waiting request rated low (only those
 // listed in `ids`, when given; only one session's, with `sessionId`).
-// Anything else is skipped with a reason, never allowed.
+// Each is checked as it is now, not as the phone last saw it: still
+// pending for that agent, its hook waiting, and rated low again from its
+// full input. Questions, plans and requests only the agent's own prompt
+// answers are never approved. Anything else is skipped with a reason.
 function approveLow (daemon, req) {
   const wanted = Array.isArray(req.ids) ? new Set(req.ids.map(String)) : null
   const approved = []
@@ -67,11 +92,18 @@ function approveLow (daemon, req) {
       if (p.answerable === false) {
         // Watched only: the agent's own prompt answers it.
         skipped.push({ id: p.id, reason: 'answer it in the terminal' })
-      } else if (!p.batchable || !p.risk || p.risk.level !== 'low') {
-        skipped.push({ id: p.id, reason: `${(p.risk && p.risk.level) || 'unrated'} risk: review it` })
-      } else if (!daemon.waiters.has(p.id)) {
-        daemon.commit(state.resolvePermission(daemon.state, p.id, 'gone'))
-        skipped.push({ id: p.id, ...expired })
+        continue
+      }
+      if (p.toolName === 'AskUserQuestion' || p.toolName === 'ExitPlanMode') {
+        skipped.push({ id: p.id, reason: p.toolName === 'ExitPlanMode' ? 'a plan: review it' : 'a question: answer it' })
+        continue
+      }
+      const found = pendingRequest(daemon, p.id, agent.sessionId)
+      if (found.error) { skipped.push({ id: p.id, reason: found.error }); continue }
+      if (!found.waiter) { skipped.push({ id: p.id, ...expired }); continue }
+      const now = daemon.approvals.recheck(found.waiter.event)
+      if (!now.batchable) {
+        skipped.push({ id: p.id, reason: `${now.risk.level} risk: review it` })
       } else if (daemon.settle(p.id, 'allow')) {
         approved.push({ id: p.id, sessionId: agent.sessionId, toolName: p.toolName, summary: p.summary })
       } else {
@@ -87,17 +119,16 @@ function approveLow (daemon, req) {
 // the request and every other waiting one the rule covers. High-risk
 // requests are refused: they always ask.
 function trust (daemon, req) {
-  const found = state.findPending(daemon.state, req.requestId)
-  if (!found) return { error: `unknown request ${req.requestId}` }
-  const { agent, request } = found
+  const found = pendingRequest(daemon, req.requestId, req.sessionId)
+  if (found.error) return { error: `${found.error}; nothing was trusted` }
+  const { agent, request, waiter } = found
   if (request.toolName === 'AskUserQuestion') return { error: 'a question takes an answer; nothing was trusted' }
-  if (request.answerable === false) return { error: 'this agent takes its answers in the terminal; nothing was trusted' }
-  if (!request.risk || request.risk.level === 'high') {
-    return { error: `high-risk requests always ask (${request.risk ? request.risk.reason : 'not rated'}); nothing was trusted` }
-  }
-  if (!daemon.waiters.has(request.id)) {
-    daemon.commit(state.resolvePermission(daemon.state, request.id, 'gone'))
-    return { error: 'request expired; answer it in the terminal' }
+  if (request.toolName === 'ExitPlanMode') return { error: 'a plan always asks; nothing was trusted' }
+  if (!waiter) return { error: 'request expired; answer it in the terminal' }
+  // Rated again from the full input as it is now.
+  const now = daemon.approvals.recheck(waiter.event)
+  if (now.risk.level === 'high') {
+    return { error: `high-risk requests always ask (${now.risk.reason}); nothing was trusted` }
   }
   const kind = req.scope || 'repo'
   const scope = kind === 'session'
@@ -108,9 +139,16 @@ function trust (daemon, req) {
   const untilSessionEnd = !!req.untilSessionEnd
   const minutes = req.minutes !== undefined && req.minutes !== null ? req.minutes : req.forever || untilSessionEnd ? null : 60
   // Without an explicit rule, only this exact call: never broader than
-  // what the user confirmed.
-  const pattern = req.rule || rules.narrowest(request.toolName, request.toolInput, daemon.approvals.context({ cwd: agent.cwd }))
-  if (!pattern) return { error: 'this request is too long to trust as is; pass a rule' }
+  // what the user confirmed. A rule the user picked must cover it.
+  const ctx = daemon.approvals.context(waiter.event)
+  const pattern = req.rule || rules.narrowest(request.toolName, waiter.event.tool_input, ctx)
+  if (!pattern) return { error: 'no rule can say exactly this call; pass a rule' }
+  try {
+    const probe = rules.makeRule({ rule: pattern })
+    if (!rules.findMatch([probe], waiter.event, ctx)) return { error: `${probe.rule} does not cover this request; nothing was trusted` }
+  } catch (err) {
+    return { error: err.message }
+  }
   let rule
   try {
     rule = daemon.approvals.add({
@@ -168,4 +206,4 @@ function handle (daemon, req) {
   }
 }
 
-module.exports = { autoApprove, applyRules, decideVerdict, handle }
+module.exports = { autoApprove, applyRules, decideVerdict, pendingRequest, handle }

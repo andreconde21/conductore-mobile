@@ -35,7 +35,9 @@ const AUDIT_MAX_BYTES = 128 * 1024
 //   config           `config get|set`
 //   question-answers `decide <id> answer --answers <json>` answers an
 //                    AskUserQuestion; pending ones carry `questions`
-const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'question-answers', 'tasks-folder', 'task-runs']
+//   request-owner    `decide`, `trust` and `approve-low` take `--session`:
+//                    the request must be pending for that agent
+const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'question-answers', 'tasks-folder', 'task-runs', 'request-owner']
 
 const rulesFile = () => path.join(paths.homeDir(), 'rules.json')
 const auditFile = () => path.join(paths.homeDir(), 'auto-approved.json')
@@ -129,9 +131,11 @@ class Approvals {
 
   // --- requests ---------------------------------------------------------------
 
+  // { cwd, root, home, realpath }: realpath lets risk and path rules see
+  // where symlinks lead.
   context (event) {
     const cwd = typeof event.cwd === 'string' && event.cwd ? event.cwd : null
-    return { cwd, root: cwd ? rules.repoRoot(cwd, this.home) : null, home: this.home }
+    return { cwd, root: cwd ? rules.repoRoot(cwd, this.home) : null, home: this.home, realpath: realpathNear }
   }
 
   // Risk label, rule suggestions and repo of a PermissionRequest, stored on
@@ -145,16 +149,25 @@ class Approvals {
     return ctx
   }
 
+  // The request's risk as of now (the files it names may have changed since
+  // it arrived): { risk, batchable }. Updates the event's label.
+  recheck (event) {
+    const ctx = this.context(event)
+    event.risk = risk.classify(event.tool_name, event.tool_input, ctx)
+    event.batchable = risk.batchable(event.tool_name, event.risk)
+    return { risk: event.risk, batchable: event.batchable }
+  }
+
   // The rule that answers this request by itself, or null. High risk always
-  // asks, whatever the rules say, and so does a question.
+  // asks, whatever the rules say, and so do a question, a plan and a
+  // request only the agent's own prompt can answer.
   match (event, now = Date.now()) {
-    // A question is the user's to answer: no rule answers it (an allow
-    // would run it with no answers).
-    if (event.tool_name === 'AskUserQuestion') return null
-    if (!event.risk) this.assess(event)
-    if (!event.risk || event.risk.level === 'high') return null
+    // A question or a plan is the user's to answer: no rule answers it (an
+    // allow would run a question with no answers).
+    if (event.tool_name === 'AskUserQuestion' || event.tool_name === 'ExitPlanMode' || event.answerable === false) return null
     const active = this.rules(now)
     if (!active.length) return null
+    if (this.recheck(event).risk.level === 'high') return null
     return rules.findMatch(active, event, this.context(event), now)
   }
 
@@ -210,4 +223,20 @@ class Approvals {
   }
 }
 
-module.exports = { Approvals, CAPABILITIES, AUDIT_KEEP_MS, AUDIT_MAX_BYTES }
+// The real path of p (symlinks resolved), also when p does not exist yet:
+// its nearest existing parent's real path plus the rest.
+function realpathNear (p) {
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return null
+  const rest = []
+  let dir = path.normalize(p)
+  for (let i = 0; i < 64; i++) {
+    try { return path.join(fs.realpathSync(dir), ...rest) } catch {}
+    const up = path.dirname(dir)
+    if (up === dir) return null
+    rest.unshift(path.basename(dir))
+    dir = up
+  }
+  return null
+}
+
+module.exports = { Approvals, CAPABILITIES, AUDIT_KEEP_MS, AUDIT_MAX_BYTES, realpathNear }

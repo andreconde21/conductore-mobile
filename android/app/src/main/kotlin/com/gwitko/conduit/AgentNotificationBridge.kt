@@ -40,6 +40,9 @@ import java.security.SecureRandom
  * - `consumePermissionActions()` -> `List<Map>`: queued action taps, cleared.
  * - `consumeOpenAgent()` -> `Map?`: the agent a tapped notification points
  *   at (`hostId`, `agentId`, `workspaceId`, `tabId`, `paneId`), cleared.
+ * - `appLockState(locked, relockAtMillis)`: the app lock ([AppLockGuard]);
+ *   while it is closed, button taps wait for the app and the launcher is
+ *   refused.
  *
  * Plain and agent notifications take the same optional `open*` arguments;
  * tapping the notification body then opens the app at that agent (its
@@ -83,7 +86,11 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
     }
 
     override fun onDetachedFromEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        if (active === this) active = null
+        if (active === this) {
+            active = null
+            // Nobody reports the app lock any more: count it as locked.
+            AppLockGuard.current = null
+        }
         channel?.setMethodCallHandler(null)
         channel = null
         // Nobody is listening for broadcast actions any more: make the
@@ -249,6 +256,11 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                 result.success(null)
             }
             "consumePermissionActions" -> result.success(AgentNotificationStore.consumeActions(ctx))
+            "appLockState" -> {
+                // Unreadable: locked, never a guess towards unlocked.
+                AppLockGuard.current = AppLockGuard.fromMap(call.arguments as? Map<*, *>) ?: AppLockGuard.State(locked = true, relockAtMillis = null)
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
     }
@@ -290,7 +302,11 @@ class AgentPermissionActionReceiver : BroadcastReceiver() {
         if (!AgentNotificationStore.claimAction(context, action)) return
         AgentNotificationStore.enqueueAction(context, action)
         val bridge = AgentNotificationBridge.active
-        if (bridge != null) {
+        if (AppLockGuard.appLockedNow()) {
+            // The app lock is closed (or would be on return): the tap stays
+            // queued and completes only once the app is opened and unlocked.
+            AgentNotificationStore.showOpenToFinish(context, action)
+        } else if (bridge != null) {
             AgentNotificationStore.showSending(context, action)
             bridge.notifyActionAvailable(context.applicationContext, action)
         } else {

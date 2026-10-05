@@ -179,7 +179,10 @@ test('child sessions fold into their root as a subagent; errors, retries and del
 test('the waiting hook prints the reply the plugin sends to OpenCode', () => {
   const request = bashEvents.map(norm).find(e => e.hook_event_name === 'PermissionRequest')
   assert.equal(opencode.hookAnswer(request, 'allow'), '{"reply":"once"}\n')
-  assert.equal(opencode.hookAnswer(request, 'always'), '{"reply":"always"}\n')
+  // OpenCode's own always saves broader patterns than the call: a once.
+  assert.deepEqual(request.opencode_request.always, ['echo *'])
+  assert.equal(opencode.hookAnswer(request, 'always'), '{"reply":"once"}\n')
+  assert.equal(opencode.capabilities().always, false)
   assert.equal(opencode.hookAnswer(request, 'deny', 'not now'), '{"reply":"reject","message":"not now"}\n')
   assert.equal(opencode.hookAnswer(request, 'deny'), '{"reply":"reject"}\n')
   assert.equal(opencode.hookAnswer(request, 'timeout'), '\n')

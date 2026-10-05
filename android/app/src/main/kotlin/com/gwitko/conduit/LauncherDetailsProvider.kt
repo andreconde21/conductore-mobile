@@ -48,7 +48,7 @@ import android.os.Process
  *
  * [call] (`reply`, `choose`) checks the caller's permission itself (the
  * manifest's read and write permissions do not cover it), refuses while
- * the device is locked, and hands the answer to the running app
+ * the device or the app lock is locked, and hands the answer to the running app
  * ([LauncherActions]); it never opens SSH or starts an engine.
  */
 class LauncherDetailsProvider : ContentProvider() {
@@ -139,6 +139,8 @@ class LauncherDetailsProvider : ContentProvider() {
 
         override fun appListening(): Boolean =
             AgentNotificationBridge.active != null && AgentStatusStore.load(ctx)?.monitoring == true
+
+        override fun appLocked(): Boolean = AppLockGuard.appLockedNow()
 
         override fun prompt(itemId: String): LauncherPrompt? {
             val waiting = AgentStatusStore.load(ctx)?.agents?.any {

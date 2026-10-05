@@ -1,0 +1,564 @@
+{
+ "bash": "5.2.21(1)-release",
+ "image": "ubuntu:24.04",
+ "probes": [
+  {
+   "command": "printf '%s\\0' @@ a b c",
+   "segments": [
+    [
+     "a",
+     "b",
+     "c"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a\"b\"'c'",
+   "segments": [
+    [
+     "abc"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a\\b\"",
+   "segments": [
+    [
+     "a\\b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a\\$b\"",
+   "segments": [
+    [
+     "a$b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a\\\"b\"",
+   "segments": [
+    [
+     "a\"b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a\\\\b\"",
+   "segments": [
+    [
+     "a\\b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a\\`b\"",
+   "segments": [
+    [
+     "a`b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ 'a\\b'",
+   "segments": [
+    [
+     "a\\b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a\\ b",
+   "segments": [
+    [
+     "a b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \\'",
+   "segments": [
+    [
+     "'"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"'\"",
+   "segments": [
+    [
+     "'"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ '\"'",
+   "segments": [
+    [
+     "\""
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a#b",
+   "segments": [
+    [
+     "a#b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a #b c",
+   "segments": [
+    [
+     "a"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"#\" x",
+   "segments": [
+    [
+     "#",
+     "x"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a\\#b",
+   "segments": [
+    [
+     "a#b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ --opt=\"x y\"",
+   "segments": [
+    [
+     "--opt=x y"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ --opt='x y'",
+   "segments": [
+    [
+     "--opt=x y"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ '' x",
+   "segments": [
+    [
+     "",
+     "x"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"\" x",
+   "segments": [
+    [
+     "",
+     "x"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a''b",
+   "segments": [
+    [
+     "ab"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a\"'b'c",
+   "segments": [
+    [
+     "abc"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \\\\",
+   "segments": [
+    [
+     "\\"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"\\\\\"",
+   "segments": [
+    [
+     "\\"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ x=1 y==2",
+   "segments": [
+    [
+     "x=1",
+     "y==2"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ {} {x} @{u}",
+   "segments": [
+    [
+     "{}",
+     "{x}",
+     "@{u}"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a,b",
+   "segments": [
+    [
+     "a,b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a!b",
+   "segments": [
+    [
+     "a!b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ % ^ + : ,",
+   "segments": [
+    [
+     "%",
+     "^",
+     "+",
+     ":",
+     ","
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ 'it'\\''s'",
+   "segments": [
+    [
+     "it's"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a\t\tb",
+   "segments": [
+    [
+     "a",
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ if then fi do done",
+   "segments": [
+    [
+     "if",
+     "then",
+     "fi",
+     "do",
+     "done"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ { } ! -- -",
+   "segments": [
+    [
+     "{",
+     "}",
+     "!",
+     "--",
+     "-"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"$\" a$ \"a$\" '$' $",
+   "segments": [
+    [
+     "$",
+     "a$",
+     "a$",
+     "$",
+     "$"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \\$HOME \"\\$HOME\" '$HOME'",
+   "segments": [
+    [
+     "$HOME",
+     "$HOME",
+     "$HOME"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a;b\" a\\;b 'a|b' a\\|b \"a&b\" a\\&b",
+   "segments": [
+    [
+     "a;b",
+     "a;b",
+     "a|b",
+     "a|b",
+     "a&b",
+     "a&b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \">\" \"<\" \\> \\<",
+   "segments": [
+    [
+     ">",
+     "<",
+     ">",
+     "<"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a 2>&1",
+   "segments": [
+    [
+     "a"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a 3>&1 b",
+   "segments": [
+    [
+     "a",
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ *.nomatch [x].nomatch ?.nomatch",
+   "segments": [
+    [
+     "*.nomatch",
+     "[x].nomatch",
+     "?.nomatch"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"*\" '?' \\*",
+   "segments": [
+    [
+     "*",
+     "?",
+     "*"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"(\" ')' \\( \\)",
+   "segments": [
+    [
+     "(",
+     ")",
+     "(",
+     ")"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a\nb\"",
+   "segments": [
+    [
+     "a\nb"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ 'a\nb'",
+   "segments": [
+    [
+     "a\nb"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"\\n\" '\\n'",
+   "segments": [
+    [
+     "\\n",
+     "\\n"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ é \"ü\" 'ñ'",
+   "segments": [
+    [
+     "é",
+     "ü",
+     "ñ"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a; printf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a;printf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a && printf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a&&printf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a\nprintf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a\n\nprintf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a &&\nprintf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a;#printf '%s\\0' @@ hidden\nprintf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a # ; printf '%s\\0' @@ hidden\nprintf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ \"a; printf '%s\\0' @@ b\"",
+   "segments": [
+    [
+     "a; printf '%s\\0' @@ b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ 'a && printf '%s\\0' @@ b'",
+   "segments": [
+    [
+     "a && printf %s0 @@ b"
+    ]
+   ]
+  },
+  {
+   "command": "printf '%s\\0' @@ a\\; printf '%s\\0' @@ b",
+   "segments": [
+    [
+     "a;",
+     "printf",
+     "%s\\0"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "command": "CI=1 printf '%s\\0' @@ a",
+   "segments": [
+    [
+     "a"
+    ]
+   ]
+  },
+  {
+   "command": "FORCE_COLOR=0 NO_COLOR=1 printf '%s\\0' @@ a",
+   "segments": [
+    [
+     "a"
+    ]
+   ]
+  }
+ ]
+}

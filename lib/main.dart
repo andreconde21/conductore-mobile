@@ -150,6 +150,20 @@ void main() {
     preferences: const SecureAppLockPreferences(secureStorage),
   );
   unawaited(lockController.loadPreferences());
+  // Notification buttons and the launcher answer only while the app lock
+  // would let the user in (CON-090): the native side follows every change.
+  void pushAppLockState() {
+    final state = lockController.actionState.value;
+    unawaited(
+      PlatformAgentAttentionNotifier.setAppLockState(
+        locked: state.locked,
+        relockAt: state.relockAt,
+      ),
+    );
+  }
+
+  lockController.actionState.addListener(pushAppLockState);
+  pushAppLockState();
   // "This computer" (desktops): the device itself as a machine, with
   // per-device settings that never join the synced machine list.
   final hostsController = HostsController(
@@ -637,7 +651,7 @@ void main() {
         navigatorKey: navigatorKey,
         attention: agentAttention,
       ),
-      locked: () => !lockController.isUnlocked,
+      locked: () => !lockController.admitsActions(),
     );
   }
 
@@ -1188,6 +1202,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                       _launchRequests.request(HomeLaunchRequest.usage),
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
+                    mayAct: widget.lockController.admitsActions,
                     launcherActions: PlatformLauncherActions.instance,
                     agentAttention: widget.agentAttention,
                     findHost: (hostId) async {

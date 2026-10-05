@@ -268,6 +268,9 @@ class PendingPermissionRequest {
   /// The Claude Code tool that asks the user questions.
   static const questionTool = 'AskUserQuestion';
 
+  /// The Claude Code tool that asks the user to approve a plan.
+  static const planTool = 'ExitPlanMode';
+
   /// Provider-issued request id, passed back verbatim with the decision.
   final String id;
 
@@ -311,14 +314,18 @@ class PendingPermissionRequest {
   /// Allow for it: it takes answers ([withAnswers]) or a Deny.
   bool get isQuestion => toolName == questionTool;
 
+  /// A plan to approve: the user's to answer every time (no rule, no trust).
+  bool get isPlan => toolName == planTool;
+
   /// Whether the phone can answer this question (the companion sent its
   /// questions, so it takes `decide <id> answer`).
   bool get answerable => isQuestion && questions.isNotEmpty;
 
   /// Whether a trust or rule may answer requests like this one (high risk
-  /// always asks, and so does a question).
+  /// always asks, and so do a question and a plan).
   bool get trustable =>
       !isQuestion &&
+      !isPlan &&
       !terminalOnly &&
       risk != null &&
       risk!.level != PermissionRiskLevel.high;

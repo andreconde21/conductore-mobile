@@ -41,7 +41,8 @@ const SECRET_PATTERNS = [
   [/(^|\/)\.config\/gh\/hosts\.yml$/, 'GitHub CLI token'],
   [/(^|\/)(credentials|secrets?)(\.[a-z]+)?$/i, 'credentials file'],
   [/(^|\/)secrets?\//i, 'secrets directory'],
-  [/^\/etc\/(shadow|gshadow|sudoers)/, 'system credentials']
+  [/^\/etc\/(shadow|gshadow|sudoers)/, 'system credentials'],
+  [/(^|\/)\.conductore(\/|$)/, 'Conductore approval rules']
 ]
 
 function secretKind (p) {
@@ -63,7 +64,7 @@ function resolvePath (p, ctx) {
 function inside (child, parent) {
   if (!child || !parent) return false
   const rel = path.relative(parent, child)
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.isAbsolute(rel))
 }
 
 const TEMP_DIRS = ['/tmp', '/var/tmp', '/dev/shm']
@@ -104,10 +105,18 @@ const KNOWN_HOSTS = [
   'developer.apple.com', 'learn.microsoft.com', 'en.wikipedia.org', 'wikipedia.org', 'mdn.io'
 ]
 
+// The host a URL (or a bare host[:port][/path]) names, as a URL parser
+// reads it (\ counts as /, user info is dropped); null when it is not a
+// plain host name or address.
 function hostOf (url) {
   if (typeof url !== 'string') return null
-  const m = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?(\[[^\]]+\]|[^/:?#]+)/i.exec(url.trim())
-  if (m) return m[1].toLowerCase().replace(/^\[|\]$/g, '')
+  const s = url.trim()
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
+    let host
+    try { host = new URL(s).hostname.toLowerCase() } catch { return null }
+    host = host.replace(/^\[|\]$/g, '')
+    return /^[a-z0-9.-]+$/.test(host) || /^[0-9a-f:.]+$/.test(host) ? host.replace(/\.$/, '') || null : null
+  }
   // curl example.com/path, curl localhost:3000
   const bare = /^([a-z0-9.-]+\.[a-z]{2,}|localhost|\d+\.\d+\.\d+\.\d+)(?::\d+)?(\/|$)/i.exec(url.trim())
   return bare ? bare[1].toLowerCase() : null
@@ -124,6 +133,12 @@ function isKnownHost (host) {
 }
 
 // --- Bash ---------------------------------------------------------------------
+//
+// Only commands the parser fully understood (shell.js `understood`) are
+// rated by what they run; anything else is high. A command line that runs
+// several statements (; && || & newline) is high too, except for leading
+// `cd <dir in the repo> &&`, the way agents start a command; a pipeline is
+// one statement, rated by its worst command.
 
 const READ_ONLY = new Set([
   'ls', 'll', 'la', 'cat', 'bat', 'head', 'tail', 'less', 'more', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'fd', 'fdfind',
@@ -132,58 +147,142 @@ const READ_ONLY = new Set([
   'comm', 'jq', 'yq', 'column', 'nl', 'od', 'xxd', 'hexdump', 'md5sum', 'sha1sum', 'sha256sum', 'sha512sum', 'cksum', 'ps',
   'pgrep', 'free', 'uptime', 'lsof', 'ss', 'netstat', 'true', 'false', 'test', '[', 'sleep', 'seq', 'cd', 'pushd', 'popd',
   'tldr', 'man', 'nproc', 'lscpu', 'lsblk', 'vmstat', 'iostat', 'locale', 'tput', 'strings', 'rev', 'fold', 'fmt', 'expand',
-  'awk', 'gawk', 'sed', 'look', 'zcat', 'zgrep', 'bzcat', 'xzcat', 'getent', 'dig', 'nslookup', 'host', 'ping', 'git-lfs'
+  'awk', 'gawk', 'sed', 'look', 'zcat', 'zgrep', 'bzcat', 'xzcat', 'getent', 'dig', 'nslookup', 'host', 'ping', 'base64'
 ])
 
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'])
-const INTERPRETERS = new Set([...SHELLS, 'python', 'python3', 'node', 'perl', 'ruby', 'php', 'deno', 'bun'])
-const WRAPPERS = new Set(['env', 'time', 'nice', 'nohup', 'command', 'builtin', 'stdbuf', 'ionice', 'chronic', 'caffeinate'])
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'ash'])
+const INTERPRETERS = new Set([...SHELLS, 'python', 'python2', 'python3', 'node', 'nodejs', 'perl', 'ruby', 'php', 'deno', 'bun', 'lua', 'Rscript', 'osascript', 'tclsh', 'pwsh', 'powershell'])
+// Flags that run the code given on the command line, per interpreter.
+const INLINE_CODE = {
+  shell: /^-[a-zA-Z]*c[a-zA-Z]*$/,
+  python: /^-[a-zA-Z]*c/,
+  node: /^(-e|-p|-pe|--eval|--print)(=|$)/,
+  perl: /^-[a-zA-Z]*[eE]/,
+  ruby: /^-[a-zA-Z]*e/,
+  php: /^(-r|-B|-R|-E|-F)$/,
+  deno: /^(eval|repl)$/,
+  bun: /^(-e|-p|--eval|--print)(=|$)/,
+  lua: /^-e/,
+  Rscript: /^(-e|--expr)/,
+  osascript: /^-e$/
+}
+function inlineCode (name, args) {
+  const re = SHELLS.has(name) ? INLINE_CODE.shell : /^python/.test(name) ? INLINE_CODE.python : name === 'nodejs' ? INLINE_CODE.node : INLINE_CODE[name]
+  if (!re) return false
+  // Only options before the script or module: what follows is its own.
+  for (const a of args) {
+    if (!a.startsWith('-') && !(name === 'deno' && re.test(a))) break
+    if (re.test(a)) return true
+    if (a === '-m' || a === '--') break
+  }
+  return false
+}
 const ROOT_WRAPPERS = new Set(['sudo', 'su', 'doas', 'pkexec', 'run0'])
+// The shell's own state: aliases, functions, variables, traps, options.
+const SHELL_STATE = new Set(['eval', 'exec', 'source', '.', 'alias', 'unalias', 'function', 'trap', 'enable', 'export', 'declare', 'typeset', 'local', 'readonly', 'unset', 'shopt', 'set', 'hash', 'ulimit', 'umask', 'bind', 'complete', 'fc', 'history', 'disown', 'let'])
+// Programs that run another command (given, or read from their input).
+const RUNS_OTHERS = new Set(['busybox', 'toybox', 'xargs', 'watch', 'parallel', 'script', 'flock', 'setsid', 'strace', 'ltrace', 'gdb', 'lldb', 'valgrind', 'chroot', 'unshare', 'nsenter', 'runuser', 'firejail', 'bwrap', 'proot', 'systemd-run', 'at', 'batch', 'entr', 'expect', 'screen', 'nodemon', 'concurrently', 'npm-run-all', 'dbus-launch', 'xvfb-run', 'faketime', 'catchsegv'])
+const CONDUCTORE = /^conductore(-hostd|-hook|-statusline)?$/
 const NETWORK = new Set(['curl', 'wget', 'http', 'https', 'xh', 'aria2c'])
 const REMOTE = new Set(['ssh', 'scp', 'sftp', 'rsync', 'ftp', 'telnet', 'nc', 'ncat', 'netcat', 'socat', 'mosh'])
 const DISK = new Set(['dd', 'mkfs', 'fdisk', 'sfdisk', 'parted', 'gdisk', 'wipefs', 'shred', 'mkswap', 'swapon', 'swapoff', 'mount', 'umount', 'losetup', 'cryptsetup'])
 const POWER = new Set(['shutdown', 'reboot', 'halt', 'poweroff', 'init', 'telinit'])
 const PKG_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun'])
+// Programs that change files: a wildcard in their arguments is high.
+const FILE_CHANGERS = new Set(['rm', 'rmdir', 'unlink', 'trash', 'trash-put', 'mv', 'cp', 'ln', 'install', 'touch', 'mkdir', 'truncate', 'chmod', 'chown', 'chgrp', 'tee', 'shred', 'rsync', 'tar', 'zip', 'unzip', 'patch', 'dd'])
+// Where a program named by its path is a system one, not a script.
+const SYSTEM_BIN = /^\/(usr\/(local\/)?)?s?bin\/[^/]+$|^\/opt\/homebrew\/bin\/[^/]+$/
 
 const TEST_SCRIPTS = /^(test|tests|t|lint|lint:.*|test:.*|check|typecheck|type-check|tsc|format:check|fmt:check|analyze|vitest|jest|spec|e2e:.*|coverage)$/
 const TEST_BINARIES = new Set(['jest', 'vitest', 'mocha', 'ava', 'tap', 'pytest', 'py.test', 'tox', 'nox', 'mypy', 'pyright', 'rspec', 'phpunit', 'phpstan', 'shellcheck', 'hadolint', 'golangci-lint', 'ktlint', 'swiftlint', 'eslint', 'prettier', 'stylelint', 'tsc', 'ruff', 'flake8', 'pylint', 'black', 'isort', 'rubocop', 'actionlint', 'yamllint', 'markdownlint', 'biome', 'oxlint'])
+const TOOLCHAINS = new Set(['pip', 'pip3', 'pipx', 'uv', 'poetry', 'pdm', 'conda', 'mamba', 'gem', 'bundle', 'composer', 'cargo', 'go', 'dotnet', 'mvn', 'gradle', 'gradlew', 'swift', 'flutter', 'dart', 'make', 'just', 'task', 'cmake', 'mix', 'deno', 'rake', 'tox', 'nox', 'python', 'python2', 'python3', 'node', 'nodejs', 'ruby'])
 
 // Flags that make a linter or formatter rewrite files.
 const FIX_FLAGS = /^(--fix|--fix-dry-run=false|--write|-w|--in-place|-i|--apply|--unsafe-fixes)$/
+// Options of test and build runners that load or run code from elsewhere,
+// or move the run to another place: not "just the tests" any more.
+// (Path-valued options are checked by where their path points.)
+const CODE_OPTIONS = /^(--script-shell|--node-options|--userconfig|--globalconfig|--exec|-exec|-toolexec|--toolexec|-vettool|--vettool|-overlay|--overlay|-Z|--eval|-E|--import|--loader|--experimental-loader)(=|$)/
+
+const ENV_SAFE = new Set(['CI', 'NODE_ENV', 'FORCE_COLOR', 'NO_COLOR', 'TERM', 'COLUMNS', 'LINES', 'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'TZ', 'DEBUG', 'RUST_BACKTRACE', 'RUST_LOG', 'PYTHONUNBUFFERED', 'PYTHONDONTWRITEBYTECODE', 'CLICOLOR', 'CLICOLOR_FORCE', 'HUSKY', 'VERBOSE', 'GIT_TERMINAL_PROMPT'])
+
+const CONCERNS = {
+  incomplete: 'has unbalanced quotes or an open here-doc',
+  substitution: 'uses command substitution',
+  expansion: 'uses shell variables or expansions',
+  background: 'runs a command in the background (&)',
+  subshell: 'uses a subshell, group or function',
+  compound: 'uses shell control flow (if, for, while, case…)',
+  heredoc: 'feeds a here-document',
+  continuation: 'uses line continuations',
+  control: 'has control or invisible characters',
+  syntax: 'has a shell syntax error',
+  'glob-command': 'uses a wildcard as the command',
+  'glob-redirect': 'redirects to a wildcard path',
+  brace: 'uses brace expansion'
+}
+
+// Why a command the parser did not fully understand is high.
+function notUnderstood (parsed) {
+  const concern = parsed.complete ? parsed.concerns[0] : 'incomplete'
+  let reason = `Cannot check it: ${CONCERNS[concern] || 'not a plain command'}`
+  if (concern === 'substitution' && parsed.substitutions.length) reason += `: ${clip(parsed.substitutions[0], 50)}`
+  return r('high', reason)
+}
 
 function classifyBash (command, ctx, depth = 0) {
   if (typeof command !== 'string' || !command.trim()) return r('medium', 'Runs an empty or unreadable command')
   const parsed = shell.parse(command)
+  if (!parsed.understood) return notUnderstood(parsed)
+  const segs = parsed.segments
+  if (!segs.length) return r('medium', 'Runs an empty or unreadable command')
+  // Leading `cd <dir in the repo> &&`: the rest runs there.
+  let here = ctx
+  let lead = 0
+  while (lead < segs.length - 1 && segs[lead + 1].sep === '&&') {
+    const dir = repoCd(segs[lead], here)
+    if (!dir) break
+    here = { ...here, cwd: dir }
+    lead++
+  }
+  const rest = segs.slice(lead)
+  const reasons = rest.map(seg => classifySegment(seg, here, depth))
   let result = r('low', '')
-  const reasons = []
-  for (const seg of parsed.segments) {
-    const one = classifySegment(seg, ctx, depth, parsed.segments)
-    reasons.push(one)
-    result = max(result, one)
+  for (const one of reasons) result = max(result, one)
+  if (rest.some((seg, k) => k > 0 && !seg.pipedFrom)) {
+    // Several statements: never rated by their parts alone.
+    if (result.level === 'high') return result
+    const names = [...new Set(rest.map(commandName).filter(Boolean))]
+    return r('high', `Runs several commands in sequence: ${clip(names.join(', '))}`)
   }
-  for (const inner of parsed.substitutions) {
-    const sub = depth < 3 ? classifyBash(inner, ctx, depth + 1) : r('medium', 'Nested command substitution')
-    result = max(result, sub.level === 'low' ? r('medium', `Runs a command substitution: ${clip(inner)}`) : sub)
-  }
-  if (!parsed.complete) result = max(result, r('medium', 'Command has unbalanced quotes or an open heredoc'))
   // `curl … | sh` says more than "network to an unknown host".
   const piped = reasons.find(x => x.level === 'high' && x.reason.startsWith('Pipes into'))
   if (piped) return piped
-  if (!parsed.segments.length && !parsed.substitutions.length) return r('medium', 'Runs an empty or unreadable command')
   if (result.level === 'low') {
     // Low: say what it is ("Read-only: git status", "Runs tests: npm test").
     const tests = reasons.find(x => x.reason.startsWith('Runs tests'))
     if (tests) return tests
     if (reasons.length === 1) return reasons[0]
-    const names = [...new Set(parsed.segments.map(commandName).filter(n => n && n !== 'cd'))]
+    const names = [...new Set(rest.map(commandName).filter(n => n && n !== 'cd'))]
     return r('low', `Read-only: ${clip(names.join(', '))}`)
   }
   return result
 }
 
+// The directory a plain `cd <dir>` moves to when it stays in the repo,
+// else null.
+function repoCd (seg, ctx) {
+  if (seg.assigns || seg.redirects.length || seg.words.length !== 2 || seg.words[0] !== 'cd') return null
+  if (seg.meta[1].glob || seg.meta[1].brace || seg.words[1] === '-' || seg.words[1].startsWith('-')) return null
+  const dir = resolvePath(seg.words[1], ctx)
+  const root = ctx.root || ctx.cwd
+  if (!dir || !root || root === '/' || root === ctx.home || !inside(dir, root)) return null
+  return dir
+}
+
 // "git status", "npm test", "ls": what a segment runs, for reasons.
 function commandName (seg) {
-  const words = shell.stripAssignments(seg.words)
+  const words = shell.stripAssignments(seg.words, seg.assigns)
   const prog = base(words[0] || '')
   if (prog === 'git' || PKG_MANAGERS.has(prog) || prog === 'docker' || prog === 'gh' || prog === 'cargo' || prog === 'go' || prog === 'flutter' || prog === 'dart') {
     const sub = words.slice(1).find(w => !w.startsWith('-'))
@@ -197,10 +296,115 @@ function clip (s, n = 60) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
 
+// The value a word gives a path check: `--file=x` and `@x` (curl) name x.
+function pathOf (w) {
+  const eq = /^--?[A-Za-z][\w-]*=(.+)$/.exec(w)
+  const v = eq ? eq[1] : w
+  return v.startsWith('@') ? v.slice(1) : v
+}
+
+function secretOf (w, ctx) {
+  for (const v of new Set([w, pathOf(w)])) {
+    const kind = secretKind(v) || (v.includes('/') || v.startsWith('~') ? secretKind(resolvePath(v, ctx)) : null)
+    if (kind) return kind
+  }
+  return null
+}
+
+// Names a wildcard must not be able to match (see SECRET_PATTERNS).
+const SECRET_NAMES = ['.env', '.env.local', '.ssh', 'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519', 'x.pem', 'x.key', 'x.p12', 'x.pfx', 'x.jks', 'x.keystore', 'x.kdbx', 'x.asc', 'x.gpg', '.aws', '.gnupg', '.netrc', '.git-credentials', '.npmrc', '.pypirc', '.pgpass', '.my.cnf', 'credentials', 'credentials.json', 'secret', 'secrets', 'secrets.yml', '.kube', '.docker', '.conductore', 'shadow', 'sudoers']
+// Programs that read names only, never contents.
+const NAMES_ONLY = new Set(['ls', 'll', 'la', 'du', 'stat', 'tree', 'file'])
+
+function segmentRegex (seg) {
+  let re = ''
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i]
+    if (c === '*') re += '.*'
+    else if (c === '?') re += '.'
+    else if (c === '[') {
+      const end = seg.indexOf(']', i + 2)
+      if (end === -1) { re += '\\['; continue }
+      re += '[' + seg.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\') + ']'
+      i = end
+    } else re += c.replace(/[.+^${}()|\\]/g, '\\$&')
+  }
+  try { return new RegExp(`^${re}$`, 's') } catch { return /^/ }
+}
+
+// A wildcard argument the shell expands before the program runs: high when
+// it can reach outside the repo, hidden files or secrets.
+function globRisk (word, prog, ctx) {
+  if (FILE_CHANGERS.has(prog)) return r('high', `Uses a wildcard with a command that changes files: ${clip(word, 40)}`)
+  const v = pathOf(word)
+  const plain = v.replace(/[*?]|\[[^\]]*\]/g, '')
+  const segs = v.split('/')
+  const secretish = secretKind(plain) || segs.some((seg, k) => /[*?[]/.test(seg) && (k < segs.length - 1 || !NAMES_ONLY.has(prog)) && SECRET_NAMES.some(n => segmentRegex(seg).test(n)))
+  if (secretish) return r('high', `Uses a wildcard that can match secrets: ${clip(word, 40)}`)
+  if (v.split('/').some(part => part.startsWith('.') && part !== '.' && part !== '..' && /[*?[]/.test(part))) return r('high', `Uses a wildcard that can match hidden files: ${clip(word, 40)}`)
+  const fixed = v.slice(0, v.search(/[*?[]/))
+  const dir = resolvePath(fixed.includes('/') ? fixed.slice(0, fixed.lastIndexOf('/') + 1) || '/' : '.', ctx)
+  const root = ctx.root || ctx.cwd
+  if (v.includes('..') || !root || !dir || !inside(dir, root)) return r('high', `Uses a wildcard path outside the repo: ${clip(word, 40)}`)
+  return null
+}
+
+// Precise option tables of the wrappers that run the rest of the line:
+// flags, options taking a value (next word), options with an inline value.
+const WRAPPERS = {
+  env: { flags: /^(-i|--ignore-environment|-0|--null|-)$/, values: /^(-u|--unset)$/, inline: /^--unset=./, assigns: true },
+  time: { flags: /^(-p|--portability)$/ },
+  nice: { values: /^(-n|--adjustment)$/, inline: /^(--adjustment=-?\d+|-n-?\d+|-\d+)$/ },
+  nohup: {},
+  stdbuf: { values: /^-[ioe]$/, inline: /^(-[ioe][0-9]*[LKMGB]?|--(input|output|error)=[0-9]*[LKMGB]?)$/ },
+  ionice: { flags: /^-t$/, values: /^-[cn]$/, inline: /^-[cn]\d+$/ },
+  chronic: { flags: /^-[ev]+$/ },
+  caffeinate: { flags: /^-[dimsu]+$/, values: /^-[tw]$/ },
+  command: { flags: /^-p$/ },
+  builtin: {},
+  timeout: { flags: /^(--preserve-status|--foreground|-v|--verbose)$/, values: /^(-s|--signal|-k|--kill-after)$/, inline: /^(--signal=\w+|--kill-after=[\d.]+[smhd]?|-s\w+|-k[\d.]+[smhd]?)$/, duration: true }
+}
+
+// The words after a wrapper's options: { words } or { risk } when its
+// options are not all known (then it cannot be read past).
+function unwrap (prog, words) {
+  const spec = WRAPPERS[prog]
+  let k = 1
+  while (k < words.length && words[k].startsWith('-') && words[k] !== '--') {
+    const w = words[k]
+    if (prog === 'command' && /^-[vV]$/.test(w)) return { risk: r('low', `Looks up a command: ${clip(words.slice(k + 1).join(' '), 40)}`) }
+    if (spec.flags && spec.flags.test(w)) { k++; continue }
+    if (spec.inline && spec.inline.test(w)) { k++; continue }
+    if (spec.values && spec.values.test(w) && k + 1 < words.length) { k += 2; continue }
+    return { risk: r('high', `Runs through ${prog} with options it cannot check: ${clip(words.join(' '), 50)}`) }
+  }
+  if (words[k] === '--') k++
+  if (spec.duration) {
+    if (!/^\d+(\.\d+)?[smhd]?$/.test(words[k] || '')) return { risk: r('high', `Runs through timeout with options it cannot check: ${clip(words.join(' '), 50)}`) }
+    k++
+  }
+  let rest = words.slice(k)
+  if (spec.assigns) {
+    let a = 0
+    while (a < rest.length && /^[^=]+=/.test(rest[a])) a++
+    const bad = rest.slice(0, a).find(w => !ENV_SAFE.has(w.slice(0, w.indexOf('='))))
+    if (bad) return { risk: r('high', `Sets ${clip(bad.slice(0, bad.indexOf('=')), 30)} for the command`) }
+    rest = rest.slice(a)
+    if (!rest.length) return { risk: r('low', 'Read-only: env') }
+  }
+  return { words: rest }
+}
+
 // One simple command: words (quotes removed) and its redirections.
-function classifySegment (seg, ctx, depth, all) {
-  let words = shell.stripAssignments(seg.words)
+function classifySegment (seg, ctx, depth) {
   let result = r('low', '')
+  // VAR=value before the command: only a few harmless names.
+  for (const a of seg.words.slice(0, seg.assigns)) {
+    const name = a.slice(0, a.search(/\+?=/))
+    if (!ENV_SAFE.has(name)) return r('high', `Sets ${name} for the command`)
+  }
+  let words = seg.words.slice(seg.assigns)
+  const meta = seg.meta.slice(seg.assigns)
   // Redirections: where output lands.
   for (const { op, target } of seg.redirects) {
     if (op.startsWith('<') && op !== '<>') {
@@ -209,46 +413,109 @@ function classifySegment (seg, ctx, depth, all) {
     }
     result = max(result, writeRisk(target, ctx, 'Writes'))
   }
+  if (!words.length) return result.level === 'low' ? r('low', seg.assigns ? 'Sets a shell variable' : 'No command (redirection only)') : result
   // Any word naming a secrets path.
-  for (const w of words.slice(1)) {
-    const kind = secretKind(w) || (w.includes('/') || w.startsWith('~') ? secretKind(resolvePath(w, ctx)) : null)
-    if (kind) { result = max(result, r('high', `Touches a secrets path (${kind}): ${short(w, ctx)}`)); break }
+  for (let k = 1; k < words.length; k++) {
+    const kind = secretOf(words[k], ctx)
+    if (kind) { result = max(result, r('high', `Touches a secrets path (${kind}): ${short(pathOf(words[k]), ctx)}`)); break }
   }
-  // Unwrap env/time/nice/timeout/xargs; sudo is high by itself.
+  // Unwrap env/time/nice/timeout/…, precisely; sudo is high by itself.
   for (let guard = 0; guard < 6 && words.length; guard++) {
     const prog = base(words[0])
     if (ROOT_WRAPPERS.has(prog)) return max(result, r('high', `Runs as root (${prog})`))
-    if (WRAPPERS.has(prog)) { words = shell.stripAssignments(dropOptions(words.slice(1), prog === 'env' ? /^-[iu0]|^--/ : /^-/)); continue }
-    if (prog === 'timeout') { words = dropOptions(words.slice(1), /^-/).slice(1); continue }
-    if (prog === 'xargs') { words = dropXargsOptions(words.slice(1)); if (!words.length) words = ['echo']; continue }
-    if (prog === 'exec') { words = words.slice(1); continue }
-    break
+    if (!WRAPPERS[prog] || (words[0].includes('/') && !SYSTEM_BIN.test(words[0]))) break
+    const next = unwrap(prog, words)
+    if (next.risk) return max(result, next.risk)
+    words = next.words
   }
   if (!words.length) return result.level === 'low' ? r('low', 'No command (redirection only)') : result
-  const prog = base(words[0])
+  const offset = meta.length - words.length
+  const name = base(words[0])
+  const prog = programName(words[0])
   const args = words.slice(1)
   const text = clip(words.join(' '))
-
-  // Piped into a shell or interpreter reading stdin: `curl … | sh`.
-  if (seg.pipedFrom && INTERPRETERS.has(prog) && !args.some(a => !a.startsWith('-') || a === '-c' || a === '-e')) {
-    return r('high', `Pipes into ${prog}: runs whatever the previous command prints`)
-  }
-  if (SHELLS.has(prog) || prog === 'eval' || prog === 'source' || prog === '.') {
-    const ci = args.indexOf('-c')
-    if (ci !== -1 && typeof args[ci + 1] === 'string' && depth < 3) {
-      const inner = classifyBash(args[ci + 1], ctx, depth + 1)
-      return max(result, inner)
+  // Wildcards the shell expands before the program sees them.
+  for (let k = 1; k < words.length; k++) {
+    const m = meta[offset + k]
+    if (!m) continue
+    if (m.brace) { result = max(result, r('high', `Uses brace expansion: ${clip(words[k], 40)}`)); break }
+    if (m.glob) {
+      const g = globRisk(words[k], name, ctx)
+      if (g) { result = max(result, g); break }
     }
-    if (prog === 'eval') return r('high', 'Evaluates a constructed command (eval)')
-    if (!args.length) return max(result, r('medium', `Starts ${prog}`))
+  }
+
+  if (CONDUCTORE.test(name)) return r('high', `Talks to Conductore's approval service: ${text}`)
+  // Piped into a shell or interpreter reading its code from stdin.
+  if (seg.pipedFrom && INTERPRETERS.has(name) && readsCodeFromStdin(name, args)) {
+    return r('high', `Pipes into ${name}: runs whatever the previous command prints`)
+  }
+  if (SHELL_STATE.has(name)) {
+    if (name === 'eval') return r('high', 'Evaluates a constructed command (eval)')
+    if (name === 'exec') return r('high', `Replaces the shell (exec): ${text}`)
+    if (name === 'source' || name === '.') return r('high', `Runs a file in the shell itself (${name}): ${text}`)
+    return r('high', `Changes the shell itself (${name}): ${text}`)
+  }
+  if (RUNS_OTHERS.has(name)) return r('high', `Runs other commands through ${name}: ${text}`)
+  if (name === 'pwsh' || name === 'powershell' || name === 'tclsh') return r('high', `${name} commands are not checked: review it`)
+  if (INTERPRETERS.has(name) && inlineCode(name, args)) return r('high', `Runs inline ${name} code`)
+  if (SHELLS.has(name)) {
+    // `bash script.sh` with plain options runs a script; anything else
+    // (no script, -s, odd options) is a shell reading its input.
+    let k = 0
+    for (;;) {
+      if (/^-[euxvn]+$/.test(args[k] || '')) { k++; continue }
+      if (args[k] === '-o' && args[k + 1] === 'pipefail') { k += 2; continue }
+      break
+    }
+    const script = args[k]
+    if (!script || script.startsWith('-') || script === '/dev/stdin' || /^\/dev\/fd\/|^\/proc\/self\/fd\//.test(script)) return r('high', `Starts ${name}: it runs whatever it reads`)
     return max(result, r('medium', `Runs a script: ${text}`))
   }
-  if (INTERPRETERS.has(prog) && (args.includes('-c') || args.includes('-e') || args.includes('--eval'))) {
-    return max(result, r('medium', `Runs inline ${prog} code`))
+  if (name === 'tmux') {
+    return /^(ls|list-sessions|list-windows|list-panes|has-session|-V)$/.test(args[0] || '')
+      ? max(result, r('low', `Read-only: ${text}`))
+      : r('high', `Controls tmux (it can type into other panes): ${text}`)
   }
 
-  const own = classifyProgram(prog, args, ctx, text, words)
+  let own = classifyProgram(prog, args, ctx, text, words)
+  // A runner (tests, linters, builds, installs) with options or paths that
+  // bring in code from elsewhere or move the run out of the repo.
+  if (own.level !== 'high' && (TEST_BINARIES.has(prog) || TOOLCHAINS.has(prog) || PKG_MANAGERS.has(prog) || prog === 'npx' || prog === 'pnpx' || prog === 'bunx' || prog === 'gradlew' || prog === 'mvnw')) {
+    own = max(own, runnerRisk(prog, args, ctx, text))
+  }
   return max(result, own)
+}
+
+function runnerRisk (prog, args, ctx, text) {
+  const end = args.indexOf('--')
+  const own = end === -1 ? args : args.slice(0, end)
+  if (own.some(a => CODE_OPTIONS.test(a))) return r('high', `Runs ${prog} with options that load code or move the run: ${text}`)
+  if (prog === 'make' && own.some(a => /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(a))) return r('high', `Overrides make variables: ${text}`)
+  const root = ctx.root || ctx.cwd
+  for (const a of args) {
+    const v = pathOf(a)
+    if (!(v.includes('/') || v.startsWith('~') || v.startsWith('.'))) continue
+    const abs = resolvePath(v, ctx)
+    if (abs && !(root && inside(abs, root))) return r('high', `Runs ${prog} with a path outside the repo: ${clip(v, 40)}`)
+  }
+  return r('low', '')
+}
+
+// Whether an interpreter fed by a pipe runs what it reads.
+function readsCodeFromStdin (prog, args) {
+  if (SHELLS.has(prog)) return true
+  const operand = args.find(a => !a.startsWith('-'))
+  if (args.includes('-m')) return false
+  return !operand || operand === '-' || operand === '/dev/stdin' || /^\/dev\/fd\/|^\/proc\/self\/fd\//.test(operand) || args.includes('-')
+}
+
+// The program a command word names: a system one by its name, anything
+// else given by path (./ls, bin/cat) is a script.
+function programName (w) {
+  if (!w.includes('/') || SYSTEM_BIN.test(w)) return base(w)
+  if (/^(\.\/)?(gradlew|mvnw)$/.test(w)) return base(w)
+  return w
 }
 
 function base (w) {
@@ -258,15 +525,6 @@ function base (w) {
 function dropOptions (words, re) {
   let k = 0
   while (k < words.length && re.test(words[k])) k++
-  return words.slice(k)
-}
-
-function dropXargsOptions (words) {
-  let k = 0
-  while (k < words.length && words[k].startsWith('-')) {
-    if (/^-(n|I|L|P|d|s|E|a)$/.test(words[k])) k++
-    k++
-  }
   return words.slice(k)
 }
 
@@ -281,8 +539,66 @@ function writeRisk (target, ctx, verb) {
   }
 }
 
+// sed scripts that only print, delete or substitute (no e, w, r, W, R
+// commands, no e or w flags) are read-only.
+const SED_SAFE = [
+  /^\s*((\d+|\$|\/(?:[^\\/]|\\.)*\/)(,(\d+|\$|\/(?:[^\\/]|\\.)*\/))?!?)?\s*[pdq=]?\s*$/,
+  /^\s*((\d+|\$|\/(?:[^\\/]|\\.)*\/)(,(\d+|\$|\/(?:[^\\/]|\\.)*\/))?)?\s*s([^\\\n\w\s])(?:(?!\5)[^\\\n]|\\.)*\5(?:(?!\5)[^\\\n]|\\.)*\5[gpiI0-9]*\s*$/
+]
+
+function sedScriptsSafe (args) {
+  const scripts = []
+  let k = 0
+  let given = false
+  for (; k < args.length; k++) {
+    const a = args[k]
+    if (a === '-e' || a === '--expression') { scripts.push(args[++k] || ''); given = true; continue }
+    if (a.startsWith('--expression=')) { scripts.push(a.slice(13)); given = true; continue }
+    if (a === '-f' || a.startsWith('--file')) return false
+    if (/^-[nrEsuz]+$/.test(a) || /^--(quiet|silent|regexp-extended|separate|unbuffered|null-data|posix|debug|sandbox)$/.test(a)) continue
+    if (/^-i|^--in-place/.test(a) || /^-[a-zA-Z]*i/.test(a)) continue
+    if (a.startsWith('-')) return false
+    if (!given) { scripts.push(a); given = true }
+  }
+  return scripts.every(s => s.split(/[;\n]/).every(part => SED_SAFE.some(re => re.test(part))))
+}
+
+// awk programs that only print: no system(), getline, output redirection
+// or pipes.
+function awkSafe (args) {
+  let k = 0
+  while (k < args.length && args[k].startsWith('-')) {
+    if (args[k] === '-F' || args[k] === '-v') { k += 2; continue }
+    if (/^-F.|^-v./.test(args[k])) { k++; continue }
+    return false // -f progfile, -E, -i, -l, --exec, …
+  }
+  const program = args[k]
+  return typeof program === 'string' && !/system\s*\(|getline|@load|@include|\bclose\s*\(|fflush|ENVIRON|PROCINFO/.test(program) && !/\bprintf?\b[^;}]*?[>|]/.test(program)
+}
+
 // Non-option arguments (paths, mostly).
 const operands = args => args.filter(a => !a.startsWith('-'))
+
+// The value of an option given as `-o x`, `--output=x` or `-ox`, or null.
+function optionValue (args, re) {
+  for (let k = 0; k < args.length; k++) {
+    if (re.test(args[k])) return args[k + 1] === undefined ? '' : args[k + 1]
+    const eq = args[k].indexOf('=')
+    if (eq > 0 && re.test(args[k].slice(0, eq))) return args[k].slice(eq + 1)
+  }
+  return null
+}
+
+// The files `sed -i` edits: its operands after the script.
+function sedFiles (args) {
+  const scripted = args.some(a => a === '-e' || a === '--expression' || a.startsWith('--expression=') || a === '-f')
+  const ops = []
+  for (let k = 0; k < args.length; k++) {
+    if (args[k] === '-e' || args[k] === '--expression' || args[k] === '-f') { k++; continue }
+    if (!args[k].startsWith('-')) ops.push(args[k])
+  }
+  return scripted ? ops : ops.slice(1)
+}
 
 function classifyProgram (prog, args, ctx, text, words) {
   if (args.length === 1 && /^(--version|-V|--help|-h|help|version)$/.test(args[0])) return r('low', `Prints ${prog} version or help`)
@@ -297,14 +613,25 @@ function classifyProgram (prog, args, ctx, text, words) {
   if (prog === 'rm' || prog === 'rmdir' || prog === 'unlink' || prog === 'trash' || prog === 'trash-put') return classifyRm(prog, args, ctx, text)
   if (prog === 'find') {
     if (args.includes('-delete')) return r('high', `Deletes files (find -delete): ${text}`)
-    if (args.some(a => /^-(exec|execdir|ok|okdir)$/.test(a))) return r('medium', `Runs a command per file (find -exec): ${text}`)
-    if (args.some(a => /^-f(print|ls|printf)/.test(a))) return r('medium', `Writes find output to a file: ${text}`)
+    if (args.some(a => /^-(exec|execdir|ok|okdir)$/.test(a))) return r('high', `Runs a command per file (find -exec): ${text}`)
+    if (args.some(a => /^-f(print|ls|printf)/.test(a))) return r('high', `Writes find output to a file: ${text}`)
     return r('low', `Read-only: ${text}`)
   }
-  if (prog === 'sed' && args.some(a => /^-i|^--in-place/.test(a) || /^-[a-zA-Z]*i/.test(a))) return pathWrites(operands(args).slice(1), ctx, 'Edits', text)
-  if ((prog === 'awk' || prog === 'gawk') && args.some(a => /system\s*\(|[^=!<>]>\s*"|\|\s*"/.test(a))) return r('medium', `awk that runs commands or writes files: ${text}`)
+  if (prog === 'sed') {
+    if (!sedScriptsSafe(args)) return r('high', `sed script that can run commands or write files: ${text}`)
+    if (args.some(a => /^-i|^--in-place/.test(a) || /^-[a-zA-Z]*i/.test(a))) return pathWrites(sedFiles(args), ctx, 'Edits', text)
+  }
+  if ((prog === 'awk' || prog === 'gawk') && !awkSafe(args)) return r('high', `awk that can run commands or write files: ${text}`)
   if (prog === 'tee') return pathWrites(operands(args), ctx, 'Writes', text)
-  if (NETWORK.has(prog)) return classifyNetwork(prog, args, text)
+  // Read-only programs with an option that writes a file.
+  if (prog === 'sort' || prog === 'tree') {
+    const out = optionValue(args, prog === 'sort' ? /^(-o|--output)$/ : /^-o$/)
+    if (out !== null) return pathWrites([out], ctx, 'Writes', text)
+  }
+  if (prog === 'uniq' && operands(args).length > 1) return pathWrites(operands(args).slice(1, 2), ctx, 'Writes', text)
+  if (prog === 'xxd' && args.some(a => /^-r/.test(a)) && operands(args).length > 1) return pathWrites(operands(args).slice(-1), ctx, 'Writes', text)
+  if (prog === 'yq' && args.some(a => /^(-i|--inplace)$/.test(a))) return pathWrites(operands(args).slice(1), ctx, 'Edits', text)
+  if (NETWORK.has(prog)) return classifyNetwork(prog, args, text, ctx)
   if (REMOTE.has(prog)) {
     const hostArg = args.find(a => !a.startsWith('-') && /[@:]/.test(a)) || operands(args)[0]
     if (prog === 'rsync' && !args.some(a => /^[^/]*:/.test(a) && !a.startsWith('-'))) return pathWrites(operands(args).slice(-1), ctx, 'Syncs to', text)
@@ -380,15 +707,42 @@ function classifyRm (prog, args, ctx, text) {
   return r('medium', `Deletes files in the repo: ${text}`)
 }
 
+// git subcommands with options that run a program or write a file of the
+// caller's choice.
+const GIT_RUNS = {
+  clone: /^(--upload-pack|-u|--template|--config|-c)(=|$)/,
+  fetch: /^--upload-pack(=|$)/,
+  pull: /^--upload-pack(=|$)/,
+  'ls-remote': /^(--upload-pack|-u|--exec)(=|$)/,
+  archive: /^(--exec|--remote|--output|-o)(=|$)/,
+  push: /^(--receive-pack|--exec)(=|$)/,
+  grep: /^(-O|--open-files-in-pager)(=|$)|^-O./,
+  diff: /^--output(=|$)/,
+  log: /^--output(=|$)/,
+  show: /^--output(=|$)/,
+  'format-patch': /^(--output|-o|--output-directory)(=|$)/,
+  rebase: /^(-x|--exec)(=|$)/
+}
+// Subcommands that change the repo but run nothing else.
+const GIT_MEDIUM = new Set(['cherry-pick', 'revert', 'merge', 'am', 'apply', 'notes', 'sparse-checkout', 'maintenance', 'init', 'bundle', 'bisect', 'lfs', 'restore', 'stage', 'range-diff', 'cherry', 'fsck', 'verify-commit', 'verify-tag', 'annotate', 'format-patch', 'archive', 'request-pull', 'mktree', 'read-tree', 'write-tree', 'hash-object', 'pack-refs', 'repack', 'commit-tree', 'checkout-index', 'update-index', 'citool'])
+
 function classifyGit (args, ctx, text) {
-  // Skip global options: -C dir, -c k=v, --no-pager, --git-dir=...
+  // Global options: -C dir, --no-pager, --git-dir=…. -c and --config-env
+  // set any config (pagers, hooks, ssh commands) for this run.
   let k = 0
   while (k < args.length && args[k].startsWith('-')) {
-    if (args[k] === '-C' || args[k] === '-c') k++
+    const a = args[k]
+    if (a === '-c' || /^--config-env(=|$)/.test(a) || /^--exec-path=/.test(a)) return r('high', `Runs git with its configuration overridden: ${text}`)
+    if (a === '-C' || a === '--git-dir' || a === '--work-tree' || a === '--namespace') k++
     k++
   }
   const sub = args[k] || ''
   const rest = args.slice(k + 1)
+  if (!sub) return r('low', `Prints git help: ${text}`)
+  if (GIT_RUNS[sub] && rest.some(a => GIT_RUNS[sub].test(a))) return r('high', `Runs git ${sub} with an option that runs a program or writes a file: ${text}`)
+  if ((sub === 'bisect' && rest[0] === 'run') || (sub === 'submodule' && rest[0] === 'foreach') || /^(difftool|mergetool|credential|daemon|instaweb|send-email|filter-repo|upload-pack|receive-pack|shell|remote-ext|-p|--paginate)$/.test(sub)) {
+    return r('high', `Runs other programs through git: ${text}`)
+  }
   const has = (...flags) => rest.some(a => flags.includes(a) || flags.some(f => f.endsWith('=') && a.startsWith(f)))
   switch (sub) {
     case 'status': case 'diff': case 'log': case 'show': case 'blame': case 'rev-parse': case 'ls-files': case 'ls-tree':
@@ -437,7 +791,8 @@ function classifyGit (args, ctx, text) {
     case 'update-ref': case 'symbolic-ref':
       return rest.includes('-d') ? r('high', `Deletes a ref: ${text}`) : r('medium', `Changes refs: ${text}`)
     default:
-      return r('medium', `Changes the repo: ${text}`)
+      if (GIT_MEDIUM.has(sub)) return r('medium', `Changes the repo: ${text}`)
+      return r('high', `Runs git ${clip(sub, 30) || '(nothing)'}: an alias or a command it does not know`)
   }
 }
 
@@ -519,7 +874,17 @@ function classifyToolchain (prog, args, text) {
   return r('medium', `Runs ${prog} ${sub}`.trim() + (text ? `: ${text}` : ''))
 }
 
-function classifyNetwork (prog, args, text) {
+function classifyNetwork (prog, args, text, ctx) {
+  // file:// URLs read local files; output options write them.
+  const files = args.filter(a => /^file:/i.test(a))
+  for (const f of files) {
+    const p = f.replace(/^file:(\/\/[^/]*)?/i, '')
+    if (secretKind(p) || secretKind(resolvePath(p, ctx))) return r('high', `Reads a secrets path through ${prog}: ${clip(p, 40)}`)
+  }
+  if (files.length) return r('medium', `Reads local files through ${prog}: ${text}`)
+  if (args.some(a => /^(-K|--config)(=|$)/.test(a))) return r('high', `Runs ${prog} with a config file: ${text}`)
+  const out = optionValue(args, prog === 'wget' ? /^(-O|--output-document|-P|--directory-prefix|-o|--output-file|-a|--append-output)$/ : /^(-o|--output|-D|--dump-header|-c|--cookie-jar|--trace|--trace-ascii|--stderr|--output-dir)$/)
+  if (out !== null && out !== '-' && writeTarget(out, ctx).where !== 'repo' && writeTarget(out, ctx).where !== 'none') return writeRisk(out, ctx, 'Downloads to')
   const urls = args.filter(a => !a.startsWith('-') && hostOf(a))
   const sends = args.some(a => /^(-d|--data.*|-F|--form.*|-T|--upload-file|--post-data|--post-file|--body-data|--body-file|--json)$/.test(a) || /^-[a-zA-Z]*[dFT]$/.test(a)) ||
     args.some((a, i) => (a === '-X' || a === '--request' || a === '--method') && /^(POST|PUT|PATCH|DELETE)$/i.test(args[i + 1] || ''))
@@ -581,32 +946,82 @@ function toolPath (input) {
   return null
 }
 
+// Every path an edit touches: its file, and all files of a patch (Codex's
+// apply_patch carries `files`).
+function toolPaths (input) {
+  const first = toolPath(input)
+  const all = first ? [first] : []
+  if (input && Array.isArray(input.files)) for (const f of input.files) if (typeof f === 'string' && f && !all.includes(f)) all.push(f)
+  return all
+}
+
+// The directory a shell call says it runs in (Gemini's dir_path, Codex's
+// workdir), when it gives one.
+function commandDir (input) {
+  for (const k of ['cwd', 'workdir', 'dir_path', 'directory']) if (typeof input[k] === 'string' && input[k]) return input[k]
+  return null
+}
+
+// ctx.realpath (when given) resolves symlinks; a path whose real target
+// differs is judged by both.
+function realOf (p, ctx) {
+  if (typeof ctx.realpath !== 'function') return null
+  const abs = resolvePath(p, ctx)
+  let real = null
+  try { real = abs ? ctx.realpath(abs) : null } catch {}
+  return real && real !== abs ? real : null
+}
+
+function classifyEdit (tool, p, ctx) {
+  const t = writeTarget(p, ctx)
+  const rel = short(p, ctx)
+  if (t.where === 'secret') return r('high', `Writes a secrets path (${t.kind}): ${rel}`)
+  if (t.where === 'outside') return r('high', `Writes outside the repo: ${rel}`)
+  if (/(^|\/)\.git\//.test(t.abs || '')) return r('high', `Writes inside .git: ${rel}`)
+  if (/(^|\/)\.claude\/settings(\.local)?\.json$/.test(t.abs || '')) return r('high', `Changes Claude Code permissions: ${rel}`)
+  if (/(^|\/)\.(github\/workflows|gitlab-ci\.yml|husky)\b|(^|\/)\.git-hooks?\//.test(t.abs || '')) return r('medium', `Edits CI or git hooks: ${rel}`)
+  if (t.where === 'temp') return r('medium', `Writes a temp file: ${rel}`)
+  return r('medium', `${tool === 'Write' ? 'Writes' : 'Edits'} ${rel}`)
+}
+
 function classify (toolName, toolInput, ctx = {}) {
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {}
   const tool = typeof toolName === 'string' ? toolName : ''
-  if (input._truncated) return r('medium', 'Tool input too large to check')
-  if (tool === 'Bash' || tool === 'PowerShell') return classifyBash(input.command, ctx)
+  if (input._truncated) return r('high', 'Tool input too large to check')
+  if (tool === 'PowerShell') return r('high', 'PowerShell commands are not checked: review it')
+  if (tool === 'Bash') {
+    const dir = commandDir(input)
+    if (dir !== null) {
+      const abs = resolvePath(dir, ctx)
+      const root = ctx.root || ctx.cwd
+      if (!abs || !root || !inside(abs, root)) return r('high', `Runs in a directory outside the repo: ${short(dir, ctx)}`)
+      return classifyBash(input.command, { ...ctx, cwd: abs })
+    }
+    return classifyBash(input.command, ctx)
+  }
   if (READ_TOOLS.has(tool)) {
     const p = toolPath(input)
     const abs = p ? resolvePath(p, ctx) : null
-    const kind = secretKind(abs) || secretKind(p) || (typeof input.pattern === 'string' && tool === 'Glob' ? secretKind(input.pattern.replace(/\*+/g, '')) : null)
-    if (kind) return r('high', `Reads a secrets path (${kind}): ${short(p || input.pattern, ctx)}`)
+    const real = p ? realOf(p, ctx) : null
+    const kind = secretKind(abs) || secretKind(p) || secretKind(real) || (typeof input.pattern === 'string' && tool === 'Glob' ? secretKind(input.pattern.replace(/\*+/g, '')) : null)
+    if (kind) return r('high', `Reads a secrets path (${kind}): ${short(p || input.pattern, ctx)}${real && secretKind(real) ? ' (through a link)' : ''}`)
     const verb = { Read: 'Reads', NotebookRead: 'Reads', Grep: 'Searches', Glob: 'Lists files', LS: 'Lists' }[tool]
     const what = p ? short(p, ctx) : typeof input.pattern === 'string' ? clip(input.pattern, 50) : ''
     return r('low', `${verb}${what ? ` ${what}` : ''}${tool === 'Grep' && typeof input.pattern === 'string' && p ? ` for ${clip(input.pattern, 30)}` : ''}`)
   }
   if (EDIT_TOOLS.has(tool)) {
-    const p = toolPath(input)
-    if (!p) return r('medium', `${tool} without a path`)
-    const t = writeTarget(p, ctx)
-    const rel = short(p, ctx)
-    if (t.where === 'secret') return r('high', `Writes a secrets path (${t.kind}): ${rel}`)
-    if (t.where === 'outside') return r('high', `Writes outside the repo: ${rel}`)
-    if (/(^|\/)\.git\//.test(t.abs || '')) return r('high', `Writes inside .git: ${rel}`)
-    if (/(^|\/)\.claude\/settings(\.local)?\.json$/.test(t.abs || '')) return r('high', `Changes Claude Code permissions: ${rel}`)
-    if (/(^|\/)\.(github\/workflows|gitlab-ci\.yml|husky)\b|(^|\/)\.git-hooks?\//.test(t.abs || '')) return r('medium', `Edits CI or git hooks: ${rel}`)
-    if (t.where === 'temp') return r('medium', `Writes a temp file: ${rel}`)
-    return r('medium', `${tool === 'Write' ? 'Writes' : 'Edits'} ${rel}`)
+    const all = toolPaths(input)
+    if (!all.length) return r('medium', `${tool} without a path`)
+    let result = r('low', '')
+    for (const p of all) {
+      result = max(result, classifyEdit(tool, p, ctx))
+      const real = realOf(p, ctx)
+      if (real) {
+        const through = classifyEdit(tool, real, ctx)
+        if (rank(through.level) > rank(result.level)) result = r(through.level, `${through.reason} (through a link)`)
+      }
+    }
+    return result
   }
   if (tool === 'WebFetch') {
     const host = hostOf(input.url)
@@ -622,9 +1037,9 @@ function classify (toolName, toolInput, ctx = {}) {
   return r('medium', `${tool || 'Unknown tool'}: effects unknown`)
 }
 
-// Only low risk goes into "Approve all safe". Plans never do.
+// Only low risk goes into "Approve all safe". Plans and questions never do.
 function batchable (toolName, risk) {
-  return !!risk && risk.level === 'low' && toolName !== 'ExitPlanMode' && toolName !== 'AskUserQuestion'
+  return !!risk && risk.level === 'low' && typeof toolName === 'string' && !!toolName && toolName !== 'ExitPlanMode' && toolName !== 'AskUserQuestion'
 }
 
 module.exports = { classify, classifyBash, batchable, secretKind, resolvePath, inside, hostOf, isLocalHost, isKnownHost, LEVELS, rank }

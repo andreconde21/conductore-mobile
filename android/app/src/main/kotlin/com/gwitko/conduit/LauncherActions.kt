@@ -114,6 +114,9 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
         /** The engine runs and monitors at least one machine. */
         fun appListening(): Boolean
 
+        /** The app lock is closed, or would be on return ([AppLockGuard]). */
+        fun appLocked(): Boolean
+
         /** [itemId]'s prompt, only while the snapshot lists it as needing the user. */
         fun prompt(itemId: String): LauncherPrompt?
 
@@ -145,6 +148,7 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
         if (method != METHOD_REPLY && method != METHOD_CHOOSE) return fail("Unknown method $method")
         if (env.deviceLocked()) return fail(UNLOCK_FIRST)
         if (!env.appListening()) return fail(OPEN_FIRST)
+        if (env.appLocked()) return fail(UNLOCK_APP_FIRST)
         val prompt = itemId?.let(env::prompt) ?: return fail(STALE)
         val action = when (method) {
             METHOD_REPLY -> {
@@ -219,6 +223,7 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
         private const val ANSWER = "answer"
         const val STALE = "That agent isn't waiting any more"
         const val UNLOCK_FIRST = "Unlock your phone first"
+        const val UNLOCK_APP_FIRST = "Unlock Conductore first"
         const val OPEN_FIRST = "Open Conductore first"
         const val OPEN_TO_ANSWER = "Open it in Conductore to answer"
         const val PICK_AN_OPTION = "Pick one of its options"
