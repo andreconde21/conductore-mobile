@@ -5,11 +5,15 @@
 // One JSON object on stdin: {folder, id?, status?, text?, author?}.
 //
 // A folder holds one `<id>.md` per task: YAML frontmatter (flat keys,
-// scalars and simple lists) then a markdown body. Only that folder is ever
-// touched: the folder must be an existing absolute directory (not `/`),
-// ids are plain file names (no separators, no dot-dot), a task file must be
-// a regular file (never a symlink) directly inside the folder, and writes go
-// through a temp file in the same folder and a rename. Status changes only
+// scalars and simple lists) then a markdown body. A folder without task
+// files of its own is a tree (CON-084): each subfolder one level down is a
+// project (names starting with `_` or `.`, and symlinks, are skipped) and
+// its tasks' ids are `<project>/<id>`. Only that folder is ever touched:
+// the folder must be an existing absolute directory (not `/`), ids are
+// plain file names (no dot-dot) with at most one project folder before
+// them, a task file must be a regular file (never a symlink) directly
+// inside the folder or a real project subfolder, and writes go through a
+// temp file next to it and a rename. Status changes only
 // rewrite the `status:` (and an existing `updated_at:`) line; comments are
 // appended under a `## Comments` heading. Everything else stays byte for
 // byte, line endings included.
@@ -18,7 +22,10 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const MAX_FILES = 2000
+// Caps on one list: tasks returned, and time spent reading (the phone
+// gives up after 20 s).
+const MAX_TASKS = 5000
+const MAX_SCAN_MS = 8000
 const MAX_FILE_BYTES = 1024 * 1024
 const MAX_COMMENT = 20000
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
@@ -46,11 +53,34 @@ function resolveFolder (raw) {
   return real
 }
 
-// The task file for id inside folder; it must exist unless allowMissing.
+// A project subfolder's name: a plain name not starting with `_` or `.`.
+const isProjectName = name => ID_RE.test(name) && !name.startsWith('_') && !name.includes('..')
+
+// The real directory a task id lives in: folder itself, or for
+// `<project>/<id>` a real (not symlinked) project subfolder directly inside
+// it.
+function taskDir (folder, id) {
+  const bad = () => new TasksError('bad-id', 'id must be a file name without the .md (letters, digits, . _ -), optionally after one project folder: project/id')
+  if (typeof id !== 'string' || id.includes('..')) throw bad()
+  const parts = id.split('/')
+  if (parts.length > 2 || !ID_RE.test(parts[parts.length - 1])) throw bad()
+  if (parts.length === 1) return { dir: folder, name: parts[0] }
+  if (!isProjectName(parts[0])) throw bad()
+  const dir = path.join(folder, parts[0])
+  let st
+  try { st = fs.lstatSync(dir) } catch { throw new TasksError('not-found', `no task ${id}`) }
+  if (!st.isDirectory()) throw new TasksError('bad-id', `${parts[0]} is not a folder`)
+  let real
+  try { real = fs.realpathSync(dir) } catch { throw new TasksError('not-found', `no task ${id}`) }
+  if (real !== dir || path.dirname(real) !== folder) throw new TasksError('bad-id', 'id escapes the folder')
+  return { dir, name: parts[1] }
+}
+
+// The task file for id inside folder; it must exist.
 function taskFile (folder, id) {
-  if (typeof id !== 'string' || !ID_RE.test(id) || id.includes('..')) throw new TasksError('bad-id', 'id must be a file name without the .md (letters, digits, . _ -)')
-  const file = path.join(folder, `${id}.md`)
-  if (path.dirname(file) !== folder) throw new TasksError('bad-id', 'id escapes the folder')
+  const { dir, name } = taskDir(folder, id)
+  const file = path.join(dir, `${name}.md`)
+  if (path.dirname(file) !== dir) throw new TasksError('bad-id', 'id escapes the folder')
   let st
   try { st = fs.lstatSync(file) } catch { throw new TasksError('not-found', `no task ${id}`) }
   if (!st.isFile()) throw new TasksError('bad-id', `${id}.md is not a regular file`)
@@ -135,7 +165,7 @@ function parseComments (body) {
   return out
 }
 
-function describe (id, text, st, withBody) {
+function describe (id, text, st, withBody, project) {
   const fm = splitFrontmatter(text)
   if (!fm) return null
   const f = fm.fields
@@ -154,6 +184,7 @@ function describe (id, text, st, withBody) {
     updatedAt: str(f.updated_at) || null,
     mtimeMs: Math.round(st.mtimeMs)
   }
+  if (project) task.project = project
   if (withBody) {
     task.body = body
     task.comments = parseComments(body)
@@ -164,14 +195,13 @@ function describe (id, text, st, withBody) {
 
 // --- operations ------------------------------------------------------------
 
-function listTasks ({ folder }) {
-  const dir = resolveFolder(folder)
-  const names = fs.readdirSync(dir).filter(n => n.endsWith('.md') && !n.startsWith('.')).sort()
-  const tasks = []
-  const seen = new Set()
-  let truncated = false
+// The tasks in one directory, appended to out (up to max, until
+// deadline); false once a cap is hit.
+function readTasksIn (dir, prefix, project, out, { max, deadline }) {
+  let names
+  try { names = fs.readdirSync(dir).filter(n => n.endsWith('.md') && !n.startsWith('.')).sort() } catch { return true }
   for (const name of names) {
-    if (tasks.length >= MAX_FILES) { truncated = true; break }
+    if (out.length >= max || Date.now() > deadline) return false
     const id = name.slice(0, -3)
     if (!ID_RE.test(id)) continue
     let st
@@ -179,19 +209,89 @@ function listTasks ({ folder }) {
     if (!st.isFile() || st.size > MAX_FILE_BYTES) continue
     let text
     try { text = fs.readFileSync(path.join(dir, name), 'utf8') } catch { continue }
-    const task = describe(id, text, st, false)
-    if (!task) continue
-    if (task.status) seen.add(task.status)
-    tasks.push(task)
+    const task = describe(prefix + id, text, st, false, project)
+    if (task) out.push(task)
   }
+  return true
+}
+
+// A status as filters compare it: `In Review`, `in_review` and
+// `in-review` are one.
+const statusKey = s => String(s).toLowerCase().trim().replace(/[ _]+/g, '-')
+
+// The list filters (all optional): {statuses, excludeStatuses, projects:
+// string lists; updatedSince: ISO time; limit: 1..MAX_TASKS}.
+function listFilters (input) {
+  const names = (key, max = 200) => {
+    const v = input[key]
+    if (v === undefined || v === null) return null
+    if (!Array.isArray(v) || v.length > max || !v.every(x => typeof x === 'string' && x.length <= 128)) throw new TasksError('bad-filter', `${key} must be a list of names`)
+    return v
+  }
+  const statuses = names('statuses')
+  const exclude = names('excludeStatuses')
+  const projects = names('projects', 1000)
+  let since = null
+  if (input.updatedSince !== undefined && input.updatedSince !== null) {
+    since = typeof input.updatedSince === 'string' ? Date.parse(input.updatedSince) : NaN
+    if (Number.isNaN(since)) throw new TasksError('bad-filter', 'updatedSince must be an ISO time')
+  }
+  let limit = MAX_TASKS
+  if (input.limit !== undefined && input.limit !== null) {
+    if (!Number.isInteger(input.limit) || input.limit < 1) throw new TasksError('bad-filter', 'limit must be a positive whole number')
+    limit = Math.min(input.limit, MAX_TASKS)
+  }
+  return {
+    statuses: statuses && new Set(statuses.map(statusKey)),
+    exclude: exclude && new Set(exclude.map(statusKey)),
+    projects: projects && new Set(projects),
+    since,
+    limit
+  }
+}
+
+// When a task last changed: its updated_at, else the file's mtime.
+const updatedMs = t => { const at = t.updatedAt ? Date.parse(t.updatedAt) : NaN; return Number.isNaN(at) ? t.mtimeMs : at }
+
+// limits: tests' smaller caps.
+function listTasks (input, { maxTasks = MAX_TASKS, maxScanMs = MAX_SCAN_MS } = {}) {
+  const dir = resolveFolder(input.folder)
+  const filters = listFilters(input)
+  const caps = { max: maxTasks, deadline: Date.now() + maxScanMs }
+  const read = []
+  let complete = readTasksIn(dir, '', null, read, caps)
+  let projects = null
+  if (complete && read.length === 0) {
+    // A tree: one level of project folders, never through a symlink.
+    const folders = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && isProjectName(e.name) && (!filters.projects || filters.projects.has(e.name)))
+      .map(e => e.name)
+      .sort()
+    for (const project of folders) {
+      complete = readTasksIn(path.join(dir, project), `${project}/`, project, read, caps)
+      if (!complete) break
+    }
+    projects = [...new Set(read.map(t => t.project))]
+  }
+  const seen = new Set(read.map(t => t.status).filter(Boolean))
   const statuses = [...DEFAULT_STATUSES, ...[...seen].filter(s => !DEFAULT_STATUSES.includes(s)).sort()]
-  return { ok: true, folder: dir, tasks, statuses, truncated }
+  const matching = read.filter(t =>
+    (!filters.statuses || filters.statuses.has(statusKey(t.status))) &&
+    (!filters.exclude || !filters.exclude.has(statusKey(t.status))) &&
+    (!filters.projects || filters.projects.has(t.project)) &&
+    (filters.since === null || updatedMs(t) >= filters.since))
+  // Newest first, so a limit keeps the most recent.
+  matching.sort((a, b) => updatedMs(b) - updatedMs(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const tasks = matching.slice(0, filters.limit)
+  const out = { ok: true, folder: dir, tasks, total: matching.length, statuses, truncated: !complete }
+  if (projects) out.projects = projects
+  return out
 }
 
 function readTask ({ folder, id }) {
   const dir = resolveFolder(folder)
   const { file, st } = taskFile(dir, id)
-  const task = describe(id, fs.readFileSync(file, 'utf8'), st, true)
+  const task = describe(id, fs.readFileSync(file, 'utf8'), st, true, id.includes('/') ? id.split('/')[0] : null)
   if (!task) throw new TasksError('no-frontmatter', `${id}.md has no frontmatter`)
   return { ok: true, task }
 }
@@ -251,15 +351,30 @@ const OPS = { list: listTasks, read: readTask, status: setStatus, comment: addCo
 const USAGE = `usage: conductore-hostd tasks <list|read|status|comment> -
 
   One JSON object on stdin:
-    list     {folder}                      every task's frontmatter
+    list     {folder, statuses?, excludeStatuses?, projects?,
+              updatedSince?, limit?}       tasks' frontmatter, newest first
     read     {folder, id}                  one task with its body and comments
     status   {folder, id, status}          rewrite its status line
     comment  {folder, id, text, author?}   append under "## Comments"
+
+  --gzip after the "-": a reply over 4 KB prints as
+  {"encoding":"gzip","data":"<base64 of the gzipped JSON>"}
 `
+
+// `--gzip` (after the `-`): a reply over GZIP_MIN_CHARS goes out as
+// {"encoding":"gzip","data":"<base64>"}, as for the other commands. Errors
+// stay plain.
+const GZIP_MIN_CHARS = 4096
 
 async function cli (args, { readStdin }) {
   const [op] = args
-  const write = obj => { process.stdout.write(JSON.stringify(obj) + '\n'); return obj.error ? 1 : 0 }
+  const gzip = args.includes('--gzip')
+  const write = obj => {
+    let json = JSON.stringify(obj)
+    if (gzip && !obj.error && json.length > GZIP_MIN_CHARS) json = JSON.stringify({ encoding: 'gzip', data: require('zlib').gzipSync(json).toString('base64') })
+    process.stdout.write(json + '\n')
+    return obj.error ? 1 : 0
+  }
   if (!OPS[op]) return write({ error: USAGE.trim(), code: 'usage' })
   let input
   try { input = JSON.parse(await readStdin()) } catch { return write({ error: 'tasks: expected one JSON object on stdin', code: 'usage' }) }

@@ -155,7 +155,7 @@ const USAGE = `usage: conductore-hostd <command>
                                   now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
 
-  --gzip (status, transcript, usage, digest, turns, diff): a reply over 4 KB
+  --gzip (status, transcript, usage, digest, turns, diff, tasks): a reply over 4 KB
   prints as {"encoding":"gzip","data":"<base64 of the gzipped JSON>"}
   doctor | stop | version
 `

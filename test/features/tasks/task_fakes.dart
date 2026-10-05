@@ -30,6 +30,7 @@ TaskItem task(
   List<String> assignees = const [],
   String? title,
   DateTime? updated,
+  String? project,
 }) => TaskItem(
   sourceId: sourceId,
   id: id,
@@ -38,6 +39,7 @@ TaskItem task(
   status: TaskStatusOption.named(status),
   assignees: assignees,
   updatedAt: updated,
+  project: project,
 );
 
 /// An in-memory source: [tasks], status changes and comments recorded.

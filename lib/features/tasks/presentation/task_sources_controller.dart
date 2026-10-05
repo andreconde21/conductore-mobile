@@ -59,9 +59,18 @@ class SourceTasks {
     this.error,
     this.loading = false,
     this.loadedAt,
+    this.total,
   });
 
   final List<TaskItem> tasks;
+
+  /// How many tasks the source matched, when it cut the list at its limit
+  /// ([WindowedTaskSource.lastTotal]); null when unknown.
+  final int? total;
+
+  /// The source matched more tasks than it sent.
+  bool get partial => total != null && total! > tasks.length;
+
   final String? error;
   final bool loading;
   final DateTime? loadedAt;
@@ -84,7 +93,13 @@ enum TaskSort {
 /// The task list's filters; null means any.
 @immutable
 class TaskFilter {
-  const TaskFilter({this.sourceIds, this.status, this.assignee, this.query});
+  const TaskFilter({
+    this.sourceIds,
+    this.status,
+    this.assignee,
+    this.project,
+    this.query,
+  });
 
   /// The sources shown; null shows every source.
   final Set<String>? sourceIds;
@@ -92,6 +107,9 @@ class TaskFilter {
   /// A status label (statuses differ per source, so by label).
   final String? status;
   final String? assignee;
+
+  /// A [TaskItem.project].
+  final String? project;
   final String? query;
 
   /// The value [TaskFilter.assignee] takes for "nobody".
@@ -102,6 +120,7 @@ class TaskFilter {
       return false;
     }
     if (status != null && task.status?.label != status) return false;
+    if (project != null && task.project != project) return false;
     if (assignee == unassigned) {
       if (task.assignees.isNotEmpty) return false;
     } else if (assignee != null && !task.assignees.contains(assignee)) {
@@ -119,11 +138,13 @@ class TaskFilter {
     Set<String>? Function()? sourceIds,
     String? Function()? status,
     String? Function()? assignee,
+    String? Function()? project,
     String? Function()? query,
   }) => TaskFilter(
     sourceIds: sourceIds == null ? this.sourceIds : sourceIds(),
     status: status == null ? this.status : status(),
     assignee: assignee == null ? this.assignee : assignee(),
+    project: project == null ? this.project : project(),
     query: query == null ? this.query : query(),
   );
 }
@@ -158,6 +179,27 @@ class TaskSourcesController extends ChangeNotifier {
       _tasks[sourceId] ?? const SourceTasks();
 
   bool get loadingTasks => _tasks.values.any((t) => t.loading);
+
+  bool _showDone = false;
+
+  /// Whether sources that list open tasks only by default
+  /// ([WindowedTaskSource]) are asked for done ones too.
+  bool get showDone => _showDone;
+
+  /// Whether any source honours [showDone] (a markdown folder).
+  bool get hasDoneToggle =>
+      _sources.any((s) => s.kind == TaskSourceKind.markdownFolder);
+
+  /// Sets [showDone] and lists those sources again.
+  Future<void> setShowDone(bool value) async {
+    if (value == _showDone) return;
+    _showDone = value;
+    notifyListeners();
+    await Future.wait([
+      for (final s in _sources)
+        if (s.kind == TaskSourceKind.markdownFolder) refresh(sourceId: s.id),
+    ]);
+  }
 
   /// Every source's tasks, newest first.
   List<TaskItem> get allTasks =>
@@ -313,6 +355,7 @@ class TaskSourcesController extends ChangeNotifier {
         tasks: tasksOf(s.id).tasks,
         loading: true,
         loadedAt: tasksOf(s.id).loadedAt,
+        total: tasksOf(s.id).total,
       );
     }
     notifyListeners();
@@ -322,8 +365,14 @@ class TaskSourcesController extends ChangeNotifier {
   Future<void> _refreshOne(TaskSourceConfig config) async {
     SourceTasks next;
     try {
-      final tasks = await (await _adapter(config.id)).list();
-      next = SourceTasks(tasks: tasks, loadedAt: DateTime.now());
+      final adapter = await _adapter(config.id);
+      if (adapter is WindowedTaskSource) adapter.includeDone = _showDone;
+      final tasks = await adapter.list();
+      next = SourceTasks(
+        tasks: tasks,
+        loadedAt: DateTime.now(),
+        total: adapter is WindowedTaskSource ? adapter.lastTotal : null,
+      );
     } on TaskSourceFailure catch (e) {
       next = SourceTasks(tasks: tasksOf(config.id).tasks, error: e.message);
     } catch (e) {
@@ -371,6 +420,7 @@ class TaskSourcesController extends ChangeNotifier {
       error: current.error,
       loading: current.loading,
       loadedAt: current.loadedAt,
+      total: current.total,
     );
     notifyListeners();
   }

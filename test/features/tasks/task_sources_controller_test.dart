@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/tasks/data/markdown_folder_task_source.dart';
+import 'package:conduit/features/tasks/data/task_http.dart';
 import 'package:conduit/features/tasks/data/task_source_factory.dart';
 import 'package:conduit/features/tasks/domain/task_source.dart';
 import 'package:conduit/features/tasks/presentation/task_sources_controller.dart';
@@ -265,7 +267,11 @@ void main() {
       expect(tasks.first.status?.category, TaskStatusCategory.inProgress);
       expect(calls.single.$1, 'h1');
       expect(calls.single.$2, 'list');
-      expect(calls.single.$3, {'folder': '~/tasks'});
+      expect(calls.single.$3, {
+        'folder': '~/tasks',
+        'limit': 500,
+        'excludeStatuses': TaskStatusCategory.doneNames.toList(),
+      });
       final options = await source.statusOptions(tasks.last);
       expect(options.map((o) => o.id), ['backlog', 'todo', 'done', 'verify']);
       final moved = await source.updateStatus(tasks.last, options[2]);
@@ -279,6 +285,144 @@ void main() {
       await source.comment(tasks.last, 'Started');
       expect(calls.last.$2, 'comment');
       expect(calls.last.$3['text'], 'Started');
+    });
+
+    test(
+      'a folder of project folders: project/id ids and the project',
+      () async {
+        final calls = <(String, Map<String, Object?>)>[];
+        final source = MarkdownFolderTaskSource(
+          const TaskSourceConfig(
+            id: 'pt',
+            kind: TaskSourceKind.markdownFolder,
+            name: 'ProjectsTasks',
+            settings: {'host': 'h1', 'folder': '/data/projectstasks'},
+          ),
+          call: (host, op, input) async {
+            calls.add((op, input));
+            final card = {
+              'id': 'conductore-mobile/CON-084',
+              'key': 'CON-084',
+              'title': 'Tree',
+              'status': input['status'] ?? 'todo',
+              'project': 'conductore-mobile',
+            };
+            return op == 'list'
+                ? {
+                    'ok': true,
+                    'projects': ['amedia', 'conductore-mobile'],
+                    'tasks': [
+                      card,
+                      {'id': 'amedia/AM-1', 'title': 'A', 'project': 'amedia'},
+                      {'id': 'FLAT-1', 'title': 'Flat', 'project': ''},
+                    ],
+                  }
+                : {'ok': true, 'task': card};
+          },
+        );
+        final tasks = await source.list();
+        final card = tasks.firstWhere((t) => t.key == 'CON-084');
+        expect(card.project, 'conductore-mobile');
+        expect(card.ref, 'pt/conductore-mobile/CON-084');
+        expect(
+          tasks.firstWhere((t) => t.id == 'amedia/AM-1').project,
+          'amedia',
+        );
+        expect(tasks.firstWhere((t) => t.id == 'FLAT-1').project, isNull);
+        final moved = await source.updateStatus(
+          card,
+          TaskStatusOption.named('done'),
+        );
+        expect(calls.last.$2['id'], 'conductore-mobile/CON-084');
+        expect(moved.project, 'conductore-mobile');
+        expect(moved.copyWith(body: 'b').project, 'conductore-mobile');
+      },
+    );
+
+    test(
+      'open tasks only unless includeDone; held to the per-source limit',
+      () async {
+        final inputs = <Map<String, Object?>>[];
+        Map<String, Object?> reply = {};
+        final source = MarkdownFolderTaskSource(
+          const TaskSourceConfig(
+            id: 'pt',
+            kind: TaskSourceKind.markdownFolder,
+            name: 'ProjectsTasks',
+            settings: {'host': 'h1', 'folder': '/data/projectstasks'},
+          ),
+          call: (host, op, input) async {
+            inputs.add(input);
+            return reply;
+          },
+        );
+        Map<String, Object?> card(int i, String status) => {
+          'id': 'p/T-$i',
+          'title': 'T$i',
+          'status': status,
+          'updatedAt': DateTime.utc(
+            2026,
+          ).add(Duration(hours: i)).toIso8601String(),
+        };
+        // A new companion: filtered and limited there, with the total.
+        reply = {
+          'ok': true,
+          'total': 1003,
+          'tasks': [
+            for (var i = 0; i < maxTasksPerSource; i++) card(i, 'todo'),
+          ],
+        };
+        expect((await source.list()).length, maxTasksPerSource);
+        expect(source.lastTotal, 1003);
+        expect(inputs.last['excludeStatuses'], contains('done'));
+        expect(inputs.last['excludeStatuses'], contains('cancelled'));
+        expect(inputs.last['limit'], maxTasksPerSource);
+
+        // An older companion ignores the filters: the adapter applies them.
+        reply = {
+          'ok': true,
+          'tasks': [
+            for (var i = 0; i < 700; i++) card(i, i.isEven ? 'done' : 'todo'),
+            card(800, 'Cancelled'),
+          ],
+        };
+        final open = await source.list();
+        expect(open.length, 350);
+        expect(open.every((t) => t.status?.id == 'todo'), isTrue);
+        expect(open.first.id, 'p/T-699', reason: 'newest first');
+        expect(source.lastTotal, 350);
+
+        source.includeDone = true;
+        final all = await source.list();
+        expect(inputs.last.containsKey('excludeStatuses'), isFalse);
+        expect(all.length, maxTasksPerSource);
+        expect(all.first.id, 'p/T-800');
+        expect(source.lastTotal, 701);
+      },
+    );
+
+    test('runCompanionTasks asks for --gzip and unpacks the reply', () async {
+      final packed = base64.encode(
+        gzip.encode(utf8.encode('{"ok":true,"tasks":[],"total":0}')),
+      );
+      final runner = FakeStdinRunner(
+        (command, stdin) => AgentCommandResult(
+          stdout: '{"encoding":"gzip","data":"$packed"}\n',
+          stderr: '',
+          exitCode: 0,
+        ),
+      );
+      final json = await runCompanionTasks(runner, 'list', {'folder': '/t'});
+      expect(json['total'], 0);
+      expect(runner.commands.single, contains('tasks list - --gzip'));
+    });
+
+    test('the project filter keeps one project', () {
+      const filter = TaskFilter(project: 'amedia');
+      expect(filter.matches(task('pt', 'amedia/1', project: 'amedia')), isTrue);
+      expect(filter.matches(task('pt', 'cm/1', project: 'cm')), isFalse);
+      expect(filter.matches(task('pt', 'flat')), isFalse);
+      expect(const TaskFilter().matches(task('pt', 'flat')), isTrue);
     });
 
     test('runCompanionTasks passes JSON on stdin and maps errors', () async {
