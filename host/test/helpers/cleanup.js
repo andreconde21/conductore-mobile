@@ -111,17 +111,17 @@ async function cleanup ({ strict = true } = {}) {
 // The user's real agent configs, which no test may write: install and
 // uninstall run every present adapter. Only what an install could change
 // is watched, by content: the hook (and statusline) entries of the agents'
-// settings, the hook files, the OpenCode plugins, sheprd's view state
-// (which `sheprd-view-update` appends to). Never mtimes, and never
+// settings, the hook files, the OpenCode plugins. Never mtimes, and never
 // ~/.claude.json: the agents themselves rewrite their files all the time.
+// Nor ~/.local/state/sheprd: a live sheprd rewrites view.json every 30 s
+// and drains view-updates.jsonl (the sheprd-view tests use a temp HOME).
 // Returns a check that fails when any of them changed.
 const REAL_CONFIGS = [
   ['.claude/settings.json', ['hooks', 'statusLine']],
   ['.codex/hooks.json'],
   ['.gemini/settings.json', ['hooks', 'hooksConfig']],
   ['.cursor/hooks.json'],
-  ['.config/opencode/plugins'],
-  ['.local/state/sheprd']
+  ['.config/opencode/plugins']
 ]
 
 const sha = text => require('crypto').createHash('sha256').update(text).digest('hex').slice(0, 16)
