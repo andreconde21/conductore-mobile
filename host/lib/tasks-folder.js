@@ -215,27 +215,75 @@ function readTasksIn (dir, prefix, project, out, { max, deadline }) {
   return true
 }
 
+// A status as filters compare it: `In Review`, `in_review` and
+// `in-review` are one.
+const statusKey = s => String(s).toLowerCase().trim().replace(/[ _]+/g, '-')
+
+// The list filters (all optional): {statuses, excludeStatuses, projects:
+// string lists; updatedSince: ISO time; limit: 1..MAX_TASKS}.
+function listFilters (input) {
+  const names = (key, max = 200) => {
+    const v = input[key]
+    if (v === undefined || v === null) return null
+    if (!Array.isArray(v) || v.length > max || !v.every(x => typeof x === 'string' && x.length <= 128)) throw new TasksError('bad-filter', `${key} must be a list of names`)
+    return v
+  }
+  const statuses = names('statuses')
+  const exclude = names('excludeStatuses')
+  const projects = names('projects', 1000)
+  let since = null
+  if (input.updatedSince !== undefined && input.updatedSince !== null) {
+    since = typeof input.updatedSince === 'string' ? Date.parse(input.updatedSince) : NaN
+    if (Number.isNaN(since)) throw new TasksError('bad-filter', 'updatedSince must be an ISO time')
+  }
+  let limit = MAX_TASKS
+  if (input.limit !== undefined && input.limit !== null) {
+    if (!Number.isInteger(input.limit) || input.limit < 1) throw new TasksError('bad-filter', 'limit must be a positive whole number')
+    limit = Math.min(input.limit, MAX_TASKS)
+  }
+  return {
+    statuses: statuses && new Set(statuses.map(statusKey)),
+    exclude: exclude && new Set(exclude.map(statusKey)),
+    projects: projects && new Set(projects),
+    since,
+    limit
+  }
+}
+
+// When a task last changed: its updated_at, else the file's mtime.
+const updatedMs = t => { const at = t.updatedAt ? Date.parse(t.updatedAt) : NaN; return Number.isNaN(at) ? t.mtimeMs : at }
+
 // limits: tests' smaller caps.
-function listTasks ({ folder }, { maxTasks = MAX_TASKS, maxScanMs = MAX_SCAN_MS } = {}) {
-  const dir = resolveFolder(folder)
+function listTasks (input, { maxTasks = MAX_TASKS, maxScanMs = MAX_SCAN_MS } = {}) {
+  const dir = resolveFolder(input.folder)
+  const filters = listFilters(input)
   const caps = { max: maxTasks, deadline: Date.now() + maxScanMs }
-  const tasks = []
-  let complete = readTasksIn(dir, '', null, tasks, caps)
+  const read = []
+  let complete = readTasksIn(dir, '', null, read, caps)
   let projects = null
-  if (complete && tasks.length === 0) {
+  if (complete && read.length === 0) {
     // A tree: one level of project folders, never through a symlink.
-    projects = fs.readdirSync(dir, { withFileTypes: true })
-      .filter(e => e.isDirectory() && isProjectName(e.name))
+    const folders = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && isProjectName(e.name) && (!filters.projects || filters.projects.has(e.name)))
       .map(e => e.name)
       .sort()
-    for (const project of projects) {
-      complete = readTasksIn(path.join(dir, project), `${project}/`, project, tasks, caps)
+    for (const project of folders) {
+      complete = readTasksIn(path.join(dir, project), `${project}/`, project, read, caps)
       if (!complete) break
     }
+    projects = [...new Set(read.map(t => t.project))]
   }
-  const seen = new Set(tasks.map(t => t.status).filter(Boolean))
+  const seen = new Set(read.map(t => t.status).filter(Boolean))
   const statuses = [...DEFAULT_STATUSES, ...[...seen].filter(s => !DEFAULT_STATUSES.includes(s)).sort()]
-  const out = { ok: true, folder: dir, tasks, statuses, truncated: !complete }
+  const matching = read.filter(t =>
+    (!filters.statuses || filters.statuses.has(statusKey(t.status))) &&
+    (!filters.exclude || !filters.exclude.has(statusKey(t.status))) &&
+    (!filters.projects || filters.projects.has(t.project)) &&
+    (filters.since === null || updatedMs(t) >= filters.since))
+  // Newest first, so a limit keeps the most recent.
+  matching.sort((a, b) => updatedMs(b) - updatedMs(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const tasks = matching.slice(0, filters.limit)
+  const out = { ok: true, folder: dir, tasks, total: matching.length, statuses, truncated: !complete }
   if (projects) out.projects = projects
   return out
 }
@@ -303,15 +351,30 @@ const OPS = { list: listTasks, read: readTask, status: setStatus, comment: addCo
 const USAGE = `usage: conductore-hostd tasks <list|read|status|comment> -
 
   One JSON object on stdin:
-    list     {folder}                      every task's frontmatter
+    list     {folder, statuses?, excludeStatuses?, projects?,
+              updatedSince?, limit?}       tasks' frontmatter, newest first
     read     {folder, id}                  one task with its body and comments
     status   {folder, id, status}          rewrite its status line
     comment  {folder, id, text, author?}   append under "## Comments"
+
+  --gzip after the "-": a reply over 4 KB prints as
+  {"encoding":"gzip","data":"<base64 of the gzipped JSON>"}
 `
+
+// `--gzip` (after the `-`): a reply over GZIP_MIN_CHARS goes out as
+// {"encoding":"gzip","data":"<base64>"}, as for the other commands. Errors
+// stay plain.
+const GZIP_MIN_CHARS = 4096
 
 async function cli (args, { readStdin }) {
   const [op] = args
-  const write = obj => { process.stdout.write(JSON.stringify(obj) + '\n'); return obj.error ? 1 : 0 }
+  const gzip = args.includes('--gzip')
+  const write = obj => {
+    let json = JSON.stringify(obj)
+    if (gzip && !obj.error && json.length > GZIP_MIN_CHARS) json = JSON.stringify({ encoding: 'gzip', data: require('zlib').gzipSync(json).toString('base64') })
+    process.stdout.write(json + '\n')
+    return obj.error ? 1 : 0
+  }
   if (!OPS[op]) return write({ error: USAGE.trim(), code: 'usage' })
   let input
   try { input = JSON.parse(await readStdin()) } catch { return write({ error: 'tasks: expected one JSON object on stdin', code: 'usage' }) }

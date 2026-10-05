@@ -59,7 +59,8 @@ test('list reads frontmatter and skips files without it', async () => {
   const { code, json } = await tasks('list', { folder: dir })
   assert.equal(code, 0)
   assert.equal(json.tasks.length, 2)
-  const [one, two] = json.tasks
+  const one = json.tasks.find(t => t.id === 'CON-001')
+  const two = json.tasks.find(t => t.id === 'CON-002')
   assert.equal(one.id, 'CON-001')
   assert.equal(one.title, 'Start tasks, not sessions')
   assert.equal(one.status, 'backlog')
@@ -169,10 +170,12 @@ test('a folder of project folders lists each project\'s tasks as project/id', as
   const { root } = projectsTree()
   const { code, json } = await tasks('list', { folder: root })
   assert.equal(code, 0)
-  assert.deepEqual(json.tasks.map(t => t.id), ['amedia/AM-1', 'conductore-mobile/CON-001', 'conductore-mobile/CON-002'])
-  assert.deepEqual(json.tasks.map(t => t.project), ['amedia', 'conductore-mobile', 'conductore-mobile'])
-  assert.deepEqual(json.tasks.map(t => t.key), ['AM-1', 'CON-001', 'CON-002'])
-  assert.deepEqual(json.projects, ['amedia', 'conductore-mobile', 'web'], '_ and . folders and symlinks are not projects')
+  const byId = [...json.tasks].sort((a, b) => a.id.localeCompare(b.id))
+  assert.deepEqual(byId.map(t => t.id), ['amedia/AM-1', 'conductore-mobile/CON-001', 'conductore-mobile/CON-002'])
+  assert.deepEqual(byId.map(t => t.project), ['amedia', 'conductore-mobile', 'conductore-mobile'])
+  assert.deepEqual(byId.map(t => t.key), ['AM-1', 'CON-001', 'CON-002'])
+  assert.deepEqual(json.projects, ['amedia', 'conductore-mobile'], '_ and . folders, symlinks and folders without tasks are not projects')
+  assert.equal(json.total, 3)
   assert.equal(json.truncated, false)
 })
 
@@ -235,10 +238,63 @@ test('a tree list stops at the task cap and the scan time cap', () => {
   const { listTasks } = require('../lib/tasks-folder')
   const { root } = projectsTree()
   const capped = listTasks({ folder: root }, { maxTasks: 2 })
-  assert.deepEqual(capped.tasks.map(t => t.id), ['amedia/AM-1', 'conductore-mobile/CON-001'])
+  assert.deepEqual(capped.tasks.map(t => t.id).sort(), ['amedia/AM-1', 'conductore-mobile/CON-001'])
   assert.equal(capped.truncated, true)
   const late = listTasks({ folder: root }, { maxScanMs: -1 })
   assert.deepEqual(late.tasks, [])
   assert.equal(late.truncated, true)
   assert.equal(listTasks({ folder: root }).truncated, false)
+})
+
+test('list filters by status, project and update time, newest first, up to a limit', async () => {
+  const dir = folderWith({
+    'A-1.md': '---\nid: A-1\ntitle: Old open\nstatus: todo\nupdated_at: "2026-01-01T00:00:00Z"\n---\n',
+    'A-2.md': '---\nid: A-2\ntitle: New open\nstatus: In Review\nupdated_at: "2026-10-01T00:00:00Z"\n---\n',
+    'A-3.md': '---\nid: A-3\ntitle: Done\nstatus: done\nupdated_at: "2026-10-02T00:00:00Z"\n---\n',
+    'A-4.md': '---\nid: A-4\ntitle: Cancelled\nstatus: Cancelled\nupdated_at: "2026-10-03T00:00:00Z"\n---\n'
+  })
+  const ids = async input => (await tasks('list', { folder: dir, ...input })).json
+  const open = await ids({ excludeStatuses: ['done', 'cancelled'] })
+  assert.deepEqual(open.tasks.map(t => t.id), ['A-2', 'A-1'], 'newest first, done and cancelled (any case) left out')
+  assert.equal(open.total, 2)
+  assert.ok(open.statuses.includes('In Review') && open.statuses.includes('done'), 'statuses still cover every task')
+  assert.deepEqual((await ids({})).tasks.map(t => t.id), ['A-4', 'A-3', 'A-2', 'A-1'])
+  assert.deepEqual((await ids({ statuses: ['in_review'] })).tasks.map(t => t.id), ['A-2'])
+  assert.deepEqual((await ids({ updatedSince: '2026-10-01T12:00:00Z' })).tasks.map(t => t.id), ['A-4', 'A-3'])
+  const limited = await ids({ limit: 2 })
+  assert.deepEqual(limited.tasks.map(t => t.id), ['A-4', 'A-3'])
+  assert.equal(limited.total, 4)
+  assert.equal(limited.truncated, false)
+  for (const bad of [{ limit: 0 }, { limit: 1.5 }, { limit: '9' }, { statuses: 'done' }, { projects: [7] }, { updatedSince: 'yesterday' }]) {
+    const { code, json } = await tasks('list', { folder: dir, ...bad })
+    assert.equal(code, 1, JSON.stringify(bad))
+    assert.equal(json.code, 'bad-filter', JSON.stringify(bad))
+  }
+})
+
+test('a tree list filters by project', async () => {
+  const { root } = projectsTree()
+  const { json } = await tasks('list', { folder: root, projects: ['amedia', 'linked', '_registry'] })
+  assert.deepEqual(json.tasks.map(t => t.id), ['amedia/AM-1'])
+  assert.deepEqual(json.projects, ['amedia'])
+})
+
+test('list --gzip packs a large reply and leaves errors plain', async () => {
+  const files = {}
+  for (let i = 0; i < 60; i++) files[`G-${i}.md`] = `---\nid: G-${i}\ntitle: "A task with a long enough title ${i}"\nstatus: todo\n---\n`
+  const dir = folderWith(files)
+  const run = (input, args) => new Promise(resolve => {
+    const child = execFile(process.execPath, [HOSTD, 'tasks', 'list', '-', ...args], { env, timeout: 15000 }, (err, stdout) => resolve({ code: err ? err.code : 0, out: stdout }))
+    child.stdin.end(JSON.stringify(input))
+  })
+  const packed = JSON.parse((await run({ folder: dir }, ['--gzip'])).out)
+  assert.equal(packed.encoding, 'gzip')
+  const json = JSON.parse(require('zlib').gunzipSync(Buffer.from(packed.data, 'base64')).toString())
+  assert.equal(json.tasks.length, 60)
+  const plain = await run({ folder: dir }, [])
+  assert.equal(JSON.parse(plain.out).tasks.length, 60)
+  assert.ok(packed.data.length < plain.out.length / 2)
+  const failed = await run({ folder: dir, limit: -1 }, ['--gzip'])
+  assert.equal(failed.code, 1)
+  assert.equal(JSON.parse(failed.out).code, 'bad-filter')
 })
