@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: the live bridge no longer leaks a Herdr `events.subscribe` connection when it stops (or stops and starts again) while a connect is still waiting for the subscription (CON-088): a connect that outlived its start closes what it got.
+
 ## 1.6.2 (2026-10-05)
 
 - feat: `tasks` reads a folder of project folders (CON-084, e.g. /data/projectstasks): a folder with no task files of its own lists one level of subfolders (skipping `_` and `.` names and symlinks) as projects, with ids `<project>/<id>` and a `project` field; `read`, `status` and `comment` take those ids (one level only, no `..`, the project folder must be a real directory inside the folder). A list stops at 5000 tasks or 8 s (`truncated`).
