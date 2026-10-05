@@ -2,15 +2,27 @@ import 'dart:async';
 
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 
-/// How long an orphaned mosh-server (its client gone, e.g. after a Herdr
-/// detach) waits before exiting on its own: 7 days. mosh-server's default
-/// is to wait forever.
-const moshServerNetworkTimeout = Duration(days: 7);
+/// How long a mosh-server waits without hearing from its client before it
+/// exits on its own (`MOSH_SERVER_NETWORK_TMOUT`): 24 hours. mosh-server's
+/// default is to wait forever, so every client that vanished (an app
+/// killed in the background, a phone that lost its network while closing)
+/// left a server, and its shell or Herdr client, running for good. A
+/// phone that comes back within a day finds its session; after that it
+/// reconnects to a new one (Herdr and tmux keep the work either way).
+const moshServerNetworkTimeout = Duration(hours: 24);
 
-/// Prefix for the `mosh-server new` bootstrap that gives the server the
-/// [moshServerNetworkTimeout] (mosh-server reads it from its environment).
+/// How long without its client a mosh-server must be before SIGUSR1 ends
+/// it (`MOSH_SERVER_SIGNAL_TMOUT`): 1 hour. Unset, SIGUSR1 ends any
+/// mosh-server, connected or not; set, a cleanup script can run
+/// `pkill -USR1 -u "$USER" mosh-server` and end only the servers whose
+/// client has been gone this long.
+const moshServerSignalTimeout = Duration(hours: 1);
+
+/// Prefix for the `mosh-server new` bootstrap that gives the server both
+/// timeouts (mosh-server reads them from its environment).
 String get moshServerTimeoutEnv =>
-    'MOSH_SERVER_NETWORK_TMOUT=${moshServerNetworkTimeout.inSeconds}';
+    'MOSH_SERVER_NETWORK_TMOUT=${moshServerNetworkTimeout.inSeconds} '
+    'MOSH_SERVER_SIGNAL_TMOUT=${moshServerSignalTimeout.inSeconds}';
 
 /// The mosh-server a session started, as far as the bootstrap told us.
 class MoshServerHandle {
@@ -36,16 +48,17 @@ class MoshServerHandle {
   /// The shell command that stops exactly this server, or null when it
   /// cannot be identified safely.
   ///
-  /// With the pid: kill it only if that pid is still a mosh-server (pids
-  /// are reused). Without it: `pkill` on the user's `mosh-server new`
-  /// processes whose `-p` names this port alone (a port range does not say
-  /// which server got which port, so nothing is killed then).
+  /// With the pid: SIGTERM it only if that pid is still a mosh-server
+  /// (pids are reused; `kill` only reaches the user's own processes, and
+  /// macOS's `ps` prints the full path). Without it: `pkill` on the user's
+  /// `mosh-server new` processes whose `-p` names this port alone (a port
+  /// range does not say which server got which port, so nothing is killed
+  /// then).
   String? killCommand() {
     final pid = this.pid;
     if (pid != null) {
-      return 'pid=$pid; '
-          '[ "\$(ps -o comm= -p "\$pid" 2>/dev/null)" = mosh-server ] '
-          '&& kill "\$pid"';
+      return 'case "\$(ps -o comm= -p $pid 2>/dev/null)" in '
+          '*mosh-server) kill $pid;; esac';
     }
     if (portArgument == '$port') {
       return 'pkill -u "\$(id -un)" -f '
@@ -55,30 +68,34 @@ class MoshServerHandle {
   }
 }
 
-/// A session whose remote server can be stopped over a separate command
-/// channel after its transport closed.
-abstract interface class ReapableTerminalSession {
-  /// Stops the remote server; best effort, never throws.
-  Future<void> reapServer();
+/// One command that ends every server in [handles] it can identify, its
+/// output and failures silenced; empty when there is none.
+String killAllCommand(Iterable<MoshServerHandle> handles) {
+  final commands = [for (final handle in handles) ?handle.killCommand()];
+  if (commands.isEmpty) return '';
+  return '{ ${commands.join('; ')}; } >/dev/null 2>&1; ';
 }
 
 /// Runs [handle]'s kill command over a runner from [runnerFactory], then
-/// closes the runner. Best effort: every failure is swallowed.
-Future<void> reapMoshServer(
+/// closes the runner. Best effort: every failure is swallowed. True when
+/// the command ran (the server is gone, or was not there any more).
+Future<bool> reapMoshServer(
   MoshServerHandle handle,
   AgentCommandRunner Function() runnerFactory, {
   Duration timeout = const Duration(seconds: 15),
 }) async {
   final command = handle.killCommand();
   if (command == null) {
-    return;
+    return false;
   }
   AgentCommandRunner? runner;
   try {
     runner = runnerFactory();
     await runner.run(command, timeout: timeout);
+    return true;
   } catch (_) {
-    // The server may already be gone, or the machine unreachable.
+    // The machine may be unreachable.
+    return false;
   } finally {
     try {
       await runner?.close();

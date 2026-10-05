@@ -57,6 +57,6 @@ resume either. So the app does not store the Mosh port or key, and a
 restored Mosh session bootstraps a fresh mosh-server over SSH. The work
 survives anyway in tmux or Herdr on the machine.
 
-The old mosh-server is orphaned and runs until its own timeout. By default
-it has none (`MOSH_SERVER_NETWORK_TMOUT` unset), so hosts that restart the
-app often may want that variable set on the server.
+The old mosh-server is not left running: the app remembers the pid of
+every mosh-server it starts (never the key), and the restored session's
+bootstrap ends the old one first. See [mosh-sessions.md](mosh-sessions.md).

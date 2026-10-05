@@ -175,6 +175,21 @@ class TerminalWorkspaceController extends ChangeNotifier {
     }
   }
 
+  /// Disconnects every session at once, for at most [timeout] (the app is
+  /// quitting): each Mosh session's close ends its mosh-server. The
+  /// sessions stay open, for the next run to restore.
+  Future<void> disconnectAll({
+    Duration timeout = const Duration(milliseconds: 2500),
+  }) async {
+    try {
+      await Future.wait([
+        for (final session in List.of(_sessions)) session.disconnect(),
+      ]).timeout(timeout);
+    } on TimeoutException {
+      // Quit anyway: the next connection there ends what is left.
+    }
+  }
+
   @override
   void dispose() {
     for (final session in _sessions) {
