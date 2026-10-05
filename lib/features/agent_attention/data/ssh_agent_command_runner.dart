@@ -9,6 +9,8 @@ import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/data/shared_command_runners.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sftp/data/dart_ssh_sftp_repository.dart';
+import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/ssh_error_formatter.dart';
 import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
@@ -33,7 +35,8 @@ class SshAgentCommandRunner
     implements
         StdinAgentCommandRunner,
         ReconnectingCommandRunner,
-        AddressedCommandRunner {
+        AddressedCommandRunner,
+        SftpChannelRunner {
   SshAgentCommandRunner(
     this._hostKeyVerifier,
     this._host, {
@@ -114,6 +117,28 @@ class SshAgentCommandRunner
       );
     }
   }
+
+  @override
+  Future<SftpSession?> openSftp() async {
+    final client = await _connect();
+    try {
+      final sftp = await client.sftp().timeout(_sftpOpenTimeout);
+      return DartSshSftpSession(client: client, sftp: sftp, ownsClient: false);
+    } catch (error) {
+      if (client.isClosed) {
+        await _dropClient();
+      } else {
+        _dropIfDead(client);
+      }
+      throw ConnectionFailure(
+        'Opening files on ${_host.name} failed.',
+        describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
+      );
+    }
+  }
+
+  static const _sftpOpenTimeout = Duration(seconds: 20);
 
   /// Drops [client] when a keep-alive ping gets no answer in time (the
   /// ping closes it then) or it is already gone; keeps it otherwise.

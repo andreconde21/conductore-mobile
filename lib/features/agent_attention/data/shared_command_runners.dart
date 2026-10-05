@@ -7,6 +7,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sftp/domain/sftp_session.dart';
 
 /// A runner whose connection can be dropped on purpose; the next command
 /// reconnects (a network change leaves idle SSH sockets half dead).
@@ -169,7 +170,11 @@ class _SharedConnection {
 }
 
 /// One caller's handle on a shared connection.
-class _Lease implements StdinAgentCommandRunner, AddressedCommandRunner {
+class _Lease
+    implements
+        StdinAgentCommandRunner,
+        AddressedCommandRunner,
+        SftpChannelRunner {
   _Lease(this._pool, this._key, this._connection);
 
   final SharedCommandRunners _pool;
@@ -211,6 +216,17 @@ class _Lease implements StdinAgentCommandRunner, AddressedCommandRunner {
       cancel: cancel,
     ),
   );
+
+  @override
+  Future<SftpSession?> openSftp() async {
+    if (_closed) {
+      throw const AppFailure('This connection is closed.');
+    }
+    return switch (_connection.runner) {
+      final SftpChannelRunner runner => runner.openSftp(),
+      _ => null,
+    };
+  }
 
   @override
   InternetAddress? get remoteAddress => switch (_connection.runner) {

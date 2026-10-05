@@ -46,10 +46,18 @@ class DartSshSftpRepository implements SftpRepository {
 }
 
 class DartSshSftpSession implements SftpSession {
-  DartSshSftpSession({required this.client, required this.sftp});
+  DartSshSftpSession({
+    required this.client,
+    required this.sftp,
+    this.ownsClient = true,
+  });
 
   final SSHClient client;
   final SftpClient sftp;
+
+  /// Whether [close] closes [client] too; false for an SFTP channel on a
+  /// connection shared with other features.
+  final bool ownsClient;
   late final _saver = SafeRemoteSaver(SftpClientSaveFileSystem(sftp));
   bool _closed = false;
 
@@ -172,6 +180,7 @@ class DartSshSftpSession implements SftpSession {
     }
     _closed = true;
     sftp.close();
+    if (!ownsClient) return;
     client.close();
     await client.done;
   }

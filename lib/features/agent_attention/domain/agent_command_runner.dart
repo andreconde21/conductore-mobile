@@ -1,3 +1,5 @@
+import 'package:conduit/features/sftp/domain/sftp_session.dart';
+
 /// Result of one non-interactive remote command.
 class AgentCommandResult {
   const AgentCommandResult({
@@ -36,6 +38,14 @@ abstract interface class StdinAgentCommandRunner implements AgentCommandRunner {
     required Duration timeout,
     Future<void>? cancel,
   });
+}
+
+/// A runner whose connection can also carry an SFTP channel, so file
+/// transfers reuse it instead of a new handshake (CON-089).
+abstract interface class SftpChannelRunner {
+  /// An SFTP session on the runner's connection; closing it closes only
+  /// its channel. Null when this runner cannot carry one.
+  Future<SftpSession?> openSftp();
 }
 
 /// The caller cancelled a [StdinAgentCommandRunner.runWithStdin] call.
