@@ -93,6 +93,7 @@ import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/routing_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/secure_host_key_verifier.dart';
 import 'package:conduit/features/terminal/data/secure_recent_directories_store.dart';
+import 'package:conduit/features/terminal/data/ssh_keepalive_policy.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
@@ -856,12 +857,17 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     widget.workspaceController.setEnterSequence(
       widget.themeController.terminalEnterSequence,
     );
+    SshKeepalivePolicy.instance.foregroundSeconds =
+        widget.themeController.sshKeepaliveSeconds;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _lifecycleState = state;
     _syncBackgroundKeepalive();
+    // Slower SSH keep-alives while nothing is on screen (CON-089).
+    SshKeepalivePolicy.instance.background =
+        state == AppLifecycleState.hidden || state == AppLifecycleState.paused;
     _syncAgentAttention(state);
 
     if (state == AppLifecycleState.resumed) {

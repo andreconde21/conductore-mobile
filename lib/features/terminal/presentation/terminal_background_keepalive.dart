@@ -27,10 +27,7 @@ class BackgroundKeepaliveSync {
   /// Stops a service left running by an earlier engine (the process
   /// survived, the Dart side did not): a fresh start never assumes that
   /// nothing is running.
-  BackgroundKeepaliveSync({
-    required this._start,
-    required this._stop,
-  }) {
+  BackgroundKeepaliveSync({required this._start, required this._stop}) {
     unawaited(_stop().catchError((_) {}));
   }
 

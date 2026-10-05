@@ -26,6 +26,12 @@ Kept small so it can be sent upstream as is:
   pty, x11, shell) at once and checks the in-order replies after, so a
   terminal opens one round trip sooner instead of waiting a round trip
   per request.
+- Keep-alive (CON-089): `SSHClient.keepAliveInterval` can be changed on a
+  live connection (null pauses it); `SSHKeepAlive` skips a tick while the
+  previous ping waits and swallows a failed ping; `SSHClient.ping()` waits
+  at most `keepAliveTimeout` (new, default 15 s) and then closes the
+  connection with an `SSHSocketError`, instead of piling up waiters until
+  the TCP timeout on a half-dead link.
 
 The diff against the origin commit is the git history of this directory
 after the commit that added the pristine copy.

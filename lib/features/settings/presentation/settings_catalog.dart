@@ -107,6 +107,9 @@ const _herdrFocusKeywords = [
 /// The wakelock setting (CON-089).
 const keepScreenOnTitle = 'Keep screen on while a terminal is open';
 
+/// The SSH keep-alive setting (CON-089).
+const sshKeepaliveTitle = 'SSH keepalive';
+
 /// The "Sync with sheprd" setting (CON-077).
 const sheprdSyncTitle = 'Sync with sheprd';
 
@@ -226,6 +229,11 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.terminal,
     keepScreenOnTitle,
     keywords: ['wakelock', 'screen', 'sleep', 'battery', 'lock'],
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    sshKeepaliveTitle,
+    keywords: ['keepalive', 'keep-alive', 'battery', 'data', 'disconnect'],
   ),
   SettingsEntry(
     SettingsSection.terminal,
