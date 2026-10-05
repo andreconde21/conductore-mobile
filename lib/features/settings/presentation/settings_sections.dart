@@ -16,6 +16,7 @@ import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart'
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -512,6 +513,27 @@ class SettingsSectionBody extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         DigestSettingsCards(controller: digest),
+      ],
+      if (ProjectLayoutController.instance case final projects?) ...[
+        _gap,
+        ListenableBuilder(
+          listenable: projects,
+          builder: (context, _) => SettingsSwitchCard(
+            key: const ValueKey('settings-sheprd-sync'),
+            switchKey: const ValueKey('settings-sheprd-sync-switch'),
+            icon: Icons.account_tree_outlined,
+            title: sheprdSyncTitle,
+            subtitle:
+                "For sheprd users. The project views mirror sheprd's "
+                'sidebar: its projects, order, hidden workspaces and each '
+                "agent's unread, kept or dismissed mark. Marking an agent "
+                'here marks it in sheprd too. While on, the app\'s own '
+                'project edits pause; turning it off brings them back. '
+                'Needs the companion on the machines sheprd connects to.',
+            value: projects.sheprdSync,
+            onChanged: (on) => unawaited(projects.setSheprdSync(on)),
+          ),
+        ),
       ],
       if (CompanionPreferences.instance case final companion?) ...[
         _gap,

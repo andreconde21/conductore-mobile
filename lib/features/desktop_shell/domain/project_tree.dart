@@ -1,5 +1,6 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
+import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:flutter/foundation.dart';
 
@@ -35,6 +36,8 @@ class ProjectEntry {
     this.agentRows = const [],
     this.active = true,
     this.hidden = false,
+    this.sheprd = const {},
+    this.sheprdKeys = const {},
   });
 
   /// The machine-tree row (opens and drags like in the Machines tab).
@@ -55,7 +58,30 @@ class ProjectEntry {
   /// In the layout's hidden list (shown only with "show hidden").
   final bool hidden;
 
-  SidebarDot get dot => node.dot;
+  /// With "Sync with sheprd": sheprd's view of the agents in this row, by
+  /// the agent row's key ([node]'s own key for a row that is its only
+  /// agent).
+  final Map<String, SheprdAgentView> sheprd;
+
+  /// The same agents' keys as sheprd names them (`machine/pane_id`, with
+  /// the app's machine names), for marks sent back.
+  final Map<String, String> sheprdKeys;
+
+  /// sheprd's view of [row] (one of [agentRows], or [node]), if synced.
+  SheprdAgentView? sheprdOf(SidebarNode row) => sheprd[row.key];
+
+  /// [row]'s dot: sheprd's presence when synced, else its own.
+  SidebarDot dotOf(SidebarNode row) => sheprd[row.key]?.presence.dot ?? row.dot;
+
+  /// The row's dot: its agents' presence in sheprd when synced.
+  SidebarDot get dot {
+    if (sheprd.isEmpty) return node.dot;
+    var dot = SidebarDot.none;
+    for (final view in sheprd.values) {
+      dot = dot.max(view.presence.dot);
+    }
+    return dot;
+  }
 
   @override
   String toString() => 'ProjectEntry($memberKey)';
@@ -152,6 +178,8 @@ abstract final class ProjectTreeBuilder {
     Map<String, Set<String>> machineAliases = const {},
     DateTime? now,
     int recentHours = ProjectPrefs.defaultRecentHours,
+    Map<String, SheprdAgentView>? sheprd,
+    List<String> order = const [],
   }) {
     final clock = now ?? DateTime.now();
     final recent = Duration(hours: recentHours);
@@ -199,6 +227,8 @@ abstract final class ProjectTreeBuilder {
               if (at < rank) rank = at;
             }
           }
+          final placed = _orderOf(order, keys);
+          if (placed != null) rank = placed;
         } else {
           final name = keys.any(layout.isUngrouped)
               ? null
@@ -209,7 +239,30 @@ abstract final class ProjectTreeBuilder {
         }
         final hidden = keys.any(layout.isHidden);
         final agentRows = _agentRows(node);
-        final active = _isActive(node, nodeAgents, agentRows, clock, recent);
+        final views = <String, SheprdAgentView>{};
+        final viewKeys = <String, String>{};
+        if (sheprd != null) {
+          for (final (rowKey, paneId) in _panesOf(node, agentRows)) {
+            for (final name in names) {
+              final key = '$name/$paneId';
+              final view = sheprd[key];
+              if (view == null) continue;
+              views[rowKey] = view;
+              viewKeys[rowKey] = key;
+              break;
+            }
+            viewKeys.putIfAbsent(rowKey, () => '${names.first}/$paneId');
+          }
+        }
+        final active = views.isEmpty
+            ? _isActive(node, nodeAgents, agentRows, clock, recent)
+            : node.openInApp ||
+                  views.values.any((view) => view.active) ||
+                  nodeAgents.any(
+                    (agent) =>
+                        agent.stateChangedAt != null &&
+                        clock.difference(agent.stateChangedAt!) < recent,
+                  );
         group.entries.add((
           rank,
           ProjectEntry(
@@ -218,6 +271,8 @@ abstract final class ProjectTreeBuilder {
             agentRows: agentRows,
             active: active,
             hidden: hidden,
+            sheprd: views,
+            sheprdKeys: viewKeys,
           ),
         ));
         if (hidden) continue;
@@ -230,7 +285,7 @@ abstract final class ProjectTreeBuilder {
         ];
         if (panes.isNotEmpty) {
           for (final pane in panes) {
-            group.count(pane.key, pane.dot);
+            group.count(pane.key, views[pane.key]?.presence.dot ?? pane.dot);
           }
         } else if (nodeAgents.isNotEmpty) {
           for (final agent in nodeAgents) {
@@ -277,6 +332,38 @@ abstract final class ProjectTreeBuilder {
         ),
         _ => ProjectKeys.named(machine, node.label),
       };
+
+  /// Where sheprd's [order] puts a row known by [keys], if it lists it.
+  static int? _orderOf(List<String> order, List<String> keys) {
+    for (var i = 0; i < order.length; i++) {
+      if (keys.any((key) => ProjectKeys.same(order[i], key))) return i;
+    }
+    return null;
+  }
+
+  /// The Herdr panes of [node]'s agent rows as (row key, pane id); a
+  /// workspace row whose only agent it is stands for that agent itself.
+  static List<(String, String)> _panesOf(
+    SidebarNode node,
+    List<SidebarNode> agentRows,
+  ) {
+    String? paneOf(SidebarNode row) => switch (row.target) {
+      AgentPaneTarget(:final pane) => pane.agent.pane ?? pane.agent.id,
+      _ => null,
+    };
+    final panes = [
+      for (final row in agentRows)
+        if (paneOf(row) case final pane?) (row.key, pane),
+    ];
+    if (panes.isNotEmpty) return panes;
+    if (node.target case HerdrWorkspaceTarget(
+      :final workspace,
+    ) when workspace.panes.length == 1) {
+      final agent = workspace.panes.single.agent;
+      return [(node.key, agent.pane ?? agent.id)];
+    }
+    return panes;
+  }
 
   /// [ProjectLayout.groupOf] for a row known by several keys (one per
   /// name of its machine).

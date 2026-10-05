@@ -142,6 +142,18 @@ narrower than 900 dp, keep the phone layout.
   drag and right-click like in the Machines tab; the project's own menu
   (right-click or ⋯) holds its quick actions, *Add action…*, *Open all …
   side by side* and *Reload*.
+- **Sync with sheprd** (Settings › Agents, off by default, CON-077). For
+  sheprd users: the project views (desktop sidebar, phone home, agents
+  dashboard) mirror sheprd's view, read from the companion
+  (`~/.local/state/sheprd/view.json`, see `docs/sheprd-view-sync.md`). That
+  covers projects, order, hidden workspaces and each agent's presence: an
+  unread dot, a pin when kept, dimmed when dismissed. A row's menu (or a
+  long press) offers *Mark as read / unread*, *Keep in active* and
+  *Dismiss*, which go back to sheprd. A mark shows as pending (a small
+  spinner) until a newer sheprd view reflects it; unconfirmed after 2
+  minutes, it is dropped with "sheprd didn't apply this (not running?)". Opening an unread agent marks it
+  read. While sync is on, the app's own project edits are paused; turning
+  it off brings back the app's layout unchanged.
 - **Quick actions.** Per project, from the repo's `.code-workspace` file
   (`commands`, Conductore Lite's format: `id`, `label`, `command`, `cwd`,
   `terminalName`, plus optional `icon`, `keybinding`, `confirm`,

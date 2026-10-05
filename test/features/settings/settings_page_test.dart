@@ -2,6 +2,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
@@ -332,6 +333,49 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('No setting matches "zzzz".'), findsOneWidget);
+  });
+
+  testWidgets('Sync with sheprd: found by search, off by default, toggles '
+      'the synced project setting', (tester) async {
+    phone(tester);
+    final projects = ProjectLayoutController.instance = ProjectLayoutController(
+      theme: theme,
+    );
+    addTearDown(() {
+      ProjectLayoutController.instance = null;
+      projects.dispose();
+    });
+    await pumpLauncher(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-search')),
+      'sheprd',
+    );
+    await tester.pumpAndSettle();
+    final result = find.byKey(
+      const ValueKey('settings-result-$sheprdSyncTitle'),
+    );
+    expect(result, findsOneWidget);
+    await tester.tap(result);
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const ValueKey('settings-sheprd-sync-switch'));
+    await tester.scrollUntilVisible(
+      toggle,
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('settings-body-agents')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    expect(theme.projectPrefs.sheprdSync, isFalse);
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(theme.projectPrefs.sheprdSync, isTrue);
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
   });
 
   testWidgets('desktop: the list and the open section side by side', (

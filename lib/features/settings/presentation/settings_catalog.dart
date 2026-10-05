@@ -1,4 +1,5 @@
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/settings/presentation/settings_sections.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:flutter/material.dart';
@@ -103,6 +104,9 @@ const _herdrFocusKeywords = [
   'this device',
 ];
 
+/// The "Sync with sheprd" setting (CON-077).
+const sheprdSyncTitle = 'Sync with sheprd';
+
 /// The Herdr focus setting's title on this build.
 String get herdrMayMoveFocusTitle => PlatformFeatures.isDesktop
     ? 'This device may move Herdr focus'
@@ -118,6 +122,7 @@ bool _backup(SettingsServices s) => s.backupService != null;
 bool _machines(SettingsServices s) => s.hostsController != null;
 bool _usage(SettingsServices s) => s.agentAttention != null;
 bool _digest(SettingsServices s) => s.digest != null;
+bool _projects(SettingsServices _) => ProjectLayoutController.instance != null;
 bool _talkbawt(SettingsServices s) =>
     s.talkbawt != null && s.agentAttention != null;
 bool _agentNotifications(SettingsServices s) =>
@@ -425,6 +430,21 @@ const List<SettingsEntry> settingsCatalog = [
     'Dashboard',
     keywords: ['digest', 'summaries', 'stuck', 'catch up', 'while away'],
     availableWhen: _digest,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    sheprdSyncTitle,
+    keywords: [
+      'sheprd',
+      'herdr',
+      'sidebar',
+      'projects',
+      'unread',
+      'kept',
+      'dismissed',
+      'mirror',
+    ],
+    availableWhen: _projects,
   ),
   SettingsEntry(
     SettingsSection.agents,

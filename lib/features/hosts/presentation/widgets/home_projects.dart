@@ -5,6 +5,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
+import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
@@ -179,7 +180,7 @@ class HomeProjectsList extends StatelessWidget {
         count: entries.length,
         tokensToday: tokens,
         onToggle: () => controller.toggleCollapsed(project),
-        onMenu: project.isOther
+        onMenu: project.isOther || !controller.canEditLayout
             ? null
             : (position) => _projectMenu(context, project, position),
       ),
@@ -189,9 +190,11 @@ class HomeProjectsList extends StatelessWidget {
             _HomeProjectRow(
               key: ValueKey('home-project-row-${entry.node.key}'),
               node: entry.node,
+              dot: entry.dot,
+              sheprd: entry.sheprdOf(entry.node),
               detail: names[entry.node.machineId] ?? '',
               faded: !entry.active || entry.hidden,
-              onTap: () => onOpen(entry.node.target),
+              onTap: () => _open(entry, entry.node),
               onLongPress: () => showProjectEntrySheet(
                 context,
                 controller,
@@ -204,22 +207,38 @@ class HomeProjectsList extends StatelessWidget {
               _HomeProjectRow(
                 key: ValueKey('home-project-agent-${agent.key}'),
                 node: agent,
+                dot: entry.dotOf(agent),
+                sheprd: entry.sheprdOf(agent),
                 detail: [
                   if (entry.node.label.toLowerCase() !=
                       project.name.toLowerCase())
                     entry.node.label,
                   names[entry.node.machineId] ?? '',
                 ].where((part) => part.isNotEmpty).join(' · '),
-                faded: !entry.active || entry.hidden,
-                onTap: () => onOpen(agent.target),
+                faded:
+                    !entry.active ||
+                    entry.hidden ||
+                    (entry.sheprdOf(agent)?.dismissed ?? false),
+                onTap: () => _open(entry, agent),
                 onLongPress: () => showProjectEntrySheet(
                   context,
                   controller,
                   entry,
                   project: project,
+                  row: agent,
                 ),
               ),
     ];
+  }
+
+  /// Opens [row]; with sheprd synced, an unread agent is read from then on
+  /// (sheprd does the same when an agent gets focus).
+  void _open(ProjectEntry entry, SidebarNode row) {
+    onOpen(row.target);
+    if (controller.sheprdSync &&
+        entry.sheprdOf(row)?.presence == SheprdPresence.unread) {
+      unawaited(controller.mark(entry, row, SheprdMark.read));
+    }
   }
 
   Future<void> _projectMenu(
@@ -236,7 +255,11 @@ class HomeProjectsList extends StatelessWidget {
         at & const Size(1, 1),
         Offset.zero & overlay.size,
       ),
-      items: projectGroupMenuItems(project, value: (action) => action),
+      items: projectGroupMenuItems(
+        project,
+        value: (action) => action,
+        editable: controller.canEditLayout,
+      ),
     );
     if (picked == null || !context.mounted) return;
     await runProjectGroupAction(context, controller, project, picked);
@@ -250,10 +273,18 @@ class _HomeProjectRow extends StatelessWidget {
     required this.faded,
     required this.onTap,
     required this.onLongPress,
+    this.dot,
+    this.sheprd,
     super.key,
   });
 
   final SidebarNode node;
+
+  /// The dot to show: sheprd's presence when synced; null uses [node]'s.
+  final SidebarDot? dot;
+
+  /// sheprd's view of the agent, while synced: a pin when kept.
+  final SheprdAgentView? sheprd;
   final String detail;
   final bool faded;
   final VoidCallback onTap;
@@ -320,9 +351,24 @@ class _HomeProjectRow extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 6),
                 child: Icon(Icons.tab_rounded, size: 14, color: palette.accent),
               ),
-            if (node.dot != SidebarDot.none) ...[
+            if (sheprd?.pending != null)
+              const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: SheprdPendingMark(size: 11),
+              ),
+            if (sheprd?.kept ?? false)
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Icon(
+                  Icons.push_pin_rounded,
+                  key: const ValueKey('home-project-kept'),
+                  size: 13,
+                  color: palette.mutedForeground,
+                ),
+              ),
+            if ((dot ?? node.dot) != SidebarDot.none) ...[
               const SizedBox(width: 8),
-              ShellStateDot(dot: node.dot, size: 9),
+              ShellStateDot(dot: dot ?? node.dot, size: 9),
             ],
           ],
         ),

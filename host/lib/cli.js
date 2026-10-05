@@ -58,6 +58,13 @@ const USAGE = `usage: conductore-hostd <command>
   sidebar-layout                  sheprd's project sidebar (~/.config/herdr/
                                   sidebar.toml) as JSON, read-only:
                                   {found, path, layout} or {found: false}
+  sheprd-view                     sheprd's view (~/.local/state/sheprd/
+                                  view.json: layout, agent presence),
+                                  read-only: {found, path, stale, view}
+  sheprd-view-update --op unread|read|dismiss|keep|unkeep
+                     --agent <machine/pane_id> [--state-seq N]
+                                  append one presence change for sheprd
+                                  to view-updates.jsonl: {ok, id}
   config [get [<key>] | set <key> <value>]
                                   herdr-sidebar on|off, tmux-live off|on,
                                   worktree-location
@@ -445,6 +452,17 @@ async function agentReadCmd (args) {
   if (Number.isNaN(lines)) return fail('--lines must be a non-negative number')
   const r = await agentsMod().read(target, { lines: lines || undefined })
   return r.ok ? out(r) : fail(r.error)
+}
+
+function sheprdViewUpdateCmd (args) {
+  const { flags } = parseFlags(args)
+  const raw = flags['state-seq']
+  const stateSeq = raw === undefined ? undefined : (/^\d+$/.test(String(raw)) ? Number(raw) : -1)
+  try {
+    return out(sheprdMod().appendUpdate({ op: flags.op, agent: flags.agent, stateSeq }))
+  } catch (err) {
+    return fail(err.message)
+  }
 }
 
 async function configCmd (args) {
@@ -1208,6 +1226,8 @@ async function main (argv) {
     case 'agent-read': return agentReadCmd(args)
     case 'config': return configCmd(args)
     case 'sidebar-layout': return out({ ok: true, ...sheprdMod().readLayout() })
+    case 'sheprd-view': return out({ ok: true, ...sheprdMod().readView() })
+    case 'sheprd-view-update': return sheprdViewUpdateCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()

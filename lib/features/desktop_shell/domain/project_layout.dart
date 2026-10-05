@@ -312,10 +312,12 @@ class ProjectLayout {
 
   /// This layout as read from machine [machineKey]: sheprd's `local/`
   /// (the machine holding the file) becomes that machine's key.
-  ProjectLayout localized(String machineKey) {
-    String fix(String key) => key.toLowerCase().startsWith('local/')
-        ? '$machineKey/${key.substring('local/'.length)}'
-        : key;
+  ProjectLayout localized(String machineKey) => renamed({'local': machineKey});
+
+  /// Every key's machine part changed by [names] (lower-cased name →
+  /// new name); other keys stay.
+  ProjectLayout renamed(Map<String, String> names) {
+    String fix(String key) => ProjectKeys.renamed(key, names);
     return ProjectLayout(
       groups: [
         for (final group in groups)
@@ -477,6 +479,14 @@ abstract final class ProjectKeys {
     return entryRest == rest;
   }
 
+  /// [key] with its machine part looked up (lower-cased) in [names].
+  static String renamed(String key, Map<String, String> names) {
+    final at = key.indexOf('/');
+    if (at < 0) return key;
+    final to = names[key.substring(0, at).toLowerCase()];
+    return to == null ? key : '$to${key.substring(at)}';
+  }
+
   /// The machine part of [key].
   static String machineOf(String key) {
     final at = key.indexOf('/');
@@ -521,6 +531,7 @@ class ProjectPrefs {
     this.collapsed = const {},
     this.groupByProject = false,
     this.showHidden = false,
+    this.sheprdSync = false,
   });
 
   static const defaults = ProjectPrefs();
@@ -542,6 +553,11 @@ class ProjectPrefs {
   final bool groupByProject;
   final bool showHidden;
 
+  /// "Sync with sheprd" (CON-077): the project views mirror sheprd's view
+  /// (layout, presence, order) and marks go back to it; the app's own
+  /// [layout] waits, untouched, until it is turned off.
+  final bool sheprdSync;
+
   static const otherKey = '\u0000other';
 
   ProjectPrefs copyWith({
@@ -553,6 +569,7 @@ class ProjectPrefs {
     Map<String, bool>? collapsed,
     bool? groupByProject,
     bool? showHidden,
+    bool? sheprdSync,
   }) => ProjectPrefs(
     layout: clearLayout ? null : (layout ?? this.layout),
     compact: compact ?? this.compact,
@@ -561,6 +578,7 @@ class ProjectPrefs {
     collapsed: collapsed ?? this.collapsed,
     groupByProject: groupByProject ?? this.groupByProject,
     showHidden: showHidden ?? this.showHidden,
+    sheprdSync: sheprdSync ?? this.sheprdSync,
   );
 
   Map<String, Object?> toJson() => {
@@ -571,6 +589,7 @@ class ProjectPrefs {
     if (collapsed.isNotEmpty) 'collapsed': collapsed,
     if (groupByProject) 'groupByProject': true,
     if (showHidden) 'showHidden': true,
+    if (sheprdSync) 'sheprdSync': true,
   };
 
   static ProjectPrefs fromJson(Object? json) {
@@ -595,6 +614,7 @@ class ProjectPrefs {
       collapsed: collapsed,
       groupByProject: json['groupByProject'] == true,
       showHidden: json['showHidden'] == true,
+      sheprdSync: json['sheprdSync'] == true,
     );
   }
 
@@ -607,7 +627,8 @@ class ProjectPrefs {
       other.recentHours == recentHours &&
       mapEquals(other.collapsed, collapsed) &&
       other.groupByProject == groupByProject &&
-      other.showHidden == showHidden;
+      other.showHidden == showHidden &&
+      other.sheprdSync == sheprdSync;
 
   @override
   int get hashCode => Object.hash(
@@ -618,6 +639,7 @@ class ProjectPrefs {
     collapsed.length,
     groupByProject,
     showHidden,
+    sheprdSync,
   );
 }
 

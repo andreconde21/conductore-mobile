@@ -931,6 +931,8 @@ class DesktopHomeState extends State<DesktopHome> {
           entry,
           project: project,
           value: _NodeAction.project,
+          controller: layout,
+          row: node,
         ),
         const PopupMenuDivider(),
       ],
@@ -1024,6 +1026,7 @@ class DesktopHomeState extends State<DesktopHome> {
           entry,
           action.projectAction!,
           project: project,
+          row: node,
         );
     }
   }
