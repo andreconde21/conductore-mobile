@@ -159,7 +159,7 @@ void main() {
           const AgentNotificationPreferences(finishedAlerts: true),
         ),
         pollInterval: const Duration(days: 1),
-      )..setAppForeground(false);
+      )..setLongPoll(false);
       addTearDown(controller.dispose);
       addTearDown(workspace.dispose);
       final host = buildHost('h').copyWith(

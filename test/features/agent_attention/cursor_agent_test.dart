@@ -119,7 +119,7 @@ void main() {
       provider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    controller.setAppForeground(false);
+    controller.setLongPoll(false);
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
     final session = workspace.open(
@@ -177,7 +177,7 @@ void main() {
       notifier: notifier,
       pollInterval: const Duration(days: 1),
     );
-    controller.setAppForeground(false);
+    controller.setLongPoll(false);
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
     await workspace

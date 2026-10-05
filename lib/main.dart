@@ -887,10 +887,11 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
         (defaultTargetPlatform == TargetPlatform.android &&
             state != AppLifecycleState.detached);
     widget.agentAttention.setAppActive(active);
-    // The companion long-poll only runs while the app is on screen; in the
-    // background the periodic poll (and its notifications) is enough.
-    widget.agentAttention.setAppForeground(
-      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    // The companion long-poll runs whenever monitoring does, in the
+    // Android background too; only the fallback tick slows down there
+    // (CON-089).
+    widget.agentAttention.setInBackground(
+      state == AppLifecycleState.hidden || state == AppLifecycleState.paused,
     );
     // Owned Talkbawt threads are watched for replies only while in front.
     widget.talkbawt?.setForeground(

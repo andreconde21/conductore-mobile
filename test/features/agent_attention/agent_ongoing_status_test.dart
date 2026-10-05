@@ -329,7 +329,7 @@ void main() {
       clock: () => _now,
     );
     controller
-      ..setAppForeground(false)
+      ..setLongPoll(false)
       ..machineName = (id) => id == 'dev' ? 'development-central' : null;
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
@@ -389,7 +389,7 @@ void main() {
       clock: () => _now,
     );
     controller
-      ..setAppForeground(false)
+      ..setLongPoll(false)
       ..machineName = (id) => id == 'dev' ? 'development-central' : null;
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);

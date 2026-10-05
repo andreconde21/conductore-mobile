@@ -454,7 +454,7 @@ void main() {
             preferences ?? MemoryAgentNotificationPreferencesStore(_everything),
         pollInterval: const Duration(days: 1),
       );
-      controller.setAppForeground(false);
+      controller.setLongPoll(false);
       addTearDown(controller.dispose);
       addTearDown(workspace.dispose);
       final host = buildHost('h').copyWith(

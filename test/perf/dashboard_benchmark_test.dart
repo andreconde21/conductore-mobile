@@ -95,7 +95,7 @@ void main() {
       provider: const ConductoreHostAttentionProvider(),
       companionProvider: const ConductoreHostAttentionProvider(),
     );
-    attention.setAppForeground(false);
+    attention.setLongPoll(false);
     final digest = DigestController(
       source: AttentionDigestHostSource(attention: attention),
       clock: () => digestNow,

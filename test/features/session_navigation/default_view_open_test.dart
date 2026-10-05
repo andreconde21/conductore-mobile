@@ -119,7 +119,7 @@ void main() {
       provider: const ConductoreHostAttentionProvider(),
       pollInterval: const Duration(days: 1),
     );
-    attention.setAppForeground(false);
+    attention.setLongPoll(false);
     final runner = HerdrFakeRunner(tmuxSessions: TmuxFixtures.sessions);
     final boards = HomeBoards(
       runnerFactory: (_) => runner,

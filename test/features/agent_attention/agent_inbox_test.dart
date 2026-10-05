@@ -301,7 +301,7 @@ void main() {
           ),
           pollInterval: const Duration(days: 1),
         );
-        controller.setAppForeground(false);
+        controller.setLongPoll(false);
         addTearDown(controller.dispose);
         addTearDown(workspace.dispose);
         final host = buildHost(
