@@ -367,4 +367,51 @@ void main() {
       expect(controller.items.single, isA<ChatUserMessage>());
     },
   );
+
+  test('the window keeps the newest entries and pages back to the dropped '
+      'ones (CON-089)', () async {
+    // 21 reads of 100 entries each, read 1 at byte 1000, read n at n*1000.
+    final reads = [
+      for (var n = 1; n <= 21; n++)
+        ok(
+          page(
+            [for (var i = 0; i < 100; i++) userLine('u$n-$i', 'line')],
+            start: n == 1 ? 1000 : 0,
+            offset: (n + 1) * 1000,
+          ),
+        ),
+      ok(page([userLine('old', 'older')], start: 2000, offset: 3000)),
+    ];
+    final runner = ScriptedAgentCommandRunner(reads);
+    final controller = controllerFor(runner);
+    for (var n = 1; n <= 21; n++) {
+      await controller.refresh();
+    }
+    // 2100 entries > 1500 + 500: the oldest reads went, down to 1500.
+    expect(controller.windowEntries, 1500);
+    expect(controller.hasOlder, isTrue);
+    await controller.loadOlder();
+    // Back from where the first kept read began (read 7 at 7000).
+    expect(runner.commands.last, contains('--before 7000'));
+  });
+
+  test('a working agent that writes nothing slows the 1 s poll (CON-089)', () {
+    fakeAsync((async) {
+      final runner = ScriptedAgentCommandRunner([
+        ok(page([userLine('u1', 'hi')], offset: 50, state: 'working')),
+        ok(page([], offset: 50, state: 'working')),
+      ]);
+      final controller = ChatViewController(
+        runner: runner,
+        sessionId: 's-1',
+        pollInterval: const Duration(milliseconds: 1500),
+      )..setVisible(true);
+      async.elapse(const Duration(seconds: 2));
+      final start = runner.commands.length;
+      // 10 polls at 1 s, 10 at 2 s, then every 4 s: not 60.
+      async.elapse(const Duration(seconds: 60));
+      expect(runner.commands.length - start, inInclusiveRange(22, 28));
+      controller.dispose();
+    });
+  });
 }
