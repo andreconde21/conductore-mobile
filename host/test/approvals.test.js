@@ -283,6 +283,55 @@ test('approve-low approves only low-risk requests, across agents', async () => {
   await Promise.all(hooks)
 })
 
+test('approve-low and trust judge each request as it is at decision time', async () => {
+  // A link that pointed into the repo when the request came now leads to a
+  // secrets folder: the stored label says low, the decision must not.
+  const secrets = path.join(userHome, '.ssh')
+  fs.mkdirSync(secrets, { recursive: true })
+  fs.writeFileSync(path.join(secrets, 'id_ed25519'), 'not a key')
+  fs.mkdirSync(path.join(repo, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(repo, 'docs', 'id_ed25519'), 'readme')
+  const link = path.join(repo, 'notes')
+  fs.symlinkSync(path.join(repo, 'docs'), link)
+  const p = hook(perm('c1', 'Read', { file_path: path.join(link, 'guide.md') }))
+  const [req] = await pendingOf('c1')
+  assert.equal(req.risk.level, 'low')
+  fs.unlinkSync(link)
+  fs.symlinkSync(secrets, link)
+  fs.writeFileSync(path.join(secrets, 'guide.md'), 'x')
+  const t = await cli('trust', req.id, '--minutes', '5')
+  assert.equal(t.code, 1)
+  assert.match(t.json.error, /high-risk/)
+  const r = await cli('approve-low', '--ids', req.id)
+  assert.deepEqual(r.json.approved, [])
+  assert.match(r.json.skipped[0].reason, /high risk/)
+  await cli('decide', req.id, 'deny')
+  await p
+  fs.unlinkSync(link)
+})
+
+test('approve-low and trust never take a plan; trust refuses a rule that does not cover the request', async () => {
+  const plan = hook(perm('c2', 'ExitPlanMode', { plan: 'do it' }))
+  const [req] = await pendingOf('c2')
+  const r = await cli('approve-low', '--ids', req.id)
+  assert.deepEqual(r.json.approved, [])
+  assert.match(r.json.skipped[0].reason, /plan/)
+  const t = await cli('trust', req.id)
+  assert.equal(t.code, 1)
+  assert.match(t.json.error, /plan always asks/)
+  await cli('decide', req.id, 'deny')
+  await plan
+  const p = hook(bash('c2', 'npm test'))
+  const [b] = await pendingOf('c2')
+  const wrong = await cli('trust', b.id, '--rule', 'Bash(git status *)')
+  assert.equal(wrong.code, 1)
+  assert.match(wrong.json.error, /does not cover this request/)
+  const narrow = await cli('trust', b.id, '--minutes', '5')
+  assert.equal(narrow.json.rule.rule, 'Bash(npm test)')
+  assert.ok(allowed(await p))
+  await cli('rules', 'remove', narrow.json.rule.id)
+})
+
 test('rules edit changes pattern and duration, keeps id and counters', async () => {
   const add = await cli('rules', 'add', 'Bash(cargo check *)', '--minutes', '10')
   const id = add.json.rule.id

@@ -246,7 +246,8 @@ class _TrustSheetState extends State<TrustSheet> {
                 onPressed: () =>
                     Navigator.of(context).pop(const TrustChoiceClaudeCode()),
                 child: const Text(
-                  "Use Claude Code's own Always instead (settings.local.json)",
+                  "Use Claude Code's own Always for exactly this call "
+                  '(settings.local.json)',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -278,6 +279,16 @@ Future<void> answerPermissionRequest(
       controller.supportsSmartApprovals(hostId) && request.risk != null;
   try {
     if (verdict == PermissionVerdict.always && smart) {
+      if (request.isPlan) {
+        // A plan's Always is the agent's own "accept edits" for this session
+        // (Claude Code); no rule ever approves later plans.
+        await controller.decide(
+          hostId,
+          request,
+          nativeAlways ? PermissionVerdict.always : PermissionVerdict.allow,
+        );
+        return;
+      }
       if (!request.trustable) {
         await controller.decide(hostId, request, PermissionVerdict.allow);
         messenger?.showSnackBar(

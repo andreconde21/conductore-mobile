@@ -63,6 +63,11 @@ const _highRm =
     '"toolInput":{"command":"rm -rf build"},"createdAt":1790000001000,'
     '"risk":{"level":"high","reason":"Deletes recursively (rm -rf): build"},'
     '"batchable":false,"suggestedRules":["Bash(rm *)"],"repo":"/home/a/api"}';
+const _plan =
+    '{"id":"req-plan","toolName":"ExitPlanMode","summary":"Plan",'
+    '"toolInput":{"plan":"do it"},"createdAt":1790000000500,'
+    '"risk":{"level":"medium","reason":"Approves the plan; edits follow"},'
+    '"batchable":false,"suggestedRules":[],"repo":"/home/a/api"}';
 const _lowLs =
     '{"id":"req-ls","toolName":"Bash","summary":"ls -la",'
     '"toolInput":{"command":"ls -la"},"createdAt":1790000002000,'
@@ -519,6 +524,36 @@ void main() {
         expect(runner.sent('trust').single, contains('--forever'));
         expect(runner.sent('trust').single, contains('--source always'));
         expect(runner.sent('decide'), isEmpty);
+      },
+    );
+
+    test('a plan is never trustable, whatever its rating', () {
+      final snapshot = ConductoreHostAttentionProvider.parseSnapshot(
+        _status([_plan], []),
+      );
+      final plan = snapshot.agents.first.pendingRequests.single;
+      expect(plan.isPlan, isTrue);
+      expect(plan.risk!.level, PermissionRiskLevel.medium);
+      expect(plan.trustable, isFalse);
+    });
+
+    testWidgets(
+      'Always on a plan is the agent\'s own option, never a saved rule',
+      (tester) async {
+        final (controller, runner) = await start(tester, {
+          'status': [
+            _status([_plan], []),
+          ],
+          'approvals': [_approvals],
+          'decide': ['{"ok":true}'],
+        });
+        await pumpSheet(tester, controller);
+        await tester.tap(find.text('Always'));
+        await tester.pumpAndSettle();
+        await tester.runAsync(pumpEventQueue);
+        expect(find.text('Save a rule'), findsNothing);
+        expect(runner.sent('trust'), isEmpty);
+        expect(runner.sent('decide').single, contains('always'));
       },
     );
 

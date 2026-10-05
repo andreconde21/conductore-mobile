@@ -29,10 +29,13 @@
 //   mcp__server           every tool of an MCP server (or mcp__server__tool)
 //   Bash, Edit, …         every call of that tool
 //
-// A Bash rule never matches a command with $(…), backticks or unbalanced
-// quotes (unless the rule is that exact command), and a compound command
-// (&&, ;, |) only when each of its commands is covered: `cd <dir>` and
-// read-only filters on the right of a pipe (`| tail -20`) count as covered.
+// A Bash rule matches the parsed command (shell.js), never its text, and
+// never a command the parser did not fully understand. Beyond the exact
+// command, it covers one statement: a pipeline whose commands each have a
+// rule, where leading `cd <dir in the repo> &&` and read-only filters on
+// the right of a pipe (`| tail -20`) count as covered. Path rules never
+// use `..` and must cover every file a call touches, through symlinks too.
+// No rule answers a question or a plan.
 //
 // matching never looks at risk; the daemon refuses to auto-answer anything
 // risk.js rates high before it asks the rules.

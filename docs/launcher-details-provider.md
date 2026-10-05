@@ -236,6 +236,7 @@ checked on the calling UID inside `call`; a caller without it gets a
 | --- | --- |
 | `Unlock your phone first` | The device is locked (`KeyguardManager.isDeviceLocked`), the same rule as the notification buttons. |
 | `Open Conductore first` | Conductore's engine is not running or monitors no machine, or its app lock is up (the answer is only taken on its unlocked home page). |
+| `Unlock Conductore first` | Conductore's app lock is closed, or would be: the app has been in the background longer than its re-lock delay. The device lock alone is not enough. |
 | `That agent isn't waiting any more` | Unknown or stale item id, an agent no longer `needsInput`/`blocked`, or a request answered meanwhile (also an option that no longer matches the request). |
 | the row's `answer_note` | The row is not answerable (high risk, terminal-only, several questions, ...). |
 | `Pick one of its options` / `It takes a reply, not an option` | `reply` on a row with `options`, or `choose` on one without. |
