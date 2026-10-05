@@ -84,7 +84,13 @@ enum TaskSort {
 /// The task list's filters; null means any.
 @immutable
 class TaskFilter {
-  const TaskFilter({this.sourceIds, this.status, this.assignee, this.query});
+  const TaskFilter({
+    this.sourceIds,
+    this.status,
+    this.assignee,
+    this.project,
+    this.query,
+  });
 
   /// The sources shown; null shows every source.
   final Set<String>? sourceIds;
@@ -92,6 +98,9 @@ class TaskFilter {
   /// A status label (statuses differ per source, so by label).
   final String? status;
   final String? assignee;
+
+  /// A [TaskItem.project].
+  final String? project;
   final String? query;
 
   /// The value [TaskFilter.assignee] takes for "nobody".
@@ -102,6 +111,7 @@ class TaskFilter {
       return false;
     }
     if (status != null && task.status?.label != status) return false;
+    if (project != null && task.project != project) return false;
     if (assignee == unassigned) {
       if (task.assignees.isNotEmpty) return false;
     } else if (assignee != null && !task.assignees.contains(assignee)) {
@@ -119,11 +129,13 @@ class TaskFilter {
     Set<String>? Function()? sourceIds,
     String? Function()? status,
     String? Function()? assignee,
+    String? Function()? project,
     String? Function()? query,
   }) => TaskFilter(
     sourceIds: sourceIds == null ? this.sourceIds : sourceIds(),
     status: status == null ? this.status : status(),
     assignee: assignee == null ? this.assignee : assignee(),
+    project: project == null ? this.project : project(),
     query: query == null ? this.query : query(),
   );
 }

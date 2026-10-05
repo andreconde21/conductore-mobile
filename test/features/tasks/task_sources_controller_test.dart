@@ -281,6 +281,66 @@ void main() {
       expect(calls.last.$3['text'], 'Started');
     });
 
+    test(
+      'a folder of project folders: project/id ids and the project',
+      () async {
+        final calls = <(String, Map<String, Object?>)>[];
+        final source = MarkdownFolderTaskSource(
+          const TaskSourceConfig(
+            id: 'pt',
+            kind: TaskSourceKind.markdownFolder,
+            name: 'ProjectsTasks',
+            settings: {'host': 'h1', 'folder': '/data/projectstasks'},
+          ),
+          call: (host, op, input) async {
+            calls.add((op, input));
+            final card = {
+              'id': 'conductore-mobile/CON-084',
+              'key': 'CON-084',
+              'title': 'Tree',
+              'status': input['status'] ?? 'todo',
+              'project': 'conductore-mobile',
+            };
+            return op == 'list'
+                ? {
+                    'ok': true,
+                    'projects': ['amedia', 'conductore-mobile'],
+                    'tasks': [
+                      card,
+                      {'id': 'amedia/AM-1', 'title': 'A', 'project': 'amedia'},
+                      {'id': 'FLAT-1', 'title': 'Flat', 'project': ''},
+                    ],
+                  }
+                : {'ok': true, 'task': card};
+          },
+        );
+        final tasks = await source.list();
+        final card = tasks.firstWhere((t) => t.key == 'CON-084');
+        expect(card.project, 'conductore-mobile');
+        expect(card.ref, 'pt/conductore-mobile/CON-084');
+        expect(
+          tasks.firstWhere((t) => t.id == 'amedia/AM-1').project,
+          'amedia',
+        );
+        expect(tasks.firstWhere((t) => t.id == 'FLAT-1').project, isNull);
+        final moved = await source.updateStatus(
+          card,
+          TaskStatusOption.named('done'),
+        );
+        expect(calls.last.$2['id'], 'conductore-mobile/CON-084');
+        expect(moved.project, 'conductore-mobile');
+        expect(moved.copyWith(body: 'b').project, 'conductore-mobile');
+      },
+    );
+
+    test('the project filter keeps one project', () {
+      const filter = TaskFilter(project: 'amedia');
+      expect(filter.matches(task('pt', 'amedia/1', project: 'amedia')), isTrue);
+      expect(filter.matches(task('pt', 'cm/1', project: 'cm')), isFalse);
+      expect(filter.matches(task('pt', 'flat')), isFalse);
+      expect(const TaskFilter().matches(task('pt', 'flat')), isTrue);
+    });
+
     test('runCompanionTasks passes JSON on stdin and maps errors', () async {
       final runner = FakeStdinRunner(
         (command, stdin) => const AgentCommandResult(

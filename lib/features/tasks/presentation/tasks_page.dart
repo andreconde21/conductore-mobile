@@ -9,8 +9,8 @@ import 'package:conduit/features/tasks/presentation/task_sources_controller.dart
 import 'package:conduit/features/tasks/presentation/task_sources_page.dart';
 import 'package:flutter/material.dart';
 
-/// Every source's tasks in one list, filtered by source, status and
-/// assignee; a task opens its detail page. With [runs], tasks start as
+/// Every source's tasks in one list, filtered by source, status, assignee
+/// and project; a task opens its detail page. With [runs], tasks start as
 /// agents: "Start" on a task, or long-press to select several and
 /// "Start N tasks" (CON-037).
 class TasksPage extends StatefulWidget {
@@ -59,6 +59,7 @@ class _TasksPageState extends State<TasksPage> {
         sourceIds: () => all ? null : chosen,
         status: () => null,
         assignee: () => null,
+        project: () => null,
       ),
     );
   }
@@ -297,6 +298,10 @@ class _TasksPageState extends State<TasksPage> {
       for (final t in all)
         if (_shown(t)) ...t.assignees,
     }.toList()..sort();
+    final projects = {
+      for (final t in all)
+        if (_shown(t) && t.project != null) t.project!,
+    }.toList()..sort();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Column(
@@ -355,6 +360,16 @@ class _TasksPageState extends State<TasksPage> {
                   () => _filter = _filter.copyWith(assignee: () => v),
                 ),
               ),
+              if (projects.isNotEmpty || _filter.project != null)
+                _FilterChip<String>(
+                  key: const ValueKey('tasks-filter-project'),
+                  label: 'Project',
+                  value: _filter.project,
+                  options: [for (final p in projects) (p, p)],
+                  onChanged: (v) => setState(
+                    () => _filter = _filter.copyWith(project: () => v),
+                  ),
+                ),
               PopupMenuButton<TaskSort>(
                 key: const ValueKey('tasks-sort'),
                 tooltip: 'Sort',
@@ -485,7 +500,7 @@ class _TaskTile extends StatelessWidget {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: !showSource && meta.isEmpty
+      subtitle: !showSource && task.project == null && meta.isEmpty
           ? null
           : Text.rich(
               TextSpan(
@@ -496,6 +511,14 @@ class _TaskTile extends StatelessWidget {
                       child: Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: TaskSourceBadge(name: sourceName),
+                      ),
+                    ),
+                  if (task.project case final project?)
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: _ProjectLabel(name: project),
                       ),
                     ),
                   TextSpan(text: meta),
@@ -536,6 +559,35 @@ class TaskSourceBadge extends StatelessWidget {
         child: Text(
           name,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ),
+    );
+  }
+}
+
+/// A task's project, as a small filled label (quieter than the source
+/// badge beside it).
+class _ProjectLabel extends StatelessWidget {
+  const _ProjectLabel({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      key: ValueKey('task-project-$name'),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        child: Text(
+          name,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSecondaryContainer,
+          ),
         ),
       ),
     );

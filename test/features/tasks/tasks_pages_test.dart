@@ -116,6 +116,82 @@ void main() {
     expect(find.byKey(const ValueKey('task-b/3')), findsOneWidget);
   });
 
+  testWidgets('a folder of project folders: project labels and filter', (
+    tester,
+  ) async {
+    sources['pt'] = FakeTaskSource(
+      const TaskSourceConfig(
+        id: 'pt',
+        kind: TaskSourceKind.markdownFolder,
+        name: 'ProjectsTasks',
+      ),
+      tasks: [
+        task('pt', 'amedia/AM-1', project: 'amedia'),
+        task('pt', 'conductore-mobile/CON-1', project: 'conductore-mobile'),
+        task('pt', 'conductore-mobile/CON-2', project: 'conductore-mobile'),
+      ],
+    );
+    await controller.save(
+      const TaskSourceConfig(id: 'a', kind: TaskSourceKind.linear, name: 'A'),
+      token: 't',
+    );
+    await controller.save(
+      const TaskSourceConfig(
+        id: 'pt',
+        kind: TaskSourceKind.markdownFolder,
+        name: 'ProjectsTasks',
+      ),
+    );
+    await pump(tester);
+
+    // Each task shows its project next to its source badge.
+    expect(find.byKey(const ValueKey('task-project-amedia')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('task-project-conductore-mobile')),
+      findsNWidgets(2),
+    );
+    expect(
+      find.byKey(const ValueKey('task-source-badge-ProjectsTasks')),
+      findsNWidgets(3),
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('task-a/1')),
+        matching: find.byKey(const ValueKey('task-project-amedia')),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('tasks-filter-project')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('conductore-mobile').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('task-pt/conductore-mobile/CON-1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('task-pt/conductore-mobile/CON-2')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('task-pt/amedia/AM-1')), findsNothing);
+    expect(find.byKey(const ValueKey('task-a/1')), findsNothing);
+    expect(find.text('Project: conductore-mobile'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('tasks-filter-project')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Any project'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('task-pt/amedia/AM-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-a/1')), findsOneWidget);
+  });
+
+  testWidgets('no projects: no Project filter', (tester) async {
+    await addTwoSources();
+    await pump(tester);
+    expect(find.byKey(const ValueKey('tasks-filter-project')), findsNothing);
+  });
+
   testWidgets('sorting by status groups to do, in progress, done', (
     tester,
   ) async {

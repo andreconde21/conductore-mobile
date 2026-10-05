@@ -118,6 +118,7 @@ class TaskItem {
     this.updatedAt,
     this.body,
     this.comments,
+    this.project,
     this.extra = const {},
   });
 
@@ -145,6 +146,10 @@ class TaskItem {
   /// Null until [TaskSource.read] (or when the source has none).
   final List<TaskComment>? comments;
 
+  /// The project it belongs to within its source (a markdown folder of
+  /// project folders), or null.
+  final String? project;
+
   /// Adapter-private values (a Jira issue's id, a work item's type).
   final Map<String, String> extra;
 
@@ -167,6 +172,7 @@ class TaskItem {
     updatedAt: updatedAt,
     body: body ?? this.body,
     comments: comments ?? this.comments,
+    project: project,
     extra: extra,
   );
 }

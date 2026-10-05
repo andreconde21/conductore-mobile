@@ -84,6 +84,10 @@ class MarkdownFolderTaskSource implements TaskSource {
                   ),
             ]
           : null,
+      project: switch (str(json['project'])) {
+        final p? when p.isNotEmpty => p,
+        _ => null,
+      },
       extra: {
         if (json['priority'] case final String p when p.isNotEmpty)
           'priority': p,
