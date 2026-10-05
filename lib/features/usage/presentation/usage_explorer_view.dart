@@ -341,10 +341,14 @@ class _UsageExplorerViewState extends State<UsageExplorerView>
             ),
         ],
       ),
-      // cswap accounts, with Switch (the home bar's "+N accounts").
+      // cswap accounts, with Switch: one line until tapped.
       if (widget.usage.summary.accounts.isNotEmpty) ...[
-        const SizedBox(height: 10),
-        UsageAccountsSection(controller: widget.usage, now: _now),
+        const SizedBox(height: 6),
+        UsageAccountsSection(
+          controller: widget.usage,
+          now: _now,
+          foldable: true,
+        ),
       ],
       const SizedBox(height: 10),
       _RangeChips(explorer: explorer, onCustom: () => _pickCustom(context)),
@@ -1525,9 +1529,36 @@ class _BreakdownGrid extends StatelessWidget {
   final Map<String, String> sessionNames;
   final List<UsageDimension> dimensions;
 
+  /// Projects, models and sessions stay open; the rest folds to a line.
+  static bool _foldable(UsageDimension d) =>
+      d != UsageDimension.project &&
+      d != UsageDimension.model &&
+      d != UsageDimension.session;
+
+  static String _title(UsageDimension d) =>
+      d == UsageDimension.account ? 'Accounts (as seen active)' : d.plural;
+
+  /// "3 · top: work".
+  String _summary(UsageDimension d) {
+    final groups = slice.groupBy(d, metric: explorer.metric);
+    return [
+      '${groups.length}',
+      if (groups.isNotEmpty) 'top: ${groups.first.label}',
+    ].join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
+    Widget section(UsageDimension dimension, {bool showTitle = true}) =>
+        _BreakdownSection(
+          explorer: explorer,
+          slice: dimension == UsageDimension.session ? sessions! : slice,
+          dimension: dimension,
+          sessionNames: sessionNames,
+          showTitle: showTitle,
+          alwaysShow: true,
+        );
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = math.max(1, (constraints.maxWidth / 300).floor());
@@ -1549,15 +1580,14 @@ class _BreakdownGrid extends StatelessWidget {
                     border: Border.all(color: palette.hairline),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: _BreakdownSection(
-                    explorer: explorer,
-                    slice: dimension == UsageDimension.session
-                        ? sessions!
-                        : slice,
-                    dimension: dimension,
-                    sessionNames: sessionNames,
-                    alwaysShow: true,
-                  ),
+                  child: _foldable(dimension)
+                      ? UsageFold(
+                          id: 'section-${dimension.name}',
+                          title: _title(dimension),
+                          summary: _summary(dimension),
+                          child: section(dimension, showTitle: false),
+                        )
+                      : section(dimension),
                 ),
           ],
         );

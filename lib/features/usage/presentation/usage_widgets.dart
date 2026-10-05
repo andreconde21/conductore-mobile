@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
 import 'package:conduit/features/usage/domain/usage_summary.dart';
@@ -189,6 +190,7 @@ class UsageSummaryView extends StatefulWidget {
     required this.controller,
     this.layout = UsageSummaryLayout.bar,
     this.onTap,
+    this.onAccounts,
     this.now,
     super.key,
   });
@@ -196,6 +198,10 @@ class UsageSummaryView extends StatefulWidget {
   final UsageController controller;
   final UsageSummaryLayout layout;
   final VoidCallback? onTap;
+
+  /// The accounts line's tap; the details sheet ([showUsageDetails]) by
+  /// default.
+  final VoidCallback? onAccounts;
 
   /// For tests.
   final DateTime? now;
@@ -219,14 +225,16 @@ class _UsageSummaryViewState extends State<UsageSummaryView>
         final content = switch (widget.layout) {
           UsageSummaryLayout.bar => _SummaryBar(
             summary: summary,
+            controller: widget.controller,
             now: now,
             loading: widget.controller.isLoading,
-            onAccounts: widget.onTap,
+            onAccounts: widget.onAccounts,
           ),
           UsageSummaryLayout.compact => _SummaryCompact(
             summary: summary,
+            controller: widget.controller,
             now: now,
-            onAccounts: widget.onTap,
+            onAccounts: widget.onAccounts,
           ),
         };
         final onTap = widget.onTap;
@@ -276,14 +284,35 @@ class _LabeledRing extends StatelessWidget {
   }
 }
 
-/// "N accounts" (cswap: every account, the active one included), and
-/// "best: home 12%" when another account has clearly more headroom than
-/// the active one. Nothing without other accounts. Tapping it opens the
-/// breakdown ([onTap]).
+/// The accounts in one line: "3 accounts · best: home 12% · 1 needs
+/// re-login" ([dense]: "3 acc · 1 re-login"). "best" only when another
+/// account has clearly more headroom than the active one.
+String usageAccountsLine(
+  UsageSummary summary,
+  DateTime now, {
+  bool dense = false,
+}) {
+  final total = summary.accounts.length;
+  final best = dense ? null : summary.bestAccount(now);
+  final bestUsed = best?.usedPct(now);
+  final relogin = summary.reloginCount;
+  return [
+    dense ? '$total acc' : '$total accounts',
+    if (best != null && bestUsed != null)
+      'best: ${best.label} ${bestUsed.round()}%',
+    if (relogin > 0) dense ? '$relogin re-login' : '$relogin needs re-login',
+  ].join(' · ');
+}
+
+/// The other Claude accounts as one tappable line (cswap: every account,
+/// the active one included, counts): "3 accounts · 1 needs re-login".
+/// Nothing without other accounts. A tap opens [onTap], else the accounts
+/// sheet ([showUsageDetails]).
 class UsageAccountsChip extends StatelessWidget {
   const UsageAccountsChip({
     required this.summary,
     required this.now,
+    this.controller,
     this.onTap,
     this.dense = false,
     super.key,
@@ -291,6 +320,9 @@ class UsageAccountsChip extends StatelessWidget {
 
   final UsageSummary summary;
   final DateTime now;
+
+  /// For the default tap: the details sheet.
+  final UsageController? controller;
   final VoidCallback? onTap;
 
   /// Count only: a sidebar or a collapsed bar.
@@ -304,52 +336,269 @@ class UsageAccountsChip extends StatelessWidget {
     }
     final total = summary.accounts.length;
     final palette = AppPalette.of(context);
-    final best = dense ? null : summary.bestAccount(now);
-    final bestUsed = best?.usedPct(now);
-    final text = [
-      dense ? '$total acc' : '$total accounts',
-      if (best != null && bestUsed != null)
-        'best: ${best.label} ${bestUsed.round()}%',
-    ].join(' · ');
+    final warn = summary.reloginCount > 0;
+    final hint = !dense && summary.bestAccount(now) != null;
+    final color = warn
+        ? palette.warning
+        : hint
+        ? palette.accent
+        : palette.mutedForeground;
     final chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.fromLTRB(6, 2, 2, 2),
       decoration: BoxDecoration(
         border: Border.all(color: palette.hairline),
         borderRadius: BorderRadius.circular(3),
       ),
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 11,
-          height: 1.2,
-          color: best != null ? palette.accent : palette.mutedForeground,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              usageAccountsLine(summary, now, dense: dense),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, height: 1.2, color: color),
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, size: 14, color: color),
+        ],
       ),
     );
+    final controller = this.controller;
     return Tooltip(
       message:
           '$total Claude accounts (cswap): ${total - others} in use, '
           '$others other${others == 1 ? '' : 's'}',
       child: InkWell(
         key: const ValueKey('usage-accounts-chip'),
-        onTap: onTap,
+        onTap:
+            onTap ??
+            (controller == null
+                ? null
+                : () => unawaited(
+                    showUsageDetails(context, controller, now: now),
+                  )),
         child: chip,
       ),
     );
   }
 }
 
+/// A titled section that folds to one header line: [title], a one-line
+/// [summary] of what it holds, and a chevron.
+class UsageFold extends StatefulWidget {
+  const UsageFold({
+    required this.id,
+    required this.title,
+    required this.child,
+    this.summary,
+    this.initiallyExpanded = false,
+    super.key,
+  });
+
+  /// Keys the header: `usage-fold-<id>`.
+  final String id;
+  final String title;
+  final String? summary;
+  final Widget child;
+  final bool initiallyExpanded;
+
+  @override
+  State<UsageFold> createState() => _UsageFoldState();
+}
+
+class _UsageFoldState extends State<UsageFold> {
+  late bool _open = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
+    final summary = widget.summary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          key: ValueKey('usage-fold-${widget.id}'),
+          onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  child: Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelLarge,
+                  ),
+                ),
+                if (summary != null && summary.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      summary,
+                      key: ValueKey('usage-fold-${widget.id}-summary'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: palette.mutedForeground,
+                      ),
+                    ),
+                  ),
+                ] else
+                  const Spacer(),
+                Semantics(
+                  label: _open
+                      ? 'Fold ${widget.title}'
+                      : 'Show ${widget.title}',
+                  child: Icon(
+                    _open
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 20,
+                    color: palette.mutedForeground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_open) widget.child,
+      ],
+    );
+  }
+}
+
+/// The home card's details: the active account's limits with their resets
+/// and ages, today with what the cost means, every account (with Switch),
+/// and the way into the explorer. A bottom sheet on phones, a dialog on
+/// desktop.
+Future<void> showUsageDetails(
+  BuildContext context,
+  UsageController controller, {
+  DateTime? now,
+}) => showAdaptiveModal<void>(
+  context: context,
+  kind: AdaptiveModalKind.dialog,
+  isScrollControlled: true,
+  useSafeArea: true,
+  showDragHandle: true,
+  desktopMaxWidth: 520,
+  builder: (sheetContext) => _UsageDetails(
+    controller: controller,
+    now: now,
+    onExplore: () {
+      Navigator.of(sheetContext).pop();
+      unawaited(openUsageExplorer(context, controller));
+    },
+  ),
+);
+
+class _UsageDetails extends StatelessWidget {
+  const _UsageDetails({
+    required this.controller,
+    required this.onExplore,
+    this.now,
+  });
+
+  final UsageController controller;
+  final VoidCallback onExplore;
+  final DateTime? now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: palette.mutedForeground,
+    );
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final summary = controller.summary;
+        final now = this.now ?? DateTime.now();
+        final hasReport = summary.machines.any((m) => m.report != null);
+        final updated = summary.updatedAt;
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+          ),
+          child: ListView(
+            key: const ValueKey('usage-details'),
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('Usage', style: theme.textTheme.titleMedium),
+                  ),
+                  TextButton.icon(
+                    key: const ValueKey('usage-details-explore'),
+                    onPressed: onExplore,
+                    icon: const Icon(Icons.insights_rounded, size: 18),
+                    label: const Text('Explore'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              for (final limit in [?summary.fiveHour, ?summary.weekly])
+                UsageLimitBar(agent: 'Claude', limit: limit, now: now),
+              if (updated != null)
+                Text(
+                  'Limits updated ${formatUsageAge(now, updated)}.',
+                  key: const ValueKey('usage-details-updated'),
+                  style: muted,
+                ),
+              if (hasReport) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Today: ${formatUsageTokens(summary.today.tokens)} tokens · '
+                  '${formatUsageCost(summary.today.costUsd)}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                Text(
+                  'Costs are estimates at public API list prices. On a '
+                  'subscription plan this is the API-equivalent cost, not '
+                  'what you pay.',
+                  style: muted,
+                ),
+              ],
+              if (summary.accounts.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                UsageAccountsSection(controller: controller, now: now),
+                const SizedBox(height: 4),
+                Text(
+                  'Accounts come from cswap on your machines. Switch changes '
+                  'the account new Claude sessions use; greyed figures are '
+                  'ones cswap cannot refresh.',
+                  style: muted,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The home card: the rings beside at most three lines (today's tokens
+/// and cost; the other accounts; how old the figures are, once stale).
+/// Explanations live in the details sheet.
 class _SummaryBar extends StatelessWidget {
   const _SummaryBar({
     required this.summary,
+    required this.controller,
     required this.now,
     required this.loading,
     this.onAccounts,
   });
 
   final UsageSummary summary;
+  final UsageController controller;
   final DateTime now;
   final bool loading;
   final VoidCallback? onAccounts;
@@ -360,6 +609,7 @@ class _SummaryBar extends StatelessWidget {
     final palette = AppPalette.of(context);
     final today = summary.today;
     final hasReport = summary.machines.any((m) => m.report != null);
+    final updated = summary.updatedAt;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
@@ -370,19 +620,14 @@ class _SummaryBar extends StatelessWidget {
           const SizedBox(width: 14),
           Expanded(
             child: Column(
+              key: const ValueKey('usage-home-lines'),
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Today',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: palette.mutedForeground,
-                  ),
-                ),
-                Text(
                   hasReport
                       ? '${formatUsageTokens(today.tokens)} tokens · '
-                            '${formatUsageCost(today.costUsd)}'
+                            '${formatUsageCost(today.costUsd)} today'
                       : loading
                       ? 'Counting…'
                       : 'No usage reported',
@@ -393,20 +638,27 @@ class _SummaryBar extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (hasReport)
-                  Text(
-                    'API-price estimate',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: palette.subtleForeground,
-                    ),
-                  ),
                 if (summary.otherAccountCount > 0)
                   Padding(
                     padding: const EdgeInsets.only(top: 3),
                     child: UsageAccountsChip(
                       summary: summary,
                       now: now,
+                      controller: controller,
                       onTap: onAccounts,
+                    ),
+                  ),
+                if (updated != null && summary.isStale(now))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'Updated ${formatUsageAge(now, updated)}',
+                      key: const ValueKey('usage-updated'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: palette.subtleForeground,
+                      ),
                     ),
                   ),
               ],
@@ -421,11 +673,13 @@ class _SummaryBar extends StatelessWidget {
 class _SummaryCompact extends StatelessWidget {
   const _SummaryCompact({
     required this.summary,
+    required this.controller,
     required this.now,
     this.onAccounts,
   });
 
   final UsageSummary summary;
+  final UsageController controller;
   final DateTime now;
   final VoidCallback? onAccounts;
 
@@ -480,6 +734,7 @@ class _SummaryCompact extends StatelessWidget {
             UsageAccountsChip(
               summary: summary,
               now: now,
+              controller: controller,
               onTap: onAccounts,
               dense: true,
             ),
@@ -604,8 +859,7 @@ class _CollapsedBarState extends State<_CollapsedBar> with UsageViewAttachment {
               UsageAccountsChip(
                 summary: summary,
                 now: now,
-                onTap: () =>
-                    unawaited(openUsageExplorer(context, widget.controller)),
+                controller: widget.controller,
                 dense: true,
               ),
             ],
@@ -682,6 +936,12 @@ class _UsageBreakdownState extends State<UsageBreakdown>
     final fetching = summary.machines.any(
       (m) => controller.isFetching(m.hostId),
     );
+    final others = [
+      for (final m in summary.machines)
+        if (m.report case final r?
+            when r.codex.present || r.opencode.present || r.gemini.present)
+          m,
+    ];
     return Column(
       key: const ValueKey('usage-breakdown'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -740,11 +1000,32 @@ class _UsageBreakdownState extends State<UsageBreakdown>
           ),
         ],
         if (summary.accounts.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          UsageAccountsSection(controller: controller, now: now),
+          const SizedBox(height: 8),
+          UsageAccountsSection(
+            controller: controller,
+            now: now,
+            foldable: true,
+          ),
         ],
+        if (others.isNotEmpty)
+          UsageFold(
+            id: 'agents',
+            title: 'Other agents',
+            summary: _otherAgentsLine(others, now),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final machine in others)
+                  _OtherAgents(
+                    machine: machine,
+                    now: now,
+                    showName: summary.machines.length > 1,
+                  ),
+              ],
+            ),
+          ),
         if (hasReport) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Text('Per day', style: theme.textTheme.labelLarge),
           const SizedBox(height: 6),
           UsageDayChart(
@@ -758,36 +1039,75 @@ class _UsageBreakdownState extends State<UsageBreakdown>
               ),
             ),
           ),
-          const SizedBox(height: 14),
-          SegmentedButton<UsageGrouping>(
-            key: const ValueKey('usage-grouping'),
-            showSelectedIcon: false,
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            segments: [
-              for (final grouping in UsageGrouping.values)
-                ButtonSegment(value: grouping, label: Text(grouping.label)),
-            ],
-            selected: {_grouping},
-            onSelectionChanged: (value) =>
-                setState(() => _grouping = value.first),
-          ),
-          const SizedBox(height: 8),
-          if (groups.isEmpty)
-            Text('Nothing in this period.', style: muted)
-          else
-            for (final group in groups.take(12))
-              _GroupRow(group: group, max: groups.first.totals),
-          const SizedBox(height: 10),
-          Text(
-            'Costs are estimates at public API list prices'
-            '${summary.pricingAsOf == null ? '' : ' (${summary.pricingAsOf})'}. '
-            'On a subscription plan this is the API-equivalent cost, not '
-            'what you pay.',
-            style: muted,
+          const SizedBox(height: 6),
+          UsageFold(
+            id: 'groups',
+            title: 'By ${_grouping.label.toLowerCase()}',
+            summary: groups.isEmpty
+                ? null
+                : 'top: ${groups.first.label} · '
+                      '${formatUsageCost(groups.first.totals.costUsd)}',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SegmentedButton<UsageGrouping>(
+                  key: const ValueKey('usage-grouping'),
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  segments: [
+                    for (final grouping in UsageGrouping.values)
+                      ButtonSegment(
+                        value: grouping,
+                        label: Text(grouping.label),
+                      ),
+                  ],
+                  selected: {_grouping},
+                  onSelectionChanged: (value) =>
+                      setState(() => _grouping = value.first),
+                ),
+                const SizedBox(height: 8),
+                if (groups.isEmpty)
+                  Text('Nothing in this period.', style: muted)
+                else
+                  for (final group in groups.take(12))
+                    _GroupRow(group: group, max: groups.first.totals),
+                const SizedBox(height: 10),
+                Text(
+                  'Costs are estimates at public API list prices'
+                  '${summary.pricingAsOf == null ? '' : ' (${summary.pricingAsOf})'}. '
+                  'On a subscription plan this is the API-equivalent cost, '
+                  'not what you pay.',
+                  style: muted,
+                ),
+              ],
+            ),
           ),
         ],
       ],
     );
+  }
+
+  /// "Codex 40% · OpenCode · Gemini": each other agent once, Codex with
+  /// its fullest window.
+  static String _otherAgentsLine(List<MachineUsage> machines, DateTime now) {
+    final codex = [for (final m in machines) ...m.codexLimits];
+    final present = <String>{
+      for (final m in machines)
+        if (m.report case final report?) ...[
+          if (report.codex.present) 'Codex',
+          if (report.opencode.present) 'OpenCode',
+          if (report.gemini.present) 'Gemini',
+        ],
+    };
+    return [
+      for (final name in present)
+        if (name == 'Codex' && codex.isNotEmpty)
+          'Codex ${codex.map((l) => l.effectivePct(now)).reduce(math.max).round()}%'
+        else
+          name,
+    ].join(' · ');
   }
 }
 
@@ -812,7 +1132,6 @@ class _MachineLimits extends StatelessWidget {
       color: palette.mutedForeground,
     );
     final report = machine.report;
-    final codexPresent = report?.codex.present ?? false;
     return Column(
       key: ValueKey('usage-machine-${machine.hostId}'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -843,6 +1162,44 @@ class _MachineLimits extends StatelessWidget {
           Text('Could not read usage: ${machine.error}', style: muted),
         for (final limit in machine.claudeLimits)
           UsageLimitBar(agent: 'Claude', limit: limit, now: now),
+        if (report != null && report.partial)
+          Text('Still counting older transcripts…', style: muted),
+      ],
+    );
+  }
+}
+
+/// One machine's Codex limits and login, OpenCode's model and Gemini's:
+/// the Usage tab's "Other agents".
+class _OtherAgents extends StatelessWidget {
+  const _OtherAgents({
+    required this.machine,
+    required this.now,
+    required this.showName,
+  });
+
+  final MachineUsage machine;
+  final DateTime now;
+  final bool showName;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: palette.mutedForeground,
+    );
+    final report = machine.report;
+    final codexPresent = report?.codex.present ?? false;
+    return Column(
+      key: ValueKey('usage-agents-${machine.hostId}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (showName)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 4),
+            child: Text(machine.hostName, style: theme.textTheme.labelLarge),
+          ),
         if (codexPresent)
           if (machine.codexLimits.isEmpty)
             Text('Codex: no rate limits reported yet', style: muted)
@@ -878,8 +1235,6 @@ class _MachineLimits extends StatelessWidget {
             key: ValueKey('usage-gemini-${machine.hostId}'),
             style: muted,
           ),
-        if (report != null && report.partial)
-          Text('Still counting older transcripts…', style: muted),
       ],
     );
   }
@@ -926,10 +1281,16 @@ class UsageLimitBar extends StatelessWidget {
                   style: theme.textTheme.bodyMedium,
                 ),
               ),
-              Text(
-                '${pct.round()}%${resetText.isEmpty ? '' : ' · $resetText'}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: palette.mutedForeground,
+              const SizedBox(width: 8),
+              // Wraps rather than overflows on a phone.
+              Flexible(
+                flex: 2,
+                child: Text(
+                  '${pct.round()}%${resetText.isEmpty ? '' : ' · $resetText'}',
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: palette.mutedForeground,
+                  ),
                 ),
               ),
             ],
@@ -988,11 +1349,16 @@ class UsageAccountsSection extends StatelessWidget {
   const UsageAccountsSection({
     required this.controller,
     required this.now,
+    this.foldable = false,
     super.key,
   });
 
   final UsageController controller;
   final DateTime now;
+
+  /// Folded to one line ([UsageFold]) until tapped: the explorer and the
+  /// Usage tab, where the summary leads.
+  final bool foldable;
 
   @override
   Widget build(BuildContext context) {
@@ -1003,6 +1369,55 @@ class UsageAccountsSection extends StatelessWidget {
       for (final machine in summary.machines)
         if (machine.canSwitchAccounts) machine,
     ];
+    final switchBest = switchable.isNotEmpty && accounts.length > 1
+        ? TextButton(
+            key: const ValueKey('usage-switch-best'),
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            onPressed: () => switchUsageAccount(
+              context,
+              controller,
+              machines: [for (final m in switchable) (m.hostId, m.hostName)],
+            ),
+            child: const Text('Switch to best'),
+          )
+        : null;
+    final rows = [
+      for (final account in accounts)
+        _AccountRow(
+          account: account,
+          now: now,
+          showMachines: summary.machines.length > 1,
+          onSwitch: account.switchTargets.isEmpty
+              ? null
+              : () => switchUsageAccount(
+                  context,
+                  controller,
+                  account: account,
+                  machines: [
+                    for (final p in account.switchTargets)
+                      (p.hostId, p.hostName),
+                  ],
+                ),
+        ),
+    ];
+    if (foldable) {
+      return KeyedSubtree(
+        key: const ValueKey('usage-accounts'),
+        child: UsageFold(
+          id: 'accounts',
+          title: 'Accounts',
+          summary: usageAccountsLine(summary, now),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (switchBest != null)
+                Align(alignment: Alignment.centerRight, child: switchBest),
+              ...rows,
+            ],
+          ),
+        ),
+      );
+    }
     return Column(
       key: const ValueKey('usage-accounts'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1012,39 +1427,11 @@ class UsageAccountsSection extends StatelessWidget {
             Expanded(
               child: Text('Accounts', style: theme.textTheme.labelLarge),
             ),
-            if (switchable.isNotEmpty && accounts.length > 1)
-              TextButton(
-                key: const ValueKey('usage-switch-best'),
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
-                onPressed: () => switchUsageAccount(
-                  context,
-                  controller,
-                  machines: [
-                    for (final m in switchable) (m.hostId, m.hostName),
-                  ],
-                ),
-                child: const Text('Switch to best'),
-              ),
+            ?switchBest,
           ],
         ),
         const SizedBox(height: 4),
-        for (final account in accounts)
-          _AccountRow(
-            account: account,
-            now: now,
-            showMachines: summary.machines.length > 1,
-            onSwitch: account.switchTargets.isEmpty
-                ? null
-                : () => switchUsageAccount(
-                    context,
-                    controller,
-                    account: account,
-                    machines: [
-                      for (final p in account.switchTargets)
-                        (p.hostId, p.hostName),
-                    ],
-                  ),
-          ),
+        ...rows,
       ],
     );
   }
