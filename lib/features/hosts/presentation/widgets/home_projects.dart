@@ -235,7 +235,7 @@ class HomeProjectsList extends StatelessWidget {
   /// (sheprd does the same when an agent gets focus).
   void _open(ProjectEntry entry, SidebarNode row) {
     onOpen(row.target);
-    if (controller.sheprdSync &&
+    if (controller.mirroring &&
         entry.sheprdOf(row)?.presence == SheprdPresence.unread) {
       unawaited(controller.mark(entry, row, SheprdMark.read));
     }

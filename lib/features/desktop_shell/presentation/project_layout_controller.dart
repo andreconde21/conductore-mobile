@@ -75,6 +75,9 @@ class ProjectLayoutController extends ChangeNotifier {
   /// marks shown on it ([sheprdView]).
   SheprdView? _base;
   SheprdView? _merged;
+
+  /// A machine answered `sheprd-view` (with a view or without).
+  bool _viewAnswered = false;
   final Map<String, _PendingMark> _pending = {};
   String? _markNotice;
   Map<String, String> _sheprdNames = const {};
@@ -106,6 +109,21 @@ class ProjectLayoutController extends ChangeNotifier {
   /// in the app's machine names. Null when off or before one was read.
   SheprdView? get sheprdView => sheprdSync ? _merged : null;
 
+  /// Synced and some machine shares sheprd's view: the views mirror it.
+  /// Synced without one, the app stays on its own layout.
+  bool get mirroring => sheprdSync && _merged != null;
+
+  /// Synced, a machine answered, and none shares sheprd's view: what to
+  /// tell the user (sheprd writes it only with `share_view = true`).
+  String? get sheprdNotSharing => sheprdSync && _merged == null && _viewAnswered
+      ? sheprdNotSharingText
+      : null;
+
+  static const sheprdNotSharingText =
+      "sheprd isn't sharing its view yet: set share_view = true in sheprd's "
+      'sidebar.toml (needs a sheprd with view sharing). Until then the '
+      'app keeps its own projects.';
+
   /// A mark sheprd did not apply in time ("not running?"), until
   /// [clearMarkNotice].
   String? get markNotice => sheprdSync ? _markNotice : null;
@@ -117,13 +135,12 @@ class ProjectLayoutController extends ChangeNotifier {
   }
 
   /// Layout edits are the app's own; while synced the layout is sheprd's.
-  bool get canEditLayout => !sheprdSync;
+  bool get canEditLayout => !mirroring;
 
-  /// While synced, sheprd's layout (from its view, else from the machines'
-  /// sidebar.toml); else the app's own once edited, else sidebar.toml.
-  ProjectLayout get layout => sheprdSync
-      ? (_merged?.layout ?? machineLayout)
-      : (prefs.layout ?? machineLayout);
+  /// While mirroring, sheprd's layout from its view; else the app's own
+  /// once edited, else the machines' sidebar.toml.
+  ProjectLayout get layout =>
+      mirroring ? _merged!.layout : (prefs.layout ?? machineLayout);
 
   bool get compact => prefs.compact ?? layout.compact ?? false;
   bool get activeOnly => prefs.activeOnly ?? layout.activeOnly ?? false;
@@ -158,7 +175,7 @@ class ProjectLayoutController extends ChangeNotifier {
       machineAliases: aliasesOf(hosts),
       now: clock(),
       recentHours: recentHours,
-      sheprd: sheprdSync ? (view?.agents ?? const {}) : null,
+      sheprd: view?.agents,
       order: view?.order ?? const [],
     );
     _found = [
@@ -449,6 +466,10 @@ class ProjectLayoutController extends ChangeNotifier {
     }
     final id = baseHostId(host.id);
     final view = SheprdView.fromReply(decoded);
+    if (!_viewAnswered) {
+      _viewAnswered = true;
+      if (view == null && !_disposed) notifyListeners();
+    }
     if (view == null) {
       if (_views.remove(id) == null) return;
     } else {
@@ -518,7 +539,7 @@ class ProjectLayoutController extends ChangeNotifier {
     SheprdMark mark,
   ) async {
     final key = entry.sheprdKeys[row.key];
-    if (key == null || !sheprdSync) return 'Not synced with sheprd.';
+    if (key == null || !mirroring) return 'Not synced with sheprd.';
     final senders = [
       for (final MapEntry(key: id, value: (host, _)) in _views.entries)
         if (_canSend(host)) (id == baseHostId(row.machineId) ? 0 : 1, host),

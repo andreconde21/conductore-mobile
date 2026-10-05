@@ -426,7 +426,7 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     SidebarNode row,
   ) {
     widget.onOpen(row);
-    if (layout.sheprdSync &&
+    if (layout.mirroring &&
         entry.sheprdOf(row)?.presence == SheprdPresence.unread) {
       unawaited(layout.mark(entry, row, SheprdMark.read));
     }
