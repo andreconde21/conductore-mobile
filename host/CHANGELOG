@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 1.6.0 (2026-10-05)
 
 - feat: `sheprd-view` and `sheprd-view-update` (capability `sheprd-view`, CON-077, `docs/sheprd-view-sync.md`): sheprd's view (`~/.local/state/sheprd/view.json`: layout, per-agent presence and marks) read-only and checked against contract v1 (size cap, version, keys), and presence changes (unread, read, dismiss, keep, unkeep) appended as one validated line to `view-updates.jsonl` under an `O_EXCL` lock file, refused past 256 KiB or through a symlink. Nothing else on disk is touched; `sidebar.toml` is never written.
 - fix: the dashboard's "same error" stuck flag (CON-079) no longer counts failures without error text: different failures all matched "The same error N times: unknown", which flagged a busy agent as stuck.
