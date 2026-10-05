@@ -147,9 +147,40 @@ class TaskRunsController extends ChangeNotifier {
     await refresh(hostId);
   }
 
-  Future<void> forget(String hostId, String runId) async {
-    await call(hostId, 'task-runs forget $runId');
+  /// Forgets a done run; the companion closes its agent, removes a clean
+  /// worktree and a merged branch (any branch with [deleteBranch]) and its
+  /// prompt. Returns the companion's report (`worktree`, `branch`, ...).
+  Future<Map<String, Object?>> forget(
+    String hostId,
+    String runId, {
+    bool deleteBranch = false,
+  }) async {
+    final report = await call(
+      hostId,
+      'task-runs forget $runId${deleteBranch ? ' --delete-branch' : ''}',
+    );
     await refresh(hostId);
+    return report;
+  }
+
+  /// Keeps (or stops keeping) a done run's agent open past the companion's
+  /// keep time.
+  Future<void> keep(String hostId, String runId, {bool on = true}) async {
+    await call(hostId, 'task-runs keep $runId${on ? '' : ' off'}');
+    await refresh(hostId);
+  }
+
+  /// What [forget]'s report means for the user, or null when everything
+  /// went.
+  static String? forgetNote(Map<String, Object?> report) {
+    final notes = [
+      if (report['worktree'] == 'kept')
+        'Worktree kept: ${report['worktreeReason'] ?? 'not clean'}'
+            '${report['worktreePath'] is String ? ' (${report['worktreePath']})' : ''}',
+      if (report['branch'] == 'kept')
+        'Branch kept: ${report['branchReason'] ?? 'not merged'}',
+    ];
+    return notes.isEmpty ? null : notes.join('\n');
   }
 
   /// How many runs a machine starts at once.

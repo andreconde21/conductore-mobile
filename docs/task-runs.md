@@ -171,5 +171,7 @@ per source.
 Started tasks show by batch on the Agents dashboard and under Tasks ›
 Started tasks. Each batch has a progress bar (finished, running, waiting,
 failed) and each run has its state, branch and actions (copy the command,
-stop following, remove). The app follows the runs only once one of those
+stop following, keep the agent open, remove and clean up, remove and delete
+the branch). Removing says what the companion kept (a worktree with
+changes, an unmerged branch). The app follows the runs only once one of those
 views has shown them, so no timer runs at startup.

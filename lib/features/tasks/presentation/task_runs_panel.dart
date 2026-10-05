@@ -149,6 +149,25 @@ class _RunTile extends StatelessWidget {
   final String hostId;
   final TaskRunsController controller;
 
+  /// Forgets the run; says what the companion kept (a worktree with
+  /// changes, an unmerged branch).
+  Future<void> _forget(
+    BuildContext context, {
+    required bool deleteBranch,
+  }) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final String? note;
+    try {
+      note = TaskRunsController.forgetNote(
+        await controller.forget(hostId, run.id, deleteBranch: deleteBranch),
+      );
+    } on Object catch (e) {
+      messenger?.showSnackBar(SnackBar(content: Text('Not removed: $e')));
+      return;
+    }
+    if (note != null) messenger?.showSnackBar(SnackBar(content: Text(note)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -196,6 +215,9 @@ class _RunTile extends StatelessWidget {
       ?run.branch,
       ?run.error,
       if (sync != null) 'not marked done: $sync',
+      if (run.agentOpen && run.keep) 'agent kept open',
+      if (run.agentStopped == 'closed' || run.agentStopped == 'signalled')
+        'agent closed',
     ].join(' · ');
     return ListTile(
       key: ValueKey('task-run-${run.id}'),
@@ -213,18 +235,33 @@ class _RunTile extends StatelessWidget {
         onSelected: (action) => unawaited(switch (action) {
           'copy' => Clipboard.setData(ClipboardData(text: run.command ?? '')),
           'cancel' => controller.cancel(hostId, run.id),
-          _ => controller.forget(hostId, run.id),
+          'keep' => controller.keep(hostId, run.id),
+          'unkeep' => controller.keep(hostId, run.id, on: false),
+          _ => _forget(context, deleteBranch: action == 'forget-branch'),
         }),
         itemBuilder: (context) => [
           if (run.command != null)
             const PopupMenuItem(value: 'copy', child: Text('Copy command')),
           if (run.active || run.status == TaskRunStatus.queued)
             const PopupMenuItem(value: 'cancel', child: Text('Stop following'))
-          else
+          else ...[
+            if (run.agentOpen)
+              PopupMenuItem(
+                value: run.keep ? 'unkeep' : 'keep',
+                child: Text(
+                  run.keep ? "Don't keep agent open" : 'Keep agent open',
+                ),
+              ),
             const PopupMenuItem(
               value: 'forget',
-              child: Text('Remove from list'),
+              child: Text('Remove and clean up'),
             ),
+            if (run.branch != null)
+              const PopupMenuItem(
+                value: 'forget-branch',
+                child: Text('Remove and delete branch'),
+              ),
+          ],
         ],
       ),
     );
