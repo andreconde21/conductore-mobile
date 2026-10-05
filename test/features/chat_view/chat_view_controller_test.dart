@@ -404,7 +404,6 @@ void main() {
       final controller = ChatViewController(
         runner: runner,
         sessionId: 's-1',
-        pollInterval: const Duration(milliseconds: 1500),
       )..setVisible(true);
       async.elapse(const Duration(seconds: 2));
       final start = runner.commands.length;
