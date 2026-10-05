@@ -5,6 +5,10 @@ import 'package:flutter/foundation.dart';
 /// time-boxed trust, "approve all safe" and the auto-approved log.
 const smartApprovalsCapability = 'smart-approvals';
 
+/// The companion takes `--session` on `decide`, `trust` and `approve-low`
+/// and refuses a request that is not pending for that agent.
+const requestOwnerCapability = 'request-owner';
+
 /// Where an approval rule applies.
 enum ApprovalScopeKind {
   /// One agent session; the rule goes when the session ends.
@@ -395,12 +399,15 @@ class TrustResult {
 /// Commands are shell command lines for the provider's runner; the parse
 /// methods read their stdout and throw on an `{"error"}` reply.
 abstract interface class SmartApprovalsProvider {
-  String approveLowCommand(List<String> requestIds);
+  /// With [sessionId], only that agent's requests ([requestOwnerCapability]).
+  String approveLowCommand(List<String> requestIds, {String? sessionId});
 
+  /// With [sessionId], refused unless [request] is that agent's.
   String trustCommand(
     PendingPermissionRequest request,
     ApprovalRuleDraft draft, {
     String source = 'trust',
+    String? sessionId,
   });
 
   String approvalsCommand();

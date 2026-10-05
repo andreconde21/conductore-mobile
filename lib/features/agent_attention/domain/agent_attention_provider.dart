@@ -53,9 +53,11 @@ abstract class AgentAttentionProvider {
   }) async => null;
 
   /// Command that answers [request] with [verdict], or null when the
-  /// provider cannot relay permission decisions.
+  /// provider cannot relay permission decisions. With [sessionId], the
+  /// companion refuses it unless the request is that agent's.
   String? decideCommand(
     PendingPermissionRequest request,
-    PermissionVerdict verdict,
-  ) => null;
+    PermissionVerdict verdict, {
+    String? sessionId,
+  }) => null;
 }

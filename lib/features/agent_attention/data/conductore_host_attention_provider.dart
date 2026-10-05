@@ -209,16 +209,18 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
   @override
   String? decideCommand(
     PendingPermissionRequest request,
-    PermissionVerdict verdict,
-  ) {
+    PermissionVerdict verdict, {
+    String? sessionId,
+  }) {
     if (request.id.isEmpty) {
       return null;
     }
+    final owner = _sessionArg(sessionId);
     final answers = request.answers;
     if (answers != null && verdict != PermissionVerdict.deny) {
       return remoteCommand(
         'decide ${shellQuoteArgument(request.id)} answer '
-        '--answers ${shellQuoteArgument(jsonEncode(answers))}',
+        '--answers ${shellQuoteArgument(jsonEncode(answers))}$owner',
       );
     }
     // A question takes answers: an allow without them would leave the
@@ -227,9 +229,15 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       return null;
     }
     return remoteCommand(
-      'decide ${shellQuoteArgument(request.id)} ${verdict.wireName}',
+      'decide ${shellQuoteArgument(request.id)} ${verdict.wireName}$owner',
     );
   }
+
+  /// ` --session S` (the agent the request must belong to), or nothing.
+  static String _sessionArg(String? sessionId) =>
+      sessionId == null || sessionId.isEmpty
+      ? ''
+      : ' --session ${shellQuoteArgument(sessionId)}';
 
   /// Maps exit codes to the two conditions the controller distinguishes:
   /// not installed (monitoring stops) versus a reported error (retried).
@@ -569,10 +577,14 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
   // --- smart approvals ------------------------------------------------------
 
   @override
-  String approveLowCommand(List<String> requestIds) => remoteCommand(
-    requestIds.isEmpty
-        ? 'approve-low'
-        : 'approve-low --ids ${shellQuoteArgument(requestIds.join(','))}',
+  String approveLowCommand(
+    List<String> requestIds, {
+    String? sessionId,
+  }) => remoteCommand(
+    (requestIds.isEmpty
+            ? 'approve-low'
+            : 'approve-low --ids ${shellQuoteArgument(requestIds.join(','))}') +
+        _sessionArg(sessionId),
   );
 
   /// `--rule R --scope K [--path P | --session S] --minutes N|…`.
@@ -604,10 +616,11 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     PendingPermissionRequest request,
     ApprovalRuleDraft draft, {
     String source = 'trust',
+    String? sessionId,
   }) => remoteCommand(
     'trust ${shellQuoteArgument(request.id)} '
     '${_draftArgs(draft, withSession: false)} '
-    '--source ${shellQuoteArgument(source)}',
+    '--source ${shellQuoteArgument(source)}${_sessionArg(sessionId)}',
   );
 
   @override

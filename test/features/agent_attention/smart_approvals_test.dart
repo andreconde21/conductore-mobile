@@ -322,6 +322,69 @@ void main() {
       ]);
     });
 
+    testWidgets(
+      'with request-owner, decide, trust and approve-low name the agent; '
+      'without it the commands stay as older companions know them',
+      (tester) async {
+        String owned(String status) => status.replaceFirst(
+          '"capabilities":["smart-approvals"]',
+          '"capabilities":["smart-approvals","request-owner"]',
+        );
+        for (final capable in [true, false]) {
+          String st(List<String> api, List<String> web) =>
+              capable ? owned(_status(api, web)) : _status(api, web);
+          final (controller, runner) = await start(tester, {
+            'status': [
+              st([_lowGit, _highRm], [_lowLs]),
+              st([_highRm], []),
+              st([_highRm], []),
+              st([], []),
+            ],
+            'approve-low': [
+              '{"ok":true,"approved":[{"id":"req-low"}],"skipped":[]}',
+              '{"ok":true,"approved":[{"id":"req-ls"}],"skipped":[]}',
+            ],
+            'trust': ['{"ok":true,"rule":$_rule,"approved":[]}'],
+            'decide': ['{"ok":true}'],
+            'approvals': [_approvals],
+          });
+          final high = controller.pendingApprovals
+              .firstWhere((p) => p.request.id == 'req-high')
+              .request;
+          await tester.runAsync(() async {
+            await controller.approveAllLowRisk();
+            await controller.trustRequest('h', high);
+            await controller.decide('h', high, PermissionVerdict.deny);
+            await pumpEventQueue();
+          });
+          final batches = runner.sent('approve-low');
+          final decided = runner.sent('decide').single;
+          final trusted = runner.sent('trust').single;
+          if (capable) {
+            expect(trusted, contains('--session s-1'));
+            // One batch per agent, each naming it.
+            expect(batches, hasLength(2));
+            expect(
+              batches.firstWhere((c) => c.contains('req-low')),
+              contains('--session s-1'),
+            );
+            expect(
+              batches.firstWhere((c) => c.contains('req-ls')),
+              contains('--session s-2'),
+            );
+            expect(decided, contains('--session s-1'));
+          } else {
+            expect(batches.single, contains('req-low,req-ls'));
+            expect(batches.single, isNot(contains('--session')));
+            expect(decided, isNot(contains('--session')));
+            expect(trusted, isNot(contains('--session')));
+          }
+          await tester.pumpWidget(const SizedBox());
+          await tester.pumpAndSettle();
+        }
+      },
+    );
+
     testWidgets('trustRequest sends the rule, scope and duration', (
       tester,
     ) async {
