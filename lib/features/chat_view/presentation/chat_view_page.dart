@@ -500,7 +500,9 @@ class _ChatViewPageState extends State<ChatViewPage>
     final attention = widget.attention;
     final hostId = widget.hostId;
     if (attention == null || hostId == null) return null;
-    return attention.monitoredHosts.where((h) => h.id == hostId).firstOrNull;
+    return attention.monitoredHosts
+        .where((h) => h.id == baseHostId(hostId))
+        .firstOrNull;
   }
 
   /// The monitor's record of this agent (Review needs its cwd and name).

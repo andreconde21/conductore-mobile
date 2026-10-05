@@ -184,8 +184,8 @@ class AgentAttentionController extends ChangeNotifier {
   String? Function(String hostId, String agentId)? stuckReasonFor;
 
   /// The saved machine's name for its id (the app wires it to the hosts
-  /// store): a session's own host is named after its Herdr workspace or
-  /// tmux session too ("dev: lf-seguros-web").
+  /// store), for the monitor's machine: a session's own host is named
+  /// after its Herdr workspace or tmux session too ("dev: lf-seguros-web").
   String? Function(String savedHostId)? machineName;
 
   final AgentStatusThrottle _statusThrottle;
@@ -233,8 +233,7 @@ class AgentAttentionController extends ChangeNotifier {
     ];
   }
 
-  bool isMonitoring(String hostId) =>
-      _monitors.containsKey(baseHostId(hostId));
+  bool isMonitoring(String hostId) => _monitors.containsKey(baseHostId(hostId));
 
   /// The monitor of [hostId]'s machine: every session of a machine (a
   /// shell, each Herdr workspace or tmux session opened) shares one
