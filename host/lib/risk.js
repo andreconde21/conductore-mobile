@@ -150,7 +150,7 @@ const READ_ONLY = new Set([
   'awk', 'gawk', 'sed', 'look', 'zcat', 'zgrep', 'bzcat', 'xzcat', 'getent', 'dig', 'nslookup', 'host', 'ping', 'base64'
 ])
 
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'ash', 'busybox'])
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'ash'])
 const INTERPRETERS = new Set([...SHELLS, 'python', 'python2', 'python3', 'node', 'nodejs', 'perl', 'ruby', 'php', 'deno', 'bun', 'lua', 'Rscript', 'osascript', 'tclsh', 'pwsh', 'powershell'])
 // Flags that run the code given on the command line.
 const INLINE_CODE = /^(-c|-e|-E|-r|-p|--eval|--print|--command|-Command|-EncodedCommand|eval)$|^--eval=|^--print=/
@@ -158,7 +158,7 @@ const ROOT_WRAPPERS = new Set(['sudo', 'su', 'doas', 'pkexec', 'run0'])
 // The shell's own state: aliases, functions, variables, traps, options.
 const SHELL_STATE = new Set(['eval', 'exec', 'source', '.', 'alias', 'unalias', 'function', 'trap', 'enable', 'export', 'declare', 'typeset', 'local', 'readonly', 'unset', 'shopt', 'set', 'hash', 'ulimit', 'umask', 'bind', 'complete', 'fc', 'history', 'disown', 'let'])
 // Programs that run another command (given, or read from their input).
-const RUNS_OTHERS = new Set(['xargs', 'watch', 'parallel', 'script', 'flock', 'setsid', 'strace', 'ltrace', 'gdb', 'lldb', 'valgrind', 'chroot', 'unshare', 'nsenter', 'runuser', 'firejail', 'bwrap', 'proot', 'systemd-run', 'at', 'batch', 'entr', 'expect', 'screen', 'nodemon', 'concurrently', 'npm-run-all', 'dbus-launch', 'xvfb-run', 'faketime', 'catchsegv'])
+const RUNS_OTHERS = new Set(['busybox', 'toybox', 'xargs', 'watch', 'parallel', 'script', 'flock', 'setsid', 'strace', 'ltrace', 'gdb', 'lldb', 'valgrind', 'chroot', 'unshare', 'nsenter', 'runuser', 'firejail', 'bwrap', 'proot', 'systemd-run', 'at', 'batch', 'entr', 'expect', 'screen', 'nodemon', 'concurrently', 'npm-run-all', 'dbus-launch', 'xvfb-run', 'faketime', 'catchsegv'])
 const CONDUCTORE = /^conductore(-hostd|-hook|-statusline)?$/
 const NETWORK = new Set(['curl', 'wget', 'http', 'https', 'xh', 'aria2c'])
 const REMOTE = new Set(['ssh', 'scp', 'sftp', 'rsync', 'ftp', 'telnet', 'nc', 'ncat', 'netcat', 'socat', 'mosh'])
@@ -195,7 +195,8 @@ const CONCERNS = {
   control: 'has control or invisible characters',
   syntax: 'has a shell syntax error',
   'glob-command': 'uses a wildcard as the command',
-  'glob-redirect': 'redirects to a wildcard path'
+  'glob-redirect': 'redirects to a wildcard path',
+  brace: 'uses brace expansion'
 }
 
 // Why a command the parser did not fully understand is high.
@@ -287,13 +288,36 @@ function secretOf (w, ctx) {
   return null
 }
 
+// Names a wildcard must not be able to match (see SECRET_PATTERNS).
+const SECRET_NAMES = ['.env', '.env.local', '.ssh', 'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519', 'x.pem', 'x.key', 'x.p12', 'x.pfx', 'x.jks', 'x.keystore', 'x.kdbx', 'x.asc', 'x.gpg', '.aws', '.gnupg', '.netrc', '.git-credentials', '.npmrc', '.pypirc', '.pgpass', '.my.cnf', 'credentials', 'credentials.json', 'secret', 'secrets', 'secrets.yml', '.kube', '.docker', '.conductore', 'shadow', 'sudoers']
+// Programs that read names only, never contents.
+const NAMES_ONLY = new Set(['ls', 'll', 'la', 'du', 'stat', 'tree', 'file'])
+
+function segmentRegex (seg) {
+  let re = ''
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i]
+    if (c === '*') re += '.*'
+    else if (c === '?') re += '.'
+    else if (c === '[') {
+      const end = seg.indexOf(']', i + 2)
+      if (end === -1) { re += '\\['; continue }
+      re += '[' + seg.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\') + ']'
+      i = end
+    } else re += c.replace(/[.+^${}()|\\]/g, '\\$&')
+  }
+  try { return new RegExp(`^${re}$`, 's') } catch { return /^/ }
+}
+
 // A wildcard argument the shell expands before the program runs: high when
 // it can reach outside the repo, hidden files or secrets.
 function globRisk (word, prog, ctx) {
   if (FILE_CHANGERS.has(prog)) return r('high', `Uses a wildcard with a command that changes files: ${clip(word, 40)}`)
   const v = pathOf(word)
   const plain = v.replace(/[*?]|\[[^\]]*\]/g, '')
-  if (secretKind(plain) || secretKind(v.replace(/[*?]|\[[^\]]*\]/g, 'x'))) return r('high', `Uses a wildcard that can match secrets: ${clip(word, 40)}`)
+  const segs = v.split('/')
+  const secretish = secretKind(plain) || segs.some((seg, k) => /[*?[]/.test(seg) && (k < segs.length - 1 || !NAMES_ONLY.has(prog)) && SECRET_NAMES.some(n => segmentRegex(seg).test(n)))
+  if (secretish) return r('high', `Uses a wildcard that can match secrets: ${clip(word, 40)}`)
   if (v.split('/').some(part => part.startsWith('.') && part !== '.' && part !== '..' && /[*?[]/.test(part))) return r('high', `Uses a wildcard that can match hidden files: ${clip(word, 40)}`)
   const fixed = v.slice(0, v.search(/[*?[]/))
   const dir = resolvePath(fixed.includes('/') ? fixed.slice(0, fixed.lastIndexOf('/') + 1) || '/' : '.', ctx)
@@ -431,9 +455,9 @@ function classifySegment (seg, ctx, depth) {
   }
 
   let own = classifyProgram(prog, args, ctx, text, words)
-  // A low-rated runner (tests, linters, read-only toolchain commands) with
-  // options or paths that bring in code from elsewhere.
-  if (own.level === 'low' && (TEST_BINARIES.has(prog) || TOOLCHAINS.has(prog) || PKG_MANAGERS.has(prog) || prog === 'npx' || prog === 'pnpx' || prog === 'bunx' || prog === 'gradlew' || prog === 'mvnw')) {
+  // A runner (tests, linters, builds, installs) with options or paths that
+  // bring in code from elsewhere or move the run out of the repo.
+  if (own.level !== 'high' && (TEST_BINARIES.has(prog) || TOOLCHAINS.has(prog) || PKG_MANAGERS.has(prog) || prog === 'npx' || prog === 'pnpx' || prog === 'bunx' || prog === 'gradlew' || prog === 'mvnw')) {
     own = max(own, runnerRisk(prog, args, ctx, text))
   }
   return max(result, own)

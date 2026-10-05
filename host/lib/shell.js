@@ -350,6 +350,8 @@ function shape (all, raw, sep, concerns) {
   const first = objs[assigns]
   if (first && !first.quoted && KEYWORDS.has(first.text)) concerns.add('compound')
   if (first && (first.glob || first.brace)) concerns.add('glob-command')
+  // {a,b} and {1..3} turn one word into several.
+  if (objs.some(w => w.brace)) concerns.add('brace')
   const meta = objs.map(w => ({ quoted: w.quoted, glob: w.glob, brace: w.brace }))
   return { words, meta, assigns, redirects, pipedFrom: sep === '|' || sep === '|&', sep, raw }
 }

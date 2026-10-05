@@ -161,7 +161,8 @@ function parseArgs (s) {
 function patchFiles (patch) {
   const files = []
   if (typeof patch !== 'string') return files
-  for (const m of patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
+  // Every path the patch writes, a rename's new name too.
+  for (const m of patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm)) {
     const f = m[1].trim()
     if (f && !files.includes(f)) files.push(f)
   }
