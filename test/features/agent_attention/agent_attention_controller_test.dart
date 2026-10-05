@@ -158,7 +158,7 @@ void main() {
 
     await controller.pollNow('h');
     expect(notifier.alerts, isEmpty);
-    expect(notifier.status?.lines.single, startsWith('builder · Done'));
+    expect(notifier.status?.lines.single, startsWith('builder · Idle'));
   });
 
   test('honors per-host notification toggles', () async {

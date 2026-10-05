@@ -1,14 +1,13 @@
 import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
+import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
-import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
-import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_notification_settings.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -324,9 +323,7 @@ void main() {
       provider: const HerdrAttentionProvider(),
       companionProvider: const ConductoreHostAttentionProvider(),
       notifier: notifier,
-      notificationPreferences: MemoryAgentNotificationPreferencesStore(
-        const AgentNotificationPreferences(),
-      ),
+      notificationPreferences: MemoryAgentNotificationPreferencesStore(),
       statusThrottle: AgentStatusThrottle(interval: Duration.zero),
       pollInterval: const Duration(days: 1),
       clock: () => _now,
