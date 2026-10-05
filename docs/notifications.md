@@ -13,20 +13,39 @@ on top of it.
 
 ## The ongoing status notification
 
-This is one silent notification that lists every agent on one line,
-starting with the most urgent:
+This is one silent notification that lists every live agent on one line,
+starting with the most urgent (needs you, then working, then idle):
 
 ```
-1 needs you · 1 working · 1 done
+1 needs you · 2 working · 1 idle
 api (Codex) · Needs you · Approve Bash: git push
-web · Working · Bash
-docs · Done · Rewrote the intro.
+lf-seguros-web · Working · Fixing the login redirect
+cli · Stuck · `npm test` failed 3 times
+docs · Idle · Rewrote the intro.
 ```
 
-- The progress after the state is the pending request, the tool the agent
-  is running (the companion's `lastToolName`), the dashboard's summary line
-  or the agent's last message. Agents that are not Claude Code are named by
-  their kind, for example "(Codex)".
+- Agents are named as the session tiles name them (CON-079,
+  `agent_naming.dart`): the project, never a folder hash. A Claude Code
+  worktree (`<repo>/.claude/worktrees/agent-<hex>`) or a Herdr one
+  (`~/.herdr/worktrees/<repo>/<branch>`) is named after its repository.
+  Agents that are not Claude Code add their kind, for example "(Codex)".
+- The text after the state is the pending request, the dashboard's summary
+  line or the agent's last message (never its generic "is waiting for your
+  input"), else the tool it runs.
+- Each agent counts once. Every Herdr workspace or tmux session opened in
+  the app is its own session of the machine and polls it, so the same agent
+  arrives once per open session; the status keys agents by machine and
+  session id, and by pane, so Herdr's sighting of an agent its hooks also
+  report (or a second agent in the same pane) folds into one, the
+  hook-reported and then the most urgent one winning.
+- Idle agents (their turn ended, or finished) drop out 30 minutes after
+  their last change. Agents that need you and working agents always stay.
+- The title counts exactly the agents listed: "N need you · N working ·
+  N idle". A dashboard stuck flag does not have its own count: the agent
+  counts under its state and its line says "Stuck" with the reason.
+- Up to five agents are listed; "+N more" counts the other agents.
+- The machine is named, as a suffix "(dev-central)", only when agents of
+  more than one machine are listed.
 - It is updated in place without sound, at most once every 5 seconds. The
   latest version wins, and removing it is never delayed. If nothing changes
   it is re-sent every 10 minutes. On Android 8 or later a status that nobody
