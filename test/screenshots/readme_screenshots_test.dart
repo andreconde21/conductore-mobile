@@ -1975,7 +1975,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
     await tester.runAsync(pumpEventQueue);
     await pumpFrames(tester, 8);
-    // The explorer: the accounts under the limit rings.
+    // The details sheet (CON-080): limits, today and every account.
+    expect(find.byKey(const ValueKey('usage-details')), findsOneWidget);
     expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
     await saveShot(tester, '33-usage-accounts');
     await tearDownPage(tester);
