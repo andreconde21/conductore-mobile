@@ -49,6 +49,7 @@ const OBSERVE_EVERY_MS = 2000
 // of lag cost nothing; rewriting ~260 KB every busy second did.
 const SNAPSHOT_DEBOUNCE_MS = 1000
 const FLUSH_EVERY_MS = 5000
+const TURNS_PRUNE_EVERY_MS = 6 * 60 * 60 * 1000
 const WATCH_FALLBACK_MS = 2000
 const TMP_MAX_AGE_MS = 60 * 60 * 1000
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
@@ -320,6 +321,10 @@ class Daemon {
     this.expireAgents()
     this.commit(state.prune(this.state))
     this.turns.prune()
+    // A daemon that lives for days (a phone polling) still drops quiet
+    // sessions' turns and refs, and collects their objects (turns.js).
+    this.turnsPruneTimer = setInterval(() => { this.turns.prune(); this.scheduleSnapshot() }, TURNS_PRUNE_EVERY_MS)
+    this.turnsPruneTimer.unref()
     this.schedulePrune()
     this.flushSnapshot()
     this.importParkedUsage()
@@ -954,6 +959,7 @@ class Daemon {
     }
     for (const t of [this.snapshotTimer, this.pruneTimer, this.idleTimer]) clearTimeout(t)
     clearInterval(this.probeTimer)
+    clearInterval(this.turnsPruneTimer)
     clearInterval(this.observeTimer)
     clearInterval(this.watchFallback)
     // A snapshot still running is dropped (its temp index goes with tmp/'s

@@ -460,7 +460,8 @@ test('turn store: sessions quiet for 7 days go with their refs', async () => {
     snapshot: async (cwd, { ref }) => ({ ok: true, ref, commit: 'c', head: 'h', repo: '/r', untracked: 0, excluded: [], ms: 1 }),
     changes: async () => [],
     listRefs: async (repo, prefix) => [{ ref: `${prefix}x`, at: 0 }],
-    deleteRefs: async (repo, refs) => { deleted.push(...refs); return refs.length }
+    deleteRefs: async (repo, refs) => { deleted.push(...refs); return refs.length },
+    collect: async () => ({ ok: true, skipped: 'test' })
   })
   const old = Date.now() - 8 * 24 * 3600 * 1000
   t.onEvent({ session_id: 'old', hook_event_name: 'UserPromptSubmit', cwd: '/r', prompt: 'x' }, old)
@@ -470,4 +471,68 @@ test('turn store: sessions quiet for 7 days go with their refs', async () => {
   await sleep(20)
   assert.equal(t.view('old'), null)
   assert.ok(deleted.includes('refs/conductore/snapshots/old/x'))
+})
+
+test('collect: old unreachable loose objects go, reachable ones are packed; HEAD, branches, index, stash and reflogs stay', async () => {
+  const repo = makeRepo()
+  const objectsOf = () => g(repo, ['count-objects', '-v']).match(/^count: (\d+)/m)[1] | 0
+  // Reachable: a snapshot ref. Unreachable: blobs of deleted snapshots,
+  // 30 days old, and one written just now (an operation in flight).
+  const r = await snapshots.snapshot(repo, { ref: 'refs/conductore/snapshots/keep/1/before', meta: {} })
+  assert.equal(r.ok, true, r.detail)
+  const hash = text => execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: repo, input: text, encoding: 'utf8' }).trim()
+  const old = []
+  for (let i = 0; i < 20; i++) old.push(hash(`old ${i}\n`))
+  const fresh = hash('fresh\n')
+  const objFile = id => path.join(repo, '.git', 'objects', id.slice(0, 2), id.slice(2))
+  const monthAgo = Date.now() / 1000 - 30 * 86400
+  for (const id of old) fs.utimesSync(objFile(id), monthAgo, monthAgo)
+  const before = gitState(repo)
+  const index = fs.readFileSync(path.join(repo, '.git', 'index'))
+  const reflog = g(repo, ['reflog', 'show', '--all'])
+  const loose = objectsOf()
+
+  // Few loose objects: nothing runs.
+  const skipped = await snapshots.collect(repo, { expireMs: 7 * 86400000, minLoose: 100000 })
+  assert.equal(skipped.skipped, 'few loose objects')
+  assert.equal(objectsOf(), loose)
+
+  const res = await snapshots.collect(repo, { expireMs: 7 * 86400000, minLoose: 1 })
+  assert.equal(res.ok, true, res.skipped)
+  for (const id of old) assert.equal(fs.existsSync(objFile(id)), false, `old unreachable ${id} pruned`)
+  assert.doesNotThrow(() => g(repo, ['cat-file', '-e', fresh]), 'a fresh unreachable object stays (grace)')
+  assert.doesNotThrow(() => g(repo, ['cat-file', '-e', `${r.commit}^{tree}`]), 'the snapshot is still readable')
+  assert.ok(res.after < loose, `loose objects ${loose} -> ${res.after}`)
+  assert.deepEqual(gitState(repo), before)
+  assert.ok(fs.readFileSync(path.join(repo, '.git', 'index')).equals(index), 'index bytes unchanged')
+  assert.equal(g(repo, ['reflog', 'show', '--all']), reflog, 'reflogs unchanged')
+  assert.equal(fs.existsSync(path.join(repo, '.git', 'packed-refs')), false, 'refs not packed')
+
+  // The owner turned automatic gc off: left alone.
+  g(repo, ['config', 'gc.auto', '0'])
+  assert.equal((await snapshots.collect(repo, { expireMs: 0, minLoose: 0 })).skipped, 'gc.auto is 0')
+})
+
+test('turn store: a prune that deleted refs queues one collect per repo, at most once a day', async () => {
+  const collected = []
+  const t = new Turns(null, {
+    snapshot: async () => ({ ok: false, reason: 'no cwd' }),
+    changes: async () => [],
+    listRefs: async (repo, prefix) => [{ ref: `${prefix}x`, at: 0 }],
+    deleteRefs: async (repo, refs) => refs.length,
+    collect: async (repo, opts) => { collected.push([repo, opts.expireMs]); return { ok: true, before: 9, after: 1 } }
+  })
+  t.enqueue({ kind: 'prune', repo: '/r1', prefix: 'refs/conductore/snapshots/a/' })
+  t.enqueue({ kind: 'prune', repo: '/r1', prefix: 'refs/conductore/snapshots/b/' })
+  t.enqueue({ kind: 'prune', repo: '/r2', prefix: 'refs/conductore/snapshots/c/' })
+  for (let i = 0; i < 50 && (t.running || t.queue.length); i++) await sleep(10)
+  assert.deepEqual(collected.map(c => c[0]).sort(), ['/r1', '/r2'])
+  assert.ok(collected.every(c => c[1] > 0), 'the keep time is passed on')
+  assert.ok(t.toJSON().collected['/r1'], 'remembered in turns.json')
+  // Restored from turns.json: still throttled.
+  const again = new Turns(JSON.parse(JSON.stringify(t.toJSON())), { ...t.ops })
+  again.ops.collect = async repo => { collected.push([repo]); return { ok: true } }
+  again.enqueue({ kind: 'prune', repo: '/r1', prefix: 'refs/conductore/snapshots/d/' })
+  for (let i = 0; i < 50 && (again.running || again.queue.length); i++) await sleep(10)
+  assert.equal(collected.length, 2)
 })

@@ -39,6 +39,8 @@ const DEFAULT_TIMEOUT_MS = 20000
 const MAX_EXCLUDED = 200
 const ARG_BUDGET = 256 * 1024
 const MIN_PIECE = 256
+// git gc's default gc.pruneExpire (2.weeks.ago).
+const PRUNE_EXPIRE_MIN_S = 14 * 24 * 60 * 60
 const IDENTITY = { name: 'Conductore', email: 'conductore@localhost' }
 
 const envInt = (name, fallback) => {
@@ -285,6 +287,39 @@ async function deleteRefs (repo, refs, deadline) {
   return r.code === 0 ? refs.length : 0
 }
 
+// Clears out what deleted snapshot refs left in a repo, without git gc
+// (which would also expire reflogs and pack refs): unreachable loose
+// objects older than expireMs, and never younger than git gc's own default
+// of two weeks, go (`git prune --expire`: the grace git gc relies on, so
+// objects an operation is writing now and a user's dangling objects stay
+// as long as git itself would keep them), and the
+// reachable loose ones go into one incremental pack (`git repack -d`,
+// never -a or -A). Branches, HEAD, the index, reflogs and the stash are
+// never written; prune treats all of them (and every worktree's) as
+// reachable. Like every git here: nice 10, its own group, a deadline.
+// Skipped when the repo has few loose objects or its owner turned
+// automatic gc off (gc.auto = 0). Resolves { ok, skipped?, before, after }
+// (loose object counts).
+async function collect (repo, { expireMs, deadline = Date.now() + 120000, minLoose = envInt('CONDUCTORE_SNAPSHOT_GC_MIN_LOOSE', 500) } = {}) {
+  const count = async () => {
+    const r = await git(['count-objects', '-v'], { cwd: repo, deadline })
+    if (r.code !== 0) return null
+    const m = /^count: (\d+)/m.exec(r.stdout.toString('utf8'))
+    return m ? Number(m[1]) : null
+  }
+  const before = await count()
+  if (before === null) return { ok: false, skipped: 'count-objects failed' }
+  if (before < minLoose) return { ok: true, skipped: 'few loose objects', before, after: before }
+  const auto = await git(['config', '--get', 'gc.auto'], { cwd: repo, deadline })
+  if (auto.code === 0 && auto.stdout.toString('utf8').trim() === '0') return { ok: true, skipped: 'gc.auto is 0', before, after: before }
+  const secs = Math.max(PRUNE_EXPIRE_MIN_S, Math.ceil((expireMs || 0) / 1000))
+  const pruned = await git(['prune', `--expire=${secs}.seconds.ago`], { cwd: repo, deadline })
+  if (pruned.code !== 0) return { ok: false, skipped: `prune: ${String(pruned.stderr).trim().slice(0, 200)}`, before }
+  const packed = await git(['repack', '-d', '-q'], { cwd: repo, deadline })
+  if (packed.code !== 0) return { ok: false, skipped: `repack: ${String(packed.stderr).trim().slice(0, 200)}`, before }
+  return { ok: true, before, after: await count() }
+}
+
 // Changed paths between two trees: [{ path, status, added, removed, binary,
 // oldMode, newMode }], sorted by path. status: A M D T (no rename detection:
 // every card is one path, and so is every per-file undo).
@@ -461,6 +496,7 @@ async function stagedPaths (repo, deadline) {
 
 module.exports = {
   REF_ROOT,
+  collect,
   SESSION_RE,
   SnapshotError,
   limits,
