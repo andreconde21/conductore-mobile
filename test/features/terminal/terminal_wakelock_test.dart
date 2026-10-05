@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -72,8 +74,10 @@ void main() {
     expect(wakelock.held, isTrue);
 
     // A route over the terminal (Chat View, SFTP, Settings).
-    navigator.currentState!.push(
-      MaterialPageRoute<void>(builder: (_) => const Text('over')),
+    unawaited(
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => const Text('over')),
+      ),
     );
     await tester.pumpAndSettle();
     expect(wakelock.held, isFalse);
