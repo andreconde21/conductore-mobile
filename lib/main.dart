@@ -43,6 +43,7 @@ import 'package:conduit/features/continuity/presentation/continuity_sync_link.da
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
+import 'package:conduit/features/home_widget/domain/launcher_themes.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
 import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
@@ -325,6 +326,15 @@ void main() {
     usage: usage,
     digest: digest,
     theme: () => AgentStatusTheme.fromPalette(themeController.palette),
+    pcTheme: () {
+      final synced = themeController.omarchySyncedTheme;
+      return AgentStatusPcTheme.fromSynced(
+        synced,
+        machine: synced == null
+            ? null
+            : hostsController.findById(synced.hostId)?.name,
+      );
+    },
     themeChanges: themeController,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();

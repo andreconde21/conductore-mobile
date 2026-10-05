@@ -7,11 +7,37 @@ import java.security.SecureRandom
 
 /**
  * One agent line as rendered by the widget and tile. Mirrors
- * `AgentStatusEntry` on the Dart side.
+ * `AgentStatusEntry` on the Dart side. The ids (where a tap goes, as in
+ * [DashboardLine]) and [changedAtMillis] (0 unknown) are empty in payloads
+ * written before the launcher details provider (CON-075).
  */
-data class AgentStatusLine(val name: String, val host: String, val state: String, val label: String) {
+data class AgentStatusLine(
+    val name: String,
+    val host: String,
+    val state: String,
+    val label: String,
+    val hostId: String = "",
+    val agentId: String = "",
+    val workspace: String = "",
+    val tab: String = "",
+    val pane: String = "",
+    val changedAtMillis: Long = 0L,
+) {
     /** Needs input or blocked: the states a human should act on. */
     val urgent: Boolean get() = state == "needsInput" || state == "blocked"
+
+    /** The same target a dashboard line for this agent has. */
+    fun asDashboardLine(): DashboardLine = DashboardLine(
+        stuck = false,
+        name = name,
+        host = host,
+        reason = label,
+        hostId = hostId,
+        agentId = agentId,
+        workspace = workspace,
+        tab = tab,
+        pane = pane,
+    )
 }
 
 /**
@@ -47,6 +73,7 @@ data class AgentStatusSnapshot(
     val version: Int = 3,
     val dashboard: WidgetDashboard = WidgetDashboard.legacy(attentionCount, agents),
     val theme: WidgetTheme? = null,
+    val pcTheme: LauncherPcTheme? = null,
 ) {
     fun limit(label: String): AgentStatusLimitRing? = limits.firstOrNull { it.label == label }
 
@@ -65,6 +92,12 @@ data class AgentStatusSnapshot(
                     host = agent.optString("host"),
                     state = agent.optString("state"),
                     label = agent.optString("label"),
+                    hostId = agent.optString("hostId"),
+                    agentId = agent.optString("agentId"),
+                    workspace = agent.optString("workspace"),
+                    tab = agent.optString("tab"),
+                    pane = agent.optString("pane"),
+                    changedAtMillis = agent.optLong("changedAt", 0L),
                 )
             }
             AgentStatusSnapshot(
@@ -85,6 +118,7 @@ data class AgentStatusSnapshot(
                 dashboard = (if (version >= 3) parseDashboard(root.optJSONObject("dashboard")) else null)
                     ?: WidgetDashboard.legacy(attentionCount, agents),
                 theme = if (version >= 3) parseTheme(root.optJSONObject("theme")) else null,
+                pcTheme = LauncherPcTheme.parse(root.optJSONObject("pcTheme")),
             )
         } catch (_: Exception) {
             null
@@ -141,7 +175,7 @@ data class AgentStatusSnapshot(
          * [json] as it is stored once the engine went away: not monitoring,
          * no agents or dashboard (they no longer reflect a live session).
          * The version, the limit rings (per account, 0 once their window
-         * resets) and the theme stay. Null when [json] is not a payload.
+         * resets), the theme and the PC theme stay. Null when [json] is not a payload.
          */
         fun notMonitoring(json: String): String? = try {
             val root = JSONObject(json)
@@ -197,16 +231,29 @@ object AgentStatusStore {
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** Stores [json] and the tokens of its agent lines. */
+    /**
+     * Stores [json] and the tokens of its agent lines (the dashboard's and
+     * every agent's, for the launcher's deep links), then tells the
+     * launcher details provider's observers.
+     */
     @Synchronized
     fun save(context: Context, json: String) {
-        val lines = AgentStatusSnapshot.parse(json)?.dashboard?.lines.orEmpty().filter { it.tappable }
+        val previousPcTheme = load(context)?.pcTheme
+        val snapshot = AgentStatusSnapshot.parse(json)
+        val lines = snapshot?.tappableLines().orEmpty()
         val tokens = WidgetLineGuard.reissue(lineTokens(context), lines.map { it.key }, ::newToken)
         prefs(context).edit()
             .putString(KEY_SNAPSHOT, json)
             .putString(KEY_LINE_TOKENS, JSONObject(tokens).toString())
             .apply()
+        // apply() updates the in-memory prefs at once, so the provider
+        // (same process) already reads the new snapshot.
+        LauncherDetailsProvider.notifyChanged(context, pcThemeChanged = snapshot?.pcTheme != previousPcTheme)
     }
+
+    /** Every line a token may open: the dashboard's, then each agent's. */
+    private fun AgentStatusSnapshot.tappableLines(): List<DashboardLine> =
+        (dashboard.lines + agents.map { it.asDashboardLine() }).filter { it.tappable }
 
     fun load(context: Context): AgentStatusSnapshot? =
         prefs(context).getString(KEY_SNAPSHOT, null)?.let(AgentStatusSnapshot::parse)
@@ -221,10 +268,11 @@ object AgentStatusStore {
      */
     fun lineForToken(context: Context, token: String?): DashboardLine? {
         val key = WidgetLineGuard.resolve(lineTokens(context), token) ?: return null
-        return load(context)?.dashboard?.lines?.firstOrNull { it.tappable && it.key == key }
+        return load(context)?.tappableLines()?.firstOrNull { it.key == key }
     }
 
-    private fun lineTokens(context: Context): Map<String, String> {
+    /** Every issued token by line key ([DashboardLine.key]). */
+    fun lineTokens(context: Context): Map<String, String> {
         val raw = prefs(context).getString(KEY_LINE_TOKENS, null) ?: return emptyMap()
         return try {
             val json = JSONObject(raw)

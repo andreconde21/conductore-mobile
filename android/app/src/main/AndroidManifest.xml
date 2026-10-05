@@ -7,6 +7,16 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Launcher details (CON-075): who may read LauncherDetailsProvider.
+         Signature, or (API 31+) an app signed with a certificate in
+         @array/launcher_details_known_certs. Below API 31 the system does
+         not know knownSigner, so it is signature-only there. The launcher
+         only <uses-permission>s it: declaring it too would fail the second
+         install (duplicate permission, different signer). -->
+    <permission
+        android:name="com.outsmartis.permission.READ_LAUNCHER_DETAILS"
+        android:protectionLevel="signature|knownSigner"
+        android:knownCerts="@array/launcher_details_known_certs" />
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
@@ -123,6 +133,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity-alias>
+
+        <!-- Launcher details (CON-075): the sheet Yoke (com.outsmartis.yoke)
+             shows on a long-press. Read-only; docs/launcher-details-provider.md. -->
+        <meta-data
+            android:name="com.outsmartis.launcher.DETAILS_AUTHORITY"
+            android:value="${applicationId}.launcherdetails" />
+        <provider
+            android:name=".LauncherDetailsProvider"
+            android:authorities="${applicationId}.launcherdetails"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            android:readPermission="com.outsmartis.permission.READ_LAUNCHER_DETAILS"
+            android:writePermission="com.outsmartis.permission.READ_LAUNCHER_DETAILS" />
 
         <!-- Allow / Deny / Always buttons on permission notifications (feat/host-approvals) -->
         <receiver

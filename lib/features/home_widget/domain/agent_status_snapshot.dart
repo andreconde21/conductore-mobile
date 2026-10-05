@@ -3,31 +3,62 @@ import 'dart:convert';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
+import 'package:conduit/features/home_widget/domain/launcher_themes.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 
 /// One agent line as the home-screen widget and quick-settings tile show
 /// it: display label, machine name and state only (the same lock-screen
-/// safe subset the notifications use).
+/// safe subset the notifications use), plus where the agent lives so the
+/// launcher details provider (CON-075) can open it and order it by its
+/// last state change.
 class AgentStatusEntry {
   const AgentStatusEntry({
     required this.name,
     required this.host,
     required this.state,
+    this.hostId,
+    this.agentId,
+    this.workspace,
+    this.tab,
+    this.pane,
+    this.changedAt,
   });
 
   final String name;
   final String host;
   final AgentAttentionState state;
 
+  /// The notification deep link's fields; null in older payloads.
+  final String? hostId;
+  final String? agentId;
+  final String? workspace;
+  final String? tab;
+  final String? pane;
+
+  /// When the agent entered [state], if its provider reports it.
+  final DateTime? changedAt;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'host': host,
     'state': state.name,
     'label': state.label,
+    'hostId': ?hostId,
+    'agentId': ?agentId,
+    'workspace': ?workspace,
+    'tab': ?tab,
+    'pane': ?pane,
+    if (changedAt case final at?)
+      'changedAt': at.toUtc().millisecondsSinceEpoch,
   };
 
   static AgentStatusEntry fromJson(Map<String, Object?> json) {
     final stateName = json['state'] as String?;
+    String? optional(String key) =>
+        json[key] is String && (json[key] as String).isNotEmpty
+        ? json[key] as String
+        : null;
+    final changedAt = json['changedAt'];
     return AgentStatusEntry(
       name: json['name'] as String? ?? '',
       host: json['host'] as String? ?? '',
@@ -36,6 +67,14 @@ class AgentStatusEntry {
               .where((state) => state.name == stateName)
               .firstOrNull ??
           AgentAttentionState.unknown,
+      hostId: optional('hostId'),
+      agentId: optional('agentId'),
+      workspace: optional('workspace'),
+      tab: optional('tab'),
+      pane: optional('pane'),
+      changedAt: changedAt is int
+          ? DateTime.fromMillisecondsSinceEpoch(changedAt, isUtc: true)
+          : null,
     );
   }
 
@@ -44,10 +83,26 @@ class AgentStatusEntry {
       other is AgentStatusEntry &&
       other.name == name &&
       other.host == host &&
-      other.state == state;
+      other.state == state &&
+      other.hostId == hostId &&
+      other.agentId == agentId &&
+      other.workspace == workspace &&
+      other.tab == tab &&
+      other.pane == pane &&
+      other.changedAt == changedAt;
 
   @override
-  int get hashCode => Object.hash(name, host, state);
+  int get hashCode => Object.hash(
+    name,
+    host,
+    state,
+    hostId,
+    agentId,
+    workspace,
+    tab,
+    pane,
+    changedAt,
+  );
 }
 
 /// One account limit window as the widget's ring shows it: `5h` or `7d`,
@@ -119,14 +174,20 @@ class AgentStatusSnapshot {
     this.limits = const [],
     this.dashboard,
     this.theme,
+    this.pcTheme,
   });
 
   /// Payload format version; bump when the shape changes. 2: [limits].
   /// 3: [dashboard] and [theme]. The native side reads every version.
+  /// The agents' ids and `changedAt` (CON-075) are optional additions to 3:
+  /// both readers default them, so they did not need a bump; the same
+  /// goes for [pcTheme].
   static const version = 3;
 
-  /// Most agents listed; the widget has room for four rows at most.
-  static const maxAgents = 4;
+  /// Most agents listed. The widget draws [dashboard], not these; the
+  /// launcher details provider lists them all (one row each), so the cap
+  /// only keeps the stored payload small.
+  static const maxAgents = 20;
 
   /// Whether at least one host is currently monitored. When false the
   /// widget shows its "open the app" placeholder instead of stale rows.
@@ -151,15 +212,23 @@ class AgentStatusSnapshot {
   /// the widget's own Everforest.
   final AgentStatusTheme? theme;
 
+  /// The followed Omarchy machine's theme, for the launcher; null when the
+  /// app follows none or has not read it yet.
+  final AgentStatusPcTheme? pcTheme;
+
   /// Builds the snapshot for every monitored host, sorting agents so the
   /// ones a human should look at come first.
   factory AgentStatusSnapshot.build({
-    required Iterable<({String hostName, List<AgentInfo> agents})> hosts,
+    required Iterable<
+      ({String hostId, String hostName, List<AgentInfo> agents})
+    >
+    hosts,
     required bool monitoring,
     required DateTime now,
     List<AgentStatusLimit> limits = const [],
     AgentStatusDashboard? dashboard,
     AgentStatusTheme? theme,
+    AgentStatusPcTheme? pcTheme,
   }) {
     final entries = <AgentStatusEntry>[
       for (final host in hosts)
@@ -168,6 +237,12 @@ class AgentStatusSnapshot {
             name: agent.name,
             host: host.hostName,
             state: agent.state,
+            hostId: host.hostId,
+            agentId: agent.id,
+            workspace: agent.workspace,
+            tab: agent.tab,
+            pane: agent.pane,
+            changedAt: agent.stateChangedAt,
           ),
     ];
     // Stable sort by urgency only, so the provider's own ordering breaks
@@ -187,6 +262,7 @@ class AgentStatusSnapshot {
       limits: limits,
       dashboard: monitoring ? dashboard : null,
       theme: theme,
+      pcTheme: pcTheme,
     );
   }
 
@@ -217,6 +293,7 @@ class AgentStatusSnapshot {
     'limits': [for (final limit in limits) limit.toJson()],
     if (dashboard case final dashboard?) 'dashboard': dashboard.toJson(),
     if (theme case final theme?) 'theme': theme.toJson(),
+    if (pcTheme case final pcTheme?) 'pcTheme': pcTheme.toJson(),
   };
 
   String encode() => jsonEncode(toJson());
@@ -245,6 +322,7 @@ class AgentStatusSnapshot {
       ],
       dashboard: v3 ? AgentStatusDashboard.fromJson(json['dashboard']) : null,
       theme: v3 ? AgentStatusTheme.fromJson(json['theme']) : null,
+      pcTheme: AgentStatusPcTheme.fromJson(json['pcTheme']),
     );
   }
 
@@ -260,7 +338,8 @@ class AgentStatusSnapshot {
       _listEquals(other.agents, agents) &&
       _listEquals(other.limits, limits) &&
       other.dashboard == dashboard &&
-      other.theme == theme;
+      other.theme == theme &&
+      other.pcTheme == pcTheme;
 
   @override
   int get hashCode => Object.hash(
@@ -271,6 +350,7 @@ class AgentStatusSnapshot {
     Object.hashAll(limits),
     dashboard,
     theme,
+    pcTheme,
   );
 
   static bool _listEquals<T>(List<T> a, List<T> b) {

@@ -9,6 +9,7 @@ import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
+import 'package:conduit/features/home_widget/domain/launcher_themes.dart';
 import 'package:conduit/features/usage/domain/usage_report.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:flutter/foundation.dart';
@@ -37,13 +38,16 @@ class AgentStatusWidgetPusher {
   /// [digest], the dashboard's stuck and done counts from its cached
   /// answers (the pusher only reads them: it never makes the dashboard
   /// fetch, let alone summarise). [theme] gives the app's colours and
-  /// [themeChanges] tells when they may have changed.
+  /// [themeChanges] tells when they may have changed. [pcTheme] gives the
+  /// followed Omarchy machine's theme for the launcher (CON-075); it
+  /// changes with [themeChanges] too.
   factory AgentStatusWidgetPusher.forController(
     AgentAttentionController controller, {
     required AgentStatusWidgetChannel channel,
     UsageController? usage,
     DigestController? digest,
     AgentStatusTheme Function()? theme,
+    AgentStatusPcTheme? Function()? pcTheme,
     Listenable? themeChanges,
     Duration debounce = const Duration(milliseconds: 500),
   }) {
@@ -54,6 +58,7 @@ class AgentStatusWidgetPusher {
         usage: usage,
         digest: digest,
         theme: theme?.call(),
+        pcTheme: pcTheme?.call(),
       ),
       channel: channel,
       debounce: debounce,
@@ -82,6 +87,7 @@ class AgentStatusWidgetPusher {
     UsageController? usage,
     DigestController? digest,
     AgentStatusTheme? theme,
+    AgentStatusPcTheme? pcTheme,
     DateTime? now,
   }) {
     final hosts = [
@@ -95,10 +101,7 @@ class AgentStatusWidgetPusher {
     final at = now ?? DateTime.now();
     final facts = digest == null ? null : cachedDigest(digest);
     return AgentStatusSnapshot.build(
-      hosts: [
-        for (final host in hosts)
-          (hostName: host.hostName, agents: host.agents),
-      ],
+      hosts: hosts,
       monitoring: hosts.isNotEmpty,
       now: at,
       limits: usage == null
@@ -110,6 +113,7 @@ class AgentStatusWidgetPusher {
         factsAt: facts?.at,
       ),
       theme: theme,
+      pcTheme: pcTheme,
     );
   }
 
@@ -138,13 +142,17 @@ class AgentStatusWidgetPusher {
     );
   }
 
-  /// What a push is compared on: everything but the update time and the
-  /// "as of" of the cached facts.
+  /// What a push is compared on: everything but the update time, the
+  /// "as of" of the cached facts and the time the machine's theme was read.
   static String contentOf(AgentStatusSnapshot snapshot) {
     final json = snapshot.toJson()..remove('updatedAt');
     final dashboard = json['dashboard'];
     if (dashboard is Map<String, Object?>) {
       json['dashboard'] = Map.of(dashboard)..remove('factsAt');
+    }
+    final pcTheme = json['pcTheme'];
+    if (pcTheme is Map<String, Object?>) {
+      json['pcTheme'] = Map.of(pcTheme)..remove('updatedAt');
     }
     return jsonEncode(json);
   }
