@@ -97,7 +97,7 @@ object LauncherDetailsModel {
                     PROGRESS_UNKNOWN,
                     updatedAt,
                     token?.let { deepLink(packageName, activityClass, it) },
-                ) + answerColumns(agent, prompt)
+                ).plus(elements = answerColumns(agent, prompt))
             }
     }
 
