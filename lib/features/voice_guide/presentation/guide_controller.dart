@@ -411,7 +411,11 @@ class GuideController extends ChangeNotifier {
         final fallback = answer.rejected != null && answer.speak.isNotEmpty
             ? answer.speak
             : strings.didNotCatch;
-        await _run(context.intentFor(answer, fallback: fallback));
+        // Model output: never acts without the user's yes (see _mustConfirm).
+        await _run(
+          context.intentFor(answer, fallback: fallback),
+          fromBrain: true,
+        );
       case GuideBrainFailed(:final reason):
         _say(
           reason == GuideBrainFailed.noBrain
@@ -422,8 +426,13 @@ class GuideController extends ChangeNotifier {
   }
 
   /// Carries out [intent] against the app as it is now. With [confirmed]
-  /// the user said yes to exactly this.
-  Future<void> _run(GuideIntent intent, {_Confirm? confirmed}) async {
+  /// the user said yes to exactly this. [fromBrain]: the intent is the
+  /// brain's reading, not a phrase the phone matched itself.
+  Future<void> _run(
+    GuideIntent intent, {
+    _Confirm? confirmed,
+    bool fromBrain = false,
+  }) async {
     if (_disposed) return;
     final generation = _generation;
     _phase = GuidePhase.thinking;
@@ -433,7 +442,13 @@ class GuideController extends ChangeNotifier {
     final now = world();
     String? reply;
     try {
-      reply = await _perform(intent, now, s, confirmed: confirmed);
+      reply = await _perform(
+        intent,
+        now,
+        s,
+        confirmed: confirmed,
+        fromBrain: fromBrain,
+      );
     } on AppFailure catch (failure) {
       reply = _failureText(failure.userMessage, s);
     } on UnsupportedError {
@@ -461,6 +476,7 @@ class GuideController extends ChangeNotifier {
     GuideWorld now,
     GuideStrings s, {
     _Confirm? confirmed,
+    bool fromBrain = false,
   }) async {
     switch (intent) {
       case GuideStop():
@@ -499,7 +515,13 @@ class GuideController extends ChangeNotifier {
       case GuideRead(:final target):
         return _read(target, now, s);
       case GuideDecide():
-        return _decide(intent, now, s, confirmed: confirmed != null);
+        return _decide(
+          intent,
+          now,
+          s,
+          confirmed: confirmed != null,
+          fromBrain: fromBrain,
+        );
       case GuideApproveAllSafe():
         return _approveAllSafe(now, s, confirmed: confirmed);
       case GuideTrust(:final minutes, :final target):
@@ -641,7 +663,16 @@ class GuideController extends ChangeNotifier {
     return s.replyFrom(agent.label, brief.spoken);
   }
 
-  bool _mustConfirm(GuideIntent intent, ApprovalRisk? risk) {
+  /// Whether [intent] waits for the user's yes. Anything the brain read
+  /// into what was said (its input carries text from agents and tools)
+  /// always does when it acts: "skip for low risk" covers only phrases the
+  /// phone matched itself.
+  bool _mustConfirm(
+    GuideIntent intent,
+    ApprovalRisk? risk, {
+    bool fromBrain = false,
+  }) {
+    if (fromBrain && intent.risky) return true;
     if (intent is GuideDecide && intent.allow) {
       if (risk == ApprovalRisk.high) return true;
       return !(preferences().confirm == GuideConfirm.skipLowRisk &&
@@ -663,6 +694,7 @@ class GuideController extends ChangeNotifier {
     GuideWorld now,
     GuideStrings s, {
     required bool confirmed,
+    bool fromBrain = false,
   }) async {
     final target = intent.target;
     GuidePending? pending;
@@ -691,7 +723,7 @@ class GuideController extends ChangeNotifier {
     // Only the agent's own prompt answers it (Gemini CLI): offer to open it.
     if (pending.request.terminalOnly) return _offerTerminal(pending, s);
     final risk = approvals.riskOf(pending.hostId, pending.request);
-    if (!confirmed && _mustConfirm(intent, risk)) {
+    if (!confirmed && _mustConfirm(intent, risk, fromBrain: fromBrain)) {
       return _ask(
         intent.allow ? s.confirmApprove(pending) : s.confirmDeny(pending),
         _Confirm(

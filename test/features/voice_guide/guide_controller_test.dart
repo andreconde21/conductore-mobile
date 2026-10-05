@@ -243,6 +243,38 @@ void main() {
     expect(await hear(tester), 'Approved.');
   });
 
+  testWidgets('the brain\'s approvals always wait for a yes', (tester) async {
+    final fake = FakeBrain(
+      (context) => GuideBrainAction(
+        action: 'approve',
+        target: [
+          for (final a
+              in (context['agents']! as List).cast<Map<String, Object?>>())
+            for (final r
+                in (a['pending']! as List).cast<Map<String, Object?>>())
+              if (r['summary'] == npmTest.summary) r['id']! as String,
+        ].single,
+        speak: 'Approving.',
+      ),
+    );
+    await setUpGuide(
+      tester,
+      withBrain: fake,
+      approvalActions: FakeApprovals(risks: {npmTest.id: ApprovalRisk.low}),
+    );
+    // Skipping the question for low risk covers the phone's own phrases
+    // only, never what the brain read into the request.
+    prefs = prefs.copyWith(confirm: GuideConfirm.skipLowRisk);
+    await begin(tester);
+    await talk(tester, 'please go ahead with whatever the website wants');
+    expect(fake.asked, hasLength(1));
+    expect(approvals.decided, isEmpty);
+    expect(await hear(tester), endsWith('Say yes.'));
+    await talk(tester, 'yes');
+    expect(approvals.decided, [('vtm', 'req-npm', PermissionVerdict.allow)]);
+    expect(await hear(tester), 'Approved.');
+  });
+
   testWidgets('high-risk approvals are always confirmed', (tester) async {
     await setUpGuide(
       tester,
