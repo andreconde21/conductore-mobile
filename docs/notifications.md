@@ -33,11 +33,12 @@ docs · Idle · Rewrote the intro.
   line or the agent's last message (never its generic "is waiting for your
   input"), else the tool it runs.
 - Each agent counts once. Every Herdr workspace or tmux session opened in
-  the app is its own session of the machine and polls it, so the same agent
-  arrives once per open session; the status keys agents by machine and
-  session id, and by pane, so Herdr's sighting of an agent its hooks also
-  report (or a second agent in the same pane) folds into one, the
-  hook-reported and then the most urgent one winning.
+  the app is its own session of the machine, but a machine has one monitor
+  (one poll loop, one set of agents, alerts keyed by the machine) however
+  many of its sessions are open. The status also keys agents by pane, so
+  Herdr's sighting of an agent its hooks also report (or a second agent in
+  the same pane) folds into one, the hook-reported and then the most urgent
+  one winning.
 - Idle agents (their turn ended, or finished) drop out 30 minutes after
   their last change. Agents that need you and working agents always stay.
 - The title counts exactly the agents listed: "N need you · N working ·
@@ -56,8 +57,9 @@ docs · Idle · Rewrote the intro.
 - **Android:** it uses the same notification id and channel ("Status",
   low importance) as the background-connection service. While live
   sessions are kept running in the background, the status *is* that
-  service's notification, with the session count as its summary line, so
-  there is only ever one notification. When the service stops, the status
+  service's notification, so there is only ever one notification. Its
+  title carries the agent counts; the session count ("2 active sessions")
+  shows only while there is no agent status. When the service stops, the status
   is detached and stays as a plain ongoing notification.
 - **iOS:** none, see below.
 

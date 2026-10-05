@@ -116,7 +116,9 @@ object AgentOngoingNotification {
         }
         val style = Notification.InboxStyle().setBigContentTitle(status.title)
         for (line in status.lines) style.addLine(line)
-        sessionLine?.let { style.setSummaryText(it) }
+        // No "8 active sessions" next to the agent counts (CON-079): the
+        // title already says what runs; the session count only stands in
+        // while there is no agent status.
         builder
             .setContentTitle(status.title)
             .setContentText(status.text)

@@ -344,4 +344,90 @@ void main() {
     expect(notifier.status?.lines, hasLength(4));
     expect(notifier.status?.lines[1], startsWith('lf-seguros-web · Working'));
   });
+
+  test('8 open sessions of one machine: 1 monitor, 1 poll, 1 alert per '
+      'state', () async {
+    final workspace = TerminalWorkspaceController(FreshTerminalRepository());
+    final notifier = RecordingAgentNotifier();
+    final runners = <String, ScriptedAgentCommandRunner>{};
+    final approval = jsonEncode({
+      'version': 1,
+      'seq': 2,
+      'agents': [
+        {
+          ..._agent(
+            'a04b9572',
+            '/root/Projects/lf-seguros-web/.claude/worktrees/'
+                'agent-a205b124f4354e391',
+            'w8:p1',
+            state: 'needs_permission',
+            lastEvent: 'PermissionRequest',
+          ),
+          'stateSeq': 2,
+          'pending': [
+            {'id': 'r1', 'toolName': 'Bash', 'summary': 'git push'},
+          ],
+        },
+      ],
+    });
+    final controller = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (host) => runners[host.id] = ScriptedAgentCommandRunner([
+        const AgentCommandResult(
+          stdout: '{"version":"1.5.1"}',
+          stderr: '',
+          exitCode: 0,
+        ),
+        AgentCommandResult(stdout: approval, stderr: '', exitCode: 0),
+      ]),
+      provider: const HerdrAttentionProvider(),
+      companionProvider: const ConductoreHostAttentionProvider(),
+      notifier: notifier,
+      notificationPreferences: MemoryAgentNotificationPreferencesStore(),
+      statusThrottle: AgentStatusThrottle(interval: Duration.zero),
+      pollInterval: const Duration(days: 1),
+      clock: () => _now,
+    );
+    controller
+      ..setAppForeground(false)
+      ..machineName = (id) => id == 'dev' ? 'development-central' : null;
+    addTearDown(controller.dispose);
+    addTearDown(workspace.dispose);
+    final machine = buildHost('dev').copyWith(agentAttentionEnabled: true);
+    final sessions = [
+      for (var w = 0; w < 8; w++)
+        workspace.open(machine.copyWith(id: 'dev#herdr:w$w', name: 'dev: w$w')),
+    ];
+    for (final session in sessions) {
+      await session.connect();
+    }
+    await pumpEventQueue();
+
+    // One monitor, under the machine's id and name, one connection.
+    expect(runners.keys, ['dev']);
+    expect(controller.monitoredHosts.map((h) => (h.id, h.name)), [
+      ('dev', 'development-central'),
+    ]);
+    final statusPolls = runners['dev']!.commands.where(
+      (command) => command.contains(' status'),
+    );
+    expect(statusPolls, hasLength(1));
+    // Every session sees the machine's agents.
+    for (final session in sessions) {
+      expect(controller.statusFor(session.host.id)?.agents, hasLength(1));
+    }
+    // One alert, keyed by the machine; the status counts the agent once.
+    expect(notifier.alerts, hasLength(1));
+    expect(notifier.alerts.single.hostId, 'dev');
+    expect(notifier.status?.title, '1 needs you');
+
+    // The followed session closes: the monitor moves to another session
+    // and keeps what it knows (no second alert, no new connection).
+    await workspace.close(sessions.first);
+    await pumpEventQueue();
+    expect(controller.isMonitoring('dev#herdr:w3'), isTrue);
+    expect(runners.keys, ['dev']);
+    await controller.resyncNotifications();
+    expect(notifier.alerts, hasLength(1));
+  });
 }
