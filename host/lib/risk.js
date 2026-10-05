@@ -152,8 +152,31 @@ const READ_ONLY = new Set([
 
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'ash'])
 const INTERPRETERS = new Set([...SHELLS, 'python', 'python2', 'python3', 'node', 'nodejs', 'perl', 'ruby', 'php', 'deno', 'bun', 'lua', 'Rscript', 'osascript', 'tclsh', 'pwsh', 'powershell'])
-// Flags that run the code given on the command line.
-const INLINE_CODE = /^(-c|-e|-E|-r|-p|--eval|--print|--command|-Command|-EncodedCommand|eval)$|^--eval=|^--print=/
+// Flags that run the code given on the command line, per interpreter.
+const INLINE_CODE = {
+  shell: /^-[a-zA-Z]*c[a-zA-Z]*$/,
+  python: /^-[a-zA-Z]*c/,
+  node: /^(-e|-p|-pe|--eval|--print)(=|$)/,
+  perl: /^-[a-zA-Z]*[eE]/,
+  ruby: /^-[a-zA-Z]*e/,
+  php: /^(-r|-B|-R|-E|-F)$/,
+  deno: /^(eval|repl)$/,
+  bun: /^(-e|-p|--eval|--print)(=|$)/,
+  lua: /^-e/,
+  Rscript: /^(-e|--expr)/,
+  osascript: /^-e$/
+}
+function inlineCode (name, args) {
+  const re = SHELLS.has(name) ? INLINE_CODE.shell : /^python/.test(name) ? INLINE_CODE.python : name === 'nodejs' ? INLINE_CODE.node : INLINE_CODE[name]
+  if (!re) return false
+  // Only options before the script or module: what follows is its own.
+  for (const a of args) {
+    if (!a.startsWith('-') && !(name === 'deno' && re.test(a))) break
+    if (re.test(a)) return true
+    if (a === '-m' || a === '--') break
+  }
+  return false
+}
 const ROOT_WRAPPERS = new Set(['sudo', 'su', 'doas', 'pkexec', 'run0'])
 // The shell's own state: aliases, functions, variables, traps, options.
 const SHELL_STATE = new Set(['eval', 'exec', 'source', '.', 'alias', 'unalias', 'function', 'trap', 'enable', 'export', 'declare', 'typeset', 'local', 'readonly', 'unset', 'shopt', 'set', 'hash', 'ulimit', 'umask', 'bind', 'complete', 'fc', 'history', 'disown', 'let'])
@@ -434,7 +457,8 @@ function classifySegment (seg, ctx, depth) {
     return r('high', `Changes the shell itself (${name}): ${text}`)
   }
   if (RUNS_OTHERS.has(name)) return r('high', `Runs other commands through ${name}: ${text}`)
-  if (INTERPRETERS.has(name) && args.some(a => INLINE_CODE.test(a))) return r('high', `Runs inline ${name} code`)
+  if (name === 'pwsh' || name === 'powershell' || name === 'tclsh') return r('high', `${name} commands are not checked: review it`)
+  if (INTERPRETERS.has(name) && inlineCode(name, args)) return r('high', `Runs inline ${name} code`)
   if (SHELLS.has(name)) {
     // `bash script.sh` with plain options runs a script; anything else
     // (no script, -s, odd options) is a shell reading its input.
