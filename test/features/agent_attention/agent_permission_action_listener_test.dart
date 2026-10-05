@@ -27,6 +27,15 @@ class _QueueSource implements AgentPermissionActionSource {
   void setListener(bool Function()? listener) => this.listener = listener;
 }
 
+class _LauncherSource implements LauncherActionSource {
+  Future<String?> Function(AgentPermissionAction action)? listener;
+
+  @override
+  void setListener(
+    Future<String?> Function(AgentPermissionAction action)? listener,
+  ) => this.listener = listener;
+}
+
 void main() {
   const tap = AgentPermissionAction(
     notificationId: 'agent:h:s-1',
@@ -122,5 +131,37 @@ void main() {
     // Unmounted (e.g. the app locked): the platform is told nobody listens.
     await tester.pumpWidget(const SizedBox());
     expect(source.listener, isNull);
+  });
+
+  testWidgets('takes launcher answers only while mounted', (tester) async {
+    final launcher = _LauncherSource();
+    final workspace = TerminalWorkspaceController(FreshTerminalRepository());
+    final controller = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => ScriptedAgentCommandRunner(const []),
+      provider: const HerdrAttentionProvider(),
+      companionProvider: const ConductoreHostAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    addTearDown(controller.dispose);
+    addTearDown(workspace.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AgentPermissionActionListener(
+          source: _QueueSource(),
+          launcherActions: launcher,
+          agentAttention: controller,
+          findHost: (hostId) async => buildHost(hostId),
+          child: const SizedBox(),
+        ),
+      ),
+    );
+    expect(launcher.listener, isNotNull);
+    // Nothing monitors the host: the launcher is told why.
+    final error = await tester.runAsync(() => launcher.listener!(tap));
+    expect(error, 'Conductore is not monitoring that machine');
+
+    await tester.pumpWidget(const SizedBox());
+    expect(launcher.listener, isNull);
   });
 }
