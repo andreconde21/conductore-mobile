@@ -88,16 +88,22 @@ class HerdrSessionFocus implements AppInputRouter {
       _lifecycle = AppLifecycleListener(
         onResume: () {
           _foreground = true;
+          _syncRefreshTimer(_workspace.sessions);
           reassertActive();
         },
-        onHide: () => _foreground = false,
+        onHide: () {
+          _foreground = false;
+          _syncRefreshTimer(_workspace.sessions);
+        },
       );
     }
   }
 
   /// How often the previews of Herdr sessions the shared focus is not on
   /// are read again (while this device may not move it); null never. The
-  /// timer runs only while a Herdr session is open.
+  /// timer runs only while the app is in front and a Herdr session's
+  /// preview is on screen ([TerminalSessionController.sharedViewWatched]),
+  /// and reads only those servers and previews (CON-089).
   final Duration? refreshInterval;
 
   static bool _never() => false;
@@ -298,6 +304,7 @@ class HerdrSessionFocus implements AppInputRouter {
       if (!_statuses.containsKey(session) && herdrTargetOf(session) != null) {
         session
           ..inputClaimer = _claim
+          ..onSharedViewWatched = _sharedViewWatchChanged
           ..inputCheck = _checkBeforeInput
           ..startupCommandFilter = _filterStartup
           ..appInputRouter = this
@@ -831,7 +838,10 @@ class HerdrSessionFocus implements AppInputRouter {
               capturedAt: now,
               label: _labelOf(session),
             );
-      unawaited(_readPreview(session, workspaces: workspaces));
+      // Only previews on screen are read; one coming on screen asks.
+      if (session.sharedViewWatched) {
+        unawaited(_readPreview(session, workspaces: workspaces));
+      }
     }
   }
 
@@ -840,7 +850,11 @@ class HerdrSessionFocus implements AppInputRouter {
     final wanted =
         interval != null &&
         !_disposed &&
-        sessions.any((session) => herdrTargetOf(session) != null);
+        _foreground &&
+        sessions.any(
+          (session) =>
+              session.sharedViewWatched && herdrTargetOf(session) != null,
+        );
     if (!wanted) {
       _refreshTimer?.cancel();
       _refreshTimer = null;
@@ -849,13 +863,28 @@ class HerdrSessionFocus implements AppInputRouter {
     }
   }
 
-  /// Every server's focus again, and the previews of the sessions it is
-  /// not on (while the app is in the foreground).
+  /// A preview of [session] came on screen (read it now) or the last one
+  /// left.
+  void _sharedViewWatchChanged(TerminalSessionController session) {
+    if (_disposed) return;
+    _syncRefreshTimer(_workspace.sessions);
+    if (session.sharedViewWatched &&
+        !mayMoveFocus &&
+        session.isConnected &&
+        controlFor(session) != null) {
+      unawaited(_checkServer(session));
+    }
+  }
+
+  /// The focus of every server with a preview on screen again, and those
+  /// previews where it is not on their session (while the app is in the
+  /// foreground).
   void _refreshAll() {
     if (_disposed || mayMoveFocus || !_foreground) return;
     final seen = <String>{};
     for (final session in _workspace.sessions) {
       if (herdrTargetOf(session) == null ||
+          !session.sharedViewWatched ||
           !session.isConnected ||
           controlFor(session) == null ||
           !seen.add(serverKey(session))) {
