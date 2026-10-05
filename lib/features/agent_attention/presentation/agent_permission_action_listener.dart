@@ -20,8 +20,21 @@ class AgentPermissionActionListener extends StatefulWidget {
     required this.findHost,
     required this.child,
     this.launcherActions,
+    this.mayAct = _always,
     super.key,
   });
+
+  static bool _always() => true;
+
+  /// Whether the app lock lets an action from outside the app run now
+  /// (`AppLockController.admitsActions`): mounted is not enough, the app
+  /// may have been in the background past its re-lock delay. When it
+  /// refuses, a notification tap stays queued (the notification asks to
+  /// open the app) and a launcher answer is refused with [unlockFirst].
+  final bool Function() mayAct;
+
+  /// The launcher's message while the app lock refuses actions.
+  static const unlockFirst = 'Unlock Conductore first';
 
   final AgentPermissionActionSource source;
 
@@ -61,12 +74,15 @@ class _AgentPermissionActionListenerState
     if (!mounted) {
       return 'Open Conductore first';
     }
+    if (!widget.mayAct()) {
+      return AgentPermissionActionListener.unlockFirst;
+    }
     return widget.agentAttention.completeLauncherAction(action, host);
   }
 
   /// The platform's ping; returns whether the tap will be handled now.
   bool _onAction() {
-    if (!mounted) {
+    if (!mounted || !widget.mayAct()) {
       return false;
     }
     _drain();
@@ -105,12 +121,22 @@ class _AgentPermissionActionListenerState
       try {
         do {
           _drainAgain = false;
+          // Left queued while the app lock refuses: drained after unlock.
+          if (!mounted || !widget.mayAct()) {
+            return;
+          }
           final actions = await widget.source.consumeActions();
           for (final action in actions) {
             if (!mounted) {
               return;
             }
             final host = await widget.findHost(action.hostId);
+            // Re-checked at the moment of acting: never answered once the
+            // app lock refuses (the request stays pending, answered in the
+            // app).
+            if (!mounted || !widget.mayAct()) {
+              return;
+            }
             await widget.agentAttention.completePermissionAction(action, host);
             _report(action, host);
           }
