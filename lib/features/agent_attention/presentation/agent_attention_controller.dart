@@ -183,6 +183,11 @@ class AgentAttentionController extends ChangeNotifier {
   /// digest; call [resyncNotifications] when its answer changes.
   String? Function(String hostId, String agentId)? stuckReasonFor;
 
+  /// The saved machine's name for its id (the app wires it to the hosts
+  /// store): a session's own host is named after its Herdr workspace or
+  /// tmux session too ("dev: lf-seguros-web").
+  String? Function(String savedHostId)? machineName;
+
   final AgentStatusThrottle _statusThrottle;
   final DateTime Function() _clock;
   Timer? _statusTimer;
@@ -1607,15 +1612,19 @@ class AgentAttentionController extends ChangeNotifier {
     if (notifier == null || _disposed) {
       return;
     }
+    final now = _clock();
     final status = _notificationPreferences.mode.showsOngoing
-        ? AgentStatusSummary.build([
+        ? AgentStatusSummary.build(now: now, [
             for (final monitor in _monitors.values)
               for (final agent in monitor.status.agents)
                 if (!(monitor.provider?.id == companionProviderId &&
                     agent.state == AgentAttentionState.finished &&
                     !isHerdrOnlyAgent(agent)))
                   (
-                    hostName: monitor.host.name,
+                    machineId: baseHostId(monitor.host.id),
+                    hostName:
+                        machineName?.call(baseHostId(monitor.host.id)) ??
+                        monitor.host.name,
                     agent: agent,
                     companion:
                         monitor.provider?.id == companionProviderId &&
@@ -1625,7 +1634,6 @@ class AgentAttentionController extends ChangeNotifier {
                   ),
           ])
         : null;
-    final now = _clock();
     final offer = _statusThrottle.offer(status, now);
     if (offer.retryAfter case final wait?) {
       _statusTimer ??= Timer(wait, () {
