@@ -491,11 +491,12 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
             )
           else
             for (final agent in entry.agentRows)
-              if (!layout.activeOnly ||
-                  entry.active &&
+              if (!layout.removedFromActive(entry, agent) &&
+                  (!layout.activeOnly || entry.active) &&
+                  (!layout.activeOnly ||
                       (entry.dotOf(agent) != SidebarDot.idle ||
                           (entry.sheprdOf(agent)?.kept ?? false) ||
-                          entry.node.openInApp))
+                          entry.node.openInApp)))
                 _MemberRow(
                   key: ValueKey('project-agent-${project.key}-${agent.key}'),
                   node: agent,

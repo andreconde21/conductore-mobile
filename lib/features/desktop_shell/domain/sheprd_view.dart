@@ -40,6 +40,7 @@ class SheprdAgentView {
     this.unread = false,
     this.dismissed = false,
     this.kept = false,
+    this.removed = false,
     this.pending,
   });
 
@@ -59,8 +60,13 @@ class SheprdAgentView {
   /// Pinned to sheprd's active view.
   final bool kept;
 
-  /// Stays in the active filter: busy, needing you, or kept.
-  bool get active => kept || presence != SheprdPresence.idle;
+  /// Taken out of sheprd's active view by hand, until its next state
+  /// change: hidden from "active", still listed in "all".
+  final bool removed;
+
+  /// Stays in the active filter: busy, needing you, or kept, unless it was
+  /// removed from the active view.
+  bool get active => !removed && (kept || presence != SheprdPresence.idle);
 
   static SheprdAgentView? fromJson(Object? json) {
     if (json is! Map) return null;
@@ -73,6 +79,7 @@ class SheprdAgentView {
       unread: json['unread'] == true,
       dismissed: json['dismissed'] == true,
       kept: json['kept'] == true,
+      removed: json['removed'] == true,
     );
   }
 
@@ -93,6 +100,7 @@ class SheprdAgentView {
     unread: unread,
     dismissed: dismissed,
     kept: kept,
+    removed: removed,
     pending: mark,
   );
 
@@ -137,11 +145,19 @@ class SheprdAgentView {
       other.unread == unread &&
       other.dismissed == dismissed &&
       other.kept == kept &&
+      other.removed == removed &&
       other.pending == pending;
 
   @override
-  int get hashCode =>
-      Object.hash(presence, stateSeq, unread, dismissed, kept, pending);
+  int get hashCode => Object.hash(
+    presence,
+    stateSeq,
+    unread,
+    dismissed,
+    kept,
+    removed,
+    pending,
+  );
 }
 
 /// A presence change sent back to sheprd (`sheprd-view-update --op`).

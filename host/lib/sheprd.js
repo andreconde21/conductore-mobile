@@ -123,7 +123,8 @@ function checkView (raw) {
       state_seq: seqOf(a.state_seq),
       unread: a.unread === true,
       dismissed: a.dismissed === true,
-      kept: a.kept === true
+      kept: a.kept === true,
+      removed: a.removed === true
     }
   }
   return {

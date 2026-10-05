@@ -204,30 +204,31 @@ class HomeProjectsList extends StatelessWidget {
             )
           else
             for (final agent in entry.agentRows)
-              _HomeProjectRow(
-                key: ValueKey('home-project-agent-${agent.key}'),
-                node: agent,
-                dot: entry.dotOf(agent),
-                sheprd: entry.sheprdOf(agent),
-                detail: [
-                  if (entry.node.label.toLowerCase() !=
-                      project.name.toLowerCase())
-                    entry.node.label,
-                  names[entry.node.machineId] ?? '',
-                ].where((part) => part.isNotEmpty).join(' · '),
-                faded:
-                    !entry.active ||
-                    entry.hidden ||
-                    (entry.sheprdOf(agent)?.dismissed ?? false),
-                onTap: () => _open(entry, agent),
-                onLongPress: () => showProjectEntrySheet(
-                  context,
-                  controller,
-                  entry,
-                  project: project,
-                  row: agent,
+              if (!controller.removedFromActive(entry, agent))
+                _HomeProjectRow(
+                  key: ValueKey('home-project-agent-${agent.key}'),
+                  node: agent,
+                  dot: entry.dotOf(agent),
+                  sheprd: entry.sheprdOf(agent),
+                  detail: [
+                    if (entry.node.label.toLowerCase() !=
+                        project.name.toLowerCase())
+                      entry.node.label,
+                    names[entry.node.machineId] ?? '',
+                  ].where((part) => part.isNotEmpty).join(' · '),
+                  faded:
+                      !entry.active ||
+                      entry.hidden ||
+                      (entry.sheprdOf(agent)?.dismissed ?? false),
+                  onTap: () => _open(entry, agent),
+                  onLongPress: () => showProjectEntrySheet(
+                    context,
+                    controller,
+                    entry,
+                    project: project,
+                    row: agent,
+                  ),
                 ),
-              ),
     ];
   }
 

@@ -588,5 +588,66 @@ void main() {
       expect(controller.sheprdNotSharing, isNull);
       expect(controller.layout.groups.single.name, 'Storefront');
     });
+
+    test(
+      'removed from the active view: hidden in active, listed in all',
+      () async {
+        await controller.setSheprdSync(true);
+        controller.applyViewReply(
+          dev,
+          _reply(
+            'dev-box',
+            agents: {
+              'dev-box/w2:p1': {
+                'presence': 'done',
+                'state_seq': 41,
+                'removed': true,
+              },
+              'dev-box/w2:p2': {'presence': 'working', 'state_seq': 3},
+            },
+          ),
+        );
+        ProjectEntry sf() => controller
+            .build(tree(), hosts: [laptop, dev])
+            .firstWhere((g) => g.name == 'Storefront')
+            .entries
+            .firstWhere((e) => e.node.label == 'sf');
+        SidebarNode row(String pane) =>
+            sf().agentRows.firstWhere((r) => r.label == 'agent $pane');
+        expect(sf().sheprdOf(row('w2:p1'))!.removed, isTrue);
+        expect(sf().sheprdOf(row('w2:p1'))!.active, isFalse);
+
+        await controller.setActiveOnly(true);
+        expect(controller.removedFromActive(sf(), row('w2:p1')), isTrue);
+        expect(controller.removedFromActive(sf(), row('w2:p2')), isFalse);
+        await controller.setActiveOnly(false);
+        expect(controller.removedFromActive(sf(), row('w2:p1')), isFalse);
+
+        // Only removed agents left: the workspace drops out of "active".
+        controller.applyViewReply(
+          dev,
+          _reply(
+            'dev-box',
+            updated: 1001,
+            agents: {
+              'dev-box/w2:p1': {'presence': 'done', 'removed': true},
+              'dev-box/w2:p2': {'presence': 'idle', 'removed': true},
+              'dev-box/w2:p3': {'presence': 'idle'},
+            },
+          ),
+        );
+        expect(sf().active, isFalse);
+      },
+    );
+
+    test('the hint names the sheprd release with view sharing', () {
+      expect(
+        ProjectLayoutController.sheprdNotSharingText,
+        contains(
+          "set share_view = true in sheprd's sidebar.toml "
+          '(sheprd ≥ 0.9.3-15)',
+        ),
+      );
+    });
   });
 }

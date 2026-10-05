@@ -179,7 +179,7 @@ const VIEW = {
   layout: { active_only: true, hidden: ['dev/w3:scratch'], unread: ['x/p1'], group: [{ name: 'Storefront', members: ['local/w1:notes', 'dev/w2:sf'], match: ['storefront'] }] },
   agents: {
     'dev/w2:p1': { presence: 'unread', state_seq: 41, unread: true, dismissed: false, kept: false },
-    'local/w1:p2': { presence: 'idle', state_seq: 7, dismissed: true, kept: true },
+    'local/w1:p2': { presence: 'idle', state_seq: 7, dismissed: true, kept: true, removed: true },
     'bad key': { presence: 'idle' },
     'dev/w2:p9': { presence: 'sleeping' }
   },
@@ -199,7 +199,7 @@ test('readView: none, checked v1, stale, refusals', () => {
   assert.equal(r.view.self, 'dev')
   assert.equal(r.view.hub, 'laptop')
   assert.deepEqual(Object.keys(r.view.agents), ['dev/w2:p1', 'local/w1:p2'])
-  assert.deepEqual(r.view.agents['local/w1:p2'], { presence: 'idle', state_seq: 7, unread: false, dismissed: true, kept: true })
+  assert.deepEqual(r.view.agents['local/w1:p2'], { presence: 'idle', state_seq: 7, unread: false, dismissed: true, kept: true, removed: true })
   assert.equal(r.view.layout.unread, undefined, 'marks never come through the layout')
   assert.deepEqual(r.view.layout.group[0].members, ['local/w1:notes', 'dev/w2:sf'])
   assert.deepEqual(r.view.order, ['local/w1:notes', 'dev/w2:sf'])

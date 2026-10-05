@@ -7,7 +7,8 @@ can also write presence marks back. The app has an opt-in setting for this,
 specific to one team: machine names, groups and paths all come from the
 user's own sheprd.
 
-Status: agreed with the sheprd agent on 2026-10-05. sheprd writes
+Status: agreed with the sheprd agent on 2026-10-05, shipped in sheprd
+0.9.3-15. sheprd writes
 `view.json` only when `share_view = true` is set in its `sidebar.toml`
 (default false). The relay forwards it to each machine, with `self` set
 per machine, and drains each machine's `view-updates.jsonl` into the hub's
@@ -79,7 +80,7 @@ stay at or under 1 MiB.
   },
   "agents": {
     "dev/w2:p1":   {"presence": "unread",  "state_seq": 41, "unread": true,  "dismissed": false, "kept": false},
-    "local/w1:p2": {"presence": "idle",    "state_seq": 7,  "unread": false, "dismissed": true,  "kept": true}
+    "local/w1:p2": {"presence": "idle",    "state_seq": 7,  "unread": false, "dismissed": true,  "kept": true, "removed": false}
   },
   "order": ["local/w1:notes", "dev/w2:sf", "dev/w9:misc"],
   "focus": "local/w1:p2"
@@ -99,6 +100,7 @@ stay at or under 1 MiB.
 | `agents.*.state_seq` | int | herdr's `state_change_seq` when sheprd last saw the agent. |
 | `agents.*.unread` / `kept` | bool | The marks. |
 | `agents.*.dismissed` | bool | Dismissed at the current `state_seq`. |
+| `agents.*.removed` | bool | Optional (sheprd 0.9.3-15). The user took the agent out of sheprd's active view; it lapses at the agent's next state change. Readers that mirror the active filter hide it there and still list it under all agents. There is no write-back op for it in v1. |
 | `order` | string[] | Optional. Workspace keys in sidebar display order, hidden ones included. |
 | `focus` | string \| null | Optional. The agent key focused in sheprd ("what is open"). |
 
