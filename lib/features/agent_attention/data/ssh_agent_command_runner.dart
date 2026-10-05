@@ -14,13 +14,17 @@ import 'package:conduit/features/terminal/data/ssh_error_formatter.dart';
 import 'package:conduit/features/terminal/data/tcp_ssh_socket.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 /// Runs agent-provider commands over a dedicated SSH exec channel.
 ///
 /// Uses the same authentication stack as the terminal and SFTP (via
 /// [SshClientFactory]) but its own connection, opened lazily on first use
 /// and kept for subsequent polls; a broken connection is dropped so the
-/// next call reconnects. Never touches the interactive PTY.
+/// next call reconnects. A command that times out closes its own channel
+/// only: the connection is dropped only when it is gone or a keep-alive
+/// ping finds it dead (CON-089), so one slow command no longer cuts every
+/// feature sharing it. Never touches the interactive PTY.
 ///
 /// Commands are POSIX shell scripts, as for the local runner; each is sent
 /// through [posixShellCommand] so the account's login shell (fish, csh)
@@ -30,10 +34,15 @@ class SshAgentCommandRunner
         StdinAgentCommandRunner,
         ReconnectingCommandRunner,
         AddressedCommandRunner {
-  SshAgentCommandRunner(this._hostKeyVerifier, this._host);
+  SshAgentCommandRunner(
+    this._hostKeyVerifier,
+    this._host, {
+    @visibleForTesting Future<SSHClient> Function()? connect,
+  }) : _connectClient = connect;
 
   final HostKeyVerifier _hostKeyVerifier;
   final SavedHost _host;
+  final Future<SSHClient> Function()? _connectClient;
 
   Future<SSHClient>? _client;
   bool _closed = false;
@@ -49,22 +58,53 @@ class SshAgentCommandRunner
     required Duration timeout,
   }) async {
     final client = await _connect();
+    SSHSession? session;
     try {
-      final result = await client
-          .runWithResult(posixShellCommand(command))
-          .timeout(timeout);
+      final deadline = DateTime.now().add(timeout);
+      Duration left() {
+        final rest = deadline.difference(DateTime.now());
+        return rest.isNegative ? Duration.zero : rest;
+      }
+
+      session = await client
+          .execute(posixShellCommand(command))
+          .timeout(left());
+      final stdout = BytesBuilder(copy: false);
+      final stderr = BytesBuilder(copy: false);
+      final stdoutDone = Completer<void>();
+      final stderrDone = Completer<void>();
+      session.stdout.listen(
+        stdout.add,
+        onDone: stdoutDone.complete,
+        onError: (Object _) => stdoutDone.complete(),
+      );
+      session.stderr.listen(
+        stderr.add,
+        onDone: stderrDone.complete,
+        onError: (Object _) => stderrDone.complete(),
+      );
+      await Future.wait([
+        stdoutDone.future,
+        stderrDone.future,
+        session.done,
+      ]).timeout(left());
       return AgentCommandResult(
-        stdout: utf8.decode(result.stdout, allowMalformed: true),
-        stderr: utf8.decode(result.stderr, allowMalformed: true),
-        exitCode: result.exitCode,
+        stdout: utf8.decode(stdout.takeBytes(), allowMalformed: true),
+        stderr: utf8.decode(stderr.takeBytes(), allowMalformed: true),
+        exitCode: session.exitCode,
       );
     } on TimeoutException {
-      // A hung exec channel usually means the connection is going away;
-      // drop it so the next poll starts fresh.
-      await _dropClient();
+      // This command is slow (a busy host, a long answer): close its
+      // channel only. Whether the link itself is dead, a ping tells.
+      if (session != null) _abort(session);
+      _dropIfDead(client);
       throw const AppFailure('The command timed out.');
     } catch (error) {
-      await _dropClient();
+      if (client.isClosed) {
+        await _dropClient();
+      } else {
+        _dropIfDead(client);
+      }
       // Authentication and the handshake happen on the first command, so
       // this is where a dropped or rejected connection shows up.
       throw ConnectionFailure(
@@ -75,14 +115,37 @@ class SshAgentCommandRunner
     }
   }
 
+  /// Drops [client] when a keep-alive ping gets no answer in time (the
+  /// ping closes it then) or it is already gone; keeps it otherwise.
+  void _dropIfDead(SSHClient client) {
+    Future<void> dropIfCurrent() async {
+      final current = _client;
+      if (current == null) return;
+      try {
+        if (!identical(await current, client)) return;
+      } catch (_) {
+        return;
+      }
+      await _dropClient();
+    }
+
+    if (client.isClosed) {
+      unawaited(dropIfCurrent());
+      return;
+    }
+    unawaited(
+      client.ping().then((_) {}, onError: (Object _) => dropIfCurrent()),
+    );
+  }
+
   Future<SSHClient> _connect() async {
     if (_closed) {
       throw const AppFailure('This connection is closed.');
     }
     try {
-      final client = await (_client ??= SshClientFactory(
-        _hostKeyVerifier,
-      ).connect(_host));
+      final client = await (_client ??=
+          _connectClient?.call() ??
+          SshClientFactory(_hostKeyVerifier).connect(_host));
       final socket = client.socket;
       _remoteAddress = socket is TcpSshSocket ? socket.remoteAddress : null;
       return client;
@@ -108,7 +171,11 @@ class SshAgentCommandRunner
     try {
       session = await client.execute(posixShellCommand(command));
     } catch (error) {
-      await _dropClient();
+      if (client.isClosed) {
+        await _dropClient();
+      } else {
+        _dropIfDead(client);
+      }
       throw ConnectionFailure(
         'Running a command on ${_host.name} failed.',
         describeSshConnectionError(error),
@@ -155,6 +222,7 @@ class SshAgentCommandRunner
       );
     } on TimeoutException {
       _abort(session);
+      _dropIfDead(client);
       throw const AppFailure('The command timed out.');
     }
   }
