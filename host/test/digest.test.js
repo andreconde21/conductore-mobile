@@ -204,6 +204,10 @@ test('stuck: working without edits, repeated failures and commands, long approva
   const errs = new Activity()
   for (const c of ['a', 'b', 'c']) feed(errs, 'e', [[now - min(5), { hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: `run ${c}` }, error: 'ECONNREFUSED 127.0.0.1:5432' }]])
   assert.match(dg.stuckFlags(null, errs.agents.e, now, t)[0].reason, /^The same error 3 times: ECONNREFUSED/)
+  // Failures without error text are not "the same error: unknown".
+  const blank = new Activity()
+  for (const c of ['a', 'b', 'c', 'd']) feed(blank, 'b', [[now - min(5), { hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: `run ${c}` }, error: '' }]])
+  assert.deepEqual(dg.stuckFlags({ state: 'working', pending: [] }, blank.agents.b, now, { ...t, workingMin: 1000 }), [])
 
   const rep = new Activity()
   for (let i = 0; i < 5; i++) feed(rep, 'r', [[now - min(10) + i, { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'curl localhost:3000/health' } }]])

@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: the dashboard's "same error" stuck flag (CON-079) no longer counts failures without error text: different failures all matched "The same error N times: unknown", which flagged a busy agent as stuck.
+
 ## 1.5.1 (2026-10-04)
 
 - feat: `task-start` takes `worktree: false` to run in the repository as it is (no branch); such a run links only an agent that started with it and no other run's.
