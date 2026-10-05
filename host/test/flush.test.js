@@ -76,3 +76,39 @@ test('a burst of events writes the state files at most once per flush interval, 
     d.sidebar.stop()
   }
 })
+
+test("the phone's polls do not restart the idle exit; hook activity, user ops and --live do", async () => {
+  const { PassThrough } = require('stream')
+  process.env.CONDUCTORE_HERDR_SOCKETS = path.join(root, 'no-herdr.sock')
+  const d = new Daemon()
+  let touched = 0
+  d.touch = () => { touched++ }
+  const ask = async req => {
+    const c = new PassThrough()
+    c.resume()
+    const before = touched
+    await d.handle(req, c)
+    c.destroy()
+    await new Promise(resolve => setImmediate(resolve))
+    return touched - before
+  }
+  try {
+    assert.equal(await ask({ op: 'ping' }), 0)
+    assert.equal(await ask({ op: 'status' }), 0)
+    assert.equal(await ask({ op: 'status', herdrAgents: true }), 0, 'the agent monitor poll')
+    assert.equal(await ask({ op: 'events', timeout: 0 }), 0)
+    assert.equal(await ask({ op: 'events', herdrAgents: true, timeout: 0 }), 0)
+    assert.equal(d.live.running, true, 'herdr-agents still gets its bridge')
+    assert.equal(d.live.liveWanted(), false, 'but not the live one')
+    assert.equal(await ask({ op: 'status', live: true }), 1, 'a live screen is a person looking')
+    assert.equal(await ask({ op: 'config' }), 1)
+    await d.process({ header: { kind: 'hook' }, body: { session_id: 'i1', hook_event_name: 'SessionStart', cwd: root } })
+    assert.ok(touched >= 2, 'hook activity')
+  } finally {
+    delete process.env.CONDUCTORE_HERDR_SOCKETS
+    clearTimeout(d.snapshotTimer)
+    clearTimeout(d.pruneTimer)
+    d.live.stop()
+    d.sidebar.stop()
+  }
+})

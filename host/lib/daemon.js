@@ -268,6 +268,10 @@ class Daemon {
       onChange: r => this.onLive(r),
       companionAgents: () => Object.values(this.state.agents),
       tmuxEnabled: () => config.get('tmux-live') === 'on',
+      held: () => {
+        const ps = [...this.pollers]
+        return { live: ps.some(p => p.live), agents: ps.some(p => p.herdrAgents) }
+      },
       extraSockets: () => [...new Set(Object.values(this.state.agents).map(a => a.herdr && a.herdr.socket).filter(Boolean))]
     })
     this.sidebar = new Sidebar({
@@ -729,7 +733,6 @@ class Daemon {
   // --- socket -----------------------------------------------------------------
 
   onConnection (c) {
-    this.touch()
     let buf = ''
     let handled = false
     c.setEncoding('utf8')
@@ -756,7 +759,25 @@ class Daemon {
     c.write(JSON.stringify(obj) + '\n')
   }
 
+  // The idle exit restarts on hook activity and on what a person does;
+  // the phone's own polls (status and events, including --herdr-agents,
+  // and ping) do not restart it unless a live screen asks (--live). A
+  // phone that only polls in the background thus meets a fresh daemon
+  // every few hours (the CLI starts one on its next call) instead of one
+  // that never exits.
+  static isPoll (req) {
+    return (req.op === 'ping' || req.op === 'status' || req.op === 'events') && !req.live
+  }
+
+  // The live bridge for what the request asked: everything for --live,
+  // the Herdr watches only for --herdr-agents.
+  touchLive (req) {
+    if (req.live) this.live.touch('live')
+    else if (req.herdrAgents) this.live.touch('agents')
+  }
+
   async handle (req, c) {
+    if (!Daemon.isPoll(req)) this.touch()
     switch (req.op) {
       case 'ping': {
         const cpu = process.cpuUsage()
@@ -775,7 +796,7 @@ class Daemon {
       case 'status':
         await this.drain()
         if (req.live || req.herdrAgents) {
-          this.live.touch()
+          this.touchLive(req)
           await this.live.ready()
         }
         this.expireAgents()
@@ -790,7 +811,7 @@ class Daemon {
         this.reply(c, { ...state.snapshot(this.state), source: 'daemon', capabilities: CAPABILITIES, activity: this.activity.toJSON(), now: Date.now() }); c.end(); return
       case 'events':
         await this.drain()
-        if (req.live || req.herdrAgents) this.live.touch()
+        this.touchLive(req)
         this.expireAgents()
         return this.handleEvents(req, c)
       case 'decide':
@@ -901,6 +922,8 @@ class Daemon {
     if (!Number.isFinite(timeout) || timeout < 0) timeout = DEFAULT_POLL_TIMEOUT_S
     timeout = Math.min(timeout, MAX_POLL_TIMEOUT_S)
     const poller = { socket: c, since, timer: null, live: !!req.live, herdrAgents: !!req.herdrAgents, onlyLive: !!req.onlyLive }
+    // A long-poll wants the bridge until it ends: its window starts then.
+    c.once('close', () => { if (!this.stopping) this.touchLive(req) })
     // If the client's cursor is not covered by our buffer, resync with a snapshot.
     const oldest = this.changes.length ? this.changes[0].seq : this.state.seq + 1
     if (since > this.state.seq || (since < oldest - 1 && this.changes.length)) {

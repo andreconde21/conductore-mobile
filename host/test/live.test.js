@@ -8,7 +8,7 @@ for (const k of Object.keys(process.env)) if (k.startsWith('HERDR_') || k.starts
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { LiveStore, LiveBridge, NEW_AGENT_GRACE_MS, WORKING_HYSTERESIS_MS } = require('../lib/live')
+const { LiveStore, LiveBridge, NEW_AGENT_GRACE_MS, WORKING_HYSTERESIS_MS, IDLE_STOP_MS, AGENTS_STOP_MS } = require('../lib/live')
 
 test('replaceServer reports only differences; activity-only changes are lazy', () => {
   const changes = []
@@ -129,6 +129,68 @@ test('the bridge starts on demand and stops when nobody asked for a while; tmux 
     b.stop()
     assert.equal(b.running, false)
   } finally {
+    delete process.env.CONDUCTORE_HERDR_SOCKETS
+  }
+})
+
+test('--herdr-agents alone keeps only the Herdr watches, for a short window; --live lapsing stops tmux first', () => {
+  let now = 1000000
+  const started = []
+  const stopped = []
+  const b = new LiveBridge({
+    now: () => now,
+    makeHerdr: s => ({ start () { started.push(s.id) }, stop () { stopped.push(s.id) } }),
+    makeTmux: () => ({ start () { started.push('tmux') }, stop () { stopped.push('tmux') } }),
+    tmuxEnabled: () => true
+  })
+  process.env.CONDUCTORE_HERDR_SOCKETS = '/nonexistent/h.sock'
+  try {
+    b.touch('agents')
+    assert.equal(b.running, true)
+    assert.deepEqual(started, ['herdr'], 'no tmux control client for the agent monitor')
+    now += AGENTS_STOP_MS - 1000
+    b.checkWanted()
+    assert.equal(b.running, true)
+    now += 2000
+    b.checkWanted()
+    assert.equal(b.running, false, 'stopped AGENTS_STOP_MS after the last herdr-agents ask, not 15 min')
+    assert.deepEqual(stopped, ['herdr'])
+
+    // A live screen: tmux too; once it lapses the agent monitor keeps Herdr only.
+    started.length = stopped.length = 0
+    b.touch('live')
+    assert.deepEqual(started, ['herdr', 'tmux'])
+    now += IDLE_STOP_MS - AGENTS_STOP_MS / 2
+    b.touch('agents')
+    now += AGENTS_STOP_MS / 2 + 1000
+    b.checkWanted()
+    assert.equal(b.running, true)
+    assert.deepEqual(stopped, ['tmux'], 'tmux goes when --live lapses')
+    // Asked for --live again: tmux comes back.
+    b.touch('live')
+    assert.deepEqual(started, ['herdr', 'tmux', 'tmux'])
+    b.stop()
+  } finally {
+    delete process.env.CONDUCTORE_HERDR_SOCKETS
+  }
+})
+
+test('an open long-poll keeps what it asked for past the window', () => {
+  let now = 1000000
+  let held = { agents: true }
+  const b = new LiveBridge({ now: () => now, held: () => held, makeHerdr: () => ({ start () {}, stop () {} }) })
+  process.env.CONDUCTORE_HERDR_SOCKETS = '/nonexistent/h.sock'
+  try {
+    b.touch('agents')
+    now += AGENTS_STOP_MS * 3
+    b.checkWanted()
+    assert.equal(b.running, true, 'a 10 min long-poll is still asking')
+    held = {}
+    now += AGENTS_STOP_MS + 1
+    b.checkWanted()
+    assert.equal(b.running, false)
+  } finally {
+    b.stop()
     delete process.env.CONDUCTORE_HERDR_SOCKETS
   }
 })
