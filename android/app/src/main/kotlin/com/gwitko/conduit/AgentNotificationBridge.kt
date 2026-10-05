@@ -52,6 +52,8 @@ import java.security.SecureRandom
  *   the app is locked or not yet listening).
  * - `openAgentAvailable()`: a notification body was tapped while the engine
  *   runs; Dart calls `consumeOpenAgent`.
+ * - `launcherAction(action)` -> `{ok, error}`: an answer from the launcher
+ *   ([LauncherDetailsProvider.call]); null when Dart cannot take it now.
  *
  * Besides Allow / Deny / Always, an agent notification may carry answer
  * buttons (a single-choice question), a Reply with an inline text field
@@ -172,6 +174,30 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                 override fun notImplemented() {
                     AgentNotificationStore.showOpenToFinish(context, action)
                 }
+            },
+        )
+    }
+
+    /**
+     * Hands a launcher answer to Dart (main thread); [done] gets its
+     * outcome, or null when Dart cannot take it (locked, not listening).
+     */
+    fun launcherAction(action: Map<String, String>, done: (LauncherActions.Outcome?) -> Unit) {
+        val channel = channel ?: return done(null)
+        channel.invokeMethod(
+            "launcherAction",
+            action,
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    val map = result as? Map<*, *> ?: return done(null)
+                    done(LauncherActions.Outcome(ok = map["ok"] == true, error = map["error"] as? String))
+                }
+
+                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                    done(LauncherActions.Outcome(ok = false, error = errorMessage ?: "Conductore could not send it"))
+                }
+
+                override fun notImplemented() = done(null)
             },
         )
     }

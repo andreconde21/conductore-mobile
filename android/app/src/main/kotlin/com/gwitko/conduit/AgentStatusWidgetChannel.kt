@@ -18,6 +18,8 @@ import io.flutter.plugin.common.PluginRegistry
  *
  * Dart -> native:
  * - `push(String json)`: store the snapshot and refresh the widget and tile.
+ * - `pushLauncherPrompts(String json)`: store the launcher's prompts
+ *   ([LauncherPromptStore], apart from the snapshot; CON-082).
  * - `consumeLaunchTarget()` -> `String?`: the pending launch target, cleared.
  * - `requestAddTile()` -> `String`: added | alreadyAdded | declined | unsupported | failed.
  *
@@ -47,6 +49,7 @@ class AgentStatusWidgetChannel : FlutterPlugin, ActivityAware, PluginRegistry.Ne
         // that no longer reflect a live session.
         context?.let {
             AgentStatusStore.markNotMonitoring(it)
+            LauncherPromptStore.clear(it)
             AgentStatusStore.refreshSurfaces(it)
         }
         context = null
@@ -131,6 +134,15 @@ class AgentStatusWidgetChannel : FlutterPlugin, ActivityAware, PluginRegistry.Ne
                 }
                 AgentStatusStore.save(ctx, json)
                 AgentStatusStore.refreshSurfaces(ctx)
+                result.success(null)
+            }
+            "pushLauncherPrompts" -> {
+                val json = call.arguments as? String
+                if (json == null) {
+                    result.error("bad_args", "pushLauncherPrompts expects a JSON string", null)
+                    return
+                }
+                LauncherPromptStore.save(ctx, json)
                 result.success(null)
             }
             "consumeLaunchTarget" -> result.success(AgentStatusStore.consumeLaunchTarget(ctx))

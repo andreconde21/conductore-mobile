@@ -38,8 +38,17 @@ data class LauncherPcTheme(
  * unit-tested on the JVM; the provider only wraps them in a cursor.
  */
 object LauncherDetailsModel {
-    val ITEM_COLUMNS = arrayOf("id", "title", "subtitle", "state", "progress", "updated_at", "deep_link")
-    val SUMMARY_COLUMNS = arrayOf("monitoring", "attention_count", "updated_at", "limit_5h_pct", "limit_7d_pct")
+    val ITEM_COLUMNS = arrayOf(
+        "id", "title", "subtitle", "state", "progress", "updated_at", "deep_link",
+        // Contract 2 (CON-082): only for agents needing the user.
+        "question", "options", "answerable", "answer_note",
+    )
+    val SUMMARY_COLUMNS = arrayOf(
+        "monitoring", "attention_count", "updated_at", "limit_5h_pct", "limit_7d_pct", "contract_version",
+    )
+
+    /** The contract version `/summary` reports (docs/launcher-details-provider.md). */
+    const val CONTRACT_VERSION = 2
 
     /** The Omarchy roles of a theme row, each `#RRGGBB`. */
     val THEME_ROLES = listOf(
@@ -59,12 +68,18 @@ object LauncherDetailsModel {
      * first (needs input or blocked), then the latest state change first;
      * ties keep the snapshot's order. [tokens] are the store's line tokens
      * by [DashboardLine.key]: an agent without one has no deep link.
+     *
+     * [prompts] (by item id) fill `question`, `options`, `answerable` and
+     * `answer_note` of an agent needing the user; every other agent has
+     * them null. One needing the user without a prompt (an older payload,
+     * or an agent the prompts have not caught up with) is not answerable.
      */
     fun items(
         snapshot: AgentStatusSnapshot?,
         tokens: Map<String, String>,
         packageName: String,
         activityClass: String,
+        prompts: Map<String, LauncherPrompt> = emptyMap(),
     ): List<Array<Any?>> {
         if (snapshot == null) return emptyList()
         return snapshot.agents
@@ -73,7 +88,8 @@ object LauncherDetailsModel {
             .map { (agent, updatedAt) ->
                 val line = agent.asDashboardLine()
                 val token = if (line.tappable) tokens[line.key] else null
-                arrayOf(
+                val prompt = if (agent.urgent && line.tappable) prompts[line.key] else null
+                arrayOf<Any?>(
                     if (line.tappable) line.key else "${agent.host}/${agent.name}",
                     agent.name,
                     listOf(agent.host, agent.label).filter { it.isNotEmpty() }.joinToString(" · "),
@@ -81,8 +97,20 @@ object LauncherDetailsModel {
                     PROGRESS_UNKNOWN,
                     updatedAt,
                     token?.let { deepLink(packageName, activityClass, it) },
-                )
+                ) + answerColumns(agent, prompt)
             }
+    }
+
+    /** `question`, `options`, `answerable` and `answer_note` of one agent. */
+    private fun answerColumns(agent: AgentStatusLine, prompt: LauncherPrompt?): Array<Any?> = when {
+        !agent.urgent -> arrayOf(null, null, null, null)
+        prompt == null -> arrayOf(null, null, 0, LauncherActions.OPEN_TO_ANSWER)
+        else -> arrayOf(
+            prompt.question.ifEmpty { null },
+            prompt.options?.let { options -> JSONArray(options.map { it.label }).toString() },
+            if (prompt.answerable) 1 else 0,
+            if (prompt.answerable) null else prompt.note ?: LauncherActions.OPEN_TO_ANSWER,
+        )
     }
 
     /** The single summary row; a missing snapshot is "not monitoring". */
@@ -94,6 +122,7 @@ object LauncherDetailsModel {
             snapshot?.updatedAtMillis ?: 0L,
             limit("5h"),
             limit("7d"),
+            CONTRACT_VERSION,
         )
     }
 
