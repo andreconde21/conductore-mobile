@@ -297,3 +297,23 @@ test('callers racing to clear a stale lock never both get it', async () => {
 })
 
 test.after(() => cleanup())
+
+test('runClaude settles at the timeout even when a straggler outside the group holds stdout', async () => {
+  const bin = path.join(root, 'straggler')
+  const pidFile = path.join(root, 'straggler.pid')
+  // setsid: a new session, so the group kill cannot reach it; it keeps the
+  // inherited stdout open for 30 s.
+  fs.writeFileSync(bin, `#!/bin/sh
+cat >/dev/null
+setsid sh -c 'echo $$ > ${pidFile}; exec sleep 30' &
+exec sleep 30
+`, { mode: 0o755 })
+  const started = Date.now()
+  try {
+    const r = await sm.runClaude(bin, 'x', { args: [], timeoutMs: 300, env: process.env, cwd: root })
+    assert.equal(r.timedOut, true)
+    assert.ok(Date.now() - started < 4000, `settled after ${Date.now() - started} ms`)
+  } finally {
+    try { process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 'SIGKILL') } catch {}
+  }
+})

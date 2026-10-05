@@ -854,40 +854,29 @@ function answerOf (text) {
   return a !== -1 && b > a ? parse(s.slice(a, b + 1)) : null
 }
 
-function runBrain (bin, env, { system, prompt, schema, model, timeoutMs, onChild }) {
-  return new Promise(resolve => {
-    const { spawn } = require('child_process')
-    let child
-    try {
-      child = spawn(bin, brainArgs({ model }), { env: brainEnv(env), cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'pipe'] })
-    } catch (err) {
-      return resolve({ ok: false, error: 'agent-missing', message: `cannot run ${bin}: ${err.code || err.message}` })
-    }
-    if (onChild) try { onChild(child) } catch {}
-    let stdout = ''
-    let stderr = ''
-    let done = false
-    let timedOut = false
-    const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGTERM') } catch {} }, timeoutMs || 60000)
-    child.stdout.on('data', d => { if (stdout.length < 4 * 1024 * 1024) stdout += d })
-    child.stderr.on('data', d => { if (stderr.length < 64 * 1024) stderr += d })
-    const finish = r => { if (done) return; done = true; clearTimeout(timer); resolve(r) }
-    child.on('error', err => finish({ ok: false, error: err.code === 'ENOENT' || err.code === 'EACCES' ? 'agent-missing' : 'failed', message: `cannot run opencode: ${err.code || err.message}` }))
-    child.on('close', (code, signal) => {
-      if (timedOut) return finish({ ok: false, error: 'timeout', message: `opencode did not answer within ${timeoutMs} ms` })
-      const r = resultOf(stdout)
-      const usage = { tokens: r.tokens, costUsd: r.cost }
-      if (r.error || (code !== 0 && !r.text)) {
-        const why = r.error ? (r.error.name || r.error.message || 'error') : `exit ${code === null ? signal : code}`
-        if (/auth|api key|unauthori[sz]ed|401/i.test(`${JSON.stringify(r.error || '')} ${stderr}`)) return finish({ ok: false, error: 'not-logged-in', message: 'opencode has no working provider login on this machine: run opencode auth login' })
-        return finish({ ok: false, error: 'failed', message: `opencode failed (${String(why).slice(0, 80)})`, ...usage })
-      }
-      finish({ ok: true, text: r.text || null, answer: schema ? answerOf(r.text) : null, model: typeof model === 'string' && model.includes('/') ? model : null, noTextReason: code !== 0 ? `exit ${code}` : 'no text', ...usage })
-    })
-    child.stdin.on('error', () => {})
-    // The prompt on stdin, then EOF (`opencode run` waits for it).
-    child.stdin.end(brainPrompt({ system, prompt, schema }))
-  })
+// One `opencode run` through the shared runner (summarize.runClaude): its
+// own process group, the whole group killed at the timeout and the call
+// settled then, so a hung opencode never holds the brain lock and leaves
+// no children behind.
+async function runBrain (bin, env, { system, prompt, schema, model, timeoutMs, onChild }) {
+  const sm = require('../summarize')
+  timeoutMs = timeoutMs || 60000
+  // The prompt on stdin, then EOF (`opencode run` waits for it).
+  const r = await sm.runClaude(bin, brainPrompt({ system, prompt, schema }), { args: brainArgs({ model }), timeoutMs, env: brainEnv(env), onChild, cwd: os.tmpdir(), maxStdout: 4 * 1024 * 1024 })
+  if (r.spawnError) {
+    const err = r.spawnError
+    return { ok: false, error: err.code === 'ENOENT' || err.code === 'EACCES' ? 'agent-missing' : 'failed', message: `cannot run opencode: ${err.code || err.message}` }
+  }
+  if (r.timedOut) return { ok: false, error: 'timeout', message: `opencode did not answer within ${timeoutMs} ms` }
+  const { code, signal, stdout, stderr } = r
+  const res = resultOf(stdout)
+  const usage = { tokens: res.tokens, costUsd: res.cost }
+  if (res.error || (code !== 0 && !res.text)) {
+    const why = res.error ? (res.error.name || res.error.message || 'error') : `exit ${code === null ? signal : code}`
+    if (/auth|api key|unauthori[sz]ed|401/i.test(`${JSON.stringify(res.error || '')} ${stderr}`)) return { ok: false, error: 'not-logged-in', message: 'opencode has no working provider login on this machine: run opencode auth login' }
+    return { ok: false, error: 'failed', message: `opencode failed (${String(why).slice(0, 80)})`, ...usage }
+  }
+  return { ok: true, text: res.text || null, answer: schema ? answerOf(res.text) : null, model: typeof model === 'string' && model.includes('/') ? model : null, noTextReason: code !== 0 ? `exit ${code}` : 'no text', ...usage }
 }
 
 const brain = {

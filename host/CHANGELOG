@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- fix: the opencode brain (summaries, guide, digest) runs in its own process group like claude and codex: at the timeout the whole group gets SIGTERM then SIGKILL, so its children no longer outlive it (CON-088). Every brain call now also settles 1.5 s after the kill even when a straggler that left the group holds its output open, so the summarize/guide/digest lock is never held by a hung run.
 - fix: the live bridge no longer leaks a Herdr `events.subscribe` connection when it stops (or stops and starts again) while a connect is still waiting for the subscription (CON-088): a connect that outlived its start closes what it got.
 
 ## 1.6.2 (2026-10-05)
