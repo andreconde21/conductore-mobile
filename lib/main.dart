@@ -21,6 +21,7 @@ import 'package:conduit/features/agent_attention/data/platform_agent_notifier.da
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_monitoring_lifecycle.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
 import 'package:conduit/features/agent_messaging/data/agent_messenger.dart';
@@ -878,15 +879,9 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
   }
 
   void _syncAgentAttention(AppLifecycleState state) {
-    // On Android the keepalive foreground service holds connections open in
-    // the background, which is exactly when attention notifications matter,
-    // so polling continues. Elsewhere backgrounded sockets die anyway, so
-    // polling pauses until the app returns.
-    final active =
-        state == AppLifecycleState.resumed ||
-        (defaultTargetPlatform == TargetPlatform.android &&
-            state != AppLifecycleState.detached);
-    widget.agentAttention.setAppActive(active);
+    widget.agentAttention.setAppActive(
+      agentMonitoringActive(state, defaultTargetPlatform),
+    );
     // The companion long-poll runs whenever monitoring does, in the
     // Android background too; only the fallback tick slows down there
     // (CON-089).
