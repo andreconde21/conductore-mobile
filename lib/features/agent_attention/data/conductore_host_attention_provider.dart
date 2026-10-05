@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
+import 'package:conduit/features/agent_attention/domain/agent_naming.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 
 /// Reads agent state from the Conductore host companion daemon
@@ -420,10 +421,11 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       return null;
     }
     final cwd = _string(item['cwd']);
-    // Never the session UUID.
+    // Never the session UUID, nor a worktree's `agent-<hex>` folder.
+    final reported = _string(item['name']);
     final name =
-        _string(item['name']) ??
-        _basename(cwd) ??
+        (reported == null || isOpaqueName(reported) ? null : reported) ??
+        projectFromPath(cwd) ??
         // Companions with agent adapters send `kind: "claude"` too.
         '${agentKindLabel(_string(item['kind']) ?? defaultAgentKind)} session';
     final tmux = item['tmux'];
@@ -461,8 +463,9 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       stateChangedAt: _timestamp(item['updatedAt']),
       pendingRequests: pending,
       lastMessage: _string(item['lastMessage']),
-      // The inbox groups by project: the cwd's basename stands in for one.
-      project: _string(item['project']) ?? _basename(cwd),
+      // The inbox groups by project: the cwd's repository stands in for
+      // one (a worktree's, not its `agent-<hex>` folder).
+      project: _string(item['project']) ?? projectFromPath(cwd),
       usage: parseUsage(item['usage']),
       lastAutoApprovedAt: _timestamp(item['lastAutoApprovedAt']),
       stateSequence: _int(item['stateSeq']),
@@ -729,14 +732,6 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
     }
     return '${text.substring(0, limit)}\n… (${text.length - limit} more '
         'characters)';
-  }
-
-  static String? _basename(String? path) {
-    if (path == null) {
-      return null;
-    }
-    final parts = path.split('/').where((part) => part.isNotEmpty);
-    return parts.isEmpty ? null : parts.last;
   }
 
   static String? _string(Object? value) {
