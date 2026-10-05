@@ -385,14 +385,13 @@ class UsageAccountsChip extends StatelessWidget {
 }
 
 /// A titled section that folds to one header line: [title], a one-line
-/// [summary] of what it holds, an optional [action], and a chevron.
+/// [summary] of what it holds, and a chevron.
 class UsageFold extends StatefulWidget {
   const UsageFold({
     required this.id,
     required this.title,
     required this.child,
     this.summary,
-    this.action,
     this.initiallyExpanded = false,
     super.key,
   });
@@ -401,7 +400,6 @@ class UsageFold extends StatefulWidget {
   final String id;
   final String title;
   final String? summary;
-  final Widget? action;
   final Widget child;
   final bool initiallyExpanded;
 
@@ -427,7 +425,15 @@ class _UsageFoldState extends State<UsageFold> {
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
               children: [
-                Text(widget.title, style: theme.textTheme.labelLarge),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  child: Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelLarge,
+                  ),
+                ),
                 if (summary != null && summary.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   Expanded(
@@ -443,7 +449,6 @@ class _UsageFoldState extends State<UsageFold> {
                   ),
                 ] else
                   const Spacer(),
-                ?widget.action,
                 Semantics(
                   label: _open
                       ? 'Fold ${widget.title}'
@@ -525,8 +530,20 @@ class _UsageDetails extends StatelessWidget {
             shrinkWrap: true,
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
             children: [
-              Text('Usage', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('Usage', style: theme.textTheme.titleMedium),
+                  ),
+                  TextButton.icon(
+                    key: const ValueKey('usage-details-explore'),
+                    onPressed: onExplore,
+                    icon: const Icon(Icons.insights_rounded, size: 18),
+                    label: const Text('Explore'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
               for (final limit in [?summary.fiveHour, ?summary.weekly])
                 UsageLimitBar(agent: 'Claude', limit: limit, now: now),
               if (updated != null)
@@ -560,16 +577,6 @@ class _UsageDetails extends StatelessWidget {
                   style: muted,
                 ),
               ],
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  key: const ValueKey('usage-details-explore'),
-                  onPressed: onExplore,
-                  icon: const Icon(Icons.insights_rounded, size: 18),
-                  label: const Text('Explore usage'),
-                ),
-              ),
             ],
           ),
         );
@@ -1274,10 +1281,16 @@ class UsageLimitBar extends StatelessWidget {
                   style: theme.textTheme.bodyMedium,
                 ),
               ),
-              Text(
-                '${pct.round()}%${resetText.isEmpty ? '' : ' · $resetText'}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: palette.mutedForeground,
+              const SizedBox(width: 8),
+              // Wraps rather than overflows on a phone.
+              Flexible(
+                flex: 2,
+                child: Text(
+                  '${pct.round()}%${resetText.isEmpty ? '' : ' · $resetText'}',
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: palette.mutedForeground,
+                  ),
                 ),
               ),
             ],
@@ -1394,10 +1407,13 @@ class UsageAccountsSection extends StatelessWidget {
           id: 'accounts',
           title: 'Accounts',
           summary: usageAccountsLine(summary, now),
-          action: switchBest,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: rows,
+            children: [
+              if (switchBest != null)
+                Align(alignment: Alignment.centerRight, child: switchBest),
+              ...rows,
+            ],
           ),
         ),
       );

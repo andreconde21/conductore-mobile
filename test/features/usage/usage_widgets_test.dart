@@ -60,6 +60,12 @@ void main() {
     home: Scaffold(body: SingleChildScrollView(child: child)),
   );
 
+  /// Opens a folded section of the Usage tab or the explorer.
+  Future<void> unfold(WidgetTester tester, String id) async {
+    await tester.tap(find.byKey(ValueKey('usage-fold-$id')));
+    await tester.pump();
+  }
+
   test('ring colours: accent, then warning from 80 %, danger from 95 %', () {
     const palette = AppPalette.defaultPalette;
     expect(usageColor(79, palette), palette.accent);
@@ -77,8 +83,11 @@ void main() {
     expect(find.byKey(const ValueKey('usage-home-bar')), findsOneWidget);
     expect(find.text('83'), findsOneWidget);
     expect(find.text('20'), findsOneWidget);
-    expect(find.textContaining(r'$4.20'), findsOneWidget);
-    expect(find.textContaining('1.2M tokens'), findsOneWidget);
+    expect(find.text(r'1.2M tokens · $4.20 today'), findsOneWidget);
+    // CON-080: no labels or explanations on the card, no age while fresh.
+    expect(find.text('Today'), findsNothing);
+    expect(find.text('API-price estimate'), findsNothing);
+    expect(find.byKey(const ValueKey('usage-updated')), findsNothing);
     final ring = tester.widget<UsageRing>(
       find.byKey(const ValueKey('usage-ring-5h')),
     );
@@ -139,6 +148,13 @@ void main() {
     expect(find.text('Claude · 5-hour'), findsOneWidget);
     expect(find.text('Claude · Weekly'), findsOneWidget);
     expect(find.textContaining('83% · resets in 3h'), findsOneWidget);
+    // The groups fold to their top row (CON-080).
+    expect(find.text('api'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('usage-fold-groups-summary')),
+      findsOneWidget,
+    );
+    await unfold(tester, 'groups');
     expect(find.text('api'), findsOneWidget);
     expect(find.text('web'), findsOneWidget);
     expect(find.byKey(const ValueKey('usage-day-2026-09-25')), findsOneWidget);
@@ -189,6 +205,10 @@ void main() {
     final usage = controller(tester);
     await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
     await tester.pump();
+    // Folded to one line (CON-080), Codex's window in it.
+    expect(find.text('Codex · 5-hour'), findsNothing);
+    expect(find.text('Codex 12%'), findsOneWidget);
+    await unfold(tester, 'agents');
     expect(find.text('Codex · 5-hour'), findsOneWidget);
     expect(usage.summary.codexPresent, isTrue);
     expect(
@@ -224,6 +244,7 @@ void main() {
     final usage = controller(tester);
     await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
     await tester.pump();
+    await unfold(tester, 'agents');
     expect(find.text('Codex account: d***@e***.com · Plus'), findsOneWidget);
     expect(find.text('Codex · 5-hour'), findsOneWidget);
     // Not one of Claude's cswap accounts.
@@ -279,6 +300,8 @@ void main() {
     final usage = controller(tester);
     await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
     await tester.pump();
+    expect(find.text('OpenCode'), findsOneWidget);
+    await unfold(tester, 'agents');
     expect(
       find.text(
         'OpenCode: opencode/mimo-v2.6-flash-free · cost as reported by OpenCode',
@@ -349,6 +372,10 @@ void main() {
       await tester.pump();
       expect(find.byKey(const ValueKey('usage-accounts')), findsOneWidget);
       expect(find.text('Accounts'), findsOneWidget);
+      // One line until tapped (CON-080).
+      expect(find.byKey(const ValueKey('usage-account-home')), findsNothing);
+      expect(find.text('3 accounts · best: home 40%'), findsOneWidget);
+      await unfold(tester, 'accounts');
       for (final label in ['work', 'home', 'o***@e***.com']) {
         expect(find.byKey(ValueKey('usage-account-$label')), findsOneWidget);
       }
@@ -404,6 +431,7 @@ void main() {
       final usage = controller(tester);
       await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
       await tester.pump();
+      await unfold(tester, 'accounts');
       final before = runner.commands.length;
 
       await tester.tap(find.byKey(const ValueKey('usage-account-switch-home')));
@@ -497,6 +525,7 @@ void main() {
       expect(find.text('3 accounts'), findsOneWidget);
       await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
       await tester.pump();
+      await unfold(tester, 'accounts');
       for (final label in ['a***@o***.com', 'outsmartis', 'webmaster']) {
         expect(find.byKey(ValueKey('usage-account-$label')), findsOneWidget);
       }
@@ -574,6 +603,17 @@ void main() {
       final usage = controller(tester);
       await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
       await tester.pump();
+      // Folded: the count of logins lost (CON-080).
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('usage-fold-accounts-summary')),
+            )
+            .data,
+        // Carol's week ended: the most headroom.
+        '3 accounts · best: carol 0% · 1 needs re-login',
+      );
+      await unfold(tester, 'accounts');
       expect(find.textContaining('Needs re-login'), findsOneWidget);
       expect(
         tester
@@ -627,7 +667,8 @@ void main() {
       expect(find.text('2 acc'), findsOneWidget);
     });
 
-    testWidgets('the compact summary shows the count', (tester) async {
+    testWidgets('the compact summary shows the count; it opens the '
+        'accounts', (tester) async {
       final usage = controller(tester);
       var tapped = 0;
       await tester.pumpWidget(
@@ -645,9 +686,13 @@ void main() {
       );
       await tester.pump();
       expect(find.text('3 acc'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
-      expect(tapped, 1);
       expect(tester.takeException(), isNull);
+      // The count opens the accounts in place; the rest opens the explorer.
+      await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
+      await tester.pumpAndSettle();
+      expect(tapped, 0);
+      expect(find.byKey(const ValueKey('usage-details')), findsOneWidget);
+      expect(find.byKey(const ValueKey('usage-account-home')), findsOneWidget);
     });
 
     testWidgets('an old companion without accounts changes nothing', (
@@ -668,6 +713,142 @@ void main() {
       await tester.pump();
       expect(find.byKey(const ValueKey('usage-accounts')), findsNothing);
       expect(find.byKey(const ValueKey('usage-accounts-chip')), findsNothing);
+    });
+
+    // CON-080: the home card is at most three lines on a 360 dp phone,
+    // and everything it leaves out is one tap away.
+    group('compact home card', () {
+      Map<String, Object?> busy() => usageReplyJson(
+        limits: [
+          {
+            'label': '5h',
+            'usedPct': 91,
+            'resetsAt': resets.millisecondsSinceEpoch,
+            'at': now
+                .subtract(const Duration(minutes: 40))
+                .millisecondsSinceEpoch,
+          },
+          {'label': '7d', 'usedPct': 64},
+        ],
+        accounts: [
+          usageAccount(1, 'work-account', active: true, fiveHour: 91),
+          usageAccount(2, 'home-account', fiveHour: 5, weekly: 10),
+          usageAccount(
+            3,
+            'outsmartis-long-account-name',
+            weekly: 100,
+            status: 'relogin_required',
+            stale: true,
+          ),
+          usageUnmanagedAccount('g***@t***.pt', inCswap: false),
+        ],
+        rows: [usageRow('2026-09-25', output: 123456789, costUsd: 1234.5)],
+      );
+
+      Future<void> phone(WidgetTester tester, Widget child) async {
+        tester.view.physicalSize = const Size(360, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: Column(children: [child])),
+          ),
+        );
+        await tester.pump();
+      }
+
+      testWidgets('at most three lines at 360 dp, no overflow', (tester) async {
+        runner.reply = () => FakeUsageRunner.ok(busy());
+        final usage = controller(tester);
+        await phone(tester, UsageHomeBar(controller: usage, now: now));
+        expect(tester.takeException(), isNull);
+        final lines = find.descendant(
+          of: find.byKey(const ValueKey('usage-home-lines')),
+          matching: find.byType(Text),
+        );
+        expect(lines, findsNWidgets(3));
+        for (final text in tester.widgetList<Text>(lines)) {
+          expect(text.maxLines, 1);
+        }
+        expect(
+          find.text('4 accounts · best: home-account 10% · 1 needs re-login'),
+          findsOneWidget,
+        );
+        // 40 minutes old: stale, so it says so.
+        expect(
+          tester.widget<Text>(find.byKey(const ValueKey('usage-updated'))).data,
+          'Updated 40m ago',
+        );
+        // Three lines' height beside the rings, no more.
+        expect(
+          tester.getSize(find.byKey(const ValueKey('usage-home-bar'))).height,
+          lessThanOrEqualTo(80),
+        );
+        expect(find.textContaining('Needs re-login'), findsNothing);
+        expect(find.textContaining('cswap'), findsNothing);
+      });
+
+      testWidgets('the details are one tap away', (tester) async {
+        runner.reply = () => FakeUsageRunner.ok(busy());
+        final usage = controller(tester);
+        await phone(tester, UsageHomeBar(controller: usage, now: now));
+        await tester.tap(find.byKey(const ValueKey('usage-accounts-chip')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('usage-details')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        // Everything CON-067 shows: limits with resets and ages, each
+        // account's state, Switch, and what the cost means.
+        expect(
+          find.textContaining('91% · resets in 3h 0m · updated 40m ago'),
+          findsOneWidget,
+        );
+        expect(find.text('Limits updated 40m ago.'), findsOneWidget);
+        expect(find.textContaining('API-equivalent cost'), findsOneWidget);
+        expect(find.textContaining('Needs re-login'), findsOneWidget);
+        expect(find.textContaining('not in cswap'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('usage-account-switch-home-account')),
+          findsOneWidget,
+        );
+        // And the explorer from there.
+        await tester.tap(find.byKey(const ValueKey('usage-details-explore')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('usage-explorer-page')),
+          findsOneWidget,
+        );
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('fresh figures carry no age; one account no accounts line', (
+        tester,
+      ) async {
+        runner.reply = () => FakeUsageRunner.ok(
+          usageReplyJson(
+            limits: [
+              {
+                'label': '5h',
+                'usedPct': 20,
+                'at': now
+                    .subtract(const Duration(minutes: 15))
+                    .millisecondsSinceEpoch,
+              },
+            ],
+            accounts: [usageAccount(1, 'work', active: true, fiveHour: 20)],
+          ),
+        );
+        final usage = controller(tester);
+        await phone(tester, UsageHomeBar(controller: usage, now: now));
+        expect(find.byKey(const ValueKey('usage-updated')), findsNothing);
+        expect(find.byKey(const ValueKey('usage-accounts-chip')), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('usage-home-lines')),
+            matching: find.byType(Text),
+          ),
+          findsOneWidget,
+        );
+      });
     });
   });
 }
