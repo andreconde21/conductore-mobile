@@ -14,6 +14,11 @@
 //   worktree-location  next-to-repo (default) | herdr | a path template
 //                      with <repo> and <branch> (e.g. ~/wt/<repo>/<branch>);
 //                      where a later task start (CON-037) puts worktrees
+//   task-agent-keep    24 (default) | hours 0-720 | forever: how long a
+//                      started task's agent stays open for review after its
+//                      run finished or was cancelled; then its own pane or
+//                      window is closed (task-runs.js). A run marked `keep`
+//                      stays open; forgetting a run closes it at once
 
 const fs = require('fs')
 const path = require('path')
@@ -22,6 +27,7 @@ const paths = require('./paths')
 const KEYS = {
   'herdr-sidebar': { default: 'on', valid: v => v === 'on' || v === 'off' },
   'tmux-live': { default: 'off', valid: v => v === 'on' || v === 'off' },
+  'task-agent-keep': { default: '24', valid: v => v === 'forever' || (/^\d{1,3}$/.test(v) && Number(v) <= 720) },
   'worktree-location': {
     default: 'next-to-repo',
     valid: v => v === 'next-to-repo' || v === 'herdr' || (v.includes('<branch>') && v.length <= 400 && !/[\n\r\0]/.test(v))

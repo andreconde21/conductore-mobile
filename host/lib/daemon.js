@@ -329,6 +329,12 @@ class Daemon {
     // sessions' turns and refs, and collects their objects (turns.js).
     this.turnsPruneTimer = setInterval(() => { this.turns.prune(); this.scheduleSnapshot() }, TURNS_PRUNE_EVERY_MS)
     this.turnsPruneTimer.unref()
+    // Started tasks (CON-088): runs whose agent never came fail, done runs'
+    // agents close after their keep time. Reads nothing while nothing is due.
+    const sweepRuns = () => require('./task-runs').sweep(this.state.agents).catch(err => log('task-runs', `sweep failed: ${err.message}`))
+    this.taskRunsTimer = setInterval(sweepRuns, require('./task-runs').SWEEP_EVERY_MS)
+    this.taskRunsTimer.unref()
+    sweepRuns()
     this.schedulePrune()
     this.flushSnapshot()
     this.importParkedUsage()
@@ -983,6 +989,7 @@ class Daemon {
     for (const t of [this.snapshotTimer, this.pruneTimer, this.idleTimer]) clearTimeout(t)
     clearInterval(this.probeTimer)
     clearInterval(this.turnsPruneTimer)
+    clearInterval(this.taskRunsTimer)
     clearInterval(this.observeTimer)
     clearInterval(this.watchFallback)
     // A snapshot still running is dropped (its temp index goes with tmp/'s
