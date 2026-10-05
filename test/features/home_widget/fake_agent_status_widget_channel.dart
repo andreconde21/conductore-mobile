@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
 
@@ -21,6 +22,13 @@ class FakeAgentStatusWidgetChannel implements AgentStatusWidgetChannel {
     if (gate != null) {
       await gate.future;
     }
+  }
+
+  final List<List<LauncherPrompt>> pushedPrompts = [];
+
+  @override
+  Future<void> pushLauncherPrompts(List<LauncherPrompt> prompts) async {
+    pushedPrompts.add(prompts);
   }
 
   @override

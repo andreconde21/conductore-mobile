@@ -1,3 +1,4 @@
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,8 @@ import 'package:flutter/services.dart';
 ///
 /// Dart → native:
 /// - `push(String json)`: the encoded [AgentStatusSnapshot].
+/// - `pushLauncherPrompts(String json)`: the [LauncherPrompt]s, stored
+///   apart from the snapshot for the launcher details provider only.
 /// - `consumeLaunchTarget()` → `String?` naming an [AgentStatusLaunchTarget]
 ///   (`"dashboard"`, `"usage"`, ...), cleared on read. A tap on one of the
 ///   widget's agent lines never comes this way: the native side checks its
@@ -46,6 +49,23 @@ class PlatformAgentStatusWidgetChannel implements AgentStatusWidgetChannel {
       // No native handler registered (e.g. tests); the widget is optional.
     } on PlatformException {
       // A widget refresh failure must never affect the dashboard itself.
+    }
+  }
+
+  @override
+  Future<void> pushLauncherPrompts(List<LauncherPrompt> prompts) async {
+    if (!_supported) {
+      return;
+    }
+    try {
+      await _channel.invokeMethod<void>(
+        'pushLauncherPrompts',
+        LauncherPrompt.encodeAll(prompts),
+      );
+    } on MissingPluginException {
+      // No native handler registered (e.g. tests).
+    } on PlatformException {
+      // The launcher sheet is optional.
     }
   }
 

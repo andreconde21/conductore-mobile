@@ -19,10 +19,16 @@ class AgentPermissionActionListener extends StatefulWidget {
     required this.agentAttention,
     required this.findHost,
     required this.child,
+    this.launcherActions,
     super.key,
   });
 
   final AgentPermissionActionSource source;
+
+  /// Answers from the launcher's details sheet (CON-082): taken only while
+  /// this widget is mounted (the app unlocked), through
+  /// [AgentAttentionController.completeLauncherAction].
+  final LauncherActionSource? launcherActions;
   final AgentAttentionController agentAttention;
 
   /// Looks up a saved host by id (null when it was deleted meanwhile).
@@ -45,7 +51,17 @@ class _AgentPermissionActionListenerState
   void initState() {
     super.initState();
     widget.source.setListener(_onAction);
+    widget.launcherActions?.setListener(_onLauncherAction);
     _drain();
+  }
+
+  /// One launcher answer; resolves with why it failed, null once done.
+  Future<String?> _onLauncherAction(AgentPermissionAction action) async {
+    final host = await widget.findHost(action.hostId);
+    if (!mounted) {
+      return 'Open Conductore first';
+    }
+    return widget.agentAttention.completeLauncherAction(action, host);
   }
 
   /// The platform's ping; returns whether the tap will be handled now.
@@ -64,11 +80,16 @@ class _AgentPermissionActionListenerState
       oldWidget.source.setListener(null);
       widget.source.setListener(_onAction);
     }
+    if (oldWidget.launcherActions != widget.launcherActions) {
+      oldWidget.launcherActions?.setListener(null);
+      widget.launcherActions?.setListener(_onLauncherAction);
+    }
   }
 
   @override
   void dispose() {
     widget.source.setListener(null);
+    widget.launcherActions?.setListener(null);
     super.dispose();
   }
 

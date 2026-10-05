@@ -14,6 +14,7 @@ import 'package:conduit/features/agent_attention/domain/agent_notifications.dart
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live/domain/live_host_model.dart';
@@ -423,11 +424,18 @@ class AgentAttentionController extends ChangeNotifier {
   /// rewrites it to say the decision failed. An answer button answers its
   /// question through the same `decide`; a Reply is typed into the agent
   /// through the companion's `send`, like the Chat View. Never throws.
-  Future<void> completePermissionAction(
+  ///
+  /// Returns null once done, else why it failed. With [reportFailure]
+  /// off (the launcher, which shows the reason itself) a failure leaves
+  /// the notifications alone, and a request answered elsewhere fails with
+  /// [LauncherPrompt.staleError].
+  Future<String?> completePermissionAction(
     AgentPermissionAction action,
-    SavedHost? host,
-  ) async {
+    SavedHost? host, {
+    bool reportFailure = true,
+  }) async {
     final notifier = _notifier;
+    String? failure;
     final answering = action.verdict == AgentPermissionAction.answerVerdict;
     final replying = action.verdict == AgentPermissionAction.replyVerdict;
     final verdict = answering
@@ -440,6 +448,10 @@ class AgentAttentionController extends ChangeNotifier {
         ? agentNotificationKey(action.hostId, action.agentId)
         : action.notificationId;
     Future<void> failed(String reason) async {
+      failure = reason;
+      if (!reportFailure) {
+        return;
+      }
       final body = replying
           ? 'Open Conductore to send it'
                 '${host == null ? '' : ' on ${host.name}'}. $reason'
@@ -475,20 +487,20 @@ class AgentAttentionController extends ChangeNotifier {
 
     if (host == null) {
       await failed('The machine is no longer saved.');
-      return;
+      return failure;
     }
     if (replying) {
       await _completeReply(action, host, key, failed);
-      return;
+      return failure;
     }
     if (verdict == null || (answering && action.text.isEmpty)) {
       await failed('Unknown action.');
-      return;
+      return failure;
     }
     final question = answering ? _questionOf(host.id, action) : '';
     if (answering && question.isEmpty) {
       await failed('The question is no longer known.');
-      return;
+      return failure;
     }
     final asked = PendingPermissionRequest(
       id: action.requestId,
@@ -526,8 +538,12 @@ class AgentAttentionController extends ChangeNotifier {
         }
       }
     } catch (error) {
-      await failed(error.toString());
-      return;
+      await failed(switch (error) {
+        _RequestGone() when !reportFailure => LauncherPrompt.staleError,
+        AppFailure(:final message) when !reportFailure => message,
+        _ => error.toString(),
+      });
+      return failure;
     } finally {
       if (!_disposed) {
         notifyListeners();
@@ -536,7 +552,7 @@ class AgentAttentionController extends ChangeNotifier {
     if (monitor != null) {
       // [_removeRequest] re-posted the agent's notification with what is
       // left, or removed it.
-      return;
+      return null;
     }
     // Nothing watches the host: nothing is known to be left.
     _notices.remove(key);
@@ -545,6 +561,79 @@ class AgentAttentionController extends ChangeNotifier {
     } else {
       await notifier?.cancel(id: action.notificationId);
     }
+    return null;
+  }
+
+  /// What the launcher's details sheet may answer for each agent that
+  /// needs the user, on every monitored host (CON-082).
+  List<LauncherPrompt> get launcherPrompts => [
+    for (final monitor in _monitors.values)
+      for (final agent in monitor.status.agents)
+        ?LauncherPrompt.of(
+          hostId: monitor.host.id,
+          agent: agent,
+          canReply: _canReply(monitor, agent),
+        ),
+  ];
+
+  /// Completes an answer from the launcher's details sheet (CON-082):
+  /// [action] must still match what [LauncherPrompt.of] offers for its
+  /// agent now (the same request, one of its options or its reply), else
+  /// it fails with [LauncherPrompt.staleError]. Then it goes the way a
+  /// notification's button does ([completePermissionAction]), without
+  /// touching the notifications on failure. Returns null once done, else
+  /// why it failed. Never throws.
+  Future<String?> completeLauncherAction(
+    AgentPermissionAction action,
+    SavedHost? host,
+  ) async {
+    final monitor = host == null ? null : _monitorFor(host.id);
+    if (host == null || monitor == null) {
+      return 'Conductore is not monitoring that machine';
+    }
+    final agent = monitor.status.agents
+        .where((agent) => agent.id == action.agentId)
+        .firstOrNull;
+    final prompt = agent == null
+        ? null
+        : LauncherPrompt.of(
+            hostId: monitor.host.id,
+            agent: agent,
+            canReply: _canReply(monitor, agent),
+          );
+    if (prompt == null || prompt.requestId != action.requestId) {
+      return LauncherPrompt.staleError;
+    }
+    final offered =
+        prompt.options?.any(
+          (option) =>
+              option.verdict == action.verdict &&
+              (action.verdict != AgentPermissionAction.answerVerdict ||
+                  option.label == action.text),
+        ) ??
+        false;
+    final replying = prompt.replyVerdict == action.verdict;
+    if (!offered && !replying) {
+      return prompt.note ?? LauncherPrompt.staleError;
+    }
+    if (replying && action.text.trim().isEmpty) {
+      return 'Nothing to send';
+    }
+    return completePermissionAction(
+      AgentPermissionAction(
+        notificationId: agentNotificationKey(host.id, action.agentId),
+        hostId: host.id,
+        agentId: action.agentId,
+        requestId: action.requestId,
+        verdict: action.verdict,
+        text: action.text,
+        question: action.verdict == AgentPermissionAction.answerVerdict
+            ? prompt.answers
+            : '',
+      ),
+      host,
+      reportFailure: false,
+    );
   }
 
   /// The question an answer button answers: as the notification carried

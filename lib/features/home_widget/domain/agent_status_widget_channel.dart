@@ -1,3 +1,4 @@
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 
 /// Where the app is asked to go when launched from the widget or tile.
@@ -35,6 +36,11 @@ enum AddTileResult {
 abstract class AgentStatusWidgetChannel {
   /// Stores [snapshot] natively and refreshes every widget and the tile.
   Future<void> push(AgentStatusSnapshot snapshot);
+
+  /// Stores what the launcher's details sheet may answer (CON-082). Kept
+  /// apart from the snapshot natively: it is not lock-screen safe, so the
+  /// widget and tile never read it.
+  Future<void> pushLauncherPrompts(List<LauncherPrompt> prompts);
 
   /// Returns and clears the pending launch target, if the app was opened
   /// (or brought back) from the widget or tile.
