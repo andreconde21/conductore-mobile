@@ -83,7 +83,8 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/talkbawt.db`, `talkbawt-serve.json` | only with `talkbawt serve`: the bundled server's SQLite database, and its pid and address while it runs |
 
 Environment: `CONDUCTORE_PERMISSION_TIMEOUT` (seconds the hook waits for the
-phone, default 120, read by the hook), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
+phone; overrides the `permission-wait` setting, which Claude Code's hook
+reads from `~/.conductore/permission-wait`; other agents' hooks wait 120 s), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
 exit, default 21600 = 6 h, 0 = never), `CONDUCTORE_USAGE_THROTTLE_MS`
 (default 10000, see Usage), `CONDUCTORE_LOG=debug` (log every state change),
 `CONDUCTORE_HOME`, `CONDUCTORE_SOCKET`, `CONDUCTORE_CLAUDE_SETTINGS`
@@ -254,6 +255,11 @@ word as its value) and answer plain JSON, so check for `encoding`.
   [{label, description?}], description?, placeholder?, min?, max?, step?,
   defaultValue?, unit?}]`, every question whole whatever the toolInput cap
   (option previews left out). Answer with `decide <id> answer`.
+* `pending[].expired: true` (with `answerable: false`, CON-096): the phone's
+  wait for this request is over and Claude Code's dialog is still open in
+  the terminal. `decide` refuses it; `terminal-answer` types the answer
+  into the agent's pane. It goes once the agent's events show the answer
+  (the call's PostToolUse, Stop, PermissionDenied, a new prompt).
 * `herdr`: where the agent's pane is now. The hook's `HERDR_*` are checked
   against Herdr's pane list (cached 10 s per server): a pane moved with
   `herdr pane move` has a new id while Claude Code keeps the old one.
@@ -340,6 +346,29 @@ ExitPlanMode is the other tool whose dialog is the input: `allow` carries
 the plan unchanged as `updatedInput`, and `always` switches the session to
 `acceptEdits` (`{"type":"setMode","mode":"acceptEdits","destination":"session"}`)
 rather than saving a rule.
+
+### `conductore-hostd terminal-answer <sessionId> -`
+
+Capability `terminal-answers` (CON-096). Answers Claude Code's own dialog in
+the agent's pane, for when no hook waits for the phone any more (an
+`expired` request, or a question only the transcript shows). JSON on stdin:
+
+* `{"questions": [...], "answers": {"<question>": "<label or own text>" | [...]}}`
+  (questions as in the transcript's AskUserQuestion input, or `"requestId"`
+  of an expired question instead of `questions`): every question needs an
+  answer, since the terminal form takes them in turn.
+* `{"requestId": "<id>", "decision": "allow" | "deny"}`: an expired
+  permission prompt; allow presses 1 (`Yes`), deny presses Escape.
+
+The pane is read before every key (tmux `capture-pane`, `herdr pane read`)
+and checked to show exactly that question (its text and options in order)
+or prompt (its command or file name); anything else stops before the next
+key, with `{"error", "steps"}` (the keys already typed). Keys: an option's
+digit (one pick: moves on; several: ticks), "Type something" + the text +
+Enter (Tab then Enter for several), Down to `Submit` + Enter, `1` on the
+review. Recorded from Claude Code 2.1.288 (`test/fixtures/claude-forms/`).
+Refused while the request's hook still waits (use `decide`), for other
+agents, and while another answer is being typed into the same pane.
 
 ### `conductore-hostd approve-low [--ids <id,id,…>] [--session <sessionId>]`
 
@@ -1154,6 +1183,11 @@ findings and the measured cost). In short:
 - `config set herdr-sidebar on|off`: pending approvals and cost as Herdr
   sidebar tokens (`$conductore_pending`, `$conductore_cost`,
   `$conductore_today`).
+- `config set permission-wait <1-60>`: minutes a Claude Code permission
+  prompt or question waits for the phone (default 15). Writes
+  `~/.conductore/permission-wait` for the hook and, when the hooks are
+  installed, the PermissionRequest handler's `timeout` (wait + 60 s); the
+  reply carries `hookTimeout`. The terminal's own dialog is unaffected.
 
 ## Usage (context and rate limits)
 
@@ -1205,7 +1239,13 @@ statusline itself.
 
 `conductore-hook PermissionRequest` creates a FIFO (`tmp/p.<pid>`), opens
 it read-write, spools the request with the FIFO's path and blocks reading it
-until `decide` is called or `CONDUCTORE_PERMISSION_TIMEOUT` (120 s) passes.
+until `decide` is called or the wait passes (`permission-wait`, 15 min by
+default; `install` sets the handler's `timeout` to the wait plus 60 s so
+Claude Code never kills it first). Claude Code shows its own dialog at once
+all the same, and does not end the hook when the dialog is answered there:
+the daemon releases it (an empty line) on the call's PostToolUse (same tool,
+the request's input within the call's), Stop, StopFailure, UserPromptSubmit
+or SessionEnd.
 The daemon writes the decision line into the FIFO with a non-blocking open,
 which fails (ENXIO) once nobody reads it: that is how it notices a hook that
 Claude Code killed (checked once a second, only while a prompt is pending),
