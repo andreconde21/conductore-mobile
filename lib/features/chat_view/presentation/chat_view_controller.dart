@@ -799,6 +799,32 @@ class ChatViewController extends ChangeNotifier {
     unawaited(refresh());
   }
 
+  /// Answers Claude Code's own dialog in the terminal (CON-096): [id] is
+  /// the request's or the transcript question's (busy while it runs, see
+  /// [isDeciding]); [payload] as [ConductoreChatClient.terminalAnswer].
+  Future<void> answerInTerminal(String id, Map<String, Object?> payload) async {
+    if (!_deciding.add(id)) {
+      return;
+    }
+    notifyListeners();
+    try {
+      await _client.terminalAnswer(sessionId, payload);
+    } on ChatUnsupported catch (error) {
+      throw AppFailure(
+        error.kind == ChatUnsupportedKind.outdated
+            ? 'The Conductore companion on this machine is too old to '
+                  'answer in the terminal from here. Update it, or open '
+                  'the terminal.'
+            : error.message,
+      );
+    } finally {
+      _deciding.remove(id);
+      if (!_disposed) notifyListeners();
+    }
+    _quietPolls = 0;
+    unawaited(refresh());
+  }
+
   void _onAgentChanged() {
     if (_visible && !_disposed) {
       _quietPolls = 0;

@@ -558,14 +558,20 @@ enum _AnswerKind { deny, secondary, allow }
 /// Says a permission prompt is answered in the agent's terminal (the
 /// phone can only show it).
 class TerminalOnlyNote extends StatelessWidget {
-  const TerminalOnlyNote({super.key});
+  const TerminalOnlyNote({this.detail, this.onOpenTerminal, super.key});
 
   static const text = 'Answer in the terminal';
+
+  /// Why ("this agent takes its approvals there" when null).
+  final String? detail;
+
+  /// Shows an "Open terminal" button when set.
+  final VoidCallback? onOpenTerminal;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
+    final note = Row(
       children: [
         Icon(
           Icons.terminal_rounded,
@@ -575,10 +581,27 @@ class TerminalOnlyNote extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            '$text: this agent takes its approvals there',
+            '$text: ${detail ?? 'this agent takes its approvals there'}',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
+          ),
+        ),
+      ],
+    );
+    final open = onOpenTerminal;
+    if (open == null) return note;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        note,
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            key: const ValueKey('terminal-only-open-terminal'),
+            onPressed: open,
+            icon: const Icon(Icons.terminal_rounded, size: 18),
+            label: const Text('Open terminal'),
           ),
         ),
       ],

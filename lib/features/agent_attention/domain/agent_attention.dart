@@ -263,6 +263,7 @@ class PendingPermissionRequest {
     this.questions = const [],
     this.answers,
     this.terminalOnly = false,
+    this.expired = false,
   });
 
   /// The Claude Code tool that asks the user questions.
@@ -310,6 +311,12 @@ class PendingPermissionRequest {
   /// Always or Trust.
   final bool terminalOnly;
 
+  /// The phone's wait for it is over (the companion's `expired`, CON-096):
+  /// Claude Code's own dialog still asks in the terminal, so it is
+  /// [terminalOnly]; a companion with `terminal-answers` types the answer
+  /// there.
+  final bool expired;
+
   /// A question Claude asked (AskUserQuestion). Claude Code ignores a plain
   /// Allow for it: it takes answers ([withAnswers]) or a Deny.
   bool get isQuestion => toolName == questionTool;
@@ -345,6 +352,7 @@ class PendingPermissionRequest {
         questions: questions,
         answers: Map.unmodifiable(answers),
         terminalOnly: terminalOnly,
+        expired: expired,
       );
 
   /// Longest tool input kept on the phone; anything beyond is truncated
@@ -365,7 +373,8 @@ class PendingPermissionRequest {
         other.repo == repo &&
         listEquals(other.questions, questions) &&
         mapEquals(other.answers, answers) &&
-        other.terminalOnly == terminalOnly;
+        other.terminalOnly == terminalOnly &&
+        other.expired == expired;
   }
 
   @override
@@ -381,6 +390,7 @@ class PendingPermissionRequest {
     repo,
     Object.hashAll(questions),
     terminalOnly,
+    expired,
   );
 }
 

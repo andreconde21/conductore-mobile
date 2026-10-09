@@ -101,7 +101,8 @@ const USAGE = `usage: conductore-hostd <command>
                                   from stdin when neither flag is given)
   interrupt <sessionId>           press Escape in the agent's pane
   terminal-answer <sessionId> -   answer Claude Code's own dialog in the
-                                  agent's pane (CON-096): JSON on stdin,
+                                  agent's pane (CON-096): JSON on stdin
+                                  (or --json-b64 <base64>),
                                   {questions, answers} (a question form)
                                   or {requestId, decision: allow|deny} (an
                                   expired permission prompt); the screen is
@@ -671,10 +672,13 @@ async function interrupt (args) {
 // more; a request whose hook still waits is answered with `decide`.
 // terminal-form.js checks the screen before every key.
 async function terminalAnswerCmd (args) {
-  const [sessionId] = parseFlags(args).positional
-  if (!sessionId) return fail('usage: terminal-answer <sessionId> -  (JSON on stdin)')
+  const { flags, positional } = parseFlags(args)
+  const [sessionId] = positional
+  if (!sessionId) return fail('usage: terminal-answer <sessionId> [- | --json-b64 <base64>]  (JSON on stdin)')
   let req
-  try { req = JSON.parse(await readStdin()) } catch { return fail('terminal-answer: expected JSON on stdin') }
+  try {
+    req = JSON.parse(typeof flags['json-b64'] === 'string' ? Buffer.from(flags['json-b64'], 'base64').toString('utf8') : await readStdin())
+  } catch { return fail('terminal-answer: expected JSON on stdin') }
   if (!req || typeof req !== 'object' || Array.isArray(req)) return fail('terminal-answer: expected a JSON object')
   const found = await inputAgent(sessionId, { allowPermission: true })
   if (found.error) return fail(found.error)

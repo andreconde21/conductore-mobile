@@ -16,6 +16,7 @@ import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_working.dart';
+import 'package:conduit/features/chat_view/domain/terminal_answers.dart';
 import 'package:conduit/features/chat_view/presentation/chat_forward.dart';
 import 'package:conduit/features/chat_view/presentation/chat_thread_extras.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
@@ -218,6 +219,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     _chat.setVisible(true);
     _chat.addListener(_stickToBottom);
     _chat.addListener(_watchTurnEnd);
+    _chat.addListener(_revealPendingAfterPoll);
     if (widget.dictation == null) {
       final recognizer =
           widget.speechRecognizer ??
@@ -463,6 +465,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     final covered = !TickerMode.valuesOf(context).enabled;
     if (covered != _covered) {
       _covered = covered;
+      if (!covered) _revealPendingOnReturn();
       WidgetsBinding.instance.addPostFrameCallback((_) => _syncPolling());
     }
     _attachContinuity(ContinuityScope.maybeOf(context));
@@ -762,6 +765,7 @@ class _ChatViewPageState extends State<ChatViewPage>
         readAloud == null ||
         !(readAloud.enabled || talking)) {
       if (state == AppLifecycleState.resumed) {
+        if (previous != AppLifecycleState.resumed) _revealPendingOnReturn();
         _syncPolling();
       } else {
         _chat.setVisible(false);
@@ -811,6 +815,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     _chat.removeListener(_feedReadAloud);
     _chat.removeListener(_stickToBottom);
     _chat.removeListener(_watchTurnEnd);
+    _chat.removeListener(_revealPendingAfterPoll);
     _dictation?.removeListener(_syncDictation);
     _talk
       ?..removeListener(_onTalkChanged)
@@ -868,6 +873,32 @@ class _ChatViewPageState extends State<ChatViewPage>
       unawaited(_chat.loadOlder());
     }
     _noteAnchorSoon();
+  }
+
+  /// Set on coming back to the chat (the app resumed, a route on top
+  /// closed) until the next poll: requests waiting for the user then show
+  /// at once (CON-094), never held behind the "New messages" pill of a
+  /// thread left scrolled up.
+  bool _revealPending = false;
+
+  void _revealPendingOnReturn() {
+    _revealPending = true;
+    _revealHeldPending();
+  }
+
+  void _revealPendingAfterPoll() {
+    if (!_revealPending || _chat.loading) return;
+    _revealPending = false;
+    _revealHeldPending();
+  }
+
+  /// Unfreezes the thread and goes to its bottom when requests wait there.
+  void _revealHeldPending() {
+    if (!mounted || _freeze == null || _chat.pending.isEmpty) return;
+    setState(() => _freeze = null);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+    });
   }
 
   /// Follows new messages while at the bottom.
@@ -941,6 +972,44 @@ class _ChatViewPageState extends State<ChatViewPage>
           content: Text(
             'Could not $what: '
             '${error is AppFailure ? error.userMessage : error}',
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Whether this machine's companion types answers into Claude Code's
+  /// own dialog (`terminal-answers`, CON-096). Unknown (no agent monitor
+  /// report) counts as yes: an older companion says so when asked.
+  bool get _terminalAnswers {
+    final hostId = widget.hostId;
+    final capabilities = hostId == null
+        ? null
+        : widget.attention?.companionCapabilities(hostId);
+    return capabilities == null ||
+        capabilities.contains(terminalAnswersCapability);
+  }
+
+  /// Types an answer into the agent's terminal dialog (CON-096).
+  Future<void> _answerInTerminal(
+    String id,
+    Map<String, Object?> payload, {
+    required String what,
+  }) async {
+    _quiet();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await _chat.answerInTerminal(id, payload);
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not $what in the terminal: '
+            '${error is AppFailure ? error.userMessage : error}',
+          ),
+          action: SnackBarAction(
+            label: 'Open terminal',
+            onPressed: widget.onOpenTerminal,
           ),
         ),
       );
@@ -1380,6 +1449,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     var shownCount = items.length;
     var pending = allPending;
     var held = 0;
+    var heldRequests = 0;
     if (freeze != null) {
       final last = freeze.lastItemId == null
           ? -1
@@ -1396,7 +1466,8 @@ class _ChatViewPageState extends State<ChatViewPage>
         for (final request in allPending)
           if (freeze.approvals.contains(request.id)) request,
       ];
-      held += allPending.length - pending.length;
+      heldRequests = allPending.length - pending.length;
+      held += heldRequests;
     }
     // What the user sent stays at the bottom until the transcript shows
     // it; while frozen above that entry, the bubble stands in for it.
@@ -1445,10 +1516,21 @@ class _ChatViewPageState extends State<ChatViewPage>
                   busy:
                       _chat.isDeciding(request.id) ||
                       (widget.attention?.isDeciding(request.id) ?? false),
-                  onAnswer: (answers) => _decide(
-                    request.withAnswers(answers),
-                    PermissionVerdict.allow,
-                  ),
+                  // The phone's wait ran out: typed into the terminal.
+                  viaTerminal: request.expired && _terminalAnswers,
+                  onOpenTerminal: widget.onOpenTerminal,
+                  onAnswer: (answers) => request.expired
+                      ? _answerInTerminal(request.id, {
+                          'requestId': request.id,
+                          'answers': terminalAnswerParts(
+                            request.questions,
+                            answers,
+                          ),
+                        }, what: 'answer')
+                      : _decide(
+                          request.withAnswers(answers),
+                          PermissionVerdict.allow,
+                        ),
                   onDecline: () => _decide(request, PermissionVerdict.deny),
                 )
               : ChatApprovalCard(
@@ -1457,7 +1539,17 @@ class _ChatViewPageState extends State<ChatViewPage>
                   busy:
                       _chat.isDeciding(request.id) ||
                       (widget.attention?.isDeciding(request.id) ?? false),
-                  onDecide: (verdict) => _decide(request, verdict),
+                  viaTerminal:
+                      request.expired && !request.isPlan && _terminalAnswers,
+                  onOpenTerminal: widget.onOpenTerminal,
+                  onDecide: (verdict) => request.expired
+                      ? _answerInTerminal(request.id, {
+                          'requestId': request.id,
+                          'decision': verdict == PermissionVerdict.deny
+                              ? 'deny'
+                              : 'allow',
+                        }, what: verdict.label.toLowerCase())
+                      : _decide(request, verdict),
                   onTrust: _smartApprovals ? () => _trust(request) : null,
                 ),
         ),
@@ -1568,7 +1660,14 @@ class _ChatViewPageState extends State<ChatViewPage>
                 key: const ValueKey('chat-new-messages'),
                 onPressed: _jumpToLatest,
                 icon: const Icon(Icons.arrow_downward_rounded, size: 18),
-                label: Text('New messages ($held)'),
+                // A request blocks the agent: it says so, not "messages".
+                label: Text(
+                  heldRequests > 0
+                      ? (allPending.every((r) => r.isQuestion)
+                            ? 'Question waiting'
+                            : 'Approval waiting')
+                      : 'New messages ($held)',
+                ),
               ),
             ),
           )
@@ -1599,20 +1698,49 @@ class _ChatViewPageState extends State<ChatViewPage>
     required bool waiting,
   }) {
     final askedBelow = _chat.pending.any((request) => request.isQuestion);
-    final canType =
+    final open =
         !item.answered &&
         !askedBelow &&
         isLast &&
-        waiting &&
-        !_chat.isAnswering(item.id);
+        _chat.agent?.state != 'ended';
+    // Claude Code's form waits in the terminal and no hook waits for the
+    // phone (CON-096): the answers are typed into the form there. The
+    // companion checks the screen first, so the agent's reported state
+    // (often still "working") does not decide it.
+    if (open &&
+        _terminalAnswers &&
+        item.questions.isNotEmpty &&
+        item.questions.every((q) => q.options.isNotEmpty)) {
+      final request = questionRequestOf(item);
+      return QuestionRequestCard(
+        key: key,
+        request: request,
+        agentName: _agentName,
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        busy: _chat.isDeciding(item.id),
+        viaTerminal: true,
+        onOpenTerminal: widget.onOpenTerminal,
+        onAnswer: (answers) => _answerInTerminal(item.id, {
+          'questions': terminalQuestions(request.questions),
+          'answers': terminalAnswerParts(request.questions, answers),
+        }, what: 'answer'),
+        onDecline: () {},
+      );
+    }
+    final canType = open && waiting && !_chat.isAnswering(item.id);
     return ChatQuestionCard(
       key: key,
       item: item,
       onPick: canType ? (number) => _pick(item, number) : null,
+      onOpenTerminal: item.answered || askedBelow
+          ? null
+          : widget.onOpenTerminal,
       note: item.answered || canType || _chat.isAnswering(item.id)
           ? null
           : askedBelow
           ? 'Answer it below.'
+          : open
+          ? 'Waiting in the terminal: answer it there.'
           : 'Not waiting for an answer here now. Open the terminal to see '
                 'the question.',
     );

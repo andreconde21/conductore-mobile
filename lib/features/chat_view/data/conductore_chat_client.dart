@@ -184,6 +184,46 @@ class ConductoreChatClient {
     _check(result);
   }
 
+  /// How long typing an answer into the terminal may take: the companion
+  /// reads the screen after every key (up to a few seconds each).
+  static const terminalAnswerTimeout = Duration(seconds: 60);
+
+  static String terminalAnswerStdinCommand(String sessionId) =>
+      ConductoreHostAttentionProvider.remoteCommand(
+        'terminal-answer ${shellQuoteArgument(sessionId)} -',
+      );
+
+  static String terminalAnswerCommand(
+    String sessionId,
+    Map<String, Object?> payload,
+  ) => ConductoreHostAttentionProvider.remoteCommand(
+    'terminal-answer ${shellQuoteArgument(sessionId)} --json-b64 '
+    '${base64.encode(utf8.encode(jsonEncode(payload)))}',
+  );
+
+  /// Answers Claude Code's own dialog in the agent's pane (capability
+  /// `terminal-answers`, CON-096): [payload] is `{questions, answers}`,
+  /// `{requestId, answers}` or `{requestId, decision}`. The companion
+  /// checks the screen before every key and fails without typing on when
+  /// it does not show that dialog.
+  Future<void> terminalAnswer(
+    String sessionId,
+    Map<String, Object?> payload,
+  ) async {
+    final runner = _runner;
+    final result = runner is StdinAgentCommandRunner
+        ? await runner.runWithStdin(
+            terminalAnswerStdinCommand(sessionId),
+            stdin: jsonEncode(payload),
+            timeout: terminalAnswerTimeout,
+          )
+        : await runner.run(
+            terminalAnswerCommand(sessionId, payload),
+            timeout: terminalAnswerTimeout,
+          );
+    _check(result);
+  }
+
   Future<void> interrupt(String sessionId) async {
     final result = await _runner.run(
       interruptCommand(sessionId),
