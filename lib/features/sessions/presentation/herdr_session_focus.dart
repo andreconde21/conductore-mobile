@@ -722,8 +722,10 @@ class HerdrSessionFocus implements AppInputRouter {
         return null;
       }
     }
+    // Verified means Herdr shows its workspace, and the pane a deep link
+    // asked for when there is one (a split shows only one pane on a phone).
     return _checkServer(session).then(
-      (view) => view != null && view.focusedId == workspaceOf(session)
+      (_) => _verifiedAt.containsKey(session)
           ? InputHoldDecision.send
           : InputHoldDecision.block,
     );
@@ -746,10 +748,17 @@ class HerdrSessionFocus implements AppInputRouter {
     }
     final paneId = _preferredPanes[session] ?? '';
     final tabId = _preferredTabs[session] ?? '';
+    var focusedPane = '';
     if (paneId.isNotEmpty || tabId.isNotEmpty) {
-      await control.focusLocation(tabId: tabId, paneId: paneId);
+      final moved = await control.focusLocation(tabId: tabId, paneId: paneId);
+      if (moved) focusedPane = paneId;
     }
-    _applyFocus(serverKey(session), workspaceId, const {});
+    _applyFocus(
+      serverKey(session),
+      workspaceId,
+      const {},
+      focusedPane: focusedPane,
+    );
     session.releaseHeldInput();
     return true;
   }
@@ -776,12 +785,20 @@ class HerdrSessionFocus implements AppInputRouter {
     if (running != null) return running;
     final control = controlFor(session);
     if (control == null) return Future.value();
-    final check = control.workspaces().then((items) {
+    final check = control.workspaces().then((items) async {
       if (items == null || _disposed) return null;
       final focused = items.where((item) => item.focused).firstOrNull;
-      _applyFocus(key, focused?.id, {
-        for (final item in items) item.id: item.label,
-      }, workspaces: items);
+      final focusedPane = focused == null
+          ? ''
+          : await _focusedPaneIfAsked(key, control, focused);
+      if (_disposed) return null;
+      _applyFocus(
+        key,
+        focused?.id,
+        {for (final item in items) item.id: item.label},
+        workspaces: items,
+        focusedPane: focusedPane,
+      );
       return _HerdrFocusView(focused?.id, focused?.label ?? '');
     });
     _checks[key] = check;
@@ -793,16 +810,62 @@ class HerdrSessionFocus implements AppInputRouter {
     return check;
   }
 
+  /// The pane [focused] (the workspace Herdr shows on server [key]) has
+  /// focused, read only when a session on that workspace was opened at a
+  /// pane ([_preferredPanes]); empty when none was or it could not be read.
+  Future<String> _focusedPaneIfAsked(
+    String key,
+    HerdrRemoteControl control,
+    HerdrWorkspaceInfo focused,
+  ) async {
+    final asked = _workspace.sessions.any(
+      (session) =>
+          herdrTargetOf(session) != null &&
+          serverKey(session) == key &&
+          workspaceOf(session) == focused.id &&
+          (_preferredPanes[session] ?? '').isNotEmpty,
+    );
+    if (!asked) return '';
+    final list = await control.query(control.commands.paneList);
+    if (list == null || !HerdrRemoteControl.succeeded(list)) return '';
+    final panes = _HerdrPane.parseList(
+      list.stdout,
+    ).where((pane) => pane.workspaceId == focused.id).toList();
+    return await _focusedPaneIn(control, panes, focused.activeTabId) ?? '';
+  }
+
+  /// The pane Herdr has focused among [panes] (one workspace's), in its
+  /// tab [activeTab] when that has any: `herdr pane layout` of one of them.
+  Future<String?> _focusedPaneIn(
+    HerdrRemoteControl control,
+    List<_HerdrPane> panes,
+    String activeTab,
+  ) async {
+    if (panes.isEmpty) return null;
+    final inTab = panes.where((pane) => pane.tabId == activeTab).toList();
+    final probe = (inTab.isEmpty ? panes : inTab).first;
+    final layout = await control.query(control.commands.paneLayout(probe.id));
+    return layout == null || !HerdrRemoteControl.succeeded(layout)
+        ? null
+        : _HerdrPane.focusedInLayout(layout.stdout);
+  }
+
   /// Herdr's focus on server [key] is on [focusedId]: the session on that
   /// workspace previews live and takes keys; the others say what Herdr
   /// shows instead, and preview their own workspace. [workspaces] is the
   /// listing that answer came from, if any, so the previews need not ask
   /// for it again.
+  ///
+  /// [focusedPane] is the pane Herdr shows in that workspace (empty when
+  /// unknown). A session opened at another pane of it (the other half of a
+  /// split, CON-095) is not on it: a phone-sized Herdr client shows only
+  /// the focused pane, so it previews its own pane until that is focused.
   void _applyFocus(
     String key,
     String? focusedId,
     Map<String, String> labels, {
     List<HerdrWorkspaceInfo>? workspaces,
+    String focusedPane = '',
   }) {
     final now = _clock();
     for (final session in _workspace.sessions) {
@@ -810,7 +873,14 @@ class HerdrSessionFocus implements AppInputRouter {
         continue;
       }
       final own = workspaceOf(session);
-      if (own != null && own == focusedId) {
+      final preferred = _preferredPanes[session] ?? '';
+      final otherPane =
+          own != null &&
+          own == focusedId &&
+          preferred.isNotEmpty &&
+          focusedPane.isNotEmpty &&
+          focusedPane != preferred;
+      if (own != null && own == focusedId && !otherPane) {
         _setAgentView(session, false);
         _verifiedAt[session] = now;
         session
@@ -826,10 +896,11 @@ class HerdrSessionFocus implements AppInputRouter {
         continue;
       }
       _verifiedAt.remove(session);
+      final shown = focusedId == null ? '' : labels[focusedId] ?? focusedId;
       session
-        ..focusElsewhereLabel = focusedId == null
-            ? ''
-            : labels[focusedId] ?? focusedId
+        ..focusElsewhereLabel = otherPane
+            ? 'another pane of ${shown.isEmpty ? _labelOf(session) : shown}'
+            : shown
         ..sharedViewSnapshot =
             session.sharedView.value ??
             _ownScreens[session] ??
