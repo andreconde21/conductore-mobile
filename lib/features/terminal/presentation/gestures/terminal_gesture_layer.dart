@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/edge_swipe_back.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
@@ -178,7 +179,9 @@ enum _TwoFingerKind { pinch, scroll, paneSwipe, workspaceSwipe, ignored }
 /// In both:
 ///
 /// * swipe down from the header strip opens the session grid;
-/// * swipe in from the right edge opens the agent panel.
+/// * swipe in from the right edge opens the agent panel;
+/// * a swipe from the left edge of a pushed page is left to the page's
+///   swipe-back (see `startsEdgeSwipeBack`).
 ///
 /// Each gesture is switched by [preferences]. The layer never touches the
 /// terminal view's own tap, long-press and single-finger scroll handling: its
@@ -637,7 +640,12 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
         return Listener(
           behavior: HitTestBehavior.translucent,
           onPointerDown: (event) {
-            _swipe.handlePointerDown(event);
+            // A touch in the left strip of a pushed page is the page's
+            // swipe-back, not a window swipe; taps, long presses and
+            // vertical scrolling there stay with the terminal view.
+            if (!startsEdgeSwipeBack(context, event.position)) {
+              _swipe.handlePointerDown(event);
+            }
             if (twoFinger) {
               _twoFinger.handlePointerDown(event);
             }

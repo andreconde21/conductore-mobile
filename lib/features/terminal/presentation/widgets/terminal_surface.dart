@@ -682,13 +682,31 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
 
   @override
   Widget build(BuildContext context) {
-    return Actions(
+    final surface = Actions(
       actions: {
         _PasteClipboardIntent: CallbackAction<_PasteClipboardIntent>(
           onInvoke: (_) => _pasteClipboard(),
         ),
       },
       child: _buildSurface(context),
+    );
+    if (PlatformFeatures.isDesktop) return surface;
+    // On a phone, a selection's handles can sit in the left strip where a
+    // swipe goes back: while there is one, back (the swipe, the system
+    // gesture) clears it instead of leaving the page, so a handle drag at
+    // the edge stays a handle drag. Only the session in front holds the
+    // page; the others are mounted out of sight.
+    return ListenableBuilder(
+      listenable: _terminalController,
+      builder: (context, child) => PopScope<Object?>(
+        canPop:
+            widget.focusNode == null || _terminalController.selection == null,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _terminalController.clearSelection();
+        },
+        child: child!,
+      ),
+      child: surface,
     );
   }
 

@@ -1,4 +1,5 @@
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/edge_swipe_back.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:flutter/material.dart';
@@ -123,6 +124,8 @@ class AppTheme {
       brightness: themeBrightness,
       colorScheme: colorScheme,
       extensions: [AppPaletteTheme(palette)],
+      // Swipe-back from the left edge on phones, predictive back on Android.
+      pageTransitionsTheme: appPageTransitionsTheme,
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
       // A mouse click shows no ripple on desktop, and hover is visible.

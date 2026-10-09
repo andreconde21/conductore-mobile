@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:conduit/core/presentation/edge_swipe_back.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
@@ -7,6 +9,7 @@ import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.da
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -70,49 +73,57 @@ class _Harness {
   Widget build() {
     return MaterialApp(
       home: Scaffold(
-        body: Center(
-          child: SizedBox(
-            width: 400,
-            height: 600,
-            child: StatefulBuilder(
-              builder: (context, setState) {
-                return TerminalGestureLayer(
-                  target: target,
-                  herdrControl: herdrControl,
-                  onHerdrWorkspaceFocused: workspacesFocused.add,
-                  preferences: preferences,
-                  session: session,
-                  fontSize: 14,
-                  onFontSizeChanged: fontSizes.add,
-                  scrollMode: scrollMode,
-                  onEnterScrollMode: () {
-                    enterScrollMode += 1;
-                    setState(() => scrollMode = true);
-                  },
-                  onExitScrollMode: () {
-                    exitScrollMode += 1;
-                    setState(() => scrollMode = false);
-                  },
-                  onOpenSessionGrid: withSessionGrid
-                      ? () => sessionGridOpens += 1
-                      : null,
-                  onOpenAgentPanel: withAgentPanel
-                      ? () => agentPanelOpens += 1
-                      : null,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => competitor.taps += 1,
-                    onLongPress: () => competitor.longPresses += 1,
-                    onVerticalDragUpdate: (details) =>
-                        competitor.verticalDrag += details.delta.dy,
-                    child: const SizedBox.expand(),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
+        body: Center(child: SizedBox(width: 400, height: 600, child: _layer())),
       ),
+    );
+  }
+
+  /// The layer filling a page pushed over a home page, with the app's
+  /// page transitions (the left-edge swipe-back).
+  Widget buildPushed(GlobalKey<NavigatorState> navigatorKey) {
+    return MaterialApp(
+      navigatorKey: navigatorKey,
+      theme: ThemeData(pageTransitionsTheme: appPageTransitionsTheme),
+      home: const Scaffold(body: Text('home')),
+      onGenerateRoute: (_) =>
+          MaterialPageRoute<void>(builder: (_) => Scaffold(body: _layer())),
+    );
+  }
+
+  Widget _layer() {
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return TerminalGestureLayer(
+          target: target,
+          herdrControl: herdrControl,
+          onHerdrWorkspaceFocused: workspacesFocused.add,
+          preferences: preferences,
+          session: session,
+          fontSize: 14,
+          onFontSizeChanged: fontSizes.add,
+          scrollMode: scrollMode,
+          onEnterScrollMode: () {
+            enterScrollMode += 1;
+            setState(() => scrollMode = true);
+          },
+          onExitScrollMode: () {
+            exitScrollMode += 1;
+            setState(() => scrollMode = false);
+          },
+          onOpenSessionGrid: withSessionGrid
+              ? () => sessionGridOpens += 1
+              : null,
+          onOpenAgentPanel: withAgentPanel ? () => agentPanelOpens += 1 : null,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => competitor.taps += 1,
+            onLongPress: () => competitor.longPresses += 1,
+            onVerticalDragUpdate: (details) =>
+                competitor.verticalDrag += details.delta.dy,
+            child: const SizedBox.expand(),
+          ),
+        );
+      },
     );
   }
 }
@@ -1094,6 +1105,67 @@ void main() {
         secondTo: _center.translate(30, -120),
       );
       expect(harness.session.log, ['ctrl:space', 'text:f']);
+    });
+  });
+
+  group('left-edge swipe-back on a pushed terminal page', () {
+    Future<_Harness> pumpPushed(WidgetTester tester) async {
+      final harness = _Harness();
+      addTearDown(harness.session.dispose);
+      final navigatorKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(harness.buildPushed(navigatorKey));
+      unawaited(navigatorKey.currentState!.pushNamed<void>('terminal'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TerminalGestureLayer), findsOneWidget);
+      return harness;
+    }
+
+    for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+      testWidgets('a swipe from the edge goes back (${platform.name})', (
+        tester,
+      ) async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final harness = await pumpPushed(tester);
+
+        await _swipe(tester, const Offset(4, 300), const Offset(500, 0));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TerminalGestureLayer), findsNothing);
+        expect(find.text('home'), findsOneWidget);
+        // Not also a window swipe.
+        expect(harness.session.log, isEmpty);
+        debugDefaultTargetPlatformOverride = null;
+      });
+
+      testWidgets('the same swipe off the edge switches the window '
+          '(${platform.name})', (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final harness = await pumpPushed(tester);
+
+        await _swipe(tester, const Offset(120, 300), const Offset(500, 0));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TerminalGestureLayer), findsOneWidget);
+        expect(harness.session.log, ['ctrl:keyB', 'text:p']);
+        debugDefaultTargetPlatformOverride = null;
+      });
+    }
+
+    testWidgets('scrolling, taps and long presses at the edge stay with the '
+        'terminal', (tester) async {
+      final harness = await pumpPushed(tester);
+
+      await _swipe(tester, const Offset(4, 200), const Offset(0, 160));
+      await tester.tapAt(const Offset(4, 300));
+      await tester.longPressAt(const Offset(4, 400));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TerminalGestureLayer), findsOneWidget);
+      expect(harness.competitor.verticalDrag, greaterThan(100));
+      expect(harness.competitor.taps, 1);
+      expect(harness.competitor.longPresses, 1);
     });
   });
 }

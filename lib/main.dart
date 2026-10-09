@@ -1137,13 +1137,16 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
               _wrapShareTargetScope(
                 DesktopEscapeToPop(
                   navigatorKey: widget.navigatorKey,
-                  child: AppLockGate(
-                    controller: widget.lockController,
-                    lockPage: (_) => LockPage(
+                  child: DesktopBackNavigation(
+                    navigatorKey: widget.navigatorKey,
+                    child: AppLockGate(
                       controller: widget.lockController,
-                      themeController: widget.themeController,
+                      lockPage: (_) => LockPage(
+                        controller: widget.lockController,
+                        themeController: widget.themeController,
+                      ),
+                      child: content,
                     ),
-                    child: content,
                   ),
                 ),
               ),
