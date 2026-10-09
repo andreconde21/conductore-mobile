@@ -1,4 +1,5 @@
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
@@ -245,14 +246,20 @@ class _ViewMenu extends StatelessWidget {
             enabled: false,
             child: Text(sheprdSyncStatus(controller)),
           ),
-        if (controller.canEditLayout &&
+        if (controller.sheprdEditsPaused case final paused?)
+          PopupMenuItem(
+            key: const ValueKey('project-view-edits-paused'),
+            enabled: false,
+            child: Text(paused),
+          ),
+        if (!controller.mirroring &&
             !controller.followsMachines &&
             controller.hasMachineLayout)
           const PopupMenuItem(
             value: _ViewChoice.follow,
             child: Text("Use the machines' sidebar.toml again"),
           ),
-        if (controller.canEditLayout &&
+        if (!controller.mirroring &&
             controller.followsMachines &&
             controller.hasMachineLayout)
           const PopupMenuItem(
@@ -291,10 +298,14 @@ class ProjectHeaderTile extends StatelessWidget {
     this.leading,
     this.tokensToday,
     this.trailing,
+    this.pending = false,
     super.key,
   });
 
   final ProjectGroup project;
+
+  /// A layout edit about it waits for sheprd: a small spinner.
+  final bool pending;
   final bool collapsed;
 
   /// Rows shown under it (with the filter applied).
@@ -356,6 +367,11 @@ class ProjectHeaderTile extends StatelessWidget {
                   ),
                 ),
               ),
+              if (pending)
+                const Padding(
+                  padding: EdgeInsets.only(left: 6),
+                  child: SheprdPendingMark(),
+                ),
               if (tokensToday case final tokens? when tokens > 0)
                 Tooltip(
                   message: "Today's tokens (input, output, cache writes)",
@@ -390,6 +406,10 @@ enum ProjectEntryAction {
   moveTo,
   moveToOther,
   hide,
+  moveUp,
+  moveDown,
+  removeActive,
+  keepActive,
   markRead,
   markUnread,
   keep,
@@ -418,6 +438,10 @@ enum ProjectEntryAction {
     ProjectEntryAction.moveTo => Icons.drive_file_move_outline,
     ProjectEntryAction.moveToOther => Icons.move_down_rounded,
     ProjectEntryAction.hide => Icons.visibility_off_outlined,
+    ProjectEntryAction.moveUp => Icons.arrow_upward_rounded,
+    ProjectEntryAction.moveDown => Icons.arrow_downward_rounded,
+    ProjectEntryAction.removeActive => Icons.remove_circle_outline_rounded,
+    ProjectEntryAction.keepActive => Icons.add_circle_outline_rounded,
     ProjectEntryAction.markRead => Icons.mark_email_read_outlined,
     ProjectEntryAction.markUnread => Icons.markunread_outlined,
     ProjectEntryAction.keep => Icons.push_pin_outlined,
@@ -436,27 +460,41 @@ List<SidebarNode> sheprdTargets(ProjectEntry entry, SidebarNode row) {
   ];
 }
 
-/// What [row] of [entry] offers: sheprd's marks while synced (nothing for
-/// a row without a Herdr agent), else the project moves and Hide.
+/// What [row] of [entry] offers: the project moves, Hide and the order;
+/// while synced, sheprd's marks first (nothing for a row without a Herdr
+/// agent), "remove from active" / "keep active", and the layout actions
+/// only when sheprd takes them (contract v2).
 List<ProjectEntryAction> projectEntryActions(
   ProjectLayoutController? controller,
   ProjectEntry entry, {
   required ProjectGroup project,
   SidebarNode? row,
 }) {
-  if (controller != null && controller.mirroring) {
-    final targets = sheprdTargets(entry, row ?? entry.node);
-    if (targets.isEmpty) return const [];
-    return [
-      for (final mark in SheprdMark.choicesFor(entry.sheprdOf(targets.first)))
-        ProjectEntryAction.of(mark),
-    ];
-  }
-  return [
+  final layout = [
     ProjectEntryAction.moveTo,
     if (!project.isOther) ProjectEntryAction.moveToOther,
     ProjectEntryAction.hide,
+    if (ProjectLayoutController.canMoveEntry(project, entry, -1))
+      ProjectEntryAction.moveUp,
+    if (ProjectLayoutController.canMoveEntry(project, entry, 1))
+      ProjectEntryAction.moveDown,
   ];
+  if (controller != null && controller.mirroring) {
+    final targets = sheprdTargets(entry, row ?? entry.node);
+    final edits = controller.sheprdTakesEdits;
+    final shown = targets.isEmpty ? null : entry.sheprdOf(targets.first);
+    return [
+      if (targets.isNotEmpty)
+        for (final mark in SheprdMark.choicesFor(shown))
+          ProjectEntryAction.of(mark),
+      if (edits && targets.isNotEmpty)
+        (shown?.removed ?? false)
+            ? ProjectEntryAction.keepActive
+            : ProjectEntryAction.removeActive,
+      if (edits) ...layout,
+    ];
+  }
+  return layout;
 }
 
 String projectEntryActionLabel(ProjectEntryAction action, ProjectEntry entry) =>
@@ -464,6 +502,10 @@ String projectEntryActionLabel(ProjectEntryAction action, ProjectEntry entry) =>
       ProjectEntryAction.moveTo => 'Move to project…',
       ProjectEntryAction.moveToOther => 'Move to Other',
       ProjectEntryAction.hide => entry.hidden ? 'Show again' : 'Hide',
+      ProjectEntryAction.moveUp => 'Move up',
+      ProjectEntryAction.moveDown => 'Move down',
+      ProjectEntryAction.removeActive => 'Remove from active',
+      ProjectEntryAction.keepActive => 'Keep active',
       _ => action.mark!.label,
     };
 
@@ -526,6 +568,25 @@ Future<void> runProjectEntryAction(
       await controller.moveTo(entry, '');
     case ProjectEntryAction.hide:
       await controller.toggleHidden(entry);
+    case ProjectEntryAction.moveUp || ProjectEntryAction.moveDown:
+      await controller.moveEntry(
+        project,
+        entry,
+        action == ProjectEntryAction.moveUp ? -1 : 1,
+      );
+    case ProjectEntryAction.removeActive || ProjectEntryAction.keepActive:
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      for (final target in sheprdTargets(entry, row ?? entry.node)) {
+        final error = await controller.setActive(
+          entry,
+          target,
+          remove: action == ProjectEntryAction.removeActive,
+        );
+        if (error != null) {
+          messenger?.showSnackBar(SnackBar(content: Text(error)));
+          return;
+        }
+      }
     default:
       break;
   }
@@ -602,33 +663,66 @@ Future<void> showProjectEntrySheet(
 }
 
 /// What a project's header menu can do.
-enum ProjectGroupAction { pin, rules, remove }
+enum ProjectGroupAction { pin, rename, rules, short, moveUp, moveDown, remove }
 
-/// None while synced with sheprd ([editable] false): its layout wins.
+/// None while the layout cannot be edited ([editable] false: synced with
+/// a sheprd that does not take layout edits), apart from why ([controller]'s
+/// [ProjectLayoutController.sheprdEditsPaused]).
 List<PopupMenuEntry<T>> projectGroupMenuItems<T>(
   ProjectGroup project, {
   required T Function(ProjectGroupAction action) value,
   bool editable = true,
-}) => project.isOther || !editable
-    ? const []
-    : [
+  ProjectLayoutController? controller,
+}) {
+  if (project.isOther) return const [];
+  if (!editable) {
+    final paused = controller?.sheprdEditsPaused;
+    return [
+      if (paused != null)
         PopupMenuItem<T>(
-          value: value(ProjectGroupAction.pin),
-          child: _MenuLine(
-            project.pinned ? Icons.star_rounded : Icons.star_outline_rounded,
-            project.pinned ? 'Unpin' : 'Pin to top',
-          ),
+          key: const ValueKey('project-edits-paused'),
+          enabled: false,
+          child: SizedBox(width: 260, child: Text(paused)),
         ),
-        PopupMenuItem<T>(
-          value: value(ProjectGroupAction.rules),
-          child: const _MenuLine(Icons.rule_rounded, 'Auto-match rules…'),
-        ),
-        if (project.inLayout)
-          PopupMenuItem<T>(
-            value: value(ProjectGroupAction.remove),
-            child: const _MenuLine(Icons.delete_outline_rounded, 'Delete'),
-          ),
-      ];
+    ];
+  }
+  return [
+    PopupMenuItem<T>(
+      value: value(ProjectGroupAction.pin),
+      child: _MenuLine(
+        project.pinned ? Icons.star_rounded : Icons.star_outline_rounded,
+        project.pinned ? 'Unpin' : 'Pin to top',
+      ),
+    ),
+    PopupMenuItem<T>(
+      value: value(ProjectGroupAction.rename),
+      child: const _MenuLine(Icons.edit_outlined, 'Rename…'),
+    ),
+    PopupMenuItem<T>(
+      value: value(ProjectGroupAction.rules),
+      child: const _MenuLine(Icons.rule_rounded, 'Auto-match rules…'),
+    ),
+    PopupMenuItem<T>(
+      value: value(ProjectGroupAction.short),
+      child: const _MenuLine(Icons.short_text_rounded, 'Short tag…'),
+    ),
+    if (controller?.canMoveProject(project, -1) ?? false)
+      PopupMenuItem<T>(
+        value: value(ProjectGroupAction.moveUp),
+        child: const _MenuLine(Icons.arrow_upward_rounded, 'Move up'),
+      ),
+    if (controller?.canMoveProject(project, 1) ?? false)
+      PopupMenuItem<T>(
+        value: value(ProjectGroupAction.moveDown),
+        child: const _MenuLine(Icons.arrow_downward_rounded, 'Move down'),
+      ),
+    if (project.inLayout)
+      PopupMenuItem<T>(
+        value: value(ProjectGroupAction.remove),
+        child: const _MenuLine(Icons.delete_outline_rounded, 'Delete'),
+      ),
+  ];
+}
 
 Future<void> runProjectGroupAction(
   BuildContext context,
@@ -654,6 +748,37 @@ Future<void> runProjectGroupAction(
       );
       if (rules == null) return;
       await controller.setRules(project, rules.split(','));
+    case ProjectGroupAction.rename:
+      final name = await askProjectName(
+        context,
+        title: 'Rename ${project.name}',
+        initial: project.name,
+      );
+      if (name == null || name.isEmpty || name == project.name) return;
+      if (!context.mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      if (!await controller.renameProject(project, name)) {
+        messenger?.showSnackBar(
+          SnackBar(content: Text('There is already a project called $name.')),
+        );
+      }
+    case ProjectGroupAction.short:
+      final short = await askProjectName(
+        context,
+        title: 'Short tag for ${project.name}',
+        initial: project.short ?? '',
+        hint: projectTag(project.name),
+        help:
+            'Two letters for the collapsed rail. Leave it empty to use '
+            '${projectTag(project.name)}.',
+      );
+      if (short == null) return;
+      final tag = String.fromCharCodes(short.trim().runes.take(2));
+      await controller.setShort(project, tag);
+    case ProjectGroupAction.moveUp:
+      await controller.moveProject(project, -1);
+    case ProjectGroupAction.moveDown:
+      await controller.moveProject(project, 1);
     case ProjectGroupAction.remove:
       await controller.removeProject(project);
   }

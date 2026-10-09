@@ -4,6 +4,7 @@
 
 - fix: every cswap account row (and the unmanaged live login) carries an `id`, the same on every machine whatever the slot or alias there (CON-100): a truncated SHA-256 of the lower-cased email and organisation uuid, never the email itself. The phone merges accounts across machines by it instead of by label, which showed one account twice when two machines named it differently. The cswap cache moves to version 3 so old rows without an id are fetched again.
 - test: host tests no longer write to the real ~/.conductore. Every test process gets a temp `CONDUCTORE_HOME` (`test/helpers/isolate.js`, loaded through `cleanup.js`). Before this, in-process tests (live bridge, sidebar, approvals) appended to the real hostd.log. Each test file now fails when the real rules.json or auto-approved.json changed, or hostd.log gained lines carrying the run's mark (`CONDUCTORE_TEST_RUN`, which log.js now stamps on every line). The live daemon's own lines never carry it.
+- feat: `sheprd-view-update --json` (capability `sheprd-view-2`, CON-101, contract v2 in `docs/sheprd-view-sync.md`): layout edits for sheprd (assign to a project or Other, hide/show, project create/rename/pin/rules/short/delete/move, member-move, remove-active/keep-active) as checked `"v":2` lines, up to 8 in one append under the same lock and limits; one bad op appends nothing. `sheprd-view` passes on sheprd's `updates` (the line version it applies, default 1) and `rejected` (refused v2 lines with why).
 
 ## 1.7.0 (2026-10-05)
 

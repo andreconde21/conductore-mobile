@@ -23,6 +23,13 @@ const sheprdSidebarCapability = 'sheprd-sidebar';
 /// (CON-077): sheprd's view state, read-only, and marks sent back.
 const sheprdViewCapability = 'sheprd-view';
 
+/// The companion capability behind `sheprd-view-update --json` (CON-101):
+/// layout edits sent to sheprd (contract v2).
+const sheprdLayoutCapability = 'sheprd-view-2';
+
+/// The first sheprd that applies contract v2's layout edits.
+const sheprdLayoutVersion = '0.9.4';
+
 /// The project view's state, shared by the desktop sidebar, the phone home
 /// and the agents dashboard (CON-065): the layout (the app's own once
 /// edited, else what the machines' sidebar.toml says, so the app and
@@ -79,6 +86,9 @@ class ProjectLayoutController extends ChangeNotifier {
   /// A machine answered `sheprd-view` (with a view or without).
   bool _viewAnswered = false;
   final Map<String, _PendingMark> _pending = {};
+
+  /// Layout edits sent to sheprd and not confirmed yet, in sending order.
+  final List<_PendingEdit> _edits = [];
   String? _markNotice;
   Map<String, String> _sheprdNames = const {};
 
@@ -134,8 +144,27 @@ class ProjectLayoutController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// Layout edits are the app's own; while synced the layout is sheprd's.
-  bool get canEditLayout => !mirroring;
+  /// Layout edits are the app's own, or, while synced, go to a sheprd
+  /// that takes them (contract v2); else they are paused.
+  bool get canEditLayout => !mirroring || sheprdTakesEdits;
+
+  /// Synced, and both sheprd and a companion that can reach it take
+  /// layout edits (contract v2).
+  bool get sheprdTakesEdits =>
+      mirroring &&
+      (_base?.takesLayoutEdits ?? false) &&
+      _views.values.any((entry) => _canSendEdits(entry.$1));
+
+  /// Synced but sheprd's layout cannot be edited from here: why.
+  String? get sheprdEditsPaused {
+    if (!mirroring || sheprdTakesEdits) return null;
+    if (!(_base?.takesLayoutEdits ?? false)) {
+      return 'Layout edits are paused: they need sheprd ≥ '
+          '$sheprdLayoutVersion (it only takes marks).';
+    }
+    return 'Layout edits are paused: update the Conductore companion on the '
+        'machine sharing sheprd\'s view.';
+  }
 
   /// While mirroring, sheprd's layout from its view; else the app's own
   /// once edited, else the machines' sidebar.toml.
@@ -267,47 +296,237 @@ class ProjectLayoutController extends ChangeNotifier {
     return layout;
   }
 
-  /// Ignored while synced with sheprd: its layout wins.
-  Future<void> _editLayout(ProjectLayout Function(ProjectLayout) edit) async {
-    if (!canEditLayout) return;
+  /// The app's own layout edit; while synced, [sheprd]'s edits go to
+  /// sheprd instead (none: paused).
+  Future<void> _editLayout(
+    ProjectLayout Function(ProjectLayout) edit, {
+    List<SheprdLayoutEdit> Function()? sheprd,
+  }) async {
+    if (mirroring) {
+      if (!sheprdTakesEdits || sheprd == null) return;
+      final edits = sheprd();
+      if (edits.isEmpty) return;
+      final error = await sendEdits(edits);
+      if (error != null && !_disposed) {
+        _markNotice = error;
+        notifyListeners();
+      }
+      return;
+    }
     await _setPrefs(prefs.copyWith(layout: edit(_editable)));
   }
 
   /// "Move to project…" ([project] made when missing) and "Move to Other"
   /// (an empty [project]).
-  Future<void> moveTo(ProjectEntry entry, String project) =>
-      _editLayout((layout) => layout.assign(entry.memberKey, project));
+  Future<void> moveTo(ProjectEntry entry, String project) => _editLayout(
+    (layout) => layout.assign(entry.memberKey, project),
+    sheprd: () => [SheprdLayoutEdit.assign(entry.memberKey, project.trim())],
+  );
 
-  Future<void> toggleHidden(ProjectEntry entry) =>
-      _editLayout((layout) => layout.toggleHidden(entry.memberKey));
+  Future<void> toggleHidden(ProjectEntry entry) => _editLayout(
+    (layout) => layout.toggleHidden(entry.memberKey),
+    sheprd: () => [
+      SheprdLayoutEdit.hide(
+        entry.memberKey,
+        hidden: !layout.isHidden(entry.memberKey),
+      ),
+    ],
+  );
+
+  /// Moves [entry] one place up (-1) or down (1) in [group].
+  Future<void> moveEntry(ProjectGroup group, ProjectEntry entry, int delta) {
+    final keys = [for (final e in group.entries) e.memberKey];
+    final at = keys.indexOf(entry.memberKey);
+    final to = at + delta;
+    if (group.isOther || at < 0 || to < 0 || to >= keys.length) {
+      return Future.value();
+    }
+    final before = delta < 0
+        ? keys[to]
+        : (to + 1 < keys.length ? keys[to + 1] : '');
+    return _editProject(
+      group,
+      (layout, name) => layout.moveMember(name, keys, entry.memberKey, before),
+      sheprd: (_) => [
+        SheprdLayoutEdit.moveMember(
+          entry.memberKey,
+          before,
+          project: group.name,
+          inView: keys,
+        ),
+      ],
+    );
+  }
+
+  /// Whether [entry] can move by [delta] in [group].
+  static bool canMoveEntry(ProjectGroup group, ProjectEntry entry, int delta) {
+    if (group.isOther) return false;
+    final at = group.entries.indexOf(entry);
+    return at >= 0 && at + delta >= 0 && at + delta < group.entries.length;
+  }
+
+  /// Takes the agent [row] of [entry] out of sheprd's active view, or
+  /// keeps it there ([remove] false), like sheprd's own menu.
+  Future<String?> setActive(
+    ProjectEntry entry,
+    SidebarNode row, {
+    required bool remove,
+  }) async {
+    final key = entry.sheprdKeys[row.key];
+    if (key == null || !sheprdTakesEdits) return 'Not synced with sheprd.';
+    if (!remove) return sendEdits([SheprdLayoutEdit.keepActive(key)]);
+    final seq = entry.sheprdOf(row)?.stateSeq ?? _liveSequence(row);
+    if (seq == null) return 'sheprd has not seen this agent change state yet.';
+    return sendEdits([SheprdLayoutEdit.removeActive(key, seq)]);
+  }
 
   /// [edit] on [group]'s own entry in the layout (made for a project
-  /// found from the agents).
+  /// found from the agents). While synced, [sheprd]'s edits for its name
+  /// in sheprd's layout, after creating it there when it is missing
+  /// (with its name as a rule, so it keeps its workspaces).
   Future<void> _editProject(
     ProjectGroup group,
-    ProjectLayout Function(ProjectLayout layout, String name) edit,
-  ) => _editLayout((layout) {
-    final withGroup = layout.add(group.name);
-    return edit(withGroup, withGroup.byName(group.name)!.name);
-  });
+    ProjectLayout Function(ProjectLayout layout, String name) edit, {
+    List<SheprdLayoutEdit> Function(String name)? sheprd,
+  }) => _editLayout(
+    (layout) {
+      final withGroup = layout.add(group.name);
+      return edit(withGroup, withGroup.byName(group.name)!.name);
+    },
+    sheprd: sheprd == null
+        ? null
+        : () {
+            final def = layout.byName(group.name);
+            if (def != null) return sheprd(def.name);
+            final name = group.name.trim();
+            return [
+              SheprdLayoutEdit.createProject(name, match: [name.toLowerCase()]),
+              ...sheprd(name),
+            ];
+          },
+  );
 
-  Future<void> setPinned(ProjectGroup group, bool pinned) =>
-      _editProject(group, (layout, name) => layout.setPinned(name, pinned));
+  Future<void> setPinned(ProjectGroup group, bool pinned) => _editProject(
+    group,
+    (layout, name) => layout.setPinned(name, pinned),
+    sheprd: (name) => [SheprdLayoutEdit.pin(name, pinned: pinned)],
+  );
 
-  Future<void> setRules(ProjectGroup group, List<String> rules) =>
-      _editProject(group, (layout, name) => layout.setRules(name, rules));
+  Future<void> setRules(ProjectGroup group, List<String> rules) => _editProject(
+    group,
+    (layout, name) => layout.setRules(name, rules),
+    sheprd: (name) => [
+      SheprdLayoutEdit.rules(
+        name,
+        _cleanRules(rules),
+        was: _base?.layout.byName(name)?.match,
+      ),
+    ],
+  );
+
+  /// Rules as the layout keeps them: trimmed, lower-cased, no blanks,
+  /// repeats or commas.
+  static List<String> _cleanRules(Iterable<String> rules) => {
+    for (final rule in rules)
+      for (final part in rule.split(','))
+        if (part.trim().isNotEmpty) part.trim().toLowerCase(),
+  }.toList();
+
+  /// Renames [group]; a name another project has is refused (false).
+  Future<bool> renameProject(ProjectGroup group, String to) async {
+    final next = to.trim();
+    if (next.isEmpty || next == group.name) return false;
+    final taken = layout.byName(next);
+    if (taken != null && taken.name.toLowerCase() != group.name.toLowerCase()) {
+      return false;
+    }
+    await _editProject(
+      group,
+      (layout, name) => layout.rename(name, next),
+      sheprd: (name) => [SheprdLayoutEdit.rename(name, next)],
+    );
+    return true;
+  }
+
+  /// Sets [group]'s two-letter tag; empty goes back to the derived one.
+  Future<void> setShort(ProjectGroup group, String short) => _editProject(
+    group,
+    (layout, name) => layout.setShort(name, short),
+    sheprd: (name) => [SheprdLayoutEdit.short(name, short.trim())],
+  );
+
+  /// The project [group] would move before for [delta] (-1 up, 1 down)
+  /// in display order, '' for the end of its pin section; null when it
+  /// cannot move that way (top, bottom, or across the pinned ones).
+  String? _moveTarget(ProjectGroup group, int delta) {
+    final layout = this.layout;
+    final def = layout.byName(group.name);
+    if (def == null) return null;
+    final order = [
+      for (final i in layout.displayOrder)
+        if (layout.groups[i].pinned == def.pinned) layout.groups[i].name,
+    ];
+    final at = order.indexOf(def.name);
+    final to = at + delta;
+    if (at < 0 || to < 0 || to >= order.length) return null;
+    if (delta < 0) return order[to];
+    return to + 1 < order.length ? order[to + 1] : '';
+  }
+
+  bool canMoveProject(ProjectGroup group, int delta) =>
+      _moveTarget(group, delta) != null;
+
+  /// Moves [group] one place up (-1) or down (1) among the projects with
+  /// the same pin.
+  Future<void> moveProject(ProjectGroup group, int delta) async {
+    final before = _moveTarget(group, delta);
+    if (before == null) return;
+    final name = layout.byName(group.name)!.name;
+    await _editLayout(
+      (layout) => layout.moveGroup(name, before),
+      sheprd: () => [SheprdLayoutEdit.moveProject(name, before)],
+    );
+  }
 
   Future<void> addProject(String name, {List<String> rules = const []}) =>
-      _editLayout((layout) => layout.add(name, rules: rules));
+      _editLayout(
+        (layout) => layout.add(name, rules: rules),
+        sheprd: () {
+          final def = layout.byName(name.trim());
+          if (def == null) {
+            return [
+              SheprdLayoutEdit.createProject(
+                name.trim(),
+                match: _cleanRules(rules),
+              ),
+            ];
+          }
+          return [
+            SheprdLayoutEdit.rules(
+              def.name,
+              _cleanRules([...def.match, ...rules]),
+              was: def.match,
+            ),
+          ];
+        },
+      );
 
-  Future<void> removeProject(ProjectGroup group) => _editLayout((layout) {
-    final def = layout.byName(group.name);
-    return def == null ? layout : layout.remove(def.name);
-  });
+  Future<void> removeProject(ProjectGroup group) => _editLayout(
+    (layout) {
+      final def = layout.byName(group.name);
+      return def == null ? layout : layout.remove(def.name);
+    },
+    sheprd: () {
+      final def = layout.byName(group.name);
+      if (def == null) return const [];
+      final shown = _base?.layout.byName(def.name);
+      return [SheprdLayoutEdit.delete(def.name, members: shown?.members)];
+    },
+  );
 
   /// Back to the machines' sidebar.toml: drops what was edited in the app.
   Future<void> followMachineLayout() async {
-    if (!canEditLayout) return;
+    if (mirroring) return;
     await _setPrefs(prefs.copyWith(clearLayout: true));
   }
 
@@ -582,6 +801,96 @@ class ProjectLayoutController extends ChangeNotifier {
     }
   }
 
+  /// Sends [edits] to sheprd in one append (contract v2), through a
+  /// machine whose companion takes them (the hub's first), and shows them
+  /// at once. Returns why it failed, null when sent.
+  Future<String?> sendEdits(List<SheprdLayoutEdit> edits) async {
+    if (!sheprdTakesEdits) {
+      return sheprdEditsPaused ?? 'Not synced with sheprd.';
+    }
+    final senders = [
+      for (final (host, view) in _views.values)
+        if (_canSendEdits(host)) (view.fromHub ? 0 : 1, host),
+    ]..sort((a, b) => a.$1.compareTo(b.$1));
+    final host = senders.first.$2;
+    final json = jsonEncode([
+      for (final edit in edits) edit.toJson(_sheprdKey),
+    ]);
+    try {
+      final stdout = await _run(
+        host,
+        ConductoreHostAttentionProvider.remoteCommand(
+          'sheprd-view-update --json ${shellQuoteArgument(json)}',
+        ),
+      );
+      final reply = jsonDecode(stdout.trim().split('\n').last);
+      if (reply is Map && reply['ok'] == true) {
+        final ids = [
+          if (reply['ids'] case final List<Object?> ids)
+            for (final id in ids) '$id',
+        ];
+        final since = _base?.updated ?? 0;
+        for (final (i, edit) in edits.indexed) {
+          final id = i < ids.length ? ids[i] : '';
+          _edits.add(
+            _PendingEdit(
+              edit,
+              id: id,
+              since: since,
+              timer: Timer(markTimeout, () => _expireEdit(id, edit)),
+            ),
+          );
+        }
+        _overlay();
+        if (!_disposed) notifyListeners();
+        return null;
+      }
+      return reply is Map && reply['error'] is String
+          ? reply['error'] as String
+          : 'sheprd-view-update failed.';
+    } catch (_) {
+      return 'Could not reach ${host.name}.';
+    }
+  }
+
+  void _expireEdit(String id, SheprdLayoutEdit edit) {
+    final at = _edits.indexWhere((p) => p.id == id && p.edit == edit);
+    if (at < 0 || _disposed) return;
+    _edits.removeAt(at);
+    _markNotice = "sheprd didn't apply this (not running?): ${edit.label}";
+    _overlay();
+    notifyListeners();
+  }
+
+  /// Layout edits sent to sheprd and not confirmed yet.
+  List<SheprdLayoutEdit> get pendingEdits =>
+      sheprdSync ? [for (final p in _edits) p.edit] : const [];
+
+  /// Whether an edit about project [name] waits for sheprd.
+  bool projectPending(String name) => pendingEdits.any(
+    (edit) =>
+        edit.project != null &&
+        edit.workspace == null &&
+        (edit.project!.toLowerCase() == name.toLowerCase() ||
+            edit.to?.toLowerCase() == name.toLowerCase()),
+  );
+
+  /// Whether an edit about workspace [entry] (or one of its agents) waits
+  /// for sheprd.
+  bool entryPending(ProjectEntry entry) => pendingEdits.any(
+    (edit) =>
+        (edit.workspace != null &&
+            ProjectKeys.same(edit.workspace!, entry.memberKey)) ||
+        (edit.agent != null && entry.sheprdKeys.containsValue(edit.agent)),
+  );
+
+  /// Whether an edit about [group] or one of its rows waits for sheprd.
+  bool groupPending(ProjectGroup group) =>
+      _edits.isNotEmpty &&
+      sheprdSync &&
+      ((!group.isOther && projectPending(group.name)) ||
+          group.entries.any(entryPending));
+
   /// Runs marks in tests instead of a machine's companion.
   @visibleForTesting
   Future<String> Function(SavedHost host, String command)? sheprdRunner;
@@ -589,6 +898,14 @@ class ProjectLayoutController extends ChangeNotifier {
   bool _canSend(SavedHost host) =>
       sheprdRunner != null ||
       (attention?.companionSupports(host.id, sheprdViewCapability) ?? false);
+
+  /// Tests set this to say which machines' companions take layout edits.
+  @visibleForTesting
+  bool Function(SavedHost host)? editCapable;
+
+  bool _canSendEdits(SavedHost host) =>
+      editCapable?.call(host) ??
+      (attention?.companionSupports(host.id, sheprdLayoutCapability) ?? false);
 
   Future<String> _run(SavedHost host, String command) async {
     if (sheprdRunner case final run?) return run(host, command);
@@ -645,6 +962,20 @@ class ProjectLayoutController extends ChangeNotifier {
       if (done) pending.timer.cancel();
       return done;
     });
+    String? refused;
+    _edits.removeWhere((pending) {
+      final why = base.rejected[pending.id];
+      if (why != null) {
+        refused =
+            "sheprd refused ${pending.edit.label}${why.isEmpty ? '' : ': $why'}";
+      }
+      final done =
+          why != null ||
+          (base.updated > pending.since && pending.edit.reflectedIn(base));
+      if (done) pending.timer.cancel();
+      return done;
+    });
+    if (refused != null) _markNotice = refused;
   }
 
   void _overlay() {
@@ -655,6 +986,9 @@ class ProjectLayoutController extends ChangeNotifier {
             view!.agents[key] ??
             const SheprdAgentView(presence: SheprdPresence.idle);
         view = view.withAgent(key, agent.withPending(pending.mark));
+      }
+      for (final pending in _edits) {
+        view = pending.edit.applyTo(view!);
       }
     }
     _merged = view;
@@ -706,6 +1040,9 @@ class ProjectLayoutController extends ChangeNotifier {
     for (final pending in _pending.values) {
       pending.timer.cancel();
     }
+    for (final pending in _edits) {
+      pending.timer.cancel();
+    }
     theme.removeListener(notifyListeners);
     super.dispose();
   }
@@ -723,6 +1060,22 @@ class _PendingMark {
   _PendingMark(this.mark, {required this.since, required this.timer});
 
   final SheprdMark mark;
+  final int since;
+  final Timer timer;
+}
+
+/// A layout edit sent to sheprd as line [id], waiting for a view newer
+/// than [since] to show it (or to list [id] as refused).
+class _PendingEdit {
+  _PendingEdit(
+    this.edit, {
+    required this.id,
+    required this.since,
+    required this.timer,
+  });
+
+  final SheprdLayoutEdit edit;
+  final String id;
   final int since;
   final Timer timer;
 }

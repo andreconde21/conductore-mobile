@@ -450,6 +450,7 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
         collapsed: collapsed,
         count: entries.length,
         tokensToday: widget.tokensToday[project.key],
+        pending: layout.groupPending(project),
         leading: project.isOther
             ? null
             : ProjectIcon(
