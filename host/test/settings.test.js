@@ -39,7 +39,12 @@ test('PermissionRequest handler blocks; all other handlers are async', () => {
   const merged = settings.merge({}, HOOK)
   const handler = ev => merged.hooks[ev][0].hooks[0]
   assert.equal(handler('PermissionRequest').async, undefined)
-  assert.equal(handler('PermissionRequest').timeout, 600)
+  // The default 15 min wait plus a minute (CON-096); `permissionWait`
+  // sets it.
+  assert.equal(handler('PermissionRequest').timeout, 960)
+  assert.equal(settings.merge({}, HOOK, settings.EVENTS, { permissionWait: 120 }).hooks.PermissionRequest[0].hooks[0].timeout, 180)
+  assert.equal(settings.permissionHookTimeoutOf(merged), 960)
+  assert.equal(settings.permissionHookTimeoutOf({}), null)
   assert.equal(handler('PreToolUse').async, true)
   assert.equal(handler('Stop').async, true)
   assert.equal(handler('SessionEnd').async, undefined)

@@ -87,11 +87,18 @@ function isOurs (handler) {
     new RegExp(`(^|[/'" ])${MARK}'? [A-Za-z]+$`).test(handler.command)
 }
 
-function buildHandler (hookBin, event) {
+// Claude Code kills a hook at its handler's `timeout` (default 600 s). The
+// PermissionRequest hook waits for the phone up to the `permission-wait`
+// setting, so its timeout is that plus a minute: Claude Code never kills it
+// first (a killed hook reads as "answered in the terminal"). Claude Code
+// shows its own dialog at once while the hook waits (checked with 2.1.288).
+const DEFAULT_PERMISSION_WAIT_S = 15 * 60
+const permissionHookTimeout = waitSeconds => (Number(waitSeconds) > 0 ? Number(waitSeconds) : DEFAULT_PERMISSION_WAIT_S) + 60
+
+function buildHandler (hookBin, event, permissionWait) {
   const h = { type: 'command', command: hookCommand(hookBin, event) }
   if (BLOCKING.has(event)) {
-    // Default command timeout is 600 s; our wait is bounded by CONDUCTORE_PERMISSION_TIMEOUT.
-    h.timeout = 600
+    h.timeout = permissionHookTimeout(permissionWait)
   } else {
     h.async = true
   }
@@ -104,8 +111,9 @@ function buildHandler (hookBin, event) {
 
 // Returns a new settings object with our hooks present exactly once per
 // event of `events` (default: the base ones), and removed from the
-// optional events not in it (a downgraded Claude Code).
-function merge (settings, hookBin, events = EVENTS) {
+// optional events not in it (a downgraded Claude Code). `permissionWait`:
+// the phone's wait in seconds (sets the PermissionRequest hook's timeout).
+function merge (settings, hookBin, events = EVENTS, { permissionWait } = {}) {
   const out = clone(settings || {})
   out.hooks = out.hooks && typeof out.hooks === 'object' ? out.hooks : {}
   for (const event of ALL_EVENTS) {
@@ -116,7 +124,7 @@ function merge (settings, hookBin, events = EVENTS) {
     const kept = groups
       .map(g => ({ ...g, hooks: (g.hooks || []).filter(h => !isOurs(h)) }))
       .filter(g => g.hooks.length > 0)
-    if (wanted) kept.push({ matcher: '', hooks: [buildHandler(hookBin, event)] })
+    if (wanted) kept.push({ matcher: '', hooks: [buildHandler(hookBin, event, permissionWait)] })
     if (kept.length) out.hooks[event] = kept
     else delete out.hooks[event]
   }
@@ -179,4 +187,13 @@ function clone (v) {
   return JSON.parse(JSON.stringify(v))
 }
 
-module.exports = { EVENTS, OPTIONAL_EVENTS, ALL_EVENTS, eventsFor, parseVersion, atLeast, settingsPath, merge, unmerge, installed, isOurs, readSettings, writeSettings, hookCommand }
+// The timeout of our PermissionRequest handler, or null when not installed.
+function permissionHookTimeoutOf (settings) {
+  const groups = (settings && settings.hooks && settings.hooks.PermissionRequest) || []
+  for (const g of Array.isArray(groups) ? groups : []) {
+    for (const h of g.hooks || []) if (isOurs(h)) return typeof h.timeout === 'number' ? h.timeout : 600
+  }
+  return null
+}
+
+module.exports = { permissionHookTimeout, permissionHookTimeoutOf, EVENTS, OPTIONAL_EVENTS, ALL_EVENTS, eventsFor, parseVersion, atLeast, settingsPath, merge, unmerge, installed, isOurs, readSettings, writeSettings, hookCommand }

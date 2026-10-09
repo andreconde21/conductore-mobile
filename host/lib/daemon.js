@@ -39,8 +39,11 @@ const MAX_REQUEST_BYTES = 1024 * 1024
 const DEFAULT_POLL_TIMEOUT_S = 55
 const MAX_POLL_TIMEOUT_S = 600
 const DEFAULT_PERMISSION_TIMEOUT_S = 120
-const MAX_PERMISSION_TIMEOUT_S = 600
+// The `permission-wait` setting goes up to 60 min (CON-096).
+const MAX_PERMISSION_TIMEOUT_S = 3600
 const PROBE_EVERY_MS = 1000
+// The main agent's events that end every prompt it was waiting on.
+const RELEASE_EVENTS = new Set(['Stop', 'StopFailure', 'UserPromptSubmit', 'SessionEnd'])
 const OBSERVE_EVERY_MS = 2000
 // state.json, activity.json and turns.json are written at most once per
 // FLUSH_EVERY_MS (and at least SNAPSHOT_DEBOUNCE_MS after the first change
@@ -51,7 +54,8 @@ const SNAPSHOT_DEBOUNCE_MS = 1000
 const FLUSH_EVERY_MS = 5000
 const TURNS_PRUNE_EVERY_MS = 6 * 60 * 60 * 1000
 const WATCH_FALLBACK_MS = 2000
-const TMP_MAX_AGE_MS = 60 * 60 * 1000
+// Longer than the longest wait, so a waiting hook's FIFO is never taken.
+const TMP_MAX_AGE_MS = 2 * 60 * 60 * 1000
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
 
 // At most one usage-only change per session per this interval; also how long
@@ -386,8 +390,9 @@ class Daemon {
     this.idleTimer = setTimeout(() => {
       // A request still waiting for an answer (a hook on its FIFO, a
       // watched prompt) would not survive a restart: pending requests are
-      // not persisted. Wait for it.
-      if (this.waiters.size || Object.values(this.state.agents).some(a => a.pending && a.pending.length)) return this.touch()
+      // not persisted. Wait for it. One whose wait expired (now only the
+      // terminal answers it) needs no daemon.
+      if (this.waiters.size || Object.values(this.state.agents).some(a => a.pending && a.pending.some(p => !p.expired))) return this.touch()
       log('daemon', 'idle, exiting')
       this.shutdown(0)
     }, ms)
@@ -456,7 +461,8 @@ class Daemon {
       if (await approvalOps.autoApprove(this, event, fifo, header)) return
     }
     await context.enrich(event, header)
-    if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout)
+    if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout, mtime)
+    this.releaseAnswered(event, mtime)
     this.commit(state.reduce(this.state, event))
     this.activity.onEvent(event)
     // Queues git snapshots in the background; never awaited here.
@@ -467,7 +473,7 @@ class Daemon {
 
   // --- permission requests ----------------------------------------------------
 
-  onPermission (event, fifo, timeout) {
+  onPermission (event, fifo, timeout, at = Date.now()) {
     const id = event.request_id || requestId()
     event.request_id = id
     this.commit(state.reduce(this.state, event))
@@ -483,7 +489,7 @@ class Daemon {
     let seconds = Number(timeout)
     if (!Number.isFinite(seconds) || seconds <= 0) seconds = DEFAULT_PERMISSION_TIMEOUT_S
     seconds = Math.min(seconds, MAX_PERMISSION_TIMEOUT_S)
-    const waiter = { fifo, event, sessionId: event.session_id, timer: null }
+    const waiter = { fifo, event, sessionId: event.session_id, timer: null, at: at || Date.now() }
     waiter.timer = setTimeout(() => this.settle(id, 'timeout'), seconds * 1000)
     this.waiters.set(id, waiter)
     this.ensureProbe()
@@ -498,6 +504,28 @@ class Daemon {
       if (!this.waiters.size) { clearInterval(this.probeTimer); this.probeTimer = null }
     }, PROBE_EVERY_MS)
     this.probeTimer.unref()
+  }
+
+  // Claude Code does not end a PermissionRequest hook when its prompt is
+  // answered in the terminal (Yes, a submitted question; checked with
+  // 2.1.288): the hook would wait out its whole time, and the phone would
+  // offer a request that is over. The agent's own events say so: the
+  // call's PostToolUse (same tool, the request's input within the call's;
+  // a question's adds its answers), or the turn ending or a new prompt.
+  // The hook is released with an empty line (no decision). Only events
+  // spooled after the request count (a late Stop of the last turn does not).
+  releaseAnswered (event, at = Date.now()) {
+    if (!this.waiters.size) return
+    const kind = event.hook_event_name
+    const call = kind === 'PostToolUse' || kind === 'PostToolUseFailure'
+    if (!call && !RELEASE_EVENTS.has(kind)) return
+    if (!call && event.agent_id) return
+    for (const [id, w] of [...this.waiters]) {
+      if (w.sessionId !== event.session_id || (at || Infinity) < w.at) continue
+      if (call && !state.sameCall(w.event, event)) continue
+      log('permission', `${id} answered in the terminal (${kind})`)
+      this.settle(id, 'answered')
+    }
   }
 
   // Watches an observe-only request until its agent's adapter sees the
@@ -528,23 +556,26 @@ class Daemon {
   }
 
   // Resolves a waiting hook. decision: allow | deny | always | answer |
-  // timeout | gone. `rule`: the approval rule that answered it (logged as
-  // auto-approved). `answers`: an AskUserQuestion's answers ('answer').
-  // Returns whether the hook received the answer.
+  // timeout | gone | answered (the terminal answered it: the hook gets an
+  // empty line and the request is gone). `rule`: the approval rule that
+  // answered it (logged as auto-approved). `answers`: an AskUserQuestion's
+  // answers ('answer'). Returns whether the hook received the answer.
   settle (id, decision, message, rule = null, answers = null) {
     const waiter = this.waiters.get(id)
     if (!waiter) return false
     this.waiters.delete(id)
     clearTimeout(waiter.timer)
     let delivered = false
-    if (decision !== 'gone') {
+    if (decision === 'answered') {
+      delivered = writeFifo(waiter.fifo, '\n')
+    } else if (decision !== 'gone') {
       delivered = writeFifo(waiter.fifo, adapters.of(waiter.event).hookAnswer(waiter.event, decision, message, answers))
     }
     if (!delivered) {
       // The hook is gone; its FIFO would otherwise linger.
       try { if (isOurFifo(waiter.fifo)) fs.unlinkSync(waiter.fifo) } catch {}
     }
-    const resolution = delivered || decision === 'timeout' ? (rule && delivered ? 'auto' : decision) : 'gone'
+    const resolution = decision === 'answered' ? 'gone' : delivered || decision === 'timeout' ? (rule && delivered ? 'auto' : decision) : 'gone'
     this.commit(state.resolvePermission(this.state, id, resolution))
     if (rule && delivered) this.approvals.record(rule, waiter.event, this.state.agents[waiter.sessionId])
     log('permission', `${id} ${resolution}`)

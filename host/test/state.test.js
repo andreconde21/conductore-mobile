@@ -73,11 +73,41 @@ test('decision resolves pending and returns to working; timeout keeps needs_perm
   state.reduce(st, ev('PermissionRequest', { request_id: 'r2', tool_name: 'Edit', tool_input: { file_path: '/a' } }))
   state.resolvePermission(st, 'r2', 'timeout')
   assert.equal(st.agents.s1.state, 'needs_permission')
-  assert.equal(st.agents.s1.pending.length, 0)
+  // It stays, answerable in the terminal only (CON-096).
+  assert.equal(st.agents.s1.pending.length, 1)
+  assert.equal(st.agents.s1.pending[0].expired, true)
+  assert.equal(st.agents.s1.pending[0].answerable, false)
   assert.match(st.agents.s1.lastMessage, /terminal/)
-  // Next tool event clears it.
-  state.reduce(st, ev('PostToolUse', { tool_name: 'Edit', tool_input: {}, tool_response: {} }))
+  // Another call of the same tool (a parallel one) leaves it.
+  state.reduce(st, ev('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/b' }, tool_response: {} }))
+  assert.equal(st.agents.s1.pending.length, 1)
+  assert.equal(st.agents.s1.state, 'needs_permission')
+  // This call's PostToolUse: answered in the terminal.
+  state.reduce(st, ev('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/a' }, tool_response: {} }))
+  assert.equal(st.agents.s1.pending.length, 0)
   assert.equal(st.agents.s1.state, 'working')
+})
+
+test('an expired request ends with the turn, a refusal or a new prompt (CON-096)', () => {
+  for (const [end, extra] of [['Stop', {}], ['PermissionDenied', { tool_name: 'Bash' }], ['UserPromptSubmit', {}]]) {
+    const st = fresh(ev('PermissionRequest', { request_id: 'r1', tool_name: 'Bash', tool_input: { command: 'ls' } }))
+    state.resolvePermission(st, 'r1', 'timeout')
+    assert.equal(st.agents.s1.pending.length, 1, end)
+    state.reduce(st, ev(end, extra))
+    assert.equal(st.agents.s1.pending.length, 0, end)
+  }
+})
+
+test('sameCall: same tool, the request input within the call input (CON-096)', () => {
+  const q = { questions: [{ question: 'A?', options: [{ label: 'x' }] }] }
+  const req = { tool_name: 'AskUserQuestion', tool_input: q }
+  assert.ok(state.sameCall(req, { tool_name: 'AskUserQuestion', tool_input: { ...q, answers: { 'A?': 'x' } } }))
+  assert.ok(!state.sameCall(req, { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'B?', options: [{ label: 'x' }] }] } }))
+  assert.ok(!state.sameCall(req, { tool_name: 'Bash', tool_input: q }))
+  assert.ok(state.sameCall({ tool_name: 'Bash', tool_input: { command: 'ls' } }, { tool_name: 'Bash', tool_input: { command: 'ls', description: 'List' } }))
+  assert.ok(!state.sameCall({ tool_name: 'Bash', tool_input: { command: 'ls' } }, { tool_name: 'Bash', tool_input: { command: 'ls -a' } }))
+  assert.ok(!state.within([1, 2], [1, 2, 3]))
+  assert.ok(!state.sameCall(null, { tool_name: 'Bash' }))
 })
 
 test('a request answered in the terminal after the turn ended leaves the agent idle, not working', () => {

@@ -10,10 +10,13 @@
 # lighter than GNU `mv`). The daemon removes both names, and adds the
 # tmux/Herdr location from the variables passed in the header.
 #
-# PermissionRequest waits on a FIFO for the phone's decision, at most
-# $CONDUCTORE_PERMISSION_TIMEOUT seconds (default 120), and prints the
-# decision JSON the daemon wrote. Timeout, no daemon, any error: prints
-# nothing, so Claude Code shows its own prompt. Always exits 0.
+# PermissionRequest waits on a FIFO for the phone's decision and prints the
+# decision JSON the daemon wrote. Claude Code shows its own prompt at once
+# all the same; the daemon ends the wait when the terminal answered it.
+# The wait: $CONDUCTORE_PERMISSION_TIMEOUT seconds, else for Claude Code
+# the `permission-wait` setting (the file permission-wait, written by
+# install and `config set`), else 120. Timeout, no daemon, any error:
+# prints nothing, so the terminal's prompt decides. Always exits 0.
 #
 # Layout (see lib/spool.js, lib/paths.js): $CONDUCTORE_HOME or ~/.conductore
 #   spool/  events the daemon watches    tmp/  staging files and FIFOs
@@ -110,7 +113,12 @@ fi
 # PermissionRequest: the FIFO is held open read-write (fd 3) before the
 # request is visible, so the daemon's non-blocking write-open always finds a
 # reader while we wait, and fails (hook gone) once we and the watchdog exit.
-t=${CONDUCTORE_PERMISSION_TIMEOUT:-120}
+t=${CONDUCTORE_PERMISSION_TIMEOUT:-}
+# Other agents' hooks may hold their terminal prompt while they wait:
+# they keep the short default.
+if [ -z "$t" ] && [ -z "$agent" ] && [ -f "$d/permission-wait" ]; then
+  read -r t <"$d/permission-wait" || t=
+fi
 case $t in '' | *[!0-9]* | 0) t=120 ;; esac
 fifo=$d/tmp/p.$$
 rm -f "$fifo"

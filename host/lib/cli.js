@@ -485,9 +485,16 @@ async function configCmd (args) {
   if (action !== 'set' || key === undefined || value === undefined) return fail('usage: config [get [<key>] | set <key> <value>]')
   let config
   try { config = cm.set(key, value) } catch (err) { return fail(err.message) }
+  // The sh hook and Claude Code's hook timeout read the wait from files.
+  let extra = {}
+  if (key === 'permission-wait') {
+    const r = claudeAdapter().syncPermissionWait()
+    if (r.error) return fail(r.error)
+    extra = { hookTimeout: r.hookTimeout }
+  }
   // A running daemon picks it up now.
   try { await client.request({ op: 'config' }, { timeoutMs: 2000 }) } catch {}
-  return out({ ok: true, config })
+  return out({ ok: true, config, ...extra })
 }
 
 // Pure: risk label and suggestions, no daemon.
