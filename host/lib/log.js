@@ -16,6 +16,9 @@ function log (tag, msg, extra) {
       if (fs.statSync(file).size > MAX_BYTES) fs.renameSync(file, file + '.1')
     } catch {}
     let line = `${new Date().toISOString()} [${tag}] ${msg}`
+    // Host test runs stamp their lines, so a test that reaches the real
+    // log is caught (test/helpers/isolate.js).
+    if (process.env.CONDUCTORE_TEST_RUN) line += ` {test ${process.env.CONDUCTORE_TEST_RUN}}`
     if (extra !== undefined) line += ' ' + safeJson(extra)
     fs.appendFileSync(file, line + '\n', { mode: 0o600 })
   } catch {}

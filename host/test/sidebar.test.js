@@ -4,6 +4,7 @@
 // the session, throttled, only on change, and off by setting.
 
 const test = require('node:test')
+require('./helpers/isolate')
 const assert = require('node:assert')
 const { Sidebar, tokensFor, THROTTLE_MS } = require('../lib/sidebar')
 

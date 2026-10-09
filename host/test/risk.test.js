@@ -1,6 +1,7 @@
 'use strict'
 
 const test = require('node:test')
+require('./helpers/isolate')
 const assert = require('node:assert/strict')
 const risk = require('../lib/risk')
 const shell = require('../lib/shell')
