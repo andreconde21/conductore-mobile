@@ -451,7 +451,7 @@ void main() {
       expect(groups().map((g) => g.name), contains('Storefront'));
       expect(
         controller.markNotice,
-        "sheprd refused rename Storefront to Shop: renamed or deleted meanwhile",
+        'sheprd refused rename Storefront to Shop: renamed or deleted meanwhile',
       );
     });
 
@@ -548,7 +548,7 @@ void main() {
       tester.view.physicalSize = const Size(800, 1400);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      await tester.runAsync(() => sync());
+      await tester.runAsync(sync);
       controller.applyViewReply(
         laptop,
         _reply(
