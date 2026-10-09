@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/terminal/data/keyboard_image_file.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
+import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'package:flutter/material.dart';
 /// the full composer for multiline prompts, and Esc to interrupt. Images
 /// come in through the attach icon in the field, "Paste image" in its
 /// menu, and a keyboard's image insertion (its clipboard panel, GIFs).
+/// Once the message runs past one line a small × clears it, with Undo.
 class ChatComposer extends StatefulWidget {
   const ChatComposer({
     required this.onSend,
@@ -212,6 +214,8 @@ class _ChatComposerState extends State<ChatComposer> {
     if (text.isEmpty || !widget.enabled || widget.sending) {
       return;
     }
+    // A late result of the dictation must not refill the field (CON-097).
+    unawaited(widget.dictation?.discard(target: _controller));
     _controller.clear();
     try {
       await widget.onSend(text);
@@ -223,6 +227,73 @@ class _ChatComposerState extends State<ChatComposer> {
       }
       _showError(error);
     }
+  }
+
+  /// Empties the field (attached images are paths in it) and stops the
+  /// dictation feeding it; a snackbar offers the text back.
+  void _clear() {
+    final previous = _controller.value;
+    if (previous.text.isEmpty) return;
+    unawaited(widget.dictation?.discard(target: _controller));
+    _controller.clear();
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: const Text('Message cleared'),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () {
+              if (mounted && _controller.text.isEmpty) {
+                _controller.value = previous;
+              }
+            },
+          ),
+        ),
+      );
+  }
+
+  void _voiceCommand(VoiceCommand command) {
+    switch (command) {
+      case VoiceCommand.send:
+        unawaited(_send());
+      case VoiceCommand.cancel:
+        _clear();
+    }
+  }
+
+  /// The × over the field's corner, once the message runs past a line.
+  Widget _clearOverlay(ThemeData theme) {
+    return ListenableBuilder(
+      listenable: _controller,
+      builder: (context, _) {
+        final text = _controller.text;
+        if (!widget.enabled || !(text.contains('\n') || text.length > 40)) {
+          return const SizedBox.shrink();
+        }
+        return Material(
+          color: theme.colorScheme.surfaceContainerHighest,
+          shape: const CircleBorder(),
+          child: InkWell(
+            key: const ValueKey('chat-composer-clear'),
+            customBorder: const CircleBorder(),
+            onTap: _clear,
+            child: Tooltip(
+              message: 'Clear message',
+              child: Padding(
+                padding: const EdgeInsets.all(3),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 14,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _interrupt() async {
@@ -295,47 +366,12 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
             ),
             Expanded(
-              child: TextField(
-                key: const ValueKey('chat-composer-field'),
-                controller: _controller,
-                focusNode: _focusNode,
-                enabled: widget.enabled,
-                minLines: 1,
-                maxLines: 4,
-                keyboardType: TextInputType.text,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _send(),
-                contextMenuBuilder: _contextMenu,
-                contentInsertionConfiguration: widget.onInsertContent == null
-                    ? null
-                    : ContentInsertionConfiguration(
-                        allowedMimeTypes: keyboardImageMimeTypes,
-                        onContentInserted: widget.onInsertContent!,
-                      ),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: widget.enabled
-                      ? 'Message ${agentObject(widget.agentName)}…'
-                      : widget.disabledHint,
-                  border: const OutlineInputBorder(
-                    borderRadius: BorderRadius.all(
-                      Radius.circular(AppTheme.radius),
-                    ),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  // Inside the field: images are always one tap away
-                  // without taking another slot in the row.
-                  suffixIcon: widget.onAttachImage == null
-                      ? null
-                      : _attachButton(theme),
-                  suffixIconConstraints: const BoxConstraints(
-                    minWidth: 40,
-                    minHeight: 40,
-                  ),
-                ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  _field(theme),
+                  Positioned(top: -4, right: -4, child: _clearOverlay(theme)),
+                ],
               ),
             ),
             // Talk and the mic stay visible (disabled) while the chat
@@ -348,6 +384,7 @@ class _ChatComposerState extends State<ChatComposer> {
                 focusNode: _focusNode,
                 enabled: widget.enabled,
                 disabledTooltip: _disabledVoiceTooltip,
+                onVoiceCommand: _voiceCommand,
                 onMessage: (message) => ScaffoldMessenger.maybeOf(context)
                   ?..hideCurrentSnackBar()
                   ..showSnackBar(SnackBar(content: Text(message))),
@@ -376,6 +413,47 @@ class _ChatComposerState extends State<ChatComposer> {
                     icon: const Icon(Icons.send_rounded),
                   ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _field(ThemeData theme) {
+    return TextField(
+      key: const ValueKey('chat-composer-field'),
+      controller: _controller,
+      focusNode: _focusNode,
+      enabled: widget.enabled,
+      minLines: 1,
+      maxLines: 4,
+      keyboardType: TextInputType.text,
+      textInputAction: TextInputAction.send,
+      onSubmitted: (_) => _send(),
+      contextMenuBuilder: _contextMenu,
+      contentInsertionConfiguration: widget.onInsertContent == null
+          ? null
+          : ContentInsertionConfiguration(
+              allowedMimeTypes: keyboardImageMimeTypes,
+              onContentInserted: widget.onInsertContent!,
+            ),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: widget.enabled
+            ? 'Message ${agentObject(widget.agentName)}…'
+            : widget.disabledHint,
+        border: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(AppTheme.radius)),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 10,
+        ),
+        // Inside the field: images are always one tap away
+        // without taking another slot in the row.
+        suffixIcon: widget.onAttachImage == null ? null : _attachButton(theme),
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 40,
+          minHeight: 40,
         ),
       ),
     );

@@ -4,6 +4,7 @@ import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
+import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/foundation.dart';
@@ -110,6 +111,10 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
   bool _attaching = false;
   String? _error;
 
+  /// What Clear removed, offered back for a few seconds.
+  TextEditingValue? _cleared;
+  Timer? _clearedTimer;
+
   @override
   void initState() {
     super.initState();
@@ -126,14 +131,19 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
     _controller.removeListener(_handleTextChanged);
     _controller.dispose();
     _focusNode.dispose();
+    _clearedTimer?.cancel();
     super.dispose();
   }
 
   void _handleTextChanged() {
     widget.onDraftChanged(_controller.text);
     // Rebuild for the character count, the oversize/empty send guard, and to
-    // clear a stale send error once the user edits again.
-    setState(() => _error = null);
+    // clear a stale send error once the user edits again. New text also
+    // retires a pending Undo of Clear.
+    setState(() {
+      _error = null;
+      if (_controller.text.isNotEmpty) _dropCleared();
+    });
   }
 
   bool get _oversized => _controller.text.length > promptComposerMaxChars;
@@ -153,6 +163,9 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
       _sending = true;
       _error = null;
     });
+    // The dictation feeding this draft ends here: a late result would
+    // bring the sent text back (CON-097).
+    await widget.dictation?.discard(target: _controller);
     try {
       await widget.onSend(text, submit: _submitEnter);
     } catch (error) {
@@ -279,9 +292,44 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
     _focusNode.requestFocus();
   }
 
+  /// Empties the draft (attached images are paths in it), stops the
+  /// dictation feeding it, and offers Undo for a few seconds.
   void _clear() {
+    final previous = _controller.value;
+    if (previous.text.isEmpty) return;
+    unawaited(widget.dictation?.discard(target: _controller));
     _controller.clear();
+    setState(() {
+      _cleared = previous;
+      _clearedTimer?.cancel();
+      _clearedTimer = Timer(const Duration(seconds: 5), () {
+        if (mounted) setState(_dropCleared);
+      });
+    });
     _focusNode.requestFocus();
+  }
+
+  void _undoClear() {
+    final previous = _cleared;
+    if (previous == null) return;
+    setState(_dropCleared);
+    _controller.value = previous;
+    _focusNode.requestFocus();
+  }
+
+  void _dropCleared() {
+    _cleared = null;
+    _clearedTimer?.cancel();
+    _clearedTimer = null;
+  }
+
+  void _voiceCommand(VoiceCommand command) {
+    switch (command) {
+      case VoiceCommand.send:
+        if (_controller.text.isNotEmpty) unawaited(_send());
+      case VoiceCommand.cancel:
+        _clear();
+    }
   }
 
   @override
@@ -347,6 +395,7 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                       focusNode: _focusNode,
                       enabled: !_sending,
                       onMessage: _showError,
+                      onVoiceCommand: _voiceCommand,
                     ),
                   if (widget.imageAttacher != null)
                     _attaching
@@ -400,8 +449,8 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                                 ),
                             ],
                           ),
-                  // A desktop has these on the keyboard (Ctrl+V, Ctrl+A,
-                  // Delete) and in the field's right-click menu.
+                  // A desktop has these on the keyboard (Ctrl+V, Ctrl+A)
+                  // and in the field's right-click menu.
                   if (!desktop) ...[
                     IconButton(
                       tooltip: 'Paste clipboard',
@@ -413,12 +462,16 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                       icon: const Icon(Icons.select_all_rounded),
                       onPressed: _sending || length == 0 ? null : _selectAll,
                     ),
+                  ],
+                  // Only with text; it also stops dictation and can be
+                  // undone, so desktops get it too.
+                  if (length > 0)
                     IconButton(
+                      key: const ValueKey('composer-clear'),
                       tooltip: 'Clear draft',
                       icon: const Icon(Icons.backspace_outlined),
-                      onPressed: _sending || length == 0 ? null : _clear,
+                      onPressed: _sending ? null : _clear,
                     ),
-                  ],
                 ],
               ),
               CallbackShortcuts(
@@ -454,7 +507,31 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (notice != null)
+                  if (_cleared != null && notice == null)
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Draft cleared',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: noticeColor,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            key: const ValueKey('composer-undo-clear'),
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: _undoClear,
+                            child: const Text('Undo'),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (notice != null)
                     Expanded(
                       child: Semantics(
                         liveRegion: true,

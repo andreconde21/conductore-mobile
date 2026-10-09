@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice_guide/domain/guide_preferences.dart';
 
 /// How much of Claude's final answer is read aloud.
@@ -67,6 +68,9 @@ class VoicePreferences {
     this.dictationSilenceSeconds = defaultSilenceSeconds,
     this.dictationMaxMinutes = defaultMaxMinutes,
     this.muteRestartBeeps = false,
+    this.voiceCommands = true,
+    this.voiceSendWords = VoiceCommandWords.defaultSend,
+    this.voiceCancelWords = VoiceCommandWords.defaultCancel,
     this.readAloudSessions = const {},
     this.talkSendSilenceSeconds = defaultTalkSendSeconds,
     this.readAloudLength = ReadAloudLength.brief,
@@ -127,6 +131,16 @@ class VoicePreferences {
   /// by default: it mutes whole system streams.
   final bool muteRestartBeeps;
 
+  /// A trailing "send" or "cancel" after a pause ends dictation in a
+  /// composer and sends or discards the message (CON-098).
+  final bool voiceCommands;
+
+  /// The send command's words, comma-separated, in any language.
+  final String voiceSendWords;
+
+  /// The cancel command's words, comma-separated, in any language.
+  final String voiceCancelWords;
+
   /// The Chat View speaker toggle per session id, most recent last.
   final Map<String, bool> readAloudSessions;
 
@@ -147,6 +161,11 @@ class VoicePreferences {
 
   Duration get dictationSilence => Duration(seconds: dictationSilenceSeconds);
   Duration get dictationMaxSession => Duration(minutes: dictationMaxMinutes);
+
+  /// The words dictation listens for; null while voice commands are off.
+  VoiceCommandWords? get commandWords => voiceCommands
+      ? VoiceCommandWords.parse(send: voiceSendWords, cancel: voiceCancelWords)
+      : null;
 
   /// Whether Chat View should read [sessionId] aloud.
   bool readAloudFor(String sessionId) =>
@@ -178,6 +197,9 @@ class VoicePreferences {
     int? dictationSilenceSeconds,
     int? dictationMaxMinutes,
     bool? muteRestartBeeps,
+    bool? voiceCommands,
+    String? voiceSendWords,
+    String? voiceCancelWords,
     Map<String, bool>? readAloudSessions,
     int? talkSendSilenceSeconds,
     ReadAloudLength? readAloudLength,
@@ -202,6 +224,9 @@ class VoicePreferences {
       dictationMaxMinutes: (dictationMaxMinutes ?? this.dictationMaxMinutes)
           .clamp(minMaxMinutes, maxMaxMinutes),
       muteRestartBeeps: muteRestartBeeps ?? this.muteRestartBeeps,
+      voiceCommands: voiceCommands ?? this.voiceCommands,
+      voiceSendWords: voiceSendWords ?? this.voiceSendWords,
+      voiceCancelWords: voiceCancelWords ?? this.voiceCancelWords,
       readAloudSessions: readAloudSessions ?? this.readAloudSessions,
       talkSendSilenceSeconds:
           (talkSendSilenceSeconds ?? this.talkSendSilenceSeconds).clamp(
@@ -227,6 +252,9 @@ class VoicePreferences {
     'dictationSilenceSeconds': dictationSilenceSeconds,
     'dictationMaxMinutes': dictationMaxMinutes,
     'muteRestartBeeps': muteRestartBeeps,
+    'voiceCommands': voiceCommands,
+    'voiceSendWords': voiceSendWords,
+    'voiceCancelWords': voiceCancelWords,
     'talkSendSilenceSeconds': talkSendSilenceSeconds,
     'readAloudLength': readAloudLength.name,
     'toolActivity': toolActivity.name,
@@ -290,6 +318,9 @@ class VoicePreferences {
         fallback.dictationMaxMinutes,
       ),
       muteRestartBeeps: pick('muteRestartBeeps', fallback.muteRestartBeeps),
+      voiceCommands: pick('voiceCommands', fallback.voiceCommands),
+      voiceSendWords: pick('voiceSendWords', fallback.voiceSendWords),
+      voiceCancelWords: pick('voiceCancelWords', fallback.voiceCancelWords),
       talkSendSilenceSeconds: integer(
         'talkSendSilenceSeconds',
         fallback.talkSendSilenceSeconds,

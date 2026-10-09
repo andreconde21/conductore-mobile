@@ -107,6 +107,7 @@ import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.
 import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
+import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_services.dart';
@@ -3193,12 +3194,42 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
 
   void _send() {
     final text = _controller.text.replaceAll(RegExp(r'[\r\n]'), '');
+    // A late result of the dictation must not refill the line (CON-097).
+    unawaited(widget.dictation?.discard(target: _controller));
     _controller.clear();
     if (text.isEmpty) {
       return;
     }
     widget.onSend(text);
     _focusNode.requestFocus();
+  }
+
+  /// "… send" sends the line; "cancel" clears it, with Undo.
+  void _voiceCommand(VoiceCommand command) {
+    switch (command) {
+      case VoiceCommand.send:
+        _send();
+      case VoiceCommand.cancel:
+        final previous = _controller.value;
+        _controller.clear();
+        if (previous.text.isEmpty) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: const Text('Line cleared'),
+              duration: const Duration(seconds: 5),
+              action: SnackBarAction(
+                label: 'Undo',
+                onPressed: () {
+                  if (mounted && _controller.text.isEmpty) {
+                    _controller.value = previous;
+                  }
+                },
+              ),
+            ),
+          );
+    }
   }
 
   void _recall(String line) {
@@ -3290,6 +3321,7 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
                 textController: _controller,
                 focusNode: _focusNode,
                 autoStart: widget.startDictation,
+                onVoiceCommand: _voiceCommand,
                 onMessage: (message) {
                   ScaffoldMessenger.of(context)
                     ..hideCurrentSnackBar()

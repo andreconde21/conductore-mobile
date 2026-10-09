@@ -4,6 +4,7 @@ import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/features/voice/domain/speech_event.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
+import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/foundation.dart';
 
@@ -33,6 +34,9 @@ class DictationOptions {
     this.maxSession = const Duration(minutes: 5),
     this.muteRestartBeeps = false,
     this.waitForSpeech = false,
+    this.commands,
+    this.commandPause = const Duration(milliseconds: 800),
+    this.commandSettle = const Duration(seconds: 1),
   });
 
   /// One phrase: the session ends when the recognizer hears a pause.
@@ -44,6 +48,7 @@ class DictationOptions {
         silenceTimeout: voice.dictationSilence,
         maxSession: voice.dictationMaxSession,
         muteRestartBeeps: voice.muteRestartBeeps,
+        commands: voice.commandWords,
       );
 
   /// Keep listening across pauses until the user taps stop: the
@@ -61,6 +66,17 @@ class DictationOptions {
   /// Count [silenceTimeout] only once something was said (the Talk loop
   /// waits for the user to start; it only ends on a pause after speech).
   final bool waitForSpeech;
+
+  /// Spoken commands that end the session ("… send"); null listens for
+  /// none. Only a sink with [DictationSink.onCommand] receives them.
+  final VoiceCommandWords? commands;
+
+  /// A command counts only after this long without new words before it,
+  /// so "when to send" mid-sentence never sends.
+  final Duration commandPause;
+
+  /// And only once nothing follows it for this long.
+  final Duration commandSettle;
 }
 
 /// Why a continuous session stopped on its own.
@@ -79,6 +95,9 @@ class DictationSink {
     required this.onFinish,
     required this.onCancel,
     this.onTakenOver,
+    this.onCommand,
+    this.onDiscard,
+    this.target,
   });
 
   final VoidCallback onBegin;
@@ -91,6 +110,19 @@ class DictationSink {
   /// text field; a sink that acts on a finished phrase (Talk sends it)
   /// must not treat a cut-off phrase as one.
   final ValueChanged<String>? onTakenOver;
+
+  /// A trailing spoken command ended the session; [message] is the
+  /// session's text without the command words. Null: commands are plain
+  /// words.
+  final void Function(VoiceCommand command, String message)? onCommand;
+
+  /// The owner threw the session away ([DictationController.discard]);
+  /// no text follows.
+  final VoidCallback? onDiscard;
+
+  /// What the sink writes into (its text field), so a composer can
+  /// discard only its own session.
+  final Object? target;
 }
 
 /// Joins dictated phrases: one space between them, none before
@@ -165,6 +197,17 @@ class DictationController extends ChangeNotifier {
   Timer? _finishTimer;
   DictationPause? _pause;
   double _level = 0;
+
+  /// After a discard or a command the platform may still deliver the
+  /// old session's last words; they are dropped until a new session is
+  /// ready.
+  bool _staleUntilReady = false;
+
+  VoiceCommandWords? _commands;
+  String _heard = '';
+  List<String> _pausedWords = const [];
+  Timer? _pauseTimer;
+  Timer? _commandTimer;
 
   DictationStatus get status => _status;
   bool get isActive => _status != DictationStatus.idle;
@@ -247,10 +290,16 @@ class DictationController extends ChangeNotifier {
     _silence = Duration.zero;
     _elapsed = Duration.zero;
     _level = 0;
+    _commands = sink.onCommand == null ? null : _options.commands;
+    _heard = '';
+    // The start of a session counts as a pause: "send" alone sends what
+    // was typed.
+    _pausedWords = const [];
     if (!await _recognizer.hasPermission()) {
       _setStatus(DictationStatus.requestingPermission);
       final granted = await _recognizer.requestPermission();
-      if (_disposed) {
+      // Discarded while the dialog showed.
+      if (_disposed || !identical(_sink, sink)) {
         return;
       }
       if (!granted) {
@@ -323,6 +372,28 @@ class DictationController extends ChangeNotifier {
   /// Drops the session, keeping whatever partial text was already inserted.
   Future<void> cancel() => _cancel(takenOver: false);
 
+  /// Throws the session away: its sink gets no more text, not even a late
+  /// final result (the composer was sent or cleared, CON-097). With
+  /// [target], only a session writing into it.
+  Future<void> discard({Object? target}) async {
+    if (_status == DictationStatus.idle) {
+      return;
+    }
+    final sink = _sink;
+    if (target != null && !identical(sink?.target, target)) {
+      return;
+    }
+    _endSession();
+    _staleUntilReady = true;
+    _setStatus(DictationStatus.idle);
+    sink?.onDiscard?.call();
+    try {
+      await _recognizer.cancel();
+    } catch (_) {
+      // Nothing left to release.
+    }
+  }
+
   Future<void> _cancel({required bool takenOver}) async {
     if (_status == DictationStatus.idle) {
       return;
@@ -350,6 +421,13 @@ class DictationController extends ChangeNotifier {
     if (_disposed || _status == DictationStatus.idle) {
       return;
     }
+    if (_staleUntilReady) {
+      if (event is SpeechReady || event is SpeechListening) {
+        _staleUntilReady = false;
+      } else if (event is SpeechPartial || event is SpeechResult) {
+        return;
+      }
+    }
     if (_options.continuous) {
       _handleContinuous(event);
       return;
@@ -368,9 +446,15 @@ class DictationController extends ChangeNotifier {
       case SpeechPartial(:final text):
         _lastPartial = text;
         _sink?.onPartial(text);
+        _heardText(text);
       case SpeechResult(:final text):
         final sink = _sink;
         final result = text.isEmpty ? _lastPartial : text;
+        final command = _finalCommand(result);
+        if (command != null) {
+          _runCommand(command);
+          return;
+        }
         _endSession();
         _setStatus(DictationStatus.idle);
         sink?.onFinish(result);
@@ -414,6 +498,7 @@ class DictationController extends ChangeNotifier {
         }
         _lastPartial = text;
         _sink?.onPartial(_sessionText);
+        _heardText(_sessionText);
       case SpeechResult(:final text):
         _committed = joinDictation(
           _committed,
@@ -458,7 +543,68 @@ class DictationController extends ChangeNotifier {
       return;
     }
     _sink?.onPartial(_committed);
+    // The recognizer ended the phrase on a pause.
+    _heardText(_committed, pause: true);
     _restart();
+  }
+
+  /// Watches the session's text for a trailing command: it counts when
+  /// the words before it were followed by a pause ([_pausedWords]) and
+  /// nothing follows it for [DictationOptions.commandSettle].
+  void _heardText(String text, {bool pause = false}) {
+    final commands = _commands;
+    if (commands == null || (text == _heard && !pause)) {
+      return;
+    }
+    _heard = text;
+    _commandTimer?.cancel();
+    _commandTimer = null;
+    _pauseTimer?.cancel();
+    _pauseTimer = null;
+    final match = _pausedCommand(text);
+    if (match != null) {
+      _commandTimer = Timer(_options.commandSettle, () => _runCommand(match));
+    }
+    if (pause) {
+      _pausedWords = normalizeSpeechWords(text);
+    } else {
+      _pauseTimer = Timer(
+        _options.commandPause,
+        () => _pausedWords = normalizeSpeechWords(_heard),
+      );
+    }
+  }
+
+  TrailingVoiceCommand? _pausedCommand(String text) {
+    final match = _commands?.trailing(text);
+    if (match == null ||
+        !listEquals(normalizeSpeechWords(match.message), _pausedWords)) {
+      return null;
+    }
+    return match;
+  }
+
+  /// The command a session's last words give, once it ends: one already
+  /// heard (the recognizer may tidy the words in its final result), or one
+  /// that only the final result shows.
+  TrailingVoiceCommand? _finalCommand(String text) {
+    final commands = _commands;
+    if (commands == null) return null;
+    return _commandTimer != null
+        ? commands.trailing(text)
+        : _pausedCommand(text);
+  }
+
+  void _runCommand(TrailingVoiceCommand match) {
+    if (_status == DictationStatus.idle) {
+      return;
+    }
+    final sink = _sink;
+    _endSession();
+    _staleUntilReady = true;
+    _setStatus(DictationStatus.idle);
+    unawaited(_recognizer.cancel().catchError((Object _) {}));
+    sink?.onCommand?.call(match.command, match.message);
   }
 
   void _restart({bool fresh = false}) {
@@ -509,8 +655,13 @@ class DictationController extends ChangeNotifier {
     if (_status == DictationStatus.idle) {
       return;
     }
-    final sink = _sink;
     final text = _sessionText;
+    final command = _finalCommand(text);
+    if (command != null) {
+      _runCommand(command);
+      return;
+    }
+    final sink = _sink;
     _endSession();
     _setStatus(DictationStatus.idle);
     sink?.onFinish(text);
@@ -527,6 +678,11 @@ class DictationController extends ChangeNotifier {
     _ticker = null;
     _finishTimer?.cancel();
     _finishTimer = null;
+    _pauseTimer?.cancel();
+    _pauseTimer = null;
+    _commandTimer?.cancel();
+    _commandTimer = null;
+    _commands = null;
   }
 
   void _setLevel(double value) {
@@ -563,6 +719,8 @@ class DictationController extends ChangeNotifier {
     if (identical(_current, this)) _current = null;
     _ticker?.cancel();
     _finishTimer?.cancel();
+    _pauseTimer?.cancel();
+    _commandTimer?.cancel();
     unawaited(_subscription?.cancel());
     if (_status != DictationStatus.idle) {
       unawaited(_recognizer.cancel().catchError((_) {}));

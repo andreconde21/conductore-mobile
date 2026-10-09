@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/dictation_text_inserter.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
@@ -25,6 +26,10 @@ import 'package:flutter/material.dart';
 /// inline bar); only the button that started the session animates and can
 /// stop it. Unmounting a button mid-session cancels its own session so the
 /// recognizer never talks to a field that is gone.
+///
+/// When the field is emptied by someone else mid-session (the composer
+/// sent or cleared it), the session is discarded, so a late result cannot
+/// bring the sent text back (CON-097).
 class DictationButton extends StatefulWidget {
   const DictationButton({
     required this.controller,
@@ -34,6 +39,7 @@ class DictationButton extends StatefulWidget {
     this.disabledTooltip,
     this.autoStart = false,
     this.onMessage,
+    this.onVoiceCommand,
     super.key,
   });
 
@@ -52,6 +58,11 @@ class DictationButton extends StatefulWidget {
   /// Receives error text to show near the field (the button has no room).
   final ValueChanged<String>? onMessage;
 
+  /// A trailing "send" or "cancel" ended the dictation (CON-098); the
+  /// field already holds the text without the command words. Null leaves
+  /// the words as text.
+  final ValueChanged<VoiceCommand>? onVoiceCommand;
+
   @override
   State<DictationButton> createState() => _DictationButtonState();
 }
@@ -61,26 +72,51 @@ class _DictationButtonState extends State<DictationButton> {
   late DictationSink _sink;
   String? _shownMessage;
   bool _lastSessionMine = false;
+  String _lastText = '';
 
   @override
   void initState() {
     super.initState();
     _inserter = DictationTextInserter(widget.textController);
-    _sink = DictationSink(
-      onBegin: _inserter.begin,
-      onPartial: _inserter.partial,
-      onFinish: (text) {
-        _inserter.finish(text);
-        widget.focusNode?.requestFocus();
-      },
-      onCancel: () {
-        _inserter.cancel();
-        widget.focusNode?.requestFocus();
-      },
-    );
+    _sink = _newSink();
+    _lastText = widget.textController.text;
+    widget.textController.addListener(_handleTextChanged);
     widget.controller.addListener(_handleControllerChanged);
     if (widget.autoStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _autoStart());
+    }
+  }
+
+  DictationSink _newSink() => DictationSink(
+    target: widget.textController,
+    onBegin: () => _inserter.begin(),
+    onPartial: (text) => _inserter.partial(text),
+    onFinish: (text) {
+      _inserter.finish(text);
+      widget.focusNode?.requestFocus();
+    },
+    onCancel: () {
+      _inserter.cancel();
+      widget.focusNode?.requestFocus();
+    },
+    onDiscard: () => _inserter.abandon(),
+    onCommand: widget.onVoiceCommand == null
+        ? null
+        : (command, message) {
+            _inserter.finish(message);
+            widget.onVoiceCommand?.call(command);
+          },
+  );
+
+  /// The field went empty without the transcript doing it: whatever the
+  /// session still hears belongs to a message that is gone.
+  void _handleTextChanged() {
+    final text = widget.textController.text;
+    final emptied = _lastText.isNotEmpty && text.isEmpty;
+    _lastText = text;
+    if (emptied && _mine && _inserter.isActive && !_inserter.isWriting) {
+      _inserter.abandon();
+      unawaited(widget.controller.discard(target: widget.textController));
     }
   }
 
@@ -113,8 +149,18 @@ class _DictationButtonState extends State<DictationButton> {
   @override
   void didUpdateWidget(DictationButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.textController != widget.textController) {
+    final fieldChanged = oldWidget.textController != widget.textController;
+    if (fieldChanged) {
+      oldWidget.textController.removeListener(_handleTextChanged);
+      widget.textController.addListener(_handleTextChanged);
+      _lastText = widget.textController.text;
       _inserter = DictationTextInserter(widget.textController);
+    }
+    if ((fieldChanged ||
+            (oldWidget.onVoiceCommand == null) !=
+                (widget.onVoiceCommand == null)) &&
+        !_mine) {
+      _sink = _newSink();
     }
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_handleControllerChanged);
@@ -124,6 +170,7 @@ class _DictationButtonState extends State<DictationButton> {
 
   @override
   void dispose() {
+    widget.textController.removeListener(_handleTextChanged);
     widget.controller.removeListener(_handleControllerChanged);
     if (widget.controller.owns(_sink)) {
       unawaited(widget.controller.cancel());

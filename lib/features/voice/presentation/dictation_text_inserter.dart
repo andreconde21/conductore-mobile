@@ -16,8 +16,13 @@ class DictationTextInserter {
   String _after = '';
   String _separator = '';
   bool _active = false;
+  bool _writing = false;
 
   bool get isActive => _active;
+
+  /// Whether the controller is changing because of this inserter (its
+  /// listeners can tell a transcript from the user's or the app's edit).
+  bool get isWriting => _writing;
 
   void begin() {
     final value = controller.value;
@@ -53,30 +58,29 @@ class DictationTextInserter {
     if (!_active) {
       return;
     }
+    _apply('');
     _active = false;
-    controller.value = TextEditingValue(
-      text: _before + _after,
-      selection: TextSelection.collapsed(offset: _before.length),
-    );
   }
+
+  /// Stops tracking and leaves the text as it is now (the field was sent
+  /// or cleared; nothing the session still hears may come back).
+  void abandon() => _active = false;
 
   void _apply(String transcript) {
     if (!_active) {
       return;
     }
-    if (transcript.isEmpty) {
+    final inserted = transcript.isEmpty ? '' : _separator + transcript;
+    _writing = true;
+    try {
       controller.value = TextEditingValue(
-        text: _before + _after,
-        selection: TextSelection.collapsed(offset: _before.length),
+        text: _before + inserted + _after,
+        selection: TextSelection.collapsed(
+          offset: _before.length + inserted.length,
+        ),
       );
-      return;
+    } finally {
+      _writing = false;
     }
-    final inserted = _separator + transcript;
-    controller.value = TextEditingValue(
-      text: _before + inserted + _after,
-      selection: TextSelection.collapsed(
-        offset: _before.length + inserted.length,
-      ),
-    );
   }
 }
