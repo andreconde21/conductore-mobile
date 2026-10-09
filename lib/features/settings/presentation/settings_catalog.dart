@@ -2,6 +2,7 @@ import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/settings/presentation/settings_sections.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
+import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter/material.dart';
 
 /// The Settings page's sections, in list order.
@@ -320,6 +321,32 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.chatVoice,
     'Keep listening until I tap stop',
     keywords: ['continuous dictation', 'dictation'],
+    availableWhen: _speech,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    voiceCommandsTitle,
+    keywords: [
+      'voice command',
+      'send',
+      'cancel',
+      'dictation',
+      'say send',
+      'enviar',
+      'cancelar',
+    ],
+    availableWhen: _speech,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Send words',
+    keywords: ['voice command', 'send', 'enviar', 'dictation'],
+    availableWhen: _speech,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Cancel words',
+    keywords: ['voice command', 'cancel', 'cancelar', 'discard', 'dictation'],
     availableWhen: _speech,
   ),
   SettingsEntry(

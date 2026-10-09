@@ -5,6 +5,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
 import 'package:conduit/features/voice/domain/speech_languages.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
+import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:flutter/foundation.dart';
@@ -114,6 +115,27 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
     }
   }
 
+  /// Edits one command's words: comma-separated, any language; empty
+  /// restores the defaults.
+  Future<void> _editWords({
+    required String title,
+    required String current,
+    required String fallback,
+    required ValueChanged<String> save,
+  }) async {
+    final words = await showDialog<String>(
+      context: context,
+      builder: (context) => _WordsDialog(title: title, current: current),
+    );
+    if (words == null) return;
+    final cleaned = words
+        .split(',')
+        .map((word) => word.trim())
+        .where((word) => word.isNotEmpty)
+        .join(', ');
+    save(cleaned.isEmpty ? fallback : cleaned);
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -209,6 +231,47 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                     onChanged: (value) =>
                         _update((v) => v.copyWith(muteRestartBeeps: value)),
                   ),
+              ],
+              SwitchListTile(
+                key: const ValueKey('speech-voice-commands'),
+                secondary: const Icon(Icons.keyboard_voice_outlined),
+                title: const Text(voiceCommandsTitle),
+                subtitle: Text(
+                  'End a dictation with a short pause, then "send" to send '
+                  'it or "cancel" to discard it. Only the last words count.',
+                  style: muted,
+                ),
+                value: voice.voiceCommands,
+                onChanged: (value) =>
+                    _update((v) => v.copyWith(voiceCommands: value)),
+              ),
+              if (voice.voiceCommands) ...[
+                ListTile(
+                  key: const ValueKey('speech-send-words'),
+                  leading: const Icon(Icons.send_rounded),
+                  title: const Text('Send words'),
+                  trailing: _Value(voice.voiceSendWords),
+                  onTap: () => _editWords(
+                    title: 'Send words',
+                    current: voice.voiceSendWords,
+                    fallback: VoiceCommandWords.defaultSend,
+                    save: (words) =>
+                        _update((v) => v.copyWith(voiceSendWords: words)),
+                  ),
+                ),
+                ListTile(
+                  key: const ValueKey('speech-cancel-words'),
+                  leading: const Icon(Icons.cancel_outlined),
+                  title: const Text('Cancel words'),
+                  trailing: _Value(voice.voiceCancelWords),
+                  onTap: () => _editWords(
+                    title: 'Cancel words',
+                    current: voice.voiceCancelWords,
+                    fallback: VoiceCommandWords.defaultCancel,
+                    save: (words) =>
+                        _update((v) => v.copyWith(voiceCancelWords: words)),
+                  ),
+                ),
               ],
             ]),
             if (_tts != null) ...[
@@ -357,6 +420,58 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
           ],
         );
       },
+    );
+  }
+}
+
+/// The voice commands setting (CON-098).
+const voiceCommandsTitle = 'Voice commands: "send" and "cancel"';
+
+class _WordsDialog extends StatefulWidget {
+  const _WordsDialog({required this.title, required this.current});
+
+  final String title;
+  final String current;
+
+  @override
+  State<_WordsDialog> createState() => _WordsDialogState();
+}
+
+class _WordsDialogState extends State<_WordsDialog> {
+  late final _controller = TextEditingController(text: widget.current);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        key: const ValueKey('speech-words-field'),
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          helperText:
+              'Comma-separated, in any language. Empty restores '
+              'the defaults.',
+          helperMaxLines: 2,
+        ),
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
