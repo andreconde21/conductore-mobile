@@ -36,12 +36,13 @@ class KeyboardVisibiltyState extends State<KeyboardVisibilty>
   void didChangeMetrics() {
     final bottomInset = View.of(context).viewInsets.bottom;
 
-    if (bottomInset != _lastBottomInset) {
-      if (bottomInset > 0) {
-        widget.onKeyboardShow?.call();
-      } else {
-        widget.onKeyboardHide?.call();
-      }
+    // Every frame of the keyboard sliding in reports a larger inset; each
+    // one is a show (the view shrank again). One sliding out is a hide only
+    // once it is gone, so reading scrollback while it closes stays put.
+    if (bottomInset > _lastBottomInset) {
+      widget.onKeyboardShow?.call();
+    } else if (bottomInset == 0 && _lastBottomInset > 0) {
+      widget.onKeyboardHide?.call();
     }
 
     _lastBottomInset = bottomInset;

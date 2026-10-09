@@ -188,6 +188,7 @@ class TerminalViewState extends State<TerminalView> {
   @override
   void initState() {
     _focusNode = widget.focusNode ?? FocusNode();
+    _focusNode.addListener(_onFocusChange);
     _controller = widget.controller ?? TerminalController();
     _controller.addListener(_handleSelectionChanged);
     _scrollController = widget.scrollController ?? ScrollController();
@@ -200,10 +201,12 @@ class TerminalViewState extends State<TerminalView> {
   @override
   void didUpdateWidget(TerminalView oldWidget) {
     if (oldWidget.focusNode != widget.focusNode) {
+      _focusNode.removeListener(_onFocusChange);
       if (oldWidget.focusNode == null) {
         _focusNode.dispose();
       }
       _focusNode = widget.focusNode ?? FocusNode();
+      _focusNode.addListener(_onFocusChange);
     }
     if (oldWidget.controller != widget.controller) {
       _controller.removeListener(_handleSelectionChanged);
@@ -229,6 +232,7 @@ class TerminalViewState extends State<TerminalView> {
     _hideSelectionToolbar();
     _selectionRevision.dispose();
     _controller.removeListener(_handleSelectionChanged);
+    _focusNode.removeListener(_onFocusChange);
     if (widget.focusNode == null) {
       _focusNode.dispose();
     }
@@ -667,12 +671,27 @@ class TerminalViewState extends State<TerminalView> {
     return handled ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
+  // The soft keyboard covers the bottom of the view, where the live screen
+  // ends (a TUI's prompt, a permission dialog). Each step of its slide-in
+  // shrinks the view, which keeps its top where it was unless the view sat
+  // exactly at the bottom: so whenever the keyboard grows, show the bottom
+  // again once that frame is laid out, focused or not (the keyboard can open
+  // before the terminal takes focus, or for another field over it) (CON-094).
   void _onKeyboardShow() {
-    if (_focusNode.hasFocus) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom();
-      });
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToBottom();
+    });
+  }
+
+  // Focus arriving while the keyboard is already up (it opened for another
+  // screen, e.g. the chat composer) brings no inset change: show the bottom
+  // too, since that is where the typing goes (CON-094).
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus || !mounted) return;
+    if (View.of(context).viewInsets.bottom <= 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToBottom();
+    });
   }
 
   void _onEditableRect(Rect rect, Rect caretRect) {
