@@ -194,35 +194,56 @@ void main() {
     expect(tester.widget<TextField>(field).controller!.text, 'hello');
   });
 
-  testWidgets('open question options type the option number', (tester) async {
-    final (_, runner) = await pumpPage(tester, [
-      ok(
-        page([
-          assistantLine('a1', [
-            toolUse('q1', 'AskUserQuestion', {
-              'questions': [
-                {
-                  'question': 'Which DB?',
-                  'options': [
-                    {'label': 'Postgres'},
-                    {'label': 'SQLite'},
-                  ],
-                },
-              ],
-            }),
+  testWidgets(
+    'an open question with no request is answered in its terminal form',
+    (tester) async {
+      // CON-096: the transcript's question, with no request held for the
+      // phone, is typed into Claude Code's form (`terminal-answer`).
+      final (_, runner) = await pumpPage(tester, [
+        ok(
+          page([
+            assistantLine('a1', [
+              toolUse('q1', 'AskUserQuestion', {
+                'questions': [
+                  {
+                    'question': 'Which DB?',
+                    'options': [
+                      {'label': 'Postgres'},
+                      {'label': 'SQLite'},
+                    ],
+                  },
+                ],
+              }),
+            ]),
           ]),
-        ]),
-      ),
-      ok('{"ok":true}'),
-      ok(page([])),
-    ]);
-    await tester.tap(find.text('2. SQLite'));
-    await tester.pumpAndSettle();
-    expect(
-      runner.commands[1],
-      contains('--text-b64 ${base64.encode(utf8.encode('2'))} --no-enter'),
-    );
-  });
+        ),
+        ok('{"ok":true}'),
+        ok(page([])),
+      ]);
+      await tester.tap(find.byKey(const ValueKey('question-option-SQLite')));
+      await tester.pumpAndSettle();
+      final command = runner.commands[1];
+      expect(command, contains('terminal-answer'));
+      final payload =
+          jsonDecode(
+                utf8.decode(
+                  base64.decode(
+                    RegExp(
+                      r'--json-b64 ([A-Za-z0-9+/=]+)',
+                    ).firstMatch(command)!.group(1)!,
+                  ),
+                ),
+              )
+              as Map<String, Object?>;
+      expect(payload['answers'], {
+        'Which DB?': ['SQLite'],
+      });
+      expect(
+        ((payload['questions']! as List).single as Map)['question'],
+        'Which DB?',
+      );
+    },
+  );
 
   // CON-062: Claude Code asks a PermissionRequest for AskUserQuestion, so the
   // agent was in needs_permission: the transcript's options were disabled
@@ -285,12 +306,18 @@ void main() {
     expect(decided.single.$2, PermissionVerdict.allow);
   });
 
-  testWidgets('a question the agent no longer waits on says so', (
+  testWidgets('a question that is not the last thing in the thread says so', (
     tester,
   ) async {
+    var toTerminal = 0;
     await pumpPage(tester, [
-      ok(page([askLine], state: 'working')),
-    ]);
+      ok(
+        page([
+          askLine,
+          assistantLine('a2', [text('Carrying on without it.')]),
+        ], state: 'working'),
+      ),
+    ], onOpenTerminal: () => toTerminal += 1);
     final option = tester.widget<OutlinedButton>(
       find.widgetWithText(OutlinedButton, '2. SQLite'),
     );
@@ -299,6 +326,10 @@ void main() {
       find.textContaining('Not waiting for an answer here now.'),
       findsOneWidget,
     );
+    await tester.tap(
+      find.byKey(const ValueKey('chat-question-open-terminal-q1')),
+    );
+    expect(toTerminal, 1);
   });
 
   testWidgets('Esc interrupts and Terminal leaves the chat', (tester) async {

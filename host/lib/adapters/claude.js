@@ -35,6 +35,7 @@ const settings = lazy('../settings')
 const summarize = lazy('../summarize')
 const digest = lazy('../digest')
 const cswap = lazy('../cswap')
+const config = lazy('../config')
 
 const ID = 'claude'
 const LABEL = 'Claude Code'
@@ -98,12 +99,49 @@ function install ({ hookBin, statuslineBin, env = process.env }) {
   const found = detect(env)
   const version = found.present ? found.version : null
   const { events, skipped } = s.eventsFor(version)
-  const merged = s.merge(current, hookBin, events)
+  const permissionWait = config().permissionWaitSeconds()
+  try { config().writePermissionWait(permissionWait) } catch (err) { return { error: `cannot write ${config().permissionWaitFile()}: ${err.message}` } }
+  const merged = s.merge(current, hookBin, events, { permissionWait })
   const withStatusline = sl.merge(merged, statuslineBin)
   if (JSON.stringify(withStatusline.settings) !== JSON.stringify(current)) {
     try { s.writeSettings(withStatusline.settings, file) } catch (err) { return { error: `cannot write ${file}: ${err.message}` } }
   }
   return { settings: file, hook: hookBin, statusline: statuslineBin, events, skipped, claudeVersion: version, statusLine: withStatusline.action }
+}
+
+// After `config set permission-wait`: the sh hook's wait file, and our
+// PermissionRequest handler's timeout when the hooks are installed (only
+// that changes). Returns { hookTimeout } (null: hooks not installed) or
+// { error }.
+function syncPermissionWait () {
+  const s = settings()
+  const file = s.settingsPath()
+  const permissionWait = config().permissionWaitSeconds()
+  try { config().writePermissionWait(permissionWait) } catch (err) { return { error: err.message } }
+  let current
+  try { current = s.readSettings(file) } catch (err) { return { error: err.message } }
+  const present = s.installed(current)
+  if (!present.length) return { hookTimeout: null }
+  const hookBin = hookBinOf(current)
+  if (!hookBin) return { hookTimeout: null }
+  const merged = s.merge(current, hookBin, present, { permissionWait })
+  if (JSON.stringify(merged) !== JSON.stringify(current)) {
+    try { s.writeSettings(merged, file) } catch (err) { return { error: `cannot write ${file}: ${err.message}` } }
+  }
+  return { hookTimeout: s.permissionHookTimeout(permissionWait) }
+}
+
+// The hook client path of our registered PermissionRequest handler.
+function hookBinOf (current) {
+  const groups = (current.hooks && current.hooks.PermissionRequest) || []
+  for (const g of groups) {
+    for (const h of g.hooks || []) {
+      if (!settings().isOurs(h)) continue
+      const m = /^'((?:[^']|'\\'')*)' [A-Za-z]+$/.exec(h.command)
+      if (m) return m[1].replace(/'\\''/g, "'")
+    }
+  }
+  return null
 }
 
 // Removes our hooks and restores the statusline we wrapped.
@@ -314,6 +352,7 @@ module.exports = {
   detect,
   install,
   uninstall,
+  syncPermissionWait,
   registeredEvents,
   normalize,
   identifyProcess,

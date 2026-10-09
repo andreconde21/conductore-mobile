@@ -105,6 +105,13 @@ const USAGE = `usage: conductore-hostd <command>
                                   type a prompt into the agent's pane (text
                                   from stdin when neither flag is given)
   interrupt <sessionId>           press Escape in the agent's pane
+  terminal-answer <sessionId> -   answer Claude Code's own dialog in the
+                                  agent's pane (CON-096): JSON on stdin
+                                  (or --json-b64 <base64>),
+                                  {questions, answers} (a question form)
+                                  or {requestId, decision: allow|deny} (an
+                                  expired permission prompt); the screen is
+                                  checked before every key
   ports [--since <seq>]           TCP ports your own processes listen on
                                   (dev servers), each with the seq it
                                   first appeared at; --since: only newer
@@ -499,9 +506,16 @@ async function configCmd (args) {
   if (action !== 'set' || key === undefined || value === undefined) return fail('usage: config [get [<key>] | set <key> <value>]')
   let config
   try { config = cm.set(key, value) } catch (err) { return fail(err.message) }
+  // The sh hook and Claude Code's hook timeout read the wait from files.
+  let extra = {}
+  if (key === 'permission-wait') {
+    const r = claudeAdapter().syncPermissionWait()
+    if (r.error) return fail(r.error)
+    extra = { hookTimeout: r.hookTimeout }
+  }
   // A running daemon picks it up now.
   try { await client.request({ op: 'config' }, { timeoutMs: 2000 }) } catch {}
-  return out({ ok: true, config })
+  return out({ ok: true, config, ...extra })
 }
 
 // Pure: risk label and suggestions, no daemon.
@@ -663,6 +677,72 @@ async function interrupt (args) {
   const r = await paneMod().sendKey(found.agent, key)
   if (r.error) return fail(r.error)
   return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: key === 'escape' ? 'Escape' : key })
+}
+
+// Answers Claude Code's own dialog in the agent's pane: a question form
+// (`questions` from the transcript or the expired request `requestId`,
+// `answers` question -> text or list) or an expired permission prompt
+// (`requestId`, `decision`). For when no hook waits for the phone any
+// more; a request whose hook still waits is answered with `decide`.
+// terminal-form.js checks the screen before every key.
+async function terminalAnswerCmd (args) {
+  const { flags, positional } = parseFlags(args)
+  const [sessionId] = positional
+  if (!sessionId) return fail('usage: terminal-answer <sessionId> [- | --json-b64 <base64>]  (JSON on stdin)')
+  let req
+  try {
+    req = JSON.parse(typeof flags['json-b64'] === 'string' ? Buffer.from(flags['json-b64'], 'base64').toString('utf8') : await readStdin())
+  } catch { return fail('terminal-answer: expected JSON on stdin') }
+  if (!req || typeof req !== 'object' || Array.isArray(req)) return fail('terminal-answer: expected a JSON object')
+  const found = await inputAgent(sessionId, { allowPermission: true })
+  if (found.error) return fail(found.error)
+  const agent = found.agent
+  if ((agent.kind || adaptersMod().DEFAULT_KIND) !== 'claude') return fail('only Claude Code dialogs can be answered this way')
+  const pending = agent.pending || []
+  let request = null
+  if (req.requestId !== undefined) {
+    request = pending.find(p => p.id === req.requestId)
+    if (!request) return fail(`request ${req.requestId} is not pending for that agent`)
+    if (!request.expired) return fail('this request still waits for the phone: answer it on its card')
+  }
+  const termForm = require('./terminal-form')
+  const isQuestion = request ? request.toolName === 'AskUserQuestion' : true
+  let run
+  if (isQuestion) {
+    const questions = Array.isArray(req.questions) ? req.questions : request && request.questions
+    if (!request && pending.some(p => p.toolName === 'AskUserQuestion' && !p.expired)) {
+      return fail('this question still waits for the phone: answer it on its card')
+    }
+    run = io => termForm.answerQuestions(io, questions, req.answers)
+  } else {
+    if (!request) return fail('a permission prompt needs its requestId')
+    run = io => termForm.answerPermission(io, request, req.decision)
+  }
+  // One answer at a time per agent: two would interleave their keys.
+  const lock = path.join(paths.homeDir(), `terminal-answer.${sessionId.replace(/[^A-Za-z0-9_-]/g, '_')}.lock`)
+  try {
+    paths.ensureDirs()
+    try { if (Date.now() - fs.statSync(lock).mtimeMs > 60000) fs.unlinkSync(lock) } catch {}
+    fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 })
+  } catch { return fail('another answer is being typed into this terminal') }
+  try {
+    const target = await paneMod().terminalIo(agent)
+    if (target.error) return fail(target.error)
+    let r
+    try { r = await run(target.io) } catch (err) { r = { error: err.message, steps: [] } }
+    if (r.error) {
+      process.stdout.write(JSON.stringify({ error: r.error, steps: r.steps }) + '\n')
+      return 1
+    }
+    // A refusal sends no event (Esc interrupts the turn): the daemon drops
+    // the expired request itself.
+    if (request) {
+      try { await client.request({ op: 'terminal-answered', sessionId, requestId: request.id, refused: !isQuestion && req.decision === 'deny' }, { timeoutMs: 2000 }) } catch {}
+    }
+    return out({ ok: true, sessionId, via: target.via, paneId: target.paneId, steps: r.steps })
+  } finally {
+    try { fs.unlinkSync(lock) } catch {}
+  }
 }
 
 // The agents the daemon knows (their statusline usage), without starting
@@ -1230,6 +1310,7 @@ async function main (argv) {
     case 'transcript': return transcriptCmd(args)
     case 'send': return send(args)
     case 'interrupt': return interrupt(args)
+    case 'terminal-answer': return terminalAnswerCmd(args)
     case 'ports': return portsCmd(args)
     case 'usage': return usageCmd(args)
     case 'summarize': return summarizeCmd(args)

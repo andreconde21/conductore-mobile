@@ -29,3 +29,8 @@ pristine copy.
   onto the grid (`debugDisableGlyphRuns` turns this off for comparisons).
 - `TerminalStyle` has value equality, so an equal style from a rebuild keeps
   the caches; the text input caret rect is sent once per frame, when it moved.
+
+Keyboard (CON-094): when the soft keyboard grows (each frame of its
+slide-in) the view goes back to the terminal's bottom, focused or not, and
+so does focus arriving while the keyboard is already up; a keyboard sliding
+out no longer counts as a show, so scrollback being read stays put.

@@ -170,9 +170,17 @@ async function sendText (agent, text, { enter = true } = {}) {
   return { error: errors.join('; ') }
 }
 
+// The keys typed into an agent's pane, by their tmux and Herdr names.
+const KEYS = {
+  escape: { tmux: 'Escape', herdr: 'esc' },
+  enter: { tmux: 'Enter', herdr: 'enter' },
+  tab: { tmux: 'Tab', herdr: 'tab' },
+  down: { tmux: 'Down', herdr: 'down' }
+}
+
 // Sends one key (Escape for `interrupt`).
 async function sendKey (agent, key) {
-  const names = { escape: { tmux: 'Escape', herdr: 'esc' } }[key]
+  const names = { escape: KEYS.escape }[key]
   if (!names) return { error: `unknown key ${key}` }
   const { list, errors } = await verifiedTargets(agent)
   for (const t of list) {
@@ -183,6 +191,34 @@ async function sendKey (agent, key) {
     errors.push(`${t.via} send-keys failed: ${why(r)}`)
   }
   return { error: errors.join('; ') }
+}
+
+// Reads and types into the agent's own pane, the first target that still
+// holds it (checked now), for answering its terminal dialog
+// (terminal-form.js). Pane-targeted: nothing is focused or moved. Resolves
+// { io, via, paneId } or { error }; io's calls throw on failure.
+async function terminalIo (agent) {
+  const { list, errors } = await verifiedTargets(agent)
+  const t = list[0]
+  if (!t) return { error: errors.join('; ') || 'session not in tmux or Herdr' }
+  const check = (r, what) => { if (r.err) throw new Error(`${t.via} ${what} failed: ${why(r)}`); return r }
+  const io = {
+    read: async () => (t.via === 'herdr'
+      ? check(await herdr(t, ['pane', 'read', t.paneId, '--source', 'visible', '--format', 'text']), 'pane read')
+      : check(await run('tmux', tmuxArgs(t, ['capture-pane', '-p', '-J', '-t', t.paneId])), 'capture-pane')).stdout,
+    text: async text => {
+      if (t.via === 'herdr') check(await herdr(t, ['pane', 'send-text', t.paneId, text]), 'pane send-text')
+      else check(await run('tmux', tmuxArgs(t, ['send-keys', '-t', t.paneId, '-l', '--', text])), 'send-keys')
+    },
+    key: async key => {
+      const names = KEYS[key]
+      if (!names) throw new Error(`unknown key ${key}`)
+      if (t.via === 'herdr') check(await herdr(t, ['pane', 'send-keys', t.paneId, names.herdr]), 'pane send-keys')
+      else check(await run('tmux', tmuxArgs(t, ['send-keys', '-t', t.paneId, names.tmux])), 'send-keys')
+    },
+    sleep
+  }
+  return { io, via: t.via, paneId: t.paneId }
 }
 
 // Brings the agent's pane to the front (Herdr, else its tmux window and pane).
@@ -208,4 +244,4 @@ async function focus (agent) {
   return { error: errors.join('; ') }
 }
 
-module.exports = { sendText, sendKey, focus, targets, verifiedTargets, MAX_TEXT }
+module.exports = { sendText, sendKey, focus, terminalIo, targets, verifiedTargets, MAX_TEXT }

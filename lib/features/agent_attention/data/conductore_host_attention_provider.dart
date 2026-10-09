@@ -571,6 +571,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       repo: info.repo,
       questions: parsePendingQuestions(entry['questions']),
       terminalOnly: terminalOnly,
+      expired: entry['expired'] == true,
     );
   }
 

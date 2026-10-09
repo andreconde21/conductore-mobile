@@ -180,8 +180,10 @@ function reduce (state, event, now = Date.now()) {
     case 'PostToolUse':
     case 'PostToolUseFailure':
       // A request the phone only watches (answerable: false; no hook
-      // waits for it) was allowed in the terminal once its tool ran.
-      dropObserved(agent, p => p.toolName === (event.tool_name || null))
+      // waits for it) was allowed in the terminal once its tool ran. One
+      // whose wait expired must be this very call (parallel calls).
+      dropObserved(agent, p => p.toolName === (event.tool_name || null) &&
+        (!p.expired || !p.toolInput || p.toolInput._truncated || within(p.toolInput, event.tool_input)))
       next = agent.pending.length ? 'needs_permission' : 'working'
       break
     case 'PermissionRequest': {
@@ -253,6 +255,24 @@ function reduce (state, event, now = Date.now()) {
   agent.updatedAt = now
   changes.push(record(state, 'change', agent, reason))
   return changes
+}
+
+// Whether `b` holds every field of `a` with the same value (objects all
+// the way down; arrays item by item, same length).
+function within (a, b) {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => within(v, b[i]))
+  if (Array.isArray(b)) return false
+  return Object.keys(a).every(k => within(a[k], b[k]))
+}
+
+// Whether a PostToolUse (`post`) is the call a PermissionRequest (`request`,
+// both hook events) asked about: same tool, and the request's input within
+// the call's (Claude Code adds a question's answers to its input).
+function sameCall (request, post) {
+  return !!request && !!post && typeof request.tool_name === 'string' && request.tool_name === post.tool_name &&
+    within(request.tool_input, post.tool_input)
 }
 
 // Removes the observe-only requests (answerable: false) that `match`
@@ -341,9 +361,18 @@ function resolvePermission (state, requestId, resolution, now = Date.now()) {
   for (const agent of Object.values(state.agents)) {
     const idx = agent.pending.findIndex(p => p.id === requestId)
     if (idx === -1) continue
-    const [request] = agent.pending.splice(idx, 1)
+    const request = agent.pending[idx]
+    if (resolution === 'timeout') {
+      // The phone's wait is over, the terminal still asks: the request
+      // stays, answerable there only (the phone types into the terminal,
+      // `terminal-answer`), until the agent's events show the answer
+      // (PostToolUse of this call, Stop, PermissionDenied, a new prompt).
+      request.expired = true
+      request.answerable = false
+      request.batchable = false
+    } else agent.pending.splice(idx, 1)
     if (agent.state !== 'ended') {
-      if (agent.pending.length) agent.state = 'needs_permission'
+      if (agent.pending.length > (resolution === 'timeout' ? 1 : 0)) agent.state = 'needs_permission'
       else if (resolution === 'timeout' && QUESTION_TOOLS.has(request.toolName)) {
         // The question (or plan) is still on screen in the terminal: the
         // agent waits for an answer there, like after its PreToolUse.
@@ -460,6 +489,8 @@ module.exports = {
   createState,
   reduce,
   resolvePermission,
+  sameCall,
+  within,
   autoApproved,
   findPending,
   setUsage,

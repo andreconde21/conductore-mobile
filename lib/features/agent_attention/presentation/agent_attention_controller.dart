@@ -808,6 +808,11 @@ class AgentAttentionController extends ChangeNotifier {
   bool companionSupports(String hostId, String capability) =>
       _monitorFor(hostId)?.capabilities?.contains(capability) ?? false;
 
+  /// What [hostId]'s companion reported it supports; null while unknown
+  /// (no monitor, or no report yet).
+  Set<String>? companionCapabilities(String hostId) =>
+      _monitorFor(hostId)?.capabilities;
+
   /// What each agent kind on [hostId] supports: the companion's report,
   /// else what companions before agent adapters implied (Claude Code only).
   AgentKindCatalog agentKinds(String hostId) =>

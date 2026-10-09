@@ -19,6 +19,13 @@
 //                      run finished or was cancelled; then its own pane or
 //                      window is closed (task-runs.js). A run marked `keep`
 //                      stays open; forgetting a run closes it at once
+//   permission-wait    15 (default) | minutes 1-60: how long a Claude Code
+//                      permission prompt or question waits for the phone
+//                      (CON-096). The terminal shows its own dialog at
+//                      once all the same, and an answer there ends the
+//                      wait. Kept in permission-wait (seconds) for the sh
+//                      hook, and as the hook's own timeout in Claude Code's
+//                      settings.json (`install`, `config set`)
 
 const fs = require('fs')
 const path = require('path')
@@ -28,6 +35,7 @@ const KEYS = {
   'herdr-sidebar': { default: 'on', valid: v => v === 'on' || v === 'off' },
   'tmux-live': { default: 'off', valid: v => v === 'on' || v === 'off' },
   'task-agent-keep': { default: '24', valid: v => v === 'forever' || (/^\d{1,3}$/.test(v) && Number(v) <= 720) },
+  'permission-wait': { default: '15', valid: v => /^\d{1,2}$/.test(v) && Number(v) >= 1 && Number(v) <= 60 },
   'worktree-location': {
     default: 'next-to-repo',
     valid: v => v === 'next-to-repo' || v === 'herdr' || (v.includes('<branch>') && v.length <= 400 && !/[\n\r\0]/.test(v))
@@ -74,4 +82,20 @@ function set (key, value) {
   return { ...current }
 }
 
-module.exports = { KEYS, get, set, reload, file }
+// The phone's wait for a Claude Code permission prompt, in seconds.
+function permissionWaitSeconds (cfg = read()) {
+  return Number(cfg['permission-wait']) * 60
+}
+
+// The file the sh hook reads the wait from (seconds, one line): it starts
+// no Node. Written by `install` and `config set permission-wait`.
+const permissionWaitFile = () => path.join(paths.homeDir(), 'permission-wait')
+
+function writePermissionWait (seconds = permissionWaitSeconds()) {
+  paths.ensureDirs()
+  const tmp = `${permissionWaitFile()}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, `${seconds}\n`, { mode: 0o600 })
+  fs.renameSync(tmp, permissionWaitFile())
+}
+
+module.exports = { KEYS, get, set, reload, file, permissionWaitSeconds, permissionWaitFile, writePermissionWait }

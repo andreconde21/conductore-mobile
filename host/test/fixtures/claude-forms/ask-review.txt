@@ -1,0 +1,31 @@
+
+❯ ask me
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Database  ☒ Features  ✔ Submit  →
+
+Review your answers
+
+ ● Which database should we use?
+   → SQLite
+ ● Which features do you want?
+   → Auth, Export
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+

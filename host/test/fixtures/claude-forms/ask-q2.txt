@@ -1,0 +1,31 @@
+
+❯ ask me
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Database  ☐ Features  ✔ Submit  →
+
+Which features do you want?
+
+❯ 1. [ ] Auth
+         Logins
+  2. [ ] Search
+         Full text
+  3. [ ] Export
+         CSV export
+  4. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+

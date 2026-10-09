@@ -37,7 +37,7 @@ const AUDIT_MAX_BYTES = 128 * 1024
 //                    AskUserQuestion; pending ones carry `questions`
 //   request-owner    `decide`, `trust` and `approve-low` take `--session`:
 //                    the request must be pending for that agent
-const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'sheprd-view-2', 'question-answers', 'tasks-folder', 'task-runs', 'request-owner']
+const CAPABILITIES = ['smart-approvals', 'digest', 'snapshots', 'live', 'herdr-agents', 'agent-messaging', 'herdr-sidebar', 'config', 'sheprd-sidebar', 'sheprd-view', 'sheprd-view-2', 'question-answers', 'tasks-folder', 'task-runs', 'request-owner', 'terminal-answers']
 
 const rulesFile = () => path.join(paths.homeDir(), 'rules.json')
 const auditFile = () => path.join(paths.homeDir(), 'auto-approved.json')

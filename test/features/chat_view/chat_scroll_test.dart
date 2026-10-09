@@ -88,8 +88,8 @@ void main() {
     await chat.refresh();
     await tester.pump();
     expect(tester.getTopLeft(find.byKey(ValueKey(row))), before);
-    // One more message and one approval.
-    expect(find.text('New messages (6)'), findsOneWidget);
+    // One more message and one approval: the pill names the approval.
+    expect(find.text('Approval waiting'), findsOneWidget);
     expect(find.text('Allow Bash?'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('chat-new-messages')));

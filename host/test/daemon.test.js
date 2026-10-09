@@ -363,11 +363,20 @@ test('a question the phone did not answer in time waits in the terminal as a que
   const r = await hook(ev('q2', 'PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: { questions: QUESTIONS } }), { CONDUCTORE_PERMISSION_TIMEOUT: '1' })
   assert.equal(r.stdout, '')
   const a = (await status()).agents.find(a => a.sessionId === 'q2')
-  assert.equal(a.pending.length, 0)
-  // Not "needs_permission with nothing pending": the phone shows the
-  // question as waiting in the terminal, where the dialog still is.
+  // The question stays, answerable in the terminal only (CON-096): the
+  // phone types the answer there (`terminal-answer`).
+  assert.equal(a.pending.length, 1)
+  assert.equal(a.pending[0].expired, true)
+  assert.equal(a.pending[0].answerable, false)
+  assert.equal(a.pending[0].questions.length, 2)
   assert.equal(a.state, 'waiting_input')
   assert.equal(a.lastMessage, 'Question is waiting in the terminal: Which database? (+1 more)')
+  const late = await cli('decide', a.pending[0].id, 'answer', '--answers', JSON.stringify({ 'Which database?': 'SQLite' }))
+  assert.equal(late.code, 1)
+  assert.match(late.json.error, /expired; answer it in the terminal/)
+  // Answered in the terminal: its PostToolUse (input plus answers) ends it.
+  await hook(ev('q2', 'PostToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: QUESTIONS, answers: { 'Which database?': 'SQLite' } }, tool_response: {} }))
+  await waitFor(async () => (await status()).agents.find(a => a.sessionId === 'q2').pending.length === 0)
 })
 
 test('plan approval: allow echoes the plan as updatedInput; always switches to acceptEdits (CON-062)', async () => {
@@ -396,10 +405,79 @@ test('PermissionRequest timeout prints nothing and leaves the terminal prompt to
   assert.equal(r.stdout, '')
   assert.ok(Date.now() - t0 >= 900)
   const a = (await status()).agents.find(a => a.sessionId === 's1')
-  assert.equal(a.pending.length, 0)
+  assert.equal(a.pending.length, 1)
+  assert.equal(a.pending[0].expired, true)
   assert.equal(a.state, 'needs_permission')
-  const late = await cli('decide', 'whatever', 'allow')
+  const late = await cli('decide', a.pending[0].id, 'allow')
   assert.equal(late.code, 1)
+  // Allowed in the terminal: the call runs.
+  await hook(ev('s1', 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {} }))
+  await waitFor(async () => (await status()).agents.find(a => a.sessionId === 's1').pending.length === 0)
+})
+
+test('an expired prompt refused in the terminal from the phone is dropped (CON-096)', async () => {
+  // Esc on Claude Code's prompt interrupts the turn with no hook event at
+  // all; terminal-answer tells the daemon.
+  await hook(ev('t4', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm x' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '1' })
+  const [req] = (await status()).agents.find(a => a.sessionId === 't4').pending
+  assert.equal(req.expired, true)
+  const [other] = await client.request({ op: 'terminal-answered', sessionId: 'nope', requestId: req.id, refused: true })
+  assert.equal(other.resolved, false)
+  const [r] = await client.request({ op: 'terminal-answered', sessionId: 't4', requestId: req.id, refused: true })
+  assert.equal(r.resolved, true)
+  const a = (await status()).agents.find(a => a.sessionId === 't4')
+  assert.equal(a.pending.length, 0)
+  assert.equal(a.state, 'waiting_input')
+})
+
+test('a prompt answered in the terminal releases the waiting hook at once (CON-096)', async () => {
+  // Claude Code shows its own dialog while the hook waits, and an answer
+  // there does not end the hook: the call's PostToolUse does.
+  const pending = hook(ev('t1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'make' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '60' })
+  await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 't1') || {}).pending?.[0])
+  // Another call of the same tool is not this one.
+  await hook(ev('t1', 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'make test' }, tool_response: {} }))
+  await sleep(300)
+  assert.equal((await status()).agents.find(a => a.sessionId === 't1').pending.length, 1)
+  const t0 = Date.now()
+  await hook(ev('t1', 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'make', description: 'Build' }, tool_response: {} }))
+  const r = await pending
+  assert.equal(r.stdout, '')
+  assert.ok(Date.now() - t0 < 5000, `${Date.now() - t0} ms`)
+  const a = (await status()).agents.find(a => a.sessionId === 't1')
+  assert.equal(a.pending.length, 0)
+  assert.equal(a.state, 'working')
+  await waitFor(async () => !fs.readdirSync(path.join(home, 'tmp')).some(n => n.startsWith('p.')))
+})
+
+test('the turn ending or a new prompt releases a waiting hook (CON-096)', async () => {
+  for (const end of ['Stop', 'UserPromptSubmit']) {
+    const pending = hook(ev('t2', 'PermissionRequest', { tool_name: 'Edit', tool_input: { file_path: '/work/t2/a' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '60' })
+    await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 't2') || {}).pending?.length === 1)
+    await hook(ev('t2', end))
+    const r = await pending
+    assert.equal(r.stdout, '', end)
+    assert.equal((await status()).agents.find(a => a.sessionId === 't2').pending.length, 0, end)
+  }
+})
+
+test('the hook waits for the permission-wait setting (CON-096)', async () => {
+  // `config set` writes the wait for the sh hook (seconds) and the
+  // handler timeout in Claude Code's settings.json.
+  const set = await cli('config', 'set', 'permission-wait', '1')
+  assert.equal(set.code, 0)
+  assert.equal(fs.readFileSync(path.join(home, 'permission-wait'), 'utf8'), '60\n')
+  fs.writeFileSync(path.join(home, 'permission-wait'), '1\n')
+  const t0 = Date.now()
+  const r = await hook(ev('t3', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'pwd' } }))
+  assert.equal(r.stdout, '')
+  assert.ok(Date.now() - t0 >= 900 && Date.now() - t0 < 10000, `${Date.now() - t0} ms`)
+  // Other agents' hooks keep the short default, never this setting.
+  const hookFile = fs.readFileSync(HOOK, 'utf8')
+  assert.match(hookFile, /\[ -z "\$agent" \] && \[ -f "\$d\/permission-wait" \]/)
+  assert.equal((await cli('config', 'set', 'permission-wait', '61')).code, 1)
+  await cli('config', 'set', 'permission-wait', '15')
+  fs.unlinkSync(path.join(home, 'permission-wait'))
 })
 
 test('killing a waiting hook drops its pending request', async () => {
@@ -552,6 +630,16 @@ test('install and uninstall edit the settings file idempotently', async () => {
   assert.equal(cfg.hooks.Stop.length, 2)
   assert.equal(cfg.hooks.PermissionRequest.length, 1)
   assert.match(cfg.hooks.PermissionRequest[0].hooks[0].command, /conductore-hook' PermissionRequest$/)
+  // The phone's wait (15 min by default) plus a minute: Claude Code never
+  // kills the waiting hook first; the sh hook reads the wait (CON-096).
+  assert.equal(cfg.hooks.PermissionRequest[0].hooks[0].timeout, 960)
+  assert.equal(fs.readFileSync(path.join(home, 'permission-wait'), 'utf8'), '900\n')
+  // `config set permission-wait` moves both.
+  assert.equal((await cli('config', 'set', 'permission-wait', '30')).json.hookTimeout, 1860)
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).hooks.PermissionRequest[0].hooks[0].timeout, 1860)
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).hooks.Stop.length, 2)
+  assert.equal(fs.readFileSync(path.join(home, 'permission-wait'), 'utf8'), '1800\n')
+  await cli('config', 'set', 'permission-wait', '15')
   const u = await cli('uninstall')
   assert.equal(u.json.removed.length, 11)
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo other' }] }] } })

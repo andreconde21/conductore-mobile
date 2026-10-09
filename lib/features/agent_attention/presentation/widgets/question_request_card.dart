@@ -1,6 +1,7 @@
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
 import 'package:flutter/material.dart';
 
 /// A question Claude asked (AskUserQuestion) and is waiting on, answered
@@ -14,6 +15,12 @@ import 'package:flutter/material.dart';
 ///
 /// When the companion did not send the questions (an older one), the
 /// options cannot be answered here and the card says so.
+///
+/// A question only the terminal can answer now ([PendingPermissionRequest
+/// .terminalOnly]: the phone's wait ran out, CON-096) is answered by typing
+/// into Claude Code's form in the agent's pane when [viaTerminal] (the
+/// companion has `terminal-answers`); else the card says it waits in the
+/// terminal and offers [onOpenTerminal].
 class QuestionRequestCard extends StatefulWidget {
   const QuestionRequestCard({
     required this.request,
@@ -22,8 +29,17 @@ class QuestionRequestCard extends StatefulWidget {
     required this.onDecline,
     this.margin = EdgeInsets.zero,
     this.agentName,
+    this.viaTerminal = false,
+    this.onOpenTerminal,
     super.key,
   });
+
+  /// [onAnswer] types the answers into the terminal's form (no Decline:
+  /// that is Esc in the terminal).
+  final bool viaTerminal;
+
+  /// "Open terminal": the agent's own pane.
+  final VoidCallback? onOpenTerminal;
 
   final PendingPermissionRequest request;
 
@@ -109,6 +125,9 @@ class _QuestionRequestCardState extends State<QuestionRequestCard> {
     final request = widget.request;
     final busy = widget.busy;
     final answers = _answers;
+    // Only the terminal answers it, and the phone cannot type there.
+    final waiting = request.terminalOnly && !widget.viaTerminal;
+    final answerable = request.answerable && !waiting;
     return Container(
       key: ValueKey('question-request-${request.id}'),
       margin: widget.margin,
@@ -137,7 +156,15 @@ class _QuestionRequestCardState extends State<QuestionRequestCard> {
             ],
           ),
           const SizedBox(height: 6),
-          if (!request.answerable) ...[
+          if (waiting) ...[
+            Text(request.summary, style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 6),
+            TerminalOnlyNote(
+              key: ValueKey('question-in-terminal-${request.id}'),
+              detail: 'the question is waiting there',
+              onOpenTerminal: widget.onOpenTerminal,
+            ),
+          ] else if (!request.answerable) ...[
             Text(request.summary, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 6),
             Text(
@@ -164,28 +191,45 @@ class _QuestionRequestCardState extends State<QuestionRequestCard> {
                   }
                 }),
               ),
-          const SizedBox(height: 4),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            children: [
-              TextButton(
-                key: ValueKey('question-decline-${request.id}'),
-                onPressed: busy ? null : widget.onDecline,
-                child: const Text('Decline'),
+          if (widget.viaTerminal && answerable)
+            Text(
+              'Claude Code asks this in the terminal now; your answers are '
+              'typed into its form there.',
+              key: ValueKey('question-via-terminal-${request.id}'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
-              if (request.answerable)
-                FilledButton(
-                  key: ValueKey('question-send-${request.id}'),
-                  onPressed: busy || answers.isEmpty
-                      ? null
-                      : () => widget.onAnswer(answers),
-                  child: Text(
-                    request.questions.length > 1 ? 'Send answers' : 'Send',
+            ),
+          const SizedBox(height: 4),
+          if (!waiting)
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              children: [
+                if (widget.viaTerminal && widget.onOpenTerminal != null)
+                  TextButton(
+                    key: ValueKey('question-open-terminal-${request.id}'),
+                    onPressed: widget.onOpenTerminal,
+                    child: const Text('Open terminal'),
+                  )
+                else if (!widget.viaTerminal)
+                  TextButton(
+                    key: ValueKey('question-decline-${request.id}'),
+                    onPressed: busy ? null : widget.onDecline,
+                    child: const Text('Decline'),
                   ),
-                ),
-            ],
-          ),
+                if (answerable)
+                  FilledButton(
+                    key: ValueKey('question-send-${request.id}'),
+                    onPressed: busy || answers.isEmpty
+                        ? null
+                        : () => widget.onAnswer(answers),
+                    child: Text(
+                      request.questions.length > 1 ? 'Send answers' : 'Send',
+                    ),
+                  ),
+              ],
+            ),
           if (busy)
             const Padding(
               padding: EdgeInsets.only(top: 8),

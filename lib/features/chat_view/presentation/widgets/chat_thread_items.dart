@@ -5,6 +5,7 @@ import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_outgoing.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
+import 'package:conduit/features/chat_view/domain/terminal_answers.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_markdown.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_search_highlight.dart';
@@ -685,14 +686,19 @@ class ChatPlanCard extends StatelessWidget {
 
 /// AskUserQuestion: the questions and their options. While unanswered and
 /// the agent waits, each option is a button that types its number into the
-/// terminal menu ([onPick] gets the 1-based number).
+/// terminal menu ([onPick] gets the 1-based number). Once answered, each
+/// question shows its answer (from the tool result).
 class ChatQuestionCard extends StatelessWidget {
   const ChatQuestionCard({
     required this.item,
     required this.onPick,
     this.note,
+    this.onOpenTerminal,
     super.key,
   });
+
+  /// "Open terminal" beside [note].
+  final VoidCallback? onOpenTerminal;
 
   final ChatQuestion item;
 
@@ -708,6 +714,9 @@ class ChatQuestionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final answered = item.answer == null
+        ? const <String, String>{}
+        : answeredInResult(item.questions, item.answer!);
     return _CardShell(
       icon: Icons.help_outline_rounded,
       title: item.answered ? 'Question answered' : 'Question',
@@ -737,24 +746,49 @@ class ChatQuestionCard extends StatelessWidget {
                   ),
                 ),
               ),
+            if (answered[question.question] case final answer?)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  'Answered: $answer',
+                  key: ValueKey(
+                    'chat-question-answer-${item.id}-'
+                    '${item.questions.indexOf(question)}',
+                  ),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
             const SizedBox(height: 6),
           ],
-          if (item.answer case final answer?)
+          if (item.answer case final answer? when answered.isEmpty)
             Text(
               answer.trim(),
               style: theme.textTheme.bodySmall,
               maxLines: 6,
               overflow: TextOverflow.ellipsis,
             )
-          else if (note case final note?)
+          else if (item.answer == null && note != null) ...[
             Text(
-              note,
+              note!,
               key: ValueKey('chat-question-note-${item.id}'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
-            )
-          else if (onPick != null && item.questions.length > 1)
+            ),
+            if (onOpenTerminal case final open?)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  key: ValueKey('chat-question-open-terminal-${item.id}'),
+                  onPressed: open,
+                  icon: const Icon(Icons.terminal_rounded, size: 18),
+                  label: const Text('Open terminal'),
+                ),
+              ),
+          ] else if (onPick != null && item.questions.length > 1)
             Text(
               'Answer the questions in order; each tap picks for the one '
               'the terminal shows.',
@@ -773,12 +807,22 @@ class ChatApprovalCard extends StatelessWidget {
     required this.busy,
     required this.onDecide,
     this.onTrust,
+    this.viaTerminal = false,
+    this.onOpenTerminal,
     super.key,
   });
 
   final PendingPermissionRequest request;
   final bool busy;
   final ValueChanged<PermissionVerdict> onDecide;
+
+  /// A [PendingPermissionRequest.terminalOnly] request whose prompt the
+  /// phone answers by keys in the terminal (CON-096): Allow presses 1
+  /// there, Deny presses Esc; no Always or Trust.
+  final bool viaTerminal;
+
+  /// "Open terminal" on a request only the terminal answers.
+  final VoidCallback? onOpenTerminal;
 
   /// Saves a time-boxed rule (companions with smart approvals); hidden for
   /// high-risk requests, which then also lose "Always".
@@ -815,7 +859,7 @@ class ChatApprovalCard extends StatelessWidget {
                 child: Text(
                   isPlan
                       ? 'Approve the plan?'
-                      : request.terminalOnly
+                      : request.terminalOnly && !viaTerminal
                       ? '${request.toolName} is waiting for approval'
                       : 'Allow ${request.toolName}?',
                   style: theme.textTheme.titleSmall,
@@ -837,10 +881,42 @@ class ChatApprovalCard extends StatelessWidget {
             RiskLine(risk: risk),
           ],
           const SizedBox(height: 10),
-          // The agent's own prompt answers it (Gemini CLI): no buttons.
-          if (request.terminalOnly)
+          // The agent's own prompt answers it (Gemini CLI, or a prompt the
+          // phone's wait ran out on): no buttons, unless the phone can
+          // type the answer there.
+          if (request.terminalOnly && viaTerminal) ...[
+            Text(
+              'Claude Code asks this in the terminal now: Allow presses 1 '
+              'there, Deny presses Esc.',
+              key: ValueKey('chat-approval-via-terminal-${request.id}'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 6),
+            ApprovalButtons(
+              deny: ApprovalAction(
+                label(PermissionVerdict.deny),
+                busy ? null : () => onDecide(PermissionVerdict.deny),
+              ),
+              secondary: [
+                if (onOpenTerminal case final open?)
+                  ApprovalAction(
+                    'Open terminal',
+                    open,
+                    key: ValueKey('chat-open-terminal-${request.id}'),
+                  ),
+              ],
+              allow: ApprovalAction(
+                label(PermissionVerdict.allow),
+                busy ? null : () => onDecide(PermissionVerdict.allow),
+              ),
+            ),
+          ] else if (request.terminalOnly)
             TerminalOnlyNote(
               key: ValueKey('chat-answer-in-terminal-${request.id}'),
+              detail: request.expired ? 'the prompt is waiting there' : null,
+              onOpenTerminal: onOpenTerminal,
             )
           else
             ApprovalButtons(

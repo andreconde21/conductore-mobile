@@ -365,6 +365,9 @@ class TranscriptParser {
 
   static PendingPermissionRequest _request(Map<Object?, Object?> entry) {
     final info = parsePendingApprovalInfo(entry);
+    // `answerable: false`: only the agent's own prompt answers it (another
+    // agent's, or one whose wait for the phone expired).
+    final terminalOnly = entry['answerable'] == false;
     return PendingPermissionRequest(
       id: _string(entry['id'])!,
       toolName: _string(entry['toolName']) ?? 'tool',
@@ -373,10 +376,12 @@ class TranscriptParser {
       toolInput: _formatInput(entry['toolInput']),
       createdAt: _millis(entry['createdAt']),
       risk: info.risk,
-      batchable: info.batchable,
+      batchable: info.batchable && !terminalOnly,
       suggestedRules: info.suggestedRules,
       repo: info.repo,
       questions: parsePendingQuestions(entry['questions']),
+      terminalOnly: terminalOnly,
+      expired: entry['expired'] == true,
     );
   }
 

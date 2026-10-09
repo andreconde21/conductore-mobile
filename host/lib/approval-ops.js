@@ -56,7 +56,7 @@ function pendingRequest (daemon, requestId, sessionId) {
   if (sessionId !== undefined && sessionId !== null && sessionId !== agent.sessionId) {
     return { error: `request ${requestId} is not pending for that agent` }
   }
-  if (request.answerable === false) return { error: 'this agent takes its answers in the terminal' }
+  if (request.answerable === false) return { error: request.expired ? 'request expired; answer it in the terminal' : 'this agent takes its answers in the terminal' }
   const waiter = daemon.waiters.get(requestId) || null
   if (waiter && (waiter.sessionId !== agent.sessionId || (waiter.event && waiter.event.request_id !== requestId))) {
     return { error: `request ${requestId} does not belong to that agent` }
