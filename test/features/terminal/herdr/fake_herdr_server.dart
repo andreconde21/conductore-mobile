@@ -188,6 +188,10 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
   /// Panes that run an agent (`agent prompt` works there).
   final Set<String> agentPanes = {};
 
+  /// Whether `agent focus` fails for a pane not in [agentPanes], as Herdr's
+  /// does (`agent_not_found`).
+  bool agentFocusNeedsAgent = false;
+
   /// Text sent to each pane by id (`pane send-text`, `agent prompt`).
   final Map<String, String> paneTyped = {};
 
@@ -334,6 +338,18 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
             '"workspace_id":"$id"}}}',
         stderr: '',
         exitCode: 0,
+      );
+    }
+    if (agentFocusNeedsAgent &&
+        words.length >= 3 &&
+        words[0] == 'agent' &&
+        words[1] == 'focus' &&
+        !agentPanes.contains(words[2])) {
+      commands.add(command);
+      return const AgentCommandResult(
+        stdout: '{"error":{"code":"agent_not_found"}}',
+        stderr: '',
+        exitCode: 1,
       );
     }
     if (words.length >= 3 && words[0] == 'agent' && words[1] == 'prompt') {

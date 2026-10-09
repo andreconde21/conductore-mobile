@@ -723,7 +723,7 @@ class HerdrSessionFocus implements AppInputRouter {
       }
     }
     // Verified means Herdr shows its workspace, and the pane a deep link
-    // asked for when there is one (a split shows only one pane on a phone).
+    // asked for when there is one (keys go to the pane Herdr focuses).
     return _checkServer(session).then(
       (_) => _verifiedAt.containsKey(session)
           ? InputHoldDecision.send
@@ -749,9 +749,15 @@ class HerdrSessionFocus implements AppInputRouter {
     final paneId = _preferredPanes[session] ?? '';
     final tabId = _preferredTabs[session] ?? '';
     var focusedPane = '';
-    if (paneId.isNotEmpty || tabId.isNotEmpty) {
-      final moved = await control.focusLocation(tabId: tabId, paneId: paneId);
-      if (moved) focusedPane = paneId;
+    if (paneId.isNotEmpty &&
+        await control.run(control.commands.agentFocus(paneId))) {
+      focusedPane = paneId;
+    } else {
+      // Not an agent's pane (`agent focus` takes only those) or gone: the
+      // session shows what its tab focuses rather than wait for a pane
+      // this cannot focus.
+      _preferredPanes.remove(session);
+      if (tabId.isNotEmpty) await control.focusLocation(tabId: tabId);
     }
     _applyFocus(
       serverKey(session),
@@ -856,10 +862,11 @@ class HerdrSessionFocus implements AppInputRouter {
   /// listing that answer came from, if any, so the previews need not ask
   /// for it again.
   ///
-  /// [focusedPane] is the pane Herdr shows in that workspace (empty when
+  /// [focusedPane] is the pane Herdr has focused in that workspace (empty when
   /// unknown). A session opened at another pane of it (the other half of a
-  /// split, CON-095) is not on it: a phone-sized Herdr client shows only
-  /// the focused pane, so it previews its own pane until that is focused.
+  /// split, CON-095) is not on it: its keys would reach the focused pane,
+  /// and the live split gives each half a sliver of a phone's width. It
+  /// previews its own pane, full width, until that pane is focused.
   void _applyFocus(
     String key,
     String? focusedId,

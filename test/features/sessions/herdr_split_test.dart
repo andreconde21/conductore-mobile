@@ -13,9 +13,11 @@ import '../../support/test_doubles.dart';
 import '../terminal/herdr/fake_herdr_server.dart';
 
 /// CON-095: two agents side by side in Herdr's own split (one workspace,
-/// one tab, panes w1:p1 and w1:p2). A phone-sized Herdr client shows only
-/// the focused pane, so opening the other half must not land on the one
-/// Herdr has focused.
+/// one tab, panes w1:p1 and w1:p2). Keys typed into a Herdr client reach
+/// the pane Herdr has focused, so opening the other half must not land on
+/// the live view of the focused one (checked on Herdr 0.9.3 in Docker: a
+/// 50-column client shows both halves, `agent focus` moves the pane focus
+/// and `pane layout` reports it).
 void main() {
   late SharedFocusHerdrServer server;
   late TerminalWorkspaceController workspace;
@@ -36,7 +38,8 @@ void main() {
     mayMove = false;
     server = SharedFocusHerdrServer(workspaces: ['w1', 'w2'])
       ..splits['w1'] = ['w1:p2']
-      ..agentPanes.addAll({'w1:p1', 'w1:p2'});
+      ..agentPanes.addAll({'w1:p1', 'w1:p2'})
+      ..agentFocusNeedsAgent = true;
     // The laptop shows the split with its left half focused.
     server.focusPaneFromElsewhere('w1:p1');
     workspace = TerminalWorkspaceController(server.clients);
@@ -136,6 +139,22 @@ void main() {
       right.sendText('x');
       await settle();
       expect(server.typedPanes, {'w1:p2': 'x'});
+    });
+
+    test('a half without an agent, which Herdr cannot focus by id, goes '
+        'live on "Take focus once"', () async {
+      server.agentPanes.remove('w1:p2');
+      final right = await open('w1:p2');
+      expect(agentView(right), isTrue);
+      expect(await flow.herdr.takeFocusOnce(right), isTrue);
+      await settle();
+      expect(server.focusedPaneOf('w1'), 'w1:p1');
+      expect(agentView(right), isFalse);
+      expect(right.focusElsewhere.value, isNull);
+      // Its next check keeps it live rather than waiting for w1:p2.
+      right.sendText('z');
+      await settle();
+      expect(server.typedPanes, {'w1:p1': 'z'});
     });
 
     test('opening the workspace itself shows what Herdr shows', () async {
