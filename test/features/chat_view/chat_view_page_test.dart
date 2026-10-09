@@ -224,19 +224,24 @@ void main() {
       await tester.pumpAndSettle();
       final command = runner.commands[1];
       expect(command, contains('terminal-answer'));
-      final payload = jsonDecode(
-        utf8.decode(
-          base64.decode(
-            RegExp(
-              r'--json-b64 ([A-Za-z0-9+/=]+)',
-            ).firstMatch(command)!.group(1)!,
-          ),
-        ),
-      );
+      final payload =
+          jsonDecode(
+                utf8.decode(
+                  base64.decode(
+                    RegExp(
+                      r'--json-b64 ([A-Za-z0-9+/=]+)',
+                    ).firstMatch(command)!.group(1)!,
+                  ),
+                ),
+              )
+              as Map<String, Object?>;
       expect(payload['answers'], {
         'Which DB?': ['SQLite'],
       });
-      expect((payload['questions'] as List).single['question'], 'Which DB?');
+      expect(
+        ((payload['questions']! as List).single as Map)['question'],
+        'Which DB?',
+      );
     },
   );
 

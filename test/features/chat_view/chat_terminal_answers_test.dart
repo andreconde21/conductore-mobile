@@ -225,7 +225,6 @@ void main() {
       ok(
         page(
           [askLine],
-          state: 'waiting_input',
           pending: [
             {
               'id': 'req-q',

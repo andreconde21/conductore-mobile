@@ -895,9 +895,18 @@ class _ChatViewPageState extends State<ChatViewPage>
   /// Unfreezes the thread and goes to its bottom when requests wait there.
   void _revealHeldPending() {
     if (!mounted || _freeze == null || _chat.pending.isEmpty) return;
-    setState(() => _freeze = null);
+    // At the bottom [_onScroll] lifts the freeze. The rows it lets in are
+    // inserted below the visible ones, and the list's layout corrects the
+    // offset to keep those in place: jump again once they are laid out.
+    if (_scroll.hasClients) {
+      _scroll.jumpTo(0);
+    } else {
+      setState(() => _freeze = null);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+      if (mounted && _freeze == null && _scroll.hasClients) {
+        _scroll.jumpTo(0);
+      }
     });
   }
 
