@@ -394,10 +394,13 @@ class UsageSession {
 /// and weekly windows. The companion sends the alias, else a masked email,
 /// as [label]; never the email itself. The live login cswap does not
 /// manage (never `cswap add`ed) comes too, active and without a [slot].
+final _accountId = RegExp(r'^[0-9a-f]{8,64}$');
+
 class UsageAccount {
   const UsageAccount({
     required this.slot,
     required this.label,
+    this.id,
     this.managed = true,
     this.alias,
     this.active = false,
@@ -418,6 +421,11 @@ class UsageAccount {
   /// null for the unmanaged live login.
   final int? slot;
   final String label;
+
+  /// The account's identity on every machine, whatever its slot or alias
+  /// there (CON-100): a hash the companion makes of the email and
+  /// organisation. Null from older companions.
+  final String? id;
 
   /// cswap manages it, so it can be switched to.
   final bool managed;
@@ -486,12 +494,14 @@ class UsageAccount {
     }
 
     final alias = json['alias'];
+    final id = json['id'];
     final status = json['status'];
     final usageAt = json['usageAt'];
     final managed = slot is num && json['managed'] != false;
     return UsageAccount(
       slot: slot is num ? slot.toInt() : null,
       label: label,
+      id: id is String && _accountId.hasMatch(id) ? id : null,
       managed: managed,
       needsLogin:
           json['needsLogin'] == true ||

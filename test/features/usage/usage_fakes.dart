@@ -99,8 +99,10 @@ Map<String, Object?> usageAccount(
   DateTime? usageAt,
   String? status,
   bool live = false,
+  String? id,
 }) => {
   'slot': slot,
+  'id': ?id,
   'alias': label.contains('*') ? null : label,
   'label': label,
   'active': active,
@@ -136,8 +138,10 @@ Map<String, Object?> usageUnmanagedAccount(
   bool? inCswap,
   Map<String, Object?> limits = const {},
   DateTime? usageAt,
+  String? id,
 }) => {
   'slot': null,
+  'id': ?id,
   'alias': null,
   'label': label,
   'active': true,

@@ -1478,7 +1478,7 @@ class _AccountRow extends StatelessWidget {
       if (account.needsLogin) 'Needs re-login',
       if (account.unmanaged) 'Current login',
       if (account.notInCswap) 'not in cswap (cswap add to switch)',
-      if (account.live && !account.active) 'in use by sessions',
+      if (account.sessionsStillOn case final other?) 'sessions still on $other',
       if (account.active && showMachines)
         'active on ${account.activeOn.join(', ')}',
       if (account.disabled) 'disabled',
@@ -1526,23 +1526,22 @@ class _AccountRow extends StatelessWidget {
                         ),
                       ),
                     ),
+                    // cswap's choice and the sessions' are badges on the
+                    // one row, never rows of their own (CON-100).
                     if (account.active) ...[
                       const SizedBox(width: 6),
-                      Container(
+                      _AccountBadge(
                         key: ValueKey('usage-account-active-${account.label}'),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        color: palette.accent.withValues(alpha: 0.18),
-                        child: Text(
-                          'active',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                            color: palette.accent,
-                          ),
-                        ),
+                        text: 'active',
+                        color: palette.accent,
+                      ),
+                    ],
+                    if (account.live) ...[
+                      const SizedBox(width: 6),
+                      _AccountBadge(
+                        key: ValueKey('usage-account-in-use-${account.label}'),
+                        text: 'in use',
+                        color: palette.success,
                       ),
                     ],
                   ],
@@ -1572,6 +1571,27 @@ class _AccountRow extends StatelessWidget {
       child: account.disabled ? Opacity(opacity: 0.45, child: row) : row,
     );
   }
+}
+
+class _AccountBadge extends StatelessWidget {
+  const _AccountBadge({required this.text, required this.color, super.key});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+    color: color.withValues(alpha: 0.18),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 10.5,
+        fontWeight: FontWeight.w700,
+        color: color,
+      ),
+    ),
+  );
 }
 
 /// Asks to confirm, then switches the Claude account on the chosen machine

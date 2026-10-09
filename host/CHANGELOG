@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: every cswap account row (and the unmanaged live login) carries an `id`, the same on every machine whatever the slot or alias there (CON-100): a truncated SHA-256 of the lower-cased email and organisation uuid, never the email itself. The phone merges accounts across machines by it instead of by label, which showed one account twice when two machines named it differently. The cswap cache moves to version 3 so old rows without an id are fetched again.
+
 ## 1.7.0 (2026-10-05)
 
 - feat: started tasks clean up after themselves (CON-088, `docs/task-runs.md`). A finished, cancelled or no-agent run's agent stays open for review for the new `task-agent-keep` setting (hours, default 24, or `forever`), then the daemon closes the run's own Herdr pane (`pane.close`) or tmux pane (`kill-pane`), or SIGTERMs the agent's own process for place none, each only after checking it is still the run's (same tab/window and a cwd in the worktree, or the same pid and start time), never by pattern; `agentStopped` says what happened. `task-runs keep <id> [off]` keeps a run's agent open. `task-runs forget <id>` (alias `remove`) stops the agent, removes the worktree only when clean (else reports it), deletes the branch only when merged into HEAD or with `--delete-branch`, and always removes the prompt folder; runs dropped past the 200 kept done ones lose their prompt folder too. A run whose agent never appears within 10 min fails (`no-agent`) and frees its cap slot.
