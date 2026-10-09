@@ -246,14 +246,20 @@ class _ViewMenu extends StatelessWidget {
             enabled: false,
             child: Text(sheprdSyncStatus(controller)),
           ),
-        if (controller.canEditLayout &&
+        if (controller.sheprdEditsPaused case final paused?)
+          PopupMenuItem(
+            key: const ValueKey('project-view-edits-paused'),
+            enabled: false,
+            child: Text(paused),
+          ),
+        if (!controller.mirroring &&
             !controller.followsMachines &&
             controller.hasMachineLayout)
           const PopupMenuItem(
             value: _ViewChoice.follow,
             child: Text("Use the machines' sidebar.toml again"),
           ),
-        if (controller.canEditLayout &&
+        if (!controller.mirroring &&
             controller.followsMachines &&
             controller.hasMachineLayout)
           const PopupMenuItem(
