@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// The composer on desktop: Ctrl/Cmd+Enter sends, and the Paste, Select
-/// all and Clear buttons (the keyboard's job there) are gone. Phones keep
-/// the buttons and Enter-only-newline.
+/// The composer on desktop: Ctrl/Cmd+Enter sends, and the Paste and Select
+/// all buttons (the keyboard's job there) are gone; Clear stays, since it
+/// can be undone (CON-099). Phones keep the buttons and
+/// Enter-only-newline.
 void main() {
   const desktops = TargetPlatformVariant({
     TargetPlatform.linux,
@@ -48,7 +49,7 @@ void main() {
     await open(tester);
     expect(find.byTooltip('Paste clipboard'), findsNothing);
     expect(find.byTooltip('Select all'), findsNothing);
-    expect(find.byTooltip('Clear draft'), findsNothing);
+    expect(find.byTooltip('Clear draft'), findsOneWidget);
     final mac = defaultTargetPlatform == TargetPlatform.macOS;
     expect(find.byTooltip(mac ? 'Cmd+Enter' : 'Ctrl+Enter'), findsOneWidget);
 
