@@ -276,6 +276,58 @@ class ProjectLayout {
     ),
   );
 
+  /// Sets the short tag of [name]; an empty one clears it.
+  ProjectLayout setShort(String name, String short) => _edit(
+    name,
+    (group) => short.trim().isEmpty
+        ? group.copyWith(clearShort: true)
+        : group.copyWith(short: short.trim()),
+  );
+
+  /// Moves project [name] right before project [before] in the file, or
+  /// after the last project with the same pin for an empty [before].
+  /// Pinned projects stay above the others: a move across is ignored.
+  ProjectLayout moveGroup(String name, String before) {
+    final at = groups.indexWhere((group) => group.name == name);
+    if (at < 0) return this;
+    final moving = groups[at];
+    final rest = [...groups]..removeAt(at);
+    int target;
+    if (before.isEmpty) {
+      final last = rest.lastIndexWhere((g) => g.pinned == moving.pinned);
+      target = last < 0 ? (moving.pinned ? 0 : rest.length) : last + 1;
+    } else {
+      target = rest.indexWhere((group) => group.name == before);
+      if (target < 0 || rest[target].pinned != moving.pinned) return this;
+    }
+    return copyWith(groups: [...rest]..insert(target, moving));
+  }
+
+  /// Moves workspace [key] right before [before] (or to the end, for an
+  /// empty one) among [inView], project [name]'s workspaces as shown,
+  /// and stores that order as its members, as sheprd's drag does (rule
+  /// matches become members, so the order sticks).
+  ProjectLayout moveMember(
+    String name,
+    List<String> inView,
+    String key,
+    String before,
+  ) {
+    if (!inView.any((k) => ProjectKeys.same(k, key))) return this;
+    final rest = [
+      for (final k in inView)
+        if (!ProjectKeys.same(k, key)) k,
+    ];
+    final at = before.isEmpty
+        ? rest.length
+        : rest.indexWhere((k) => ProjectKeys.same(k, before));
+    if (at < 0) return this;
+    return _edit(
+      name,
+      (group) => group.copyWith(members: [...rest]..insert(at, key)),
+    );
+  }
+
   ProjectLayout rename(String name, String to) {
     final next = to.trim();
     if (next.isEmpty || (byName(next) != null && byName(next)!.name != name)) {
