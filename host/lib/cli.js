@@ -65,6 +65,11 @@ const USAGE = `usage: conductore-hostd <command>
                      --agent <machine/pane_id> [--state-seq N]
                                   append one presence change for sheprd
                                   to view-updates.jsonl: {ok, id}
+  sheprd-view-update --json '<op>|[<op>, ...]'
+                                  append up to 8 layout edits (contract
+                                  v2: assign, hide, show, project-*,
+                                  member-move, remove-active,
+                                  keep-active) in one write: {ok, ids}
   config [get [<key>] | set <key> <value>]
                                   herdr-sidebar on|off, tmux-live off|on,
                                   worktree-location, task-agent-keep
@@ -464,6 +469,15 @@ async function agentReadCmd (args) {
 
 function sheprdViewUpdateCmd (args) {
   const { flags } = parseFlags(args)
+  if (flags.json !== undefined) {
+    let ops
+    try { ops = JSON.parse(String(flags.json)) } catch { return fail('--json must be a JSON op object or array') }
+    try {
+      return out(sheprdMod().appendUpdatesV2({ ops }))
+    } catch (err) {
+      return fail(err.message)
+    }
+  }
   const raw = flags['state-seq']
   const stateSeq = raw === undefined ? undefined : (/^\d+$/.test(String(raw)) ? Number(raw) : -1)
   try {

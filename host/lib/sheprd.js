@@ -94,6 +94,7 @@ const OPS = ['unread', 'read', 'dismiss', 'keep', 'unkeep']
 // endpoint label (no slash, no control characters), the pane a herdr id.
 const MACHINE = /^[^/\u0000-\u001f\u007f]{1,64}$/
 const AGENT_KEY = /^[^/\u0000-\u001f\u007f]{1,64}\/[A-Za-z0-9:._-]{1,64}$/
+const ID = /^[A-Za-z0-9_-]{8,64}$/
 
 // Fixed, like sheprd-msg's state: never XDG, never configurable.
 function stateDir (home = os.homedir()) {
@@ -136,8 +137,21 @@ function checkView (raw) {
     layout: pick(layout),
     agents,
     order: strings(raw.order),
-    focus: typeof raw.focus === 'string' && AGENT_KEY.test(raw.focus) ? raw.focus : null
+    focus: typeof raw.focus === 'string' && AGENT_KEY.test(raw.focus) ? raw.focus : null,
+    // v2 (CON-101): the highest update line version sheprd applies, and
+    // the v2 lines it refused.
+    updates: Number.isSafeInteger(raw.updates) && raw.updates >= 1 && raw.updates <= 99 ? raw.updates : 1,
+    rejected: rejectedOf(raw.rejected)
   }
+}
+
+function rejectedOf (raw) {
+  const out = []
+  for (const r of Array.isArray(raw) ? raw.slice(-50) : []) {
+    if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !ID.test(r.id)) continue
+    out.push({ id: r.id, why: typeof r.why === 'string' ? r.why.slice(0, 120) : '' })
+  }
+  return out
 }
 
 const shownPath = file => file.startsWith(os.homedir() + path.sep) ? '~' + file.slice(os.homedir().length) : file
@@ -199,11 +213,97 @@ function updateLine ({ op, agent, stateSeq, now = Date.now(), id }) {
   return { id: entry.id, line }
 }
 
+// Contract v2 (CON-101): layout edits, as `"v":2` lines.
+
+const V2_LINE_MAX_BYTES = 4096
+const V2_MAX_BATCH = 8
+const WORKSPACE_KEY = /^[^/\u0000-\u001f\u007f]{1,64}\/[^\u0000-\u001f\u007f]{1,256}$/
+const CONTROL = /[\u0000-\u001f\u007f]/
+// The fields of each op, beyond `op`: required, then optional.
+const V2_OPS = {
+  assign: [['workspace', 'projectOrOther'], []],
+  hide: [['workspace'], []],
+  show: [['workspace'], []],
+  'project-create': [['project'], ['match']],
+  'project-rename': [['project', 'to'], []],
+  'project-pin': [['project', 'pinned'], []],
+  'project-rules': [['project', 'match'], ['was']],
+  'project-short': [['project', 'short'], []],
+  'project-delete': [['project'], ['members']],
+  'project-move': [['project', 'before'], []],
+  'member-move': [['workspace', 'before'], []],
+  'remove-active': [['agent', 'state_seq'], []],
+  'keep-active': [['agent'], []]
+}
+const V2_OP_NAMES = Object.keys(V2_OPS)
+
+const projectName = v => typeof v === 'string' && v.length >= 1 && v.length <= 128 && !CONTROL.test(v) && v.trim() === v && v !== ''
+const rules = v => Array.isArray(v) && v.length <= 32 && v.every(r => typeof r === 'string' && r.length >= 1 && r.length <= 128 && !CONTROL.test(r) && !r.includes(','))
+const workspaceKeys = v => Array.isArray(v) && v.length <= 200 && v.every(k => typeof k === 'string' && WORKSPACE_KEY.test(k))
+
+// Field name -> [the key it is written as, check].
+const FIELDS = {
+  workspace: ['workspace', v => typeof v === 'string' && WORKSPACE_KEY.test(v)],
+  projectOrOther: ['project', v => v === '' || projectName(v)],
+  project: ['project', projectName],
+  to: ['to', projectName],
+  pinned: ['pinned', v => typeof v === 'boolean'],
+  match: ['match', rules],
+  was: ['was', rules],
+  short: ['short', v => typeof v === 'string' && v.length <= 8 && !CONTROL.test(v)],
+  members: ['members', workspaceKeys],
+  agent: ['agent', v => typeof v === 'string' && AGENT_KEY.test(v)],
+  state_seq: ['state_seq', v => seqOf(v) !== null]
+}
+
+// The v2 line for one op object ({op, ...fields}); throws on bad input.
+function updateLineV2 (input, { now = Date.now(), id } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('each op must be an object')
+  const { op } = input
+  if (!V2_OP_NAMES.includes(op)) throw new Error(`op must be one of ${V2_OP_NAMES.join(', ')}`)
+  const [required, optional] = V2_OPS[op]
+  const entry = { v: 2, id: id || `c-${now}-${crypto.randomBytes(4).toString('hex')}`, at: Math.floor(now / 1000), from: 'conductore', op }
+  const allowed = new Set(['op'])
+  for (const field of [...required, ...optional]) {
+    const [key, check] = field === 'before' ? ['before', op === 'project-move' ? v => v === '' || projectName(v) : v => v === '' || FIELDS.workspace[1](v)] : FIELDS[field]
+    allowed.add(key)
+    const value = input[key]
+    if (value === undefined) {
+      if (required.includes(field)) throw new Error(`${op} needs ${key}`)
+      continue
+    }
+    if (!check(value)) throw new Error(`${op}: bad ${key}`)
+    entry[key] = value
+  }
+  for (const key of Object.keys(input)) {
+    if (!allowed.has(key)) throw new Error(`${op}: unknown field ${key}`)
+  }
+  const line = JSON.stringify(entry) + '\n'
+  if (Buffer.byteLength(line) > V2_LINE_MAX_BYTES) throw new Error('update is too long')
+  return { id: entry.id, line }
+}
+
+// Appends v2 ops (one object or an array of up to V2_MAX_BATCH) as one
+// write: { ok: true, ids } or throws, appending nothing on any bad op.
+function appendUpdatesV2 ({ dir = stateDir(), ops, now = Date.now() }) {
+  const list = Array.isArray(ops) ? ops : [ops]
+  if (list.length === 0) throw new Error('no op given')
+  if (list.length > V2_MAX_BATCH) throw new Error(`at most ${V2_MAX_BATCH} ops at once`)
+  const lines = list.map(op => updateLineV2(op, { now }))
+  appendLines(dir, lines.map(l => l.line).join(''))
+  return { ok: true, ids: lines.map(l => l.id) }
+}
+
 // Appends one update for sheprd: { ok: true, id } or throws. Creates the
 // state dir (0700) and the file (0600) when missing; refuses symlinks, a
 // file sheprd stopped draining, and anything but one append.
 function appendUpdate ({ dir = stateDir(), ...input }) {
   const { id, line } = updateLine(input)
+  appendLines(dir, line)
+  return { ok: true, id }
+}
+
+function appendLines (dir, line) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   const dirStat = fs.lstatSync(dir)
   if (!dirStat.isDirectory()) throw new Error(`${shownPath(dir)} is not a directory`)
@@ -216,7 +316,6 @@ function appendUpdate ({ dir = stateDir(), ...input }) {
     const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600)
     try { fs.writeSync(fd, line) } finally { fs.closeSync(fd) }
   })
-  return { ok: true, id }
 }
 
-module.exports = { sidebarPath, readLayout, pick, stateDir, checkView, readView, updateLine, appendUpdate, withLock, OPS, UPDATES_MAX_BYTES }
+module.exports = { sidebarPath, readLayout, pick, stateDir, checkView, readView, updateLine, appendUpdate, updateLineV2, appendUpdatesV2, withLock, OPS, V2_OP_NAMES, UPDATES_MAX_BYTES }
