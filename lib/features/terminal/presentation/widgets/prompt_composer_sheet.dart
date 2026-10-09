@@ -571,6 +571,7 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                       },
               ),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   TextButton(
                     onPressed: _sending
@@ -578,27 +579,35 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                         : () => Navigator.of(context).pop(),
                     child: const Text('Cancel'),
                   ),
-                  const Spacer(),
-                  Tooltip(
-                    message: desktop
-                        ? (defaultTargetPlatform == TargetPlatform.macOS
-                              ? 'Cmd+Enter'
-                              : 'Ctrl+Enter')
-                        : '',
-                    child: FilledButton.icon(
-                      onPressed: canSend ? _send : null,
-                      icon: _sending
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              _submitEnter
-                                  ? Icons.send_rounded
-                                  : Icons.keyboard_return_rounded,
-                            ),
-                      label: Text(_submitEnter ? 'Insert & Send' : 'Insert'),
+                  // Shrinks before it overflows (360 dp, large text).
+                  Flexible(
+                    child: Tooltip(
+                      message: desktop
+                          ? (defaultTargetPlatform == TargetPlatform.macOS
+                                ? 'Cmd+Enter'
+                                : 'Ctrl+Enter')
+                          : '',
+                      child: FilledButton.icon(
+                        onPressed: canSend ? _send : null,
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                _submitEnter
+                                    ? Icons.send_rounded
+                                    : Icons.keyboard_return_rounded,
+                              ),
+                        label: Text(
+                          _submitEnter ? 'Insert & Send' : 'Insert',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
                   ),
                 ],

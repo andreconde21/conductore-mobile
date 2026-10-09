@@ -1,7 +1,9 @@
+import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/voice/domain/speech_event.dart';
 import 'package:conduit/features/voice/domain/voice_commands.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_speech_recognizer.dart';
@@ -59,6 +61,18 @@ void main() {
       );
       expect(saved.voiceCommands, isFalse);
       expect(saved.voiceSendWords, 'go');
+    });
+
+    test('settings search finds the voice commands', () {
+      for (final query in ['voice command', 'send', 'enviar', 'cancelar']) {
+        expect(
+          settingsCatalog
+              .where((entry) => entry.matches(query))
+              .map((entry) => entry.title),
+          contains(voiceCommandsTitle),
+          reason: query,
+        );
+      }
     });
   });
 
