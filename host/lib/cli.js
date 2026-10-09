@@ -716,6 +716,11 @@ async function terminalAnswerCmd (args) {
       process.stdout.write(JSON.stringify({ error: r.error, steps: r.steps }) + '\n')
       return 1
     }
+    // A refusal sends no event (Esc interrupts the turn): the daemon drops
+    // the expired request itself.
+    if (request) {
+      try { await client.request({ op: 'terminal-answered', sessionId, requestId: request.id, refused: !isQuestion && req.decision === 'deny' }, { timeoutMs: 2000 }) } catch {}
+    }
     return out({ ok: true, sessionId, via: target.via, paneId: target.paneId, steps: r.steps })
   } finally {
     try { fs.unlinkSync(lock) } catch {}

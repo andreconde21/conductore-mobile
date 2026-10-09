@@ -415,6 +415,21 @@ test('PermissionRequest timeout prints nothing and leaves the terminal prompt to
   await waitFor(async () => (await status()).agents.find(a => a.sessionId === 's1').pending.length === 0)
 })
 
+test('an expired prompt refused in the terminal from the phone is dropped (CON-096)', async () => {
+  // Esc on Claude Code's prompt interrupts the turn with no hook event at
+  // all; terminal-answer tells the daemon.
+  await hook(ev('t4', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm x' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '1' })
+  const [req] = (await status()).agents.find(a => a.sessionId === 't4').pending
+  assert.equal(req.expired, true)
+  const [other] = await client.request({ op: 'terminal-answered', sessionId: 'nope', requestId: req.id, refused: true })
+  assert.equal(other.resolved, false)
+  const [r] = await client.request({ op: 'terminal-answered', sessionId: 't4', requestId: req.id, refused: true })
+  assert.equal(r.resolved, true)
+  const a = (await status()).agents.find(a => a.sessionId === 't4')
+  assert.equal(a.pending.length, 0)
+  assert.equal(a.state, 'waiting_input')
+})
+
 test('a prompt answered in the terminal releases the waiting hook at once (CON-096)', async () => {
   // Claude Code shows its own dialog while the hook waits, and an answer
   // there does not end the hook: the call's PostToolUse does.

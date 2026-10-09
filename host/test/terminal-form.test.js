@@ -49,6 +49,16 @@ test('reads the recorded question screens', () => {
   assert.deepEqual(bash.options.map(o => o.label.split(',')[0]), ['Yes', 'Yes', 'Yes', 'No'])
 })
 
+test('reads ticked boxes and a narrow pane (recorded, CON-096)', () => {
+  const ticked = form.formOf(fixture('ask-q2-ticked.txt'))
+  assert.deepEqual(ticked.options.map(o => [o.label, o.checked]), [['Auth', true], ['Search', false], ['Export', true], ['Type something', false]])
+  assert.equal(ticked.options[0].cursor, true)
+  // 46 columns: the footer wraps, the dialog still reads.
+  const narrow = form.formOf(fixture('ask-q1-narrow.txt'))
+  assert.equal(narrow.kind, 'question')
+  assert.deepEqual(narrow.options.map(o => o.label), ['Postgres', 'SQLite', 'MySQL', 'Type something.'])
+})
+
 test('no dialog: the prompt box and transcript are not forms', () => {
   assert.equal(form.formOf('❯ ask me\n  ⎿  · Which database should we use? → SQLite\n\n❯ \n'), null)
   assert.equal(form.formOf(''), null)

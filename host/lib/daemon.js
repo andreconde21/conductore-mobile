@@ -875,6 +875,19 @@ class Daemon {
         const agent = a ? { name: a.name, state: a.state, cwd: a.cwd, endedAt: a.endedAt } : null
         this.reply(c, { ok: true, sessionId: sid, idle, agent, record: this.turns.view(sid, Number(req.limit) || 20) }); c.end(); return
       }
+      case 'terminal-answered': {
+        // `terminal-answer` typed the answer to an expired request into
+        // the terminal. A refusal there (Esc) interrupts the turn and
+        // Claude Code sends no event at all, so the request would stay;
+        // an allow or an answer is also confirmed by the call's PostToolUse.
+        const agent = this.state.agents[String(req.sessionId || '')]
+        const request = agent && agent.pending.find(p => p.id === req.requestId)
+        if (!request || !request.expired) { this.reply(c, { ok: true, resolved: false }); c.end(); return }
+        this.commit(state.resolvePermission(this.state, request.id, 'gone'))
+        if (req.refused && !agent.pending.length) this.commit(state.reduce(this.state, { session_id: agent.sessionId, hook_event_name: 'Stop', agent_kind: agent.kind, interrupted: true }))
+        log('permission', `${request.id} answered in the terminal from the phone${req.refused ? ' (refused)' : ''}`)
+        this.reply(c, { ok: true, resolved: true }); c.end(); return
+      }
       case 'approve-low': case 'trust': case 'rules': case 'approvals':
         this.reply(c, approvalOps.handle(this, req)); c.end(); return
       case 'agents':
