@@ -419,7 +419,7 @@ class ProjectLayoutController extends ChangeNotifier {
       SheprdLayoutEdit.rules(
         name,
         _cleanRules(rules),
-        was: layout.byName(name)?.match,
+        was: _base?.layout.byName(name)?.match,
       ),
     ],
   );
@@ -518,9 +518,9 @@ class ProjectLayoutController extends ChangeNotifier {
     },
     sheprd: () {
       final def = layout.byName(group.name);
-      return def == null
-          ? const []
-          : [SheprdLayoutEdit.delete(def.name, members: def.members)];
+      if (def == null) return const [];
+      final shown = _base?.layout.byName(def.name);
+      return [SheprdLayoutEdit.delete(def.name, members: shown?.members)];
     },
   );
 
@@ -883,6 +883,13 @@ class ProjectLayoutController extends ChangeNotifier {
             ProjectKeys.same(edit.workspace!, entry.memberKey)) ||
         (edit.agent != null && entry.sheprdKeys.containsValue(edit.agent)),
   );
+
+  /// Whether an edit about [group] or one of its rows waits for sheprd.
+  bool groupPending(ProjectGroup group) =>
+      _edits.isNotEmpty &&
+      sheprdSync &&
+      ((!group.isOther && projectPending(group.name)) ||
+          group.entries.any(entryPending));
 
   /// Runs marks in tests instead of a machine's companion.
   @visibleForTesting

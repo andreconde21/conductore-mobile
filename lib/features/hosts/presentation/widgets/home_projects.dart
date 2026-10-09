@@ -179,8 +179,12 @@ class HomeProjectsList extends StatelessWidget {
         collapsed: collapsed,
         count: entries.length,
         tokensToday: tokens,
+        pending: controller.groupPending(project),
         onToggle: () => controller.toggleCollapsed(project),
-        onMenu: project.isOther || !controller.canEditLayout
+        onMenu:
+            project.isOther ||
+                (!controller.canEditLayout &&
+                    controller.sheprdEditsPaused == null)
             ? null
             : (position) => _projectMenu(context, project, position),
       ),
@@ -260,6 +264,7 @@ class HomeProjectsList extends StatelessWidget {
         project,
         value: (action) => action,
         editable: controller.canEditLayout,
+        controller: controller,
       ),
     );
     if (picked == null || !context.mounted) return;

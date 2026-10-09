@@ -246,6 +246,7 @@ extension _ShellProjects on DesktopHomeState {
             project,
             value: (action) => action,
             editable: layout.canEditLayout,
+            controller: layout,
           ),
         ],
       ],
