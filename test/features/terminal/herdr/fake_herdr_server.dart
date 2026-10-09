@@ -109,6 +109,33 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
   /// Text typed into each workspace.
   final Map<String, String> typed = {};
 
+  /// Text typed through the clients into each pane: the one its workspace
+  /// has focused when the keys arrive.
+  final Map<String, String> typedPanes = {};
+
+  /// Extra panes beside each workspace's `<id>:p1`, in the same tab: a
+  /// Herdr split (CON-095).
+  final Map<String, List<String>> splits = {};
+
+  /// The pane each workspace has focused (its `<id>:p1` unless set).
+  final Map<String, String> focusedPanes = {};
+
+  List<String> panesOf(String workspaceId) => [
+    '$workspaceId:p1',
+    ...?splits[workspaceId],
+  ];
+
+  String focusedPaneOf(String workspaceId) =>
+      focusedPanes[workspaceId] ?? '$workspaceId:p1';
+
+  /// Another client (the laptop) focuses [paneId] (and its workspace).
+  void focusPaneFromElsewhere(String paneId) {
+    final workspaceId = paneId.split(':').first;
+    focusedWorkspace = workspaceId;
+    focusedPanes[workspaceId] = paneId;
+    events.add('focus $paneId (elsewhere)');
+  }
+
   Completer<void>? _focusGate;
 
   /// Focus commands wait until [releaseFocus]: the round trip is in flight.
@@ -147,6 +174,8 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
       return;
     }
     typed[focusedWorkspace] = (typed[focusedWorkspace] ?? '') + data;
+    final pane = focusedPaneOf(focusedWorkspace);
+    typedPanes[pane] = (typedPanes[pane] ?? '') + data;
     events.add('type $focusedWorkspace: $data');
   }
 
@@ -158,6 +187,10 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
 
   /// Panes that run an agent (`agent prompt` works there).
   final Set<String> agentPanes = {};
+
+  /// Whether `agent focus` fails for a pane not in [agentPanes], as Herdr's
+  /// does (`agent_not_found`).
+  bool agentFocusNeedsAgent = false;
 
   /// Text sent to each pane by id (`pane send-text`, `agent prompt`).
   final Map<String, String> paneTyped = {};
@@ -236,9 +269,10 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
         case 'list':
           final panes = [
             for (final id in workspaces)
-              '{"pane_id":"$id:p1","workspace_id":"$id","tab_id":"$id:t1",'
-                  '"focused":${id == focusedWorkspace}'
-                  '${agentPanes.contains('$id:p1') ? ',"agent":"claude"' : ''}}',
+              for (final pane in panesOf(id))
+                '{"pane_id":"$pane","workspace_id":"$id","tab_id":"$id:t1",'
+                    '"focused":${id == focusedWorkspace && pane == focusedPaneOf(id)}'
+                    '${agentPanes.contains(pane) ? ',"agent":"claude"' : ''}}',
           ];
           return AgentCommandResult(
             stdout: '{"result":{"panes":[${panes.join(',')}]}}',
@@ -246,19 +280,26 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
             exitCode: 0,
           );
         case 'layout':
-          final pane = words[3];
+          final workspaceId = words[3].split(':').first;
+          final focused = focusedPaneOf(workspaceId);
+          final rects = [
+            for (final pane in panesOf(workspaceId))
+              '{"pane_id":"$pane","focused":${pane == focused},"rect":'
+                  '{"width":40,"height":10,"x":0,"y":0}}',
+          ];
           return AgentCommandResult(
             stdout:
-                '{"result":{"layout":{"focused_pane_id":"$pane","panes":'
-                '[{"pane_id":"$pane","focused":true,"rect":{"width":40,'
-                '"height":10,"x":0,"y":0}}]}}}',
+                '{"result":{"layout":{"focused_pane_id":"$focused","panes":'
+                '[${rects.join(',')}]}}}',
             stderr: '',
             exitCode: 0,
           );
         case 'read':
           final pane = words[2];
           return AgentCommandResult(
-            stdout: 'screen of ${pane.split(':').first}\n\x1b[1mbold\x1b[0m',
+            stdout:
+                'screen of ${pane.split(':').first} ($pane)\n'
+                '\x1b[1mbold\x1b[0m',
             stderr: '',
             exitCode: 0,
           );
@@ -299,6 +340,18 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
         exitCode: 0,
       );
     }
+    if (agentFocusNeedsAgent &&
+        words.length >= 3 &&
+        words[0] == 'agent' &&
+        words[1] == 'focus' &&
+        !agentPanes.contains(words[2])) {
+      commands.add(command);
+      return const AgentCommandResult(
+        stdout: '{"error":{"code":"agent_not_found"}}',
+        stderr: '',
+        exitCode: 1,
+      );
+    }
     if (words.length >= 3 && words[0] == 'agent' && words[1] == 'prompt') {
       commands.add(command);
       if (!agentPanes.contains(words[2])) {
@@ -315,6 +368,10 @@ class SharedFocusHerdrServer extends FakeHerdrServer {
     final result = super.handle(command);
     if (command.contains('workspace focus') && result.exitCode == 0) {
       events.add('focus $focusedWorkspace');
+    }
+    if (command.contains('agent focus') && result.exitCode == 0) {
+      focusedPanes[focusedWorkspace] = focusedPane;
+      events.add('focus $focusedPane');
     }
     return result;
   }
