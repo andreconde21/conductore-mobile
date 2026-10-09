@@ -137,7 +137,7 @@ test('CLI: a bad target is refused; config validates and saves', async () => {
   const home = tempDir('hl-agents-home-')
   const env = { ...process.env, CONDUCTORE_HOME: home, CONDUCTORE_SOCKET: path.join(home, 's.sock') }
   assert.match((await hostd(['agent-send', '--to', 'tmux/%1', '--text', 'x', '--dry-run'], env)).error, /bad target/)
-  assert.deepEqual((await hostd(['config'], env)).config, { 'herdr-sidebar': 'on', 'tmux-live': 'off', 'task-agent-keep': '24', 'worktree-location': 'next-to-repo' })
+  assert.deepEqual((await hostd(['config'], env)).config, { 'herdr-sidebar': 'on', 'tmux-live': 'off', 'task-agent-keep': '24', 'permission-wait': '15', 'worktree-location': 'next-to-repo' })
   assert.equal((await hostd(['config', 'set', 'herdr-sidebar', 'off'], env)).config['herdr-sidebar'], 'off')
   assert.match((await hostd(['config', 'set', 'herdr-sidebar', 'maybe'], env)).error, /invalid/)
   assert.equal((await hostd(['config', 'set', 'worktree-location', '~/wt/<repo>/<branch>'], env)).config['worktree-location'], '~/wt/<repo>/<branch>')
