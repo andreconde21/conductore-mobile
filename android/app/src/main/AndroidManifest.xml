@@ -27,7 +27,10 @@
         android:name="android.hardware.nfc"
         android:required="false" />
 
+    <!-- enableOnBackInvokedCallback: predictive back (CON-093), the system
+         back gesture animates the page away and a PopScope still decides. -->
     <application
+        android:enableOnBackInvokedCallback="true"
         android:label="Conductore"
         android:name="${applicationName}"
         android:extractNativeLibs="true"

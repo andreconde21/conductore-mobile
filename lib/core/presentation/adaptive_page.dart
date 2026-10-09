@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -177,5 +178,80 @@ class DesktopEscapeToPop extends StatelessWidget {
       return true;
     });
     return top is PageRoute && !top!.isFirst;
+  }
+}
+
+/// On desktop, the mouse's back button (XButton1) and Alt+Left close the
+/// page on top, like a browser's back: a pushed page or a page opened as a
+/// dialog ([DesktopPageRoute]), never a plain dialog. A page's `PopScope`
+/// still gets its say. Alt+Left reaches here only when nothing focused used
+/// it: the terminal sends it to the remote program, and a text field keeps
+/// it for moving the cursor. Sits above the Navigator, in
+/// `MaterialApp.builder`. Phones are left as they are.
+class DesktopBackNavigation extends StatelessWidget {
+  const DesktopBackNavigation({
+    required this.navigatorKey,
+    required this.child,
+    super.key,
+  });
+
+  /// The app's navigator; without one (tests) nothing changes.
+  final GlobalKey<NavigatorState>? navigatorKey;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final navigatorKey = this.navigatorKey;
+    if (!PlatformFeatures.isDesktop || navigatorKey == null) return child;
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) {
+        if (event.kind == PointerDeviceKind.mouse &&
+            event.buttons & kBackMouseButton != 0) {
+          _back(navigatorKey);
+        }
+      },
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onKeyEvent: (node, event) {
+          if (event is! KeyDownEvent ||
+              event.logicalKey != LogicalKeyboardKey.arrowLeft ||
+              !HardwareKeyboard.instance.isAltPressed ||
+              HardwareKeyboard.instance.isControlPressed ||
+              HardwareKeyboard.instance.isShiftPressed ||
+              HardwareKeyboard.instance.isMetaPressed ||
+              _editingText()) {
+            return KeyEventResult.ignored;
+          }
+          return _back(navigatorKey)
+              ? KeyEventResult.handled
+              : KeyEventResult.ignored;
+        },
+        child: child,
+      ),
+    );
+  }
+
+  /// Whether the focus is in a text field, whose own Alt+Left (the
+  /// platform's cursor move) would otherwise reach here first.
+  static bool _editingText() =>
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorStateOfType<EditableTextState>() !=
+      null;
+
+  /// Pops the page on top, if there is one; true when it asked.
+  static bool _back(GlobalKey<NavigatorState> navigatorKey) {
+    final navigator = navigatorKey.currentState;
+    if (navigator == null || !navigator.canPop()) return false;
+    Route<Object?>? top;
+    navigator.popUntil((route) {
+      top = route;
+      return true;
+    });
+    final page = (top is PageRoute || top is DesktopPageRoute) && !top!.isFirst;
+    if (!page) return false;
+    navigator.maybePop();
+    return true;
   }
 }
