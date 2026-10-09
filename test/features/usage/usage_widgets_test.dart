@@ -547,6 +547,51 @@ void main() {
       );
     });
 
+    // CON-100: cswap's active account and the sessions' one are badges;
+    // sessions left on another account are a note, not a row.
+    testWidgets('active and in use are badges; sessions still on X is a '
+        'note', (tester) async {
+      runner.reply = () => FakeUsageRunner.ok(
+        usageReplyJson(
+          accounts: [
+            usageAccount(1, 'outsmartis', id: 'aaaaaaaaaaaaaaaa', active: true),
+            usageAccount(2, 'webmaster', id: 'bbbbbbbbbbbbbbbb', live: true),
+            usageAccount(3, 'spare', id: 'cccccccccccccccc'),
+          ],
+        ),
+      );
+      final usage = controller(tester);
+      await tester.pumpWidget(app(UsageBreakdown(controller: usage, now: now)));
+      await tester.pump();
+      await unfold(tester, 'accounts');
+      expect(
+        find.byKey(const ValueKey('usage-account-outsmartis')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-webmaster')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('usage-account-spare')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('usage-account-active-outsmartis')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-in-use-webmaster')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('usage-account-in-use-outsmartis')),
+        findsNothing,
+      );
+      expect(
+        find.textContaining('sessions still on webmaster'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('in use by sessions'), findsNothing);
+    });
+
     // CON-067: accounts cswap lost the login of, windows that ended, and
     // the unmanaged login only "not in cswap" when confirmed.
     testWidgets('needs re-login is labelled and greyed; ended windows say '

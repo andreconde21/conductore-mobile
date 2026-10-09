@@ -7,6 +7,7 @@
 for (const k of Object.keys(process.env)) if (k.startsWith('HERDR_') || k.startsWith('TMUX')) delete process.env[k]
 
 const test = require('node:test')
+require('./helpers/isolate')
 const assert = require('node:assert')
 const { LiveStore, LiveBridge, NEW_AGENT_GRACE_MS, WORKING_HYSTERESIS_MS, IDLE_STOP_MS, AGENTS_STOP_MS } = require('../lib/live')
 

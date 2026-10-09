@@ -6,6 +6,7 @@
 // and their answers are data the phone shows or asks the user about.
 
 const test = require('node:test')
+require('./helpers/isolate')
 const assert = require('node:assert/strict')
 const path = require('path')
 const { execFileSync } = require('child_process')

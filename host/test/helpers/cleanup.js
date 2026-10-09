@@ -14,6 +14,8 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const proc = require('../../lib/proc')
+// A temp CONDUCTORE_HOME for the whole process, and the real-home guard.
+require('./isolate')
 
 const dirs = []
 

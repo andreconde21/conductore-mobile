@@ -102,17 +102,23 @@ class UsageAccountPlacement {
   final bool canSwitch;
 }
 
-/// One Claude account across machines, merged by its label: the freshest
-/// windows any machine reported, and where it is active.
+/// One Claude account across machines, merged by its id (else its label):
+/// the freshest windows any machine reported, and where it is active.
 class UsageAccountSummary {
   const UsageAccountSummary({
     required this.label,
     required this.placements,
     this.fiveHour,
     this.weekly,
+    this.sessionsStillOn,
   });
 
+  /// Its alias on the first machine that has one, else its masked email.
   final String label;
+
+  /// Active in cswap on a machine whose running sessions are still on
+  /// another account (started before a switch): that account's label.
+  final String? sessionsStillOn;
   final UsageLimit? fiveHour;
   final UsageLimit? weekly;
   final List<UsageAccountPlacement> placements;
@@ -237,13 +243,14 @@ class UsageSummary {
 
   bool get codexPresent => _reports.any((report) => report.codex.present);
 
-  /// Every cswap account across machines, merged by label, active ones
-  /// first. Empty without cswap.
+  /// Every cswap account across machines, one per real account (merged by
+  /// the companion's id, else by label), active ones first. Empty without
+  /// cswap.
   List<UsageAccountSummary> get accounts {
-    final byLabel = <String, List<UsageAccountPlacement>>{};
     // cswap has no windows for a login it does not manage; the machine's
     // statusline limits are that live login's.
     final liveLimits = <UsageAccountPlacement, List<UsageLimit>>{};
+    final all = <UsageAccountPlacement>[];
     for (final machine in machines) {
       for (final account in machine.accounts) {
         final placement = UsageAccountPlacement(
@@ -259,8 +266,58 @@ class UsageSummary {
             !machine.accounts.any((a) => a.managed && a.live)) {
           liveLimits[placement] = machine.claudeLimits;
         }
-        (byLabel[account.label] ??= []).add(placement);
+        all.add(placement);
       }
+    }
+    // Labels differ between machines (an alias on one, the masked email on
+    // another): the id says which rows are one account (CON-100). A row
+    // from an older companion, without one, joins the account that has
+    // its label somewhere, else stands alone under it.
+    final groups = <String, List<UsageAccountPlacement>>{};
+    for (final p in all) {
+      if (p.account.id case final id?) (groups['id:$id'] ??= []).add(p);
+    }
+    for (final p in all.where((p) => p.account.id == null)) {
+      final key =
+          groups.entries
+              .where(
+                (g) => g.value.any((q) => q.account.label == p.account.label),
+              )
+              .firstOrNull
+              ?.key ??
+          'label:${p.account.label}';
+      (groups[key] ??= []).add(p);
+    }
+    // In the machines' slot order, whichever pass placed them.
+    final ordered = groups.values.toList()
+      ..sort((a, b) => all.indexOf(a.first).compareTo(all.indexOf(b.first)));
+    for (final g in ordered) {
+      g.sort((a, b) => all.indexOf(a).compareTo(all.indexOf(b)));
+    }
+    String labelOf(List<UsageAccountPlacement> placements) =>
+        placements
+            .where((p) => p.account.alias != null)
+            .firstOrNull
+            ?.account
+            .label ??
+        placements.first.account.label;
+    final groupOf = {
+      for (final g in ordered)
+        for (final p in g) p: g,
+    };
+    // Where cswap's active account is not the one the sessions run on, the
+    // active one says so; the sessions' one is not shown twice.
+    final stillOn = <List<UsageAccountPlacement>, String>{};
+    for (final machine in machines) {
+      UsageAccountPlacement? find(bool Function(UsageAccount) test) => all
+          .where((p) => p.hostId == machine.hostId && test(p.account))
+          .firstOrNull;
+      final active = find((a) => a.active);
+      final live = find((a) => a.live);
+      if (active == null || live == null) continue;
+      final from = groupOf[active]!;
+      final to = groupOf[live]!;
+      if (!identical(from, to)) stillOn[from] ??= labelOf(to);
     }
     UsageLimit? window(UsageAccountPlacement p, {required bool weekly}) =>
         (weekly ? p.account.weekly : p.account.fiveHour) ??
@@ -268,10 +325,11 @@ class UsageSummary {
             ?.where((l) => weekly ? l.isWeekly : l.isFiveHour)
             .firstOrNull;
     final merged = [
-      for (final MapEntry(key: label, value: placements) in byLabel.entries)
+      for (final placements in ordered)
         UsageAccountSummary(
-          label: label,
+          label: labelOf(placements),
           placements: placements,
+          sessionsStillOn: stillOn[placements],
           fiveHour: _freshest([
             for (final p in placements) ?window(p, weekly: false),
           ]),

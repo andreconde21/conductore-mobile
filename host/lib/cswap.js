@@ -13,9 +13,14 @@
 // none.
 //
 // Only what the phone shows leaves this module: slot, alias, a label (the
-// alias, else a masked email: a***@d***.com), active, disabled and the
-// limit windows. Never an email, an organisation or a token; the cache
-// holds the same masked rows.
+// alias, else a masked email: a***@d***.com), active, disabled, the limit
+// windows and an `id` (CON-100). Never an email, an organisation or a
+// token; the cache holds the same masked rows.
+//
+// `id` is the account's identity across machines, whatever its slot or
+// alias there: a truncated SHA-256 of the lower-cased email and the
+// organisation uuid. The phone merges rows by it; it says nothing it can
+// be turned back into.
 //
 // `cswap list` shows only the accounts cswap manages. When none of them is
 // the live Claude login (a `/login` to an account never `cswap add`ed),
@@ -34,12 +39,13 @@
 // A new `cswap add` or `remove` rewrites cswap's sequence.json, which
 // drops the cache at once rather than after the TTL.
 
+const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawn } = require('child_process')
 
-const CACHE_VERSION = 2
+const CACHE_VERSION = 3
 const TTL_MS = 60 * 1000
 const STALE_MAX_MS = 15 * 60 * 1000
 const LIST_TIMEOUT_MS = 3000
@@ -81,6 +87,14 @@ function maskEmail (email) {
   const name = dot > 0 ? domain.slice(0, dot) : domain
   const tld = dot > 0 ? domain.slice(dot) : ''
   return `${e[0]}***@${name ? name[0] : ''}***${tld}`
+}
+
+// The stable, non-reversible identity of an account (null without an
+// email): the same on every machine that has it.
+function accountId (email, organizationUuid) {
+  if (typeof email !== 'string' || !email.trim()) return null
+  const org = typeof organizationUuid === 'string' ? organizationUuid.trim().toLowerCase() : ''
+  return crypto.createHash('sha256').update(`conductore-account\n${email.trim().toLowerCase()}\n${org}`).digest('hex').slice(0, 16)
 }
 
 const EMAIL = /[^\s@"'<>(),;:]+@[^\s@"'<>(),;:]+/g
@@ -146,6 +160,7 @@ function parseList (obj, now = Date.now()) {
     if (week) limits['7d'] = week
     const row = {
       slot: a.number,
+      id: accountId(a.email, a.organizationUuid),
       alias,
       label: alias || maskEmail(a.email) || `Account ${a.number}`,
       active: a.active === true,
@@ -177,7 +192,7 @@ function unmanagedRow (obj) {
   if (!a || typeof a !== 'object' || a.managed !== false) return null
   const label = maskEmail(a.email)
   if (!label) return null
-  return { slot: null, alias: null, label, active: true, disabled: false, managed: false, status: null, limits: {} }
+  return { slot: null, id: accountId(a.email, a.organizationUuid), alias: null, label, active: true, disabled: false, managed: false, status: null, limits: {} }
 }
 
 const SAME_WINDOW_MS = 5 * 60 * 1000
@@ -407,4 +422,4 @@ async function switchAccount (opts = {}) {
   }
 }
 
-module.exports = { findCswap, maskEmail, maskEmails, parseList, parseJson, unmanagedRow, withLiveLimits, sequenceFile, accounts, switchAccount, run, TTL_MS, STALE_MAX_MS }
+module.exports = { findCswap, accountId, maskEmail, maskEmails, parseList, parseJson, unmanagedRow, withLiveLimits, sequenceFile, accounts, switchAccount, run, TTL_MS, STALE_MAX_MS }

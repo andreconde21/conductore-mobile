@@ -56,6 +56,7 @@ test('parseList: slot, alias, label, active, disabled, limits and per-model wind
   const [work, home, third] = r.accounts
   assert.deepEqual(work, {
     slot: 1,
+    id: cswap.accountId('alice@example.com', JSON.parse(FIXTURE).accounts[0].organizationUuid),
     alias: 'work',
     label: 'work',
     active: true,
@@ -97,6 +98,31 @@ test('parseList marks windows that already reset, and rejects other JSON', () =>
   assert.equal(cswap.parseList({ schemaVersion: 1, error: { type: 'X', message: 'no' } }), null)
   assert.equal(cswap.parseList(null), null)
   assert.deepEqual(cswap.parseList({ accounts: [{ number: 'x' }, null] }), { activeSlot: null, accounts: [] })
+})
+
+test('accountId: the same account has the same id on every machine, whatever its slot or alias (CON-100)', () => {
+  const id = cswap.accountId('Alice@Example.com ', 'org-1')
+  assert.match(id, /^[0-9a-f]{16}$/)
+  assert.equal(cswap.accountId('alice@example.com', 'ORG-1'), id)
+  assert.notEqual(cswap.accountId('alice@example.com', 'org-2'), id)
+  assert.notEqual(cswap.accountId('bob@example.com', 'org-1'), id)
+  assert.equal(cswap.accountId('', 'org-1'), null)
+  assert.equal(cswap.accountId(undefined), null)
+  // Two machines: slots and aliases differ, ids do not.
+  const laptop = cswap.parseList({ accounts: [
+    { number: 1, email: 'bob@example.com', organizationUuid: 'org-b', alias: 'personal' },
+    { number: 2, email: 'alice@example.com', organizationUuid: 'org-a' }
+  ] }, NOW)
+  const server = cswap.parseList({ accounts: [
+    { number: 1, email: 'alice@example.com', organizationUuid: 'org-a', alias: 'work' },
+    { number: 3, email: 'bob@example.com', organizationUuid: 'org-b' }
+  ] }, NOW)
+  assert.equal(laptop.accounts[1].id, server.accounts[0].id)
+  assert.equal(laptop.accounts[0].id, server.accounts[1].id)
+  assert.notEqual(laptop.accounts[0].id, laptop.accounts[1].id)
+  // The unmanaged login gets the id it has where cswap manages it.
+  const login = cswap.unmanagedRow({ active: { email: 'bob@example.com', organizationUuid: 'org-b', managed: false } })
+  assert.equal(login.id, server.accounts[1].id)
 })
 
 test('maskEmail keeps the first letters and the top-level domain', () => {
@@ -235,7 +261,7 @@ test('accounts: an unmanaged live login is a third, active row without a slot', 
   assert.deepEqual(calls(dir), ['list --json', 'status --json'])
   assert.equal(r.accounts.length, 3)
   assert.deepEqual(r.accounts.map(a => [a.slot, a.label, a.active]), [[1, 'work', false], [2, 'home', false], [null, 'd***@e***.com', true]])
-  assert.deepEqual(r.accounts[2], { slot: null, alias: null, label: 'd***@e***.com', active: true, disabled: false, managed: false, status: null, limits: {} })
+  assert.deepEqual(r.accounts[2], { slot: null, id: cswap.accountId('dave@example.com'), alias: null, label: 'd***@e***.com', active: true, disabled: false, managed: false, status: null, limits: {} })
   assert.ok(!JSON.stringify(r).includes('dave'))
   assert.ok(!fs.readFileSync(path.join(dir, 'c.json'), 'utf8').includes('dave'))
 })

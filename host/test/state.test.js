@@ -1,6 +1,7 @@
 'use strict'
 
 const test = require('node:test')
+require('./helpers/isolate')
 const assert = require('node:assert/strict')
 const state = require('../lib/state')
 

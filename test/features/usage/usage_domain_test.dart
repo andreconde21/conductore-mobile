@@ -366,6 +366,100 @@ void main() {
       expect(summary.accountTerms.toSet(), {'home', 'work', 'spare'});
     });
 
+    // CON-100: the laptop and dev-central list the same four accounts,
+    // under other slots and labels (an alias on one, the masked email on
+    // the other). One row per account, by the companion's id.
+    test('two machines, same accounts, different labels: one row each', () {
+      const ids = [
+        '0a1b2c3d4e5f6071',
+        '1a1b2c3d4e5f6071',
+        '2a1b2c3d4e5f6071',
+        '3a1b2c3d4e5f6071',
+      ];
+      final summary = UsageSummary([
+        machine('dev', [
+          usageAccount(1, 'outsmartis', id: ids[0], active: true, weekly: 87),
+          usageAccount(2, 'webmaster', id: ids[1], weekly: 94),
+          usageAccount(3, 'a***@o***.com', id: ids[2], weekly: 100),
+          usageAccount(4, 'g***@t***.pt', id: ids[3], weekly: 75),
+        ]),
+        machine('laptop', [
+          usageAccount(1, 'o***@o***.com', id: ids[0], weekly: 80),
+          usageAccount(2, 'andre', id: ids[2], weekly: 100),
+          usageAccount(3, 'web', id: ids[1], weekly: 94),
+          // Its live login, never `cswap add`ed there.
+          usageUnmanagedAccount('g***@t***.pt', id: ids[3]),
+        ]),
+      ]);
+      final accounts = summary.accounts;
+      expect(accounts, hasLength(4));
+      // Active ones first; an alias wins over a masked email.
+      expect(accounts.map((a) => a.label), [
+        'outsmartis',
+        'g***@t***.pt',
+        'webmaster',
+        'andre',
+      ]);
+      expect(accounts[0].activeOn, ['DEV']);
+      expect(accounts[1].activeOn, ['LAPTOP']);
+      expect(accounts[3].placements.map((p) => p.account.slot), [3, 2]);
+      final login = accounts[1];
+      expect(login.unmanaged, isFalse);
+      expect(login.switchTargets.map((p) => p.hostId), ['dev']);
+      expect(summary.otherAccountCount, 2);
+    });
+
+    test('a row without an id (older companion) joins the account with its '
+        'label, else stands alone', () {
+      final accounts = UsageSummary([
+        machine('a', [
+          usageAccount(1, 'work', id: 'aaaaaaaaaaaaaaaa', active: true),
+          usageAccount(2, 'home', id: 'bbbbbbbbbbbbbbbb'),
+        ]),
+        machine('b', [usageAccount(1, 'work'), usageAccount(2, 'spare')]),
+        machine('c', [usageAccount(5, 'personal', id: 'bbbbbbbbbbbbbbbb')]),
+      ]).accounts;
+      expect(accounts.map((a) => a.label), ['work', 'home', 'spare']);
+      expect(accounts[0].placements.map((p) => p.hostId), ['a', 'b']);
+      expect(accounts[1].placements.map((p) => p.hostId), ['a', 'c']);
+      // A malformed id is ignored.
+      final bad = UsageAccount.fromJson({
+        ...usageAccount(1, 'x'),
+        'id': 'not hex!',
+      });
+      expect(bad?.id, isNull);
+    });
+
+    // CON-100: cswap switched, the sessions started before it did not.
+    test('sessions on another account than cswap\'s active one: a note, '
+        'not a row', () {
+      final accounts = UsageSummary([
+        machine('dev', [
+          usageAccount(1, 'outsmartis', id: 'aaaaaaaaaaaaaaaa', active: true),
+          usageAccount(2, 'webmaster', id: 'bbbbbbbbbbbbbbbb', live: true),
+          usageAccount(3, 'spare', id: 'cccccccccccccccc'),
+        ]),
+        machine('laptop', [
+          usageAccount(
+            1,
+            'webmaster',
+            id: 'bbbbbbbbbbbbbbbb',
+            active: true,
+            live: true,
+          ),
+        ]),
+      ]).accounts;
+      expect(accounts, hasLength(3));
+      expect(accounts[0].label, 'outsmartis');
+      expect(accounts[0].sessionsStillOn, 'webmaster');
+      expect(accounts[0].live, isFalse);
+      expect(accounts[1].live, isTrue);
+      expect(accounts[1].active, isTrue);
+      // Active and in use on the laptop: nothing to note.
+      expect(accounts[1].sessionsStillOn, isNull);
+      expect(accounts[2].sessionsStillOn, isNull);
+    });
+
     test('best: another account with clearly more headroom', () {
       UsageSummary summaryWith(num activeUsed, num otherUsed) => UsageSummary([
         machine('a', [
