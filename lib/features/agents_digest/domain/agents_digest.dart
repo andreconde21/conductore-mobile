@@ -515,7 +515,9 @@ DigestReport digestFromStatus({
           fromStatus: true,
           state: switch (agent.state) {
             AgentAttentionState.working => 'working',
-            AgentAttentionState.finished => 'ended',
+            // Done with its turn (Herdr's "done") or ended; the monitor
+            // still lists it, so it can still be opened.
+            AgentAttentionState.finished => 'done',
             _ when agent.pendingRequests.isNotEmpty => 'needs_permission',
             _ => 'waiting_input',
           },

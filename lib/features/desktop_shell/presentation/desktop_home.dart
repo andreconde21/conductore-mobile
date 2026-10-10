@@ -10,7 +10,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agents_icon.dart';
 import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/command_palette/domain/palette_entry.dart';
@@ -1324,11 +1324,7 @@ class DesktopHomeState extends State<DesktopHome> {
       key: const ValueKey('shell-toggle-agents'),
       tooltip: active ? 'Hide the agents panel' : 'Agents panel',
       isSelected: active,
-      icon: Badge.count(
-        count: count,
-        isLabelVisible: count > 0,
-        child: const Icon(Icons.monitor_heart_outlined, size: 20),
-      ),
+      icon: AgentsIcon(count: count, size: 20),
       onPressed: () => _controller.toggleRightPanel(ShellRightPanel.agents),
     );
   }
@@ -1985,9 +1981,13 @@ class DesktopHomeState extends State<DesktopHome> {
                 ),
                 Expanded(
                   child: switch (panel) {
-                    ShellRightPanel.agents => AgentAttentionSheet(
-                      controller: widget.agentAttention,
-                      onOpenAgent: (host, agent) {
+                    ShellRightPanel.agents => AgentsDashboardView(
+                      key: const ValueKey('shell-agents-panel'),
+                      attention: widget.agentAttention,
+                      tabs: true,
+                      inlineMenu: true,
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
+                      onOpenTerminal: (host, agent) {
                         final flow = widget.connectFlow;
                         if (flow != null) {
                           unawaited(flow.openAgent(host, agent));

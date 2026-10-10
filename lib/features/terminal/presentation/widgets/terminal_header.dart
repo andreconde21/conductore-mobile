@@ -1,5 +1,6 @@
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agents_icon.dart';
 import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_recognizers.dart';
 import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
@@ -229,11 +230,7 @@ class TerminalHeader extends StatelessWidget {
               _RowButton(
                 tooltip: 'Agents',
                 color: foreground,
-                icon: Badge.count(
-                  count: attentionCount,
-                  isLabelVisible: attentionCount > 0,
-                  child: const Icon(Icons.monitor_heart_outlined, size: 20),
-                ),
+                icon: AgentsIcon(count: attentionCount, size: 20),
                 onPressed: onOpenAgentAttention!,
               ),
             ...extraActions,
