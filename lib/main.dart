@@ -29,6 +29,7 @@ import 'package:conduit/features/agent_messaging/data/agent_messenger.dart';
 import 'package:conduit/features/agent_messaging/domain/agent_message.dart';
 import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
+import 'package:conduit/features/app_lock/data/device_uptime.dart';
 import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/data/secure_app_lock_preferences.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
@@ -150,6 +151,7 @@ void main() {
     LocalAppAuthenticator(),
     enabled: PlatformFeatures.appLock,
     preferences: const SecureAppLockPreferences(secureStorage),
+    uptime: deviceUptime,
   );
   unawaited(lockController.loadPreferences());
   // Notification buttons and the launcher answer only while the app lock

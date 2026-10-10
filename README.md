@@ -298,7 +298,10 @@ tmux.
   in Settings › Sync ([docs/sync.md](docs/sync.md)).
 - Encrypted backups of settings, machines and trusted keys (same format as
   sync), and an optional device-auth app lock that locks again after a
-  time in the background you choose (Settings › Security). Android's own
+  time in the background you choose (Settings › Security). The longer
+  choices (1 hour, 4 hours, 8 hours, 1 day) count from the last unlock and
+  hold across app restarts, after a warning; a reboot or a clock moved back
+  asks again (iOS and desktops cannot tell a reboot). Android's own
   cloud backup and device transfer are off: machines move with these
   backups or sync.
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/features/app_lock/domain/app_authenticator.dart';
 import 'package:conduit/features/app_lock/domain/app_lock_preferences.dart';
 import 'package:flutter/foundation.dart';
@@ -33,6 +35,7 @@ class AppLockController extends ChangeNotifier {
     this.enabled = true,
     this._preferences,
     DateTime Function()? clock,
+    this._uptime,
   }) : _status = enabled ? AppLockStatus.locked : AppLockStatus.unlocked,
        _clock = clock ?? DateTime.now {
     actionState = ValueNotifier(_actionState());
@@ -44,6 +47,10 @@ class AppLockController extends ChangeNotifier {
   final AppLockPreferences? _preferences;
   final DateTime Function() _clock;
 
+  /// Time since the device booted (Android), to tell a reboot from a
+  /// restart of the app; null where the platform does not say.
+  final Future<Duration?> Function()? _uptime;
+
   AppLockStatus _status;
   String? _message;
 
@@ -52,6 +59,14 @@ class AppLockController extends ChangeNotifier {
   bool _authenticated = false;
   DateTime? _backgroundedAt;
   RelockDelay _relockDelay = RelockDelay.standard;
+
+  /// The last unlock by device authentication, in this run or (within a
+  /// delay that [RelockDelay.lastsAcrossRestarts]) a saved one.
+  DateTime? _unlockedAt;
+
+  /// [loadPreferences] running: the first unlock waits for it.
+  Future<void>? _loading;
+  bool _savedUnlockTried = false;
 
   /// How long the app may stay in the background before it locks again.
   RelockDelay get relockDelay => _relockDelay;
@@ -66,12 +81,27 @@ class AppLockController extends ChangeNotifier {
   late final ValueNotifier<AppLockActionState> actionState;
 
   /// When the app locks again if it stays in the background (null: it is
-  /// on screen, or does not lock again).
+  /// on screen, or does not lock again). For a delay that
+  /// [RelockDelay.lastsAcrossRestarts], from the last unlock on.
   DateTime? get relockAt {
-    final since = _backgroundedAt;
     final delay = _relockDelay.duration;
-    if (since == null || delay == null) return null;
+    if (delay == null) return null;
+    if (_relockDelay.lastsAcrossRestarts) return _unlockedAt?.add(delay);
+    final since = _backgroundedAt;
+    if (since == null) return null;
     return since.add(delay);
+  }
+
+  /// Past [relockAt], or the clock went back since the unlock.
+  bool _relockDue() {
+    final deadline = relockAt;
+    if (deadline == null) return false;
+    final now = _clock();
+    final unlockedAt = _unlockedAt;
+    return !now.isBefore(deadline) ||
+        (_relockDelay.lastsAcrossRestarts &&
+            unlockedAt != null &&
+            now.isBefore(unlockedAt));
   }
 
   /// Whether an action taken from outside the app (a notification button,
@@ -81,8 +111,7 @@ class AppLockController extends ChangeNotifier {
   bool admitsActions() {
     if (!enabled) return true;
     if (!isUnlocked) return false;
-    final deadline = relockAt;
-    if (deadline != null && _authenticated && !_clock().isBefore(deadline)) {
+    if (_authenticated && _relockDue()) {
       lock();
       return false;
     }
@@ -105,6 +134,11 @@ class AppLockController extends ChangeNotifier {
     _message = null;
     notifyListeners();
 
+    if (!_savedUnlockTried) {
+      _savedUnlockTried = true;
+      if (await _resumeSavedUnlock()) return;
+    }
+
     final canAuthenticate = await _canAuthenticate();
     if (!canAuthenticate) {
       _status = AppLockStatus.unavailable;
@@ -122,6 +156,9 @@ class AppLockController extends ChangeNotifier {
         _message = null;
         _authenticated = true;
         _backgroundedAt = null;
+        final at = _clock();
+        _unlockedAt = at;
+        unawaited(_saveUnlock(at));
       case AppAuthenticationResult.cancelled:
         _status = AppLockStatus.locked;
         _message = 'Authentication was cancelled.';
@@ -132,6 +169,59 @@ class AppLockController extends ChangeNotifier {
             'Set a screen lock for better protection.';
     }
     notifyListeners();
+  }
+
+  /// A start within a delay that [RelockDelay.lastsAcrossRestarts] of the
+  /// last unlock opens without asking (see [AppUnlockStamp.holdsAt]).
+  Future<bool> _resumeSavedUnlock() async {
+    final preferences = _preferences;
+    if (preferences == null) return false;
+    try {
+      await _loading;
+      final stamp = await preferences.loadUnlockStamp();
+      if (stamp == null) return false;
+      final delay = _relockDelay.duration;
+      final holds =
+          _relockDelay.lastsAcrossRestarts &&
+          stamp.holdsAt(
+            _clock(),
+            delay!,
+            sinceBootNow: await _uptime?.call(),
+          );
+      if (!holds) {
+        await preferences.saveUnlockStamp(null);
+        return false;
+      }
+      _status = AppLockStatus.unlocked;
+      _message = null;
+      _authenticated = true;
+      _backgroundedAt = null;
+      _unlockedAt = stamp.at.toLocal();
+      notifyListeners();
+      return true;
+    } catch (_) {
+      // Unreadable: ask.
+      return false;
+    }
+  }
+
+  Future<void> _saveUnlock(DateTime at) async {
+    try {
+      final sinceBoot = await _uptime?.call();
+      await _preferences?.saveUnlockStamp(
+        AppUnlockStamp(at: at, sinceBoot: sinceBoot),
+      );
+    } catch (_) {
+      // Best effort: the next start asks.
+    }
+  }
+
+  Future<void> _forgetUnlock() async {
+    try {
+      await _preferences?.saveUnlockStamp(null);
+    } catch (_) {
+      // Best effort; a lock that stays saved still expires.
+    }
   }
 
   Future<bool> _canAuthenticate() async {
@@ -164,11 +254,15 @@ class AppLockController extends ChangeNotifier {
     _message = null;
     _authenticated = false;
     _backgroundedAt = null;
+    _unlockedAt = null;
     notifyListeners();
+    unawaited(_forgetUnlock());
   }
 
   /// Reads the saved [relockDelay].
-  Future<void> loadPreferences() async {
+  Future<void> loadPreferences() => _loading = _load();
+
+  Future<void> _load() async {
     final preferences = _preferences;
     if (preferences == null) return;
     try {
@@ -194,14 +288,19 @@ class AppLockController extends ChangeNotifier {
   }
 
   /// The app is back on screen: locks again when it was away for at least
-  /// [relockDelay].
+  /// [relockDelay] (from the last unlock, for a delay that
+  /// [RelockDelay.lastsAcrossRestarts]).
   void appResumed() {
     final since = _backgroundedAt;
     _backgroundedAt = null;
     _publish();
     final delay = _relockDelay.duration;
-    if (since == null || delay == null) return;
-    if (!enabled || !isUnlocked || !_authenticated) return;
+    if (delay == null || !enabled || !isUnlocked || !_authenticated) return;
+    if (_relockDelay.lastsAcrossRestarts) {
+      if (_relockDue()) lock();
+      return;
+    }
+    if (since == null) return;
     if (_clock().difference(since) >= delay) lock();
   }
 
