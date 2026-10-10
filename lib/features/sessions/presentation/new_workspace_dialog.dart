@@ -5,6 +5,7 @@ import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/new_workspace.dart';
+import 'package:conduit/features/sessions/presentation/folder_picker_sheet.dart';
 import 'package:flutter/material.dart';
 
 /// Asks for a new Herdr workspace's or tmux session's name, starting
@@ -16,6 +17,7 @@ Future<ConnectTarget?> showNewWorkspaceDialog(
   required MultiplexerKind kind,
   required Future<ConnectTarget> Function(NewWorkspaceRequest request) create,
   List<String> folders = const [],
+  FolderLister? listFolders,
   Future<List<KnownAgentKind>>? agents,
   String? initialAgent,
 }) => showDialog<ConnectTarget>(
@@ -24,6 +26,7 @@ Future<ConnectTarget?> showNewWorkspaceDialog(
     kind: kind,
     create: create,
     folders: folders,
+    listFolders: listFolders,
     agents: agents,
     initialAgent: initialAgent,
   ),
@@ -34,6 +37,7 @@ class NewWorkspaceDialog extends StatefulWidget {
     required this.kind,
     required this.create,
     this.folders = const [],
+    this.listFolders,
     this.agents,
     this.initialAgent,
     super.key,
@@ -45,6 +49,10 @@ class NewWorkspaceDialog extends StatefulWidget {
   /// Suggested starting folders, most recent first: where the machine's
   /// agents and shells worked.
   final List<String> folders;
+
+  /// Lists the machine's folders for the folder picker; null offers the
+  /// recent [folders] only.
+  final FolderLister? listFolders;
 
   /// The agents installed on the machine, offered besides "None"; null
   /// offers none.
@@ -59,8 +67,6 @@ class NewWorkspaceDialog extends StatefulWidget {
 }
 
 class _NewWorkspaceDialogState extends State<NewWorkspaceDialog> {
-  static const _maxSuggestions = 6;
-
   late final _name = TextEditingController(
     text: widget.kind == MultiplexerKind.tmux ? defaultTmuxSessionName : '',
   );
@@ -125,6 +131,16 @@ class _NewWorkspaceDialogState extends State<NewWorkspaceDialog> {
       }
       _error = null;
     });
+  }
+
+  Future<void> _browse() async {
+    final picked = await showFolderPickerSheet(
+      context,
+      recents: widget.folders,
+      list: widget.listFolders,
+      initialQuery: _folder.text,
+    );
+    if (picked != null && mounted) _useFolder(picked);
   }
 
   Future<void> _submit() async {
@@ -210,7 +226,6 @@ class _NewWorkspaceDialogState extends State<NewWorkspaceDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final suggestions = widget.folders.take(_maxSuggestions).toList();
     return AlertDialog(
       key: const ValueKey('new-workspace-dialog'),
       title: Text(_herdr ? 'New Herdr workspace' : 'New tmux session'),
@@ -240,34 +255,17 @@ class _NewWorkspaceDialogState extends State<NewWorkspaceDialog> {
               enableSuggestions: false,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => unawaited(_submit()),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Starting folder',
                 hintText: '~/Projects/app',
+                suffixIcon: IconButton(
+                  key: const ValueKey('new-workspace-browse'),
+                  tooltip: 'Pick a folder',
+                  icon: const Icon(Icons.folder_open_outlined),
+                  onPressed: _busy ? null : () => unawaited(_browse()),
+                ),
               ),
             ),
-            if (suggestions.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final folder in suggestions)
-                    Tooltip(
-                      message: folder,
-                      child: ActionChip(
-                        key: ValueKey('new-workspace-folder-$folder'),
-                        avatar: const Icon(Icons.folder_outlined, size: 16),
-                        label: Text(
-                          NewWorkspaceCommands.folderName(folder).isEmpty
-                              ? folder
-                              : NewWorkspaceCommands.folderName(folder),
-                        ),
-                        onPressed: _busy ? null : () => _useFolder(folder),
-                      ),
-                    ),
-                ],
-              ),
-            ],
             const SizedBox(height: 12),
             _agentChoice(theme),
             if (_error case final error?)

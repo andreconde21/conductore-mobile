@@ -435,11 +435,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('New session'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('new-workspace-browse')));
+    await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(
-        const ValueKey('new-workspace-folder-/home/a/Projects/TheCalendar'),
+        const ValueKey('folder-picker-row-/home/a/Projects/TheCalendar'),
       ),
     );
+    await tester.pumpAndSettle();
     // No favourite: None and only what this machine has, None first.
     expect(find.text('Start Claude in it'), findsNothing);
     expect(
@@ -464,8 +467,10 @@ void main() {
     // remembering Codex for this machine.
     expect(picked.single.target, const ConnectTarget.tmux('TheCalendar'));
     expect(picked.single.agent, 'codex');
-    expect(runner.commands, hasLength(5));
+    expect(runner.commands, hasLength(6));
     expect(runner.commands[3], contains('command -v'));
+    // The folder picker listed the machine's folders once.
+    expect(runner.commands[4], contains('/Projects'));
     final create = runner.commands.last;
     expect(create, startsWith("sh -c 'eval"));
     expect(create, contains('new-session'));

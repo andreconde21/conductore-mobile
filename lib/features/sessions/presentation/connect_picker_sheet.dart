@@ -205,6 +205,7 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
         return creator.create(request);
       },
       folders: widget.recentDirectories,
+      listFolders: creator.listFolders,
       agents: creator.installedAgents(
         widget.host.id,
         agentLaunchCandidates(widget.agentKinds),

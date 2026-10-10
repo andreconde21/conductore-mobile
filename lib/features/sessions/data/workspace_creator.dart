@@ -67,6 +67,33 @@ class WorkspaceCreator {
   @visibleForTesting
   static void clearDetectedAgents() => _detected.clear();
 
+  /// The folders a starting folder can be picked from (see
+  /// [NewWorkspaceCommands.listFolders]): the project roots when [folder]
+  /// is null, else [folder]'s subfolders. Throws a [NewWorkspaceFailure]
+  /// when the machine cannot be asked.
+  Future<List<String>> listFolders([String? folder]) async {
+    final AgentCommandResult result;
+    try {
+      result = await _runner.run(
+        NewWorkspaceCommands.listFolders(folder),
+        timeout: _listTimeout,
+      );
+    } catch (error) {
+      throw NewWorkspaceFailure(error.toString());
+    }
+    if (result.exitCode == NewWorkspaceCommands.missingFolderExit) {
+      throw const NewWorkspaceFailure('That folder does not exist.');
+    }
+    if (result.exitCode != null && result.exitCode != 0) {
+      throw NewWorkspaceFailure(
+        _failure(result, 'Could not list the folders.'),
+      );
+    }
+    return NewWorkspaceCommands.parseFolders(result.stdout);
+  }
+
+  static const _listTimeout = Duration(seconds: 10);
+
   /// Creates what [request] asks for and returns the target that opens
   /// it. Throws a [NewWorkspaceFailure] that says what went wrong.
   Future<ConnectTarget> create(NewWorkspaceRequest request) async {

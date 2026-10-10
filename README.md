@@ -211,6 +211,13 @@ tmux.
   switch, one-tap **Split right / Split down / New tab / New workspace** (tmux:
   new window), windows or tabs 1-9, zoom, kill pane and detach. Long-press the
   toolbar's Herdr or tmux button for the split menu.
+- **New workspace / New session** (connect picker): a name, a starting folder
+  and an agent to start in it. The folder button opens a searchable list:
+  recent folders first, then the subfolders of `~/Projects` and `~` and the git
+  repositories one level below them (listed over one quick SSH command). Step
+  into any folder with its arrow, type to filter or to use a path that is not
+  listed, and picking a folder names the workspace after it. If the machine
+  cannot be listed, the recents and a typed path still work.
 - **Back**: swipe right from the left edge of any page on a phone (predictive
   back on Android), or the mouse back button and Alt+Left on a desktop.
 - **Gestures**: swipe for tabs or windows, two fingers sideways for panes, two
