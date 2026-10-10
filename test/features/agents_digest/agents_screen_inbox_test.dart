@@ -219,6 +219,46 @@ void main() {
     expect(find.byKey(web), findsOneWidget);
   });
 
+  testWidgets('the badge counts exactly the cards under Needs you: a turn '
+      'that only finished counts in neither', (tester) async {
+    final harness = await pumpPanel(tester, {
+      'h': [
+        status([
+          // Finished its turn: Done, no badge.
+          agentJson('s-1', state: 'waiting_input', message: 'All green.'),
+          // Asks in its last line.
+          agentJson(
+            's-2',
+            state: 'waiting_input',
+            cwd: '/w/web',
+            message: 'Should I deploy?',
+          ),
+          // Asks with AskUserQuestion.
+          '{"sessionId":"s-3","cwd":"/w/etl","state":"waiting_input",'
+              '"updatedAt":1790000000000,"pending":[],'
+              '"lastEvent":"PreToolUse","lastToolName":"AskUserQuestion"}',
+          agentJson('s-4', cwd: '/w/docs'),
+        ]),
+      ],
+    });
+    expect(harness.controller.attentionCount, 2);
+    final needsYou = find.byKey(const ValueKey('digest-section-needsYou'));
+    expect(
+      find.descendant(of: needsYou, matching: find.text('2')),
+      findsOneWidget,
+    );
+    expect(find.text('Asks you'), findsNWidgets(2));
+    // The tab's badge says the same.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('agents-tabs')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Done'), findsOneWidget);
+  });
+
   group('desktop right-click', () {
     const desktops = TargetPlatformVariant({
       TargetPlatform.linux,

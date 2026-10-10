@@ -527,8 +527,7 @@ DigestReport digestFromStatus({
           },
           attention: agent.pendingRequests.isNotEmpty
               ? DigestAttention.permission
-              : agent.state.needsAttention &&
-                    (waitingNeedsYou || _asks(agent.lastMessage))
+              : agent.needsYou(waitingNeedsYou: waitingNeedsYou)
               ? DigestAttention.question
               : null,
           lastActivityAt: agent.stateChangedAt,
@@ -545,14 +544,6 @@ DigestReport digestFromStatus({
         ),
     ],
   );
-}
-
-bool _asks(String? message) {
-  final lines = (message ?? '')
-      .split('\n')
-      .map((line) => line.trim())
-      .where((line) => line.isNotEmpty);
-  return lines.isNotEmpty && RegExp(r'''\?[\s*_)"'`]*$''').hasMatch(lines.last);
 }
 
 String? _firstLine(String? message) {

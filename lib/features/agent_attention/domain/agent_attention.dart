@@ -637,6 +637,38 @@ class AgentInfo {
   );
 }
 
+/// The agents that need the user now, the same rule everywhere: the Agents
+/// screen's "Needs you" and the Agents button's badge.
+extension AgentNeedsYou on AgentInfo {
+  /// A pending approval, or waiting with a question: it asked with
+  /// AskUserQuestion or ExitPlanMode, or its last reply ends in a question
+  /// (the companion's `digest` rule). An agent that only finished its turn
+  /// does not count. [waitingNeedsYou]: every wait counts (Herdr reports
+  /// "blocked" only when it sees a question or approval on screen).
+  bool needsYou({bool waitingNeedsYou = false}) {
+    if (pendingRequests.isNotEmpty) return true;
+    if (!state.needsAttention) return false;
+    return waitingNeedsYou || asksQuestion;
+  }
+
+  /// See [needsYou].
+  bool get asksQuestion {
+    if (_questionTools.contains(lastToolName) &&
+        lastEvent != 'Stop' &&
+        lastEvent != 'SessionStart') {
+      return true;
+    }
+    final lines = (lastMessage ?? '')
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty);
+    return lines.isNotEmpty &&
+        RegExp(r'''\?[\s*_)"'`]*$''').hasMatch(lines.last);
+  }
+}
+
+const _questionTools = {'AskUserQuestion', 'ExitPlanMode'};
+
 /// How much of an agent's budget is used, as far as the provider knows.
 /// Every field is optional: a provider reports what it can see (Claude
 /// Code's statusline input carries all of it; hooks carry none).
