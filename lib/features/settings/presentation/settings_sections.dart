@@ -386,8 +386,7 @@ class SettingsSectionBody extends StatelessWidget {
       const SettingsNote(
         'Dictate: tap the mic next to any chat field (the terminal chat '
         'line from the pill\'s Chat button, the prompt composer, Chat '
-        'View). Add a Dictate button to the pill (long-press the pill), '
-        'or swipe up on the pill and pick Dictate.\n'
+        'View). Add a Dictate button to the pill (long-press the pill).\n'
         'Talk: the speaking-head button in Chat View\'s composer runs a '
         'hands-free conversation with the agent. Long-press it for the voice '
         'guide, which talks to all your agents (also the headset-mic button at '

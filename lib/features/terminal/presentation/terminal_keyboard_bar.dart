@@ -57,7 +57,8 @@ class TerminalKeyboardBar extends StatelessWidget {
   final VoidCallback? onChatButton;
 
   /// Opens the chat line with dictation running (the pill's Dictate
-  /// button and the swipe-up palette). Null without voice input.
+  /// button, which is not on the pill by default). Null without voice
+  /// input.
   final VoidCallback? onDictate;
   final VoidCallback onEnterTmuxScrollMode;
   final VoidCallback onExitTmuxScrollMode;
