@@ -28,6 +28,7 @@ void main() {
     required bool showSharedView,
     bool showAgentView = false,
     HerdrFocusActions? herdrActions,
+    HerdrClosedWorkspaceActions? closedWorkspace,
   }) async {
     final paneDowns = <int>[];
     final terminalTaps = <int>[];
@@ -43,6 +44,7 @@ void main() {
             showSharedView: showSharedView,
             showAgentView: showAgentView,
             herdrActions: herdrActions,
+            closedWorkspace: closedWorkspace,
             child: GestureDetector(
               key: const ValueKey('terminal'),
               behavior: HitTestBehavior.opaque,
@@ -251,5 +253,40 @@ void main() {
       expect(calls, ['take']);
       expect(taps.terminalTaps, isEmpty);
     });
+  });
+
+  testWidgets('a tab whose Herdr workspace was closed says so, with Keep '
+      'what Herdr shows and Close tab (CON-103)', (tester) async {
+    final calls = <String>[];
+    session.focusElsewhereLabel = 'Projects';
+    await pumpPane(
+      tester,
+      showSharedView: false,
+      herdrActions: HerdrFocusActions(
+        typeInComposer: (_) {},
+        takeFocusOnce: () async {},
+        useShownWorkspace: () async {},
+      ),
+      closedWorkspace: HerdrClosedWorkspaceActions(
+        label: 'DTech',
+        useShownWorkspace: () async => calls.add('keep'),
+        closeTab: () => calls.add('close'),
+      ),
+    );
+    expect(find.byKey(const ValueKey('herdr-workspace-closed')), findsOneWidget);
+    expect(
+      find.text(
+        'DTech was closed in Herdr. This tab shows whatever Herdr has '
+        'focused, not DTech.',
+      ),
+      findsOneWidget,
+    );
+    // The other-workspace banner would offer to focus a workspace that is
+    // gone.
+    expect(find.byKey(const ValueKey('herdr-focus-banner')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('herdr-closed-keep')));
+    await tester.tap(find.byKey(const ValueKey('herdr-closed-close')));
+    await tester.pump();
+    expect(calls, ['keep', 'close']);
   });
 }

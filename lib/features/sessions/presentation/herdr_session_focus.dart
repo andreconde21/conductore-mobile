@@ -142,6 +142,33 @@ class HerdrSessionFocus implements AppInputRouter {
   /// Sessions whose workspace was closed: no longer pinned to one.
   final _unpinned = <String>{};
 
+  /// Sessions whose Herdr workspace was closed (a tab restored for a
+  /// workspace that is gone, CON-103). Pinned to none, they show whatever
+  /// Herdr focuses, so the terminal says so and offers to keep what it
+  /// shows or close the tab, rather than pass another workspace off as
+  /// theirs.
+  final closedWorkspaces = ValueNotifier<Set<TerminalSessionController>>(
+    const {},
+  );
+
+  void _unpin(TerminalSessionController session) {
+    _unpinned.add(session.host.id);
+    _syncClosed();
+  }
+
+  void _syncClosed() {
+    if (_disposed) return;
+    final closed = {
+      for (final session in _workspace.sessions)
+        if (_unpinned.contains(session.host.id)) session,
+    };
+    final current = closedWorkspaces.value;
+    if (closed.length == current.length && closed.containsAll(current)) {
+      return;
+    }
+    closedWorkspaces.value = closed;
+  }
+
   /// The session each Herdr server's focus was last put on by the app.
   final _owners = <String, TerminalSessionController>{};
 
@@ -270,6 +297,7 @@ class HerdrSessionFocus implements AppInputRouter {
     if (workspaceId.isNotEmpty) {
       _workspaces[session.host.id] = workspaceId;
       _unpinned.remove(session.host.id);
+      _syncClosed();
     }
   }
 
@@ -305,6 +333,7 @@ class HerdrSessionFocus implements AppInputRouter {
       };
     }
     _syncRefreshTimer(sessions);
+    _syncClosed();
     for (final session in sessions) {
       if (!_statuses.containsKey(session) && herdrTargetOf(session) != null) {
         session
@@ -336,6 +365,9 @@ class HerdrSessionFocus implements AppInputRouter {
     final sessions = _workspace.sessions;
     _workspaces.removeWhere(
       (hostId, _) => !sessions.any((session) => session.host.id == hostId),
+    );
+    _unpinned.removeWhere(
+      (hostId) => !sessions.any((session) => session.host.id == hostId),
     );
     _trackSessions();
     final next = _workspace.activeSession;
@@ -463,7 +495,7 @@ class HerdrSessionFocus implements AppInputRouter {
         // Closed in Herdr: the session shows whatever Herdr falls back to
         // and is no longer pinned (the input held so far is still
         // dropped, it was meant for the closed workspace).
-        _unpinned.add(session.host.id);
+        _unpin(session);
       }
       return outcome == HerdrFocusOutcome.focused;
     });
@@ -516,7 +548,9 @@ class HerdrSessionFocus implements AppInputRouter {
     _owners[key] = next;
     next.sharedViewSnapshot = null;
     Future<String?>? remembered;
-    if (samePrevious && owner == previous) {
+    // A tab whose workspace was closed only mirrored Herdr: where Herdr
+    // is says nothing about where the user took it.
+    if (samePrevious && owner == previous && !isUnpinned(previous)) {
       // Learn where the tab we are leaving ended up before moving Herdr.
       // The control runs commands in order, so this reads the old focus.
       remembered = control.focusedWorkspaceId();
@@ -747,7 +781,7 @@ class HerdrSessionFocus implements AppInputRouter {
     final outcome = await control.focusWorkspaceOutcome(workspaceId);
     if (outcome != HerdrFocusOutcome.focused) {
       if (outcome == HerdrFocusOutcome.missing) {
-        _unpinned.add(session.host.id);
+        _unpin(session);
       }
       return false;
     }
@@ -798,6 +832,7 @@ class HerdrSessionFocus implements AppInputRouter {
     if (control == null) return Future.value();
     final check = control.workspaces().then((items) async {
       if (items == null || _disposed) return null;
+      _unpinGone(key, items);
       final focused = items.where((item) => item.focused).firstOrNull;
       final focusedPane = focused == null
           ? ''
@@ -819,6 +854,19 @@ class HerdrSessionFocus implements AppInputRouter {
       }),
     );
     return check;
+  }
+
+  /// Sessions of server [key] on a workspace [items] (a fresh `herdr
+  /// workspace list`) no longer has: it was closed in Herdr.
+  void _unpinGone(String key, List<HerdrWorkspaceInfo> items) {
+    final ids = {for (final item in items) item.id};
+    for (final session in _workspace.sessions) {
+      if (herdrTargetOf(session) == null || serverKey(session) != key) {
+        continue;
+      }
+      final own = workspaceOf(session);
+      if (own != null && !ids.contains(own)) _unpin(session);
+    }
   }
 
   /// The pane [focused] (the workspace Herdr shows on server [key]) has
@@ -1178,6 +1226,7 @@ class HerdrSessionFocus implements AppInputRouter {
     }
     _timers.clear();
     agentViews.dispose();
+    closedWorkspaces.dispose();
     final controls = List.of(_controls.values);
     _controls.clear();
     for (final control in controls) {

@@ -147,4 +147,64 @@ void main() {
     expect(location.herdrWorkspaceId, 'w12');
     expect(location.herdrPaneId, isEmpty);
   });
+
+  group('a tab whose workspace was closed', () {
+    Future<TerminalSessionController> openStale() async {
+      final stale = open(
+        const ConnectTarget.herdr(workspaceId: 'wE', label: 'DTech'),
+      );
+      await stale.connect();
+      await settle();
+      return stale;
+    }
+
+    test('says so instead of silently mirroring Herdr', () async {
+      final stale = await openStale();
+      expect(focus.closedWorkspaces.value, {stale});
+
+      // Kept on a workspace by hand: no longer closed.
+      server.focusPaneFromElsewhere('w1D:p1');
+      expect(await focus.useShownWorkspace(stale), isTrue);
+      expect(focus.workspaceOf(stale), 'w1D');
+      expect(focus.closedWorkspaces.value, isEmpty);
+    });
+
+    test('is not pinned to whatever Herdr showed when it is left', () async {
+      final stale = await openStale();
+      // The laptop moves Herdr to another "Projects" workspace; the stale
+      // tab only mirrored it, the user never went there.
+      server.focusPaneFromElsewhere('w1D:p1');
+      final other = open(
+        const ConnectTarget.herdr(workspaceId: 'w12', label: 'Projects'),
+      );
+      await other.connect();
+      await settle();
+
+      expect(focus.workspaceOf(stale), isNull);
+      expect(focus.closedWorkspaces.value, {stale});
+
+      // Coming back to it moves Herdr nowhere.
+      server.commands.clear();
+      workspace.activate(stale);
+      await settle();
+      expect(
+        server.herdrArgs.where((args) => args.contains('focus')),
+        isEmpty,
+      );
+    });
+
+    test('is noticed while this device may not move the focus', () async {
+      await focus.dispose();
+      focus = HerdrSessionFocus(
+        workspace: workspace,
+        runnerFactory: (_) => server.runner(),
+        reattachRefocusDelay: Duration.zero,
+      );
+      final stale = await openStale();
+      workspace.activate(stale);
+      await settle();
+      expect(focus.closedWorkspaces.value, {stale});
+      expect(focus.workspaceOf(stale), isNull);
+    });
+  });
 }
