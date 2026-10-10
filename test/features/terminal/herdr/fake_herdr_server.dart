@@ -13,9 +13,13 @@ class FakeHerdrServer {
   FakeHerdrServer({
     this.workspaces = const ['w1', 'w2', 'w3'],
     this.focusedWorkspace = 'w1',
+    this.labels = const {},
   });
 
   final List<String> workspaces;
+
+  /// Workspace labels by id (`W<id>` unless set); several may share one.
+  final Map<String, String> labels;
   String focusedWorkspace;
   String focusedTab = '';
   String focusedPane = '';
@@ -44,7 +48,7 @@ class FakeHerdrServer {
     if (args.contains('workspace list')) {
       final items = [
         for (final (index, id) in workspaces.indexed)
-          '{"workspace_id":"$id","label":"W$id","number":${index + 1},'
+          '{"workspace_id":"$id","label":"${labels[id] ?? 'W$id'}","number":${index + 1},'
               '"focused":${id == focusedWorkspace},"tab_count":1,'
               '"active_tab_id":"$id:t1"}',
       ];
@@ -102,7 +106,11 @@ class _FakeHerdrServerRunner implements AgentCommandRunner {
 /// [events] logs focus changes and typed text in order ("focus w1",
 /// "type w1: ls"), so tests can check that a focus came before the input.
 class SharedFocusHerdrServer extends FakeHerdrServer {
-  SharedFocusHerdrServer({super.workspaces, super.focusedWorkspace});
+  SharedFocusHerdrServer({
+    super.workspaces,
+    super.focusedWorkspace,
+    super.labels,
+  });
 
   final List<String> events = [];
 

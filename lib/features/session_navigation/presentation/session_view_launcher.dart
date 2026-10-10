@@ -160,6 +160,44 @@ Future<bool> openPreferredChatView(
   }
 }
 
+/// Where Chat View looks for the Claude session [session] shows: the
+/// Herdr workspace it is on ([herdr] tracks where a reused session was
+/// moved). A session whose workspace was closed in Herdr is pinned to none
+/// and shows whatever Herdr focuses, live: then it is the pane Herdr has
+/// focused, so Chat View opens what is on screen instead of asking about
+/// a workspace that is gone (CON-103). Never by label: several workspaces
+/// may share one.
+Future<ChatSessionLocation> chatSessionLocation(
+  TerminalSessionController session,
+  HerdrSessionFocus? herdr,
+) async {
+  final workspace = herdr?.workspaceOf(session) ?? '';
+  final control =
+      herdr == null ||
+          !herdr.isUnpinned(session) ||
+          HerdrSessionFocus.herdrTargetOf(session) == null
+      ? null
+      : herdr.controlFor(session);
+  if (control != null) {
+    HerdrFocusedPane? focused;
+    try {
+      focused = await control.readFocusedPane().timeout(
+        const Duration(seconds: 3),
+      );
+    } catch (_) {
+      // Best effort: the session's own place below.
+    }
+    if (focused != null && focused.workspaceId.isNotEmpty) {
+      return ChatSessionLocation(
+        herdrWorkspaceId: focused.workspaceId,
+        herdrTabId: focused.tabId,
+        herdrPaneId: focused.paneId,
+      );
+    }
+  }
+  return ChatSessionLocation(herdrWorkspaceId: workspace);
+}
+
 /// The session host id [host]'s view choice is read under: a Herdr
 /// session that was moved to another workspace reads that workspace's.
 String _viewHostId(SavedHost host, ChatSessionLocation location) {
