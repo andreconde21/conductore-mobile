@@ -1,19 +1,24 @@
-# Launcher details provider (CON-075, v2 CON-082)
+# Launcher details provider (CON-075, v2 CON-082, v3 CON-119)
 
 André's launcher Yoke (an OLauncher fork; `com.outsmartis.yoke`, debug
 builds `com.outsmartis.yoke.debug`) opens a
 details sheet when Conductore's icon is long-pressed. Conductore supplies the
 sheet's content through a `ContentProvider`, and since contract 2
 (CON-082) takes answers to waiting agents through `ContentProvider.call`.
-This page is the contract between the two apps.
+Contract 3 (CON-119) holds those answers while Conductore is locked and
+adds each row's project and "active" standing. This page is the contract
+between the two apps.
 
 Code: `android/app/src/main/kotlin/com/gwitko/conduit/LauncherDetailsProvider.kt`
 (the provider), `LauncherDetailsModel.kt` (the rows, unit-tested in
 `android/app/src/test/.../LauncherDetailsModelTest.kt`) and
 `LauncherActions.kt` (the prompts and the `call` actions, unit-tested in
-`LauncherActionsTest.kt`). The Dart side: `LauncherPrompt`
-(`lib/features/agent_attention/domain/launcher_prompt.dart`) and
-`AgentAttentionController.completeLauncherAction`.
+`LauncherActionsTest.kt`) and `LauncherAnswerQueue.kt` (the answers held
+for the unlock, unit-tested in `LauncherAnswerQueueTest.kt`). The Dart
+side: `LauncherPrompt`
+(`lib/features/agent_attention/domain/launcher_prompt.dart`),
+`AgentAttentionController.completeLauncherAction` and
+`deliverQueuedLauncherAnswer`, and `ProjectLayoutController.launcherFacts`.
 
 ## Discovery
 
@@ -80,6 +85,8 @@ Ties keep Conductore's own order.
 | `options` | string or null | Contract 2. A JSON array of the choice labels, e.g. `["Allow","Always allow","Deny"]`. Null when there are no choices. |
 | `answerable` | int or null | Contract 2. 1: the launcher may answer (`choose` when `options` is set, else `reply`); 0: it may not. Null unless `state` is `needsInput` or `blocked`. |
 | `answer_note` | string or null | Contract 2. When `answerable` is 0: why, for the sheet (e.g. `High-risk request: open it in Conductore`). Null otherwise. |
+| `project` | string or null | Contract 3. The display name of the project Conductore's project view puts the agent in (its sheprd / sidebar.toml layout, else the repo the agent reports); null for Other. |
+| `active` | int | Contract 3. 1 when the project view's "active" filter keeps the agent, else 0 (below). |
 
 ## `content://<authority>/summary`
 
@@ -92,7 +99,7 @@ Exactly one row.
 | `updated_at` | long | Epoch ms of the last snapshot (0 before the first). |
 | `limit_5h_pct` | int | Claude's 5-hour window used, 0-100 (0 once it reset); -1 unknown. |
 | `limit_7d_pct` | int | Claude's weekly window, the same way. |
-| `contract_version` | int | `2` (this page). Absent (projection fails) from a Conductore with contract 1. |
+| `contract_version` | int | `3` (this page); `2` from a Conductore before CON-119. Absent (projection fails) from a Conductore with contract 1. Yoke treats a missing column as null. |
 
 ## `content://<authority>/themes`
 
@@ -171,6 +178,29 @@ stopped monitoring) opens the agents dashboard instead.
 - When Conductore's engine goes away, the snapshot is marked not monitoring:
   `items` is empty and `monitoring` is 0, the limits and the PC theme stay.
 
+### `project` and `active` (contract 3)
+
+Dart writes each agent's project and a `busy` flag into the snapshot
+(and the view's recent-hours window once, `recentHours`); the provider
+judges `active` when queried, so it turns 0 on time without a new
+snapshot:
+
+- `active` is 1 when the agent is busy or changed state within the
+  project view's recent hours (its "Recent hours" setting, from sheprd or
+  sidebar.toml, default 24).
+- Busy: `working`, `needsInput`, `blocked` or `finished` (the dots the
+  view's filter keeps). With "Sync with sheprd" on, sheprd's own active
+  view decides instead for the agents it lists (kept in it: busy; taken
+  out of it by hand: not).
+- `project` is placed the way the agents dashboard places an agent
+  (`ProjectLayoutController.projectOfAgent`): the layout's explicit member
+  or rule, else Other; with no layout projects, the repo the agent
+  reports. The phone home's Projects mode groups whole
+  workspaces from the machines' live boards, which the provider never
+  has; both read the same layout, so the names match.
+- A workspace open in the app keeps all its rows in the view's "active"
+  filter; the provider judges each agent on its own.
+
 ## Contract 2: questions and answers (CON-082)
 
 ### What `/items` carries
@@ -223,7 +253,9 @@ val error = result?.getString("error")
   When Conductore has not finished after 5 seconds, the call returns
   `ok = true` and `queued = true`: the answer is still being sent and its
   outcome is not known (a failure then shows nowhere but in the app's own
-  state). Otherwise `ok` is the real outcome.
+  state). Contract 3: an answer held for the unlock returns `ok = true`,
+  `queued = true` and `pending_unlock = true` (below). Otherwise `ok` is
+  the real outcome.
 - After a successful answer Conductore calls `notifyChange` on `/items` (and
   the next snapshot updates it again).
 - Call it off the main thread: it may block for up to 5 seconds.
@@ -234,9 +266,9 @@ checked on the calling UID inside `call`; a caller without it gets a
 
 | `error` | When |
 | --- | --- |
-| `Unlock your phone first` | The device is locked (`KeyguardManager.isDeviceLocked`), the same rule as the notification buttons. |
-| `Open Conductore first` | Conductore's engine is not running or monitors no machine, or its app lock is up (the answer is only taken on its unlocked home page). |
-| `Unlock Conductore first` | Conductore's app lock is closed, or would be: the app has been in the background longer than its re-lock delay (for a delay above 15 minutes, that long has passed since the last unlock). The device lock alone is not enough. |
+| `Unlock your phone first` | The device is locked (`KeyguardManager.isDeviceLocked`), the same rule as the notification buttons. Contract 3 does not change it: nothing is held. |
+| `Open Conductore first` | Conductore's engine is not running and left nothing to answer (the row is gone), or an answer could not be held (below). |
+| `Unlock Conductore first` | Conductore's app lock is closed and the answer could not be held (the encrypted store failed). Since contract 3 a closed app lock otherwise holds the answer. |
 | `That agent isn't waiting any more` | Unknown or stale item id, an agent no longer `needsInput`/`blocked`, or a request answered meanwhile (also an option that no longer matches the request). |
 | the row's `answer_note` | The row is not answerable (high risk, terminal-only, several questions, ...). |
 | `Pick one of its options` / `It takes a reply, not an option` | `reply` on a row with `options`, or `choose` on one without. |
@@ -254,9 +286,8 @@ to the running app over the notification channel
 completes it with the same code a notification button uses
 (`completePermissionAction`: `decide` for Allow / Always / Deny and answers,
 `send` for a reply), after checking it against what it would offer for that
-agent now. Unlike a notification tap it is not queued for later: when the
-app cannot take it, the call says so (`Open Conductore first`), and a failure
-does not rewrite the agent's notification.
+agent now. A failure does not rewrite the agent's notification. When the
+app cannot take it now, the answer is held (contract 3, below).
 
 ### Differences from Yoke's proposal
 
@@ -275,3 +306,51 @@ does not rewrite the agent's notification.
   `ok = false`.
 - The extra refusals above (locked phone, app not running, one action per
   item, length and index checks).
+
+## Contract 3: answers held while Conductore is locked (CON-119)
+
+`reply` and `choose` no longer fail while Conductore's app lock is up. The
+answer is checked exactly as before (the row's prompt, the option index,
+the text), then held, and the call returns `ok = true`, `queued = true`,
+`pending_unlock = true` (Bundle booleans). Nothing is sent until the user
+unlocks Conductore.
+
+- Held when the app lock is closed (or would be), when Conductore's engine
+  is not running but the row still stands (the process died: the stored
+  snapshot and prompts outlive it, and the answer goes after the next
+  start and unlock), or when the running app could not take it (locked
+  meanwhile, still starting).
+- The device lock still refuses (`Unlock your phone first`): nothing is
+  held from the lock screen.
+- Storage: Conductore's own preferences file `launcher_answers`, encrypted
+  with AES-256-GCM under a key in the Android Keystore (it never leaves
+  the keystore). It survives process death. At most one answer per row (a
+  newer one replaces the older), at most 20.
+- Expiry: 15 minutes after it was held (the companion's permission wait).
+  An expired answer is never sent.
+- While answers wait, Conductore shows a notification, `1 answer waits for
+  you to unlock Conductore` (`N answers wait ...`). It names no agent and
+  carries no answer text; it goes when they are taken, or by itself when
+  the last one expires (Android 8+).
+- Delivery: right after the next unlock (on the unlocked home page), in
+  the order held. For each, Conductore waits for that machine's monitor
+  (up to 20 seconds), reads its status again, and sends the answer only
+  when the agent still waits on the same request (a reply: the same wait,
+  i.e. the agent has not changed state since). Otherwise it is dropped and
+  Conductore says so in the app: `Your answer to api on dev wasn't sent: it
+  was answered elsewhere.` (or `it waited more than 15 minutes`, or the
+  reason it failed). A sent one says `Sent your answer to api on dev.`
+- If the store fails, the call fails as contract 2 did
+  (`Unlock Conductore first` / `Open Conductore first`).
+- A held answer changes nothing in `/items` until it is sent; the next
+  snapshot after sending updates the row.
+
+## Changelog
+
+- 3 (CON-119): `reply` / `choose` hold the answer while Conductore is
+  locked or not running (`pending_unlock`), encrypted, for 15 minutes, and
+  send it after the next unlock if the agent still waits on the same
+  request. `/items` gains `project` and `active`; `contract_version` is 3.
+- 2 (CON-082): `question`, `options`, `answerable`, `answer_note`, and
+  `call` with `reply` / `choose`.
+- 1 (CON-075): `/items`, `/summary`, `/themes`, `/pc_theme`.
