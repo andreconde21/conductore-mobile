@@ -687,6 +687,21 @@ class SettingsSectionBody extends StatelessWidget {
     final verifier = services.hostKeyVerifier;
     final lockNow = services.onLockNow;
     return [
+      if (lockNow != null) ...[
+        SettingsCard(
+          child: ListTile(
+            key: const ValueKey('settings-lock-now'),
+            leading: const Icon(Icons.lock_outline_rounded),
+            title: const Text('Lock now'),
+            subtitle: const Text('Closes every session until you unlock.'),
+            onTap: () async {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+              await lockNow();
+            },
+          ),
+        ),
+        _gap,
+      ],
       SettingsCard(
         child: ListTile(
           leading: const Icon(Icons.fingerprint_rounded),
@@ -702,21 +717,6 @@ class SettingsSectionBody extends StatelessWidget {
       if (services.appLock case final appLock?) ...[
         _gap,
         SettingsCard(child: _RelockDelayTile(controller: appLock)),
-      ],
-      if (lockNow != null) ...[
-        _gap,
-        SettingsCard(
-          child: ListTile(
-            key: const ValueKey('settings-lock-now'),
-            leading: const Icon(Icons.lock_outline_rounded),
-            title: const Text('Lock now'),
-            subtitle: const Text('Closes every session until you unlock.'),
-            onTap: () async {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-              await lockNow();
-            },
-          ),
-        ),
       ],
       if (verifier != null) ...[
         _gap,

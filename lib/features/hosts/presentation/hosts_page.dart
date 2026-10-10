@@ -85,13 +85,12 @@ import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/usage/presentation/usage_explorer_view.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
-import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
-/// The home page, Moshi-style: a slim bar (lock, machine filter chip,
-/// settings), the open sessions of the filtered machines as large live
+/// The home page, Moshi-style: a slim bar (machine filter chip, agents,
+/// search, settings), the open sessions of the filtered machines as large live
 /// previews or compact rows, then their other workspaces (tmux sessions and
 /// Herdr workspaces not open in the app yet), grouped by machine, with one
 /// notice per machine that cannot be listed.
@@ -651,12 +650,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                       slivers: centerSliversOnDesktop([
                         SliverToBoxAdapter(
                           child: HomeTopBar(
-                            onLock: _lock,
                             onSettings: _openSettings,
-                            onSwitcher: () => unawaited(_openSwitcher()),
                             onSearch: () =>
                                 unawaited(_openSwitcher(focusSearch: true)),
-                            onGuide: _guideButton(context),
                             onAgents: DigestScope.maybeOf(context) == null
                                 ? null
                                 : _openAgentsDashboard,
@@ -697,16 +693,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         ),
       ),
     );
-  }
-
-  /// The voice guide's button, when the guide is on (it hides when
-  /// turned off in Settings).
-  VoidCallback? _guideButton(BuildContext context) {
-    final guide = GuideScope.maybeOf(context);
-    if (guide == null || !widget.themeController.voice.guide.enabled) {
-      return null;
-    }
-    return guide.start;
   }
 
   /// The desktop shell: sidebar, tabs and splits, dashboard.

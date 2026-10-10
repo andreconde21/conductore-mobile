@@ -69,26 +69,29 @@ class SessionTabs extends StatefulWidget {
   /// Height of one tab chip.
   static const tabHeight = 30.0;
 
-  /// Short display name for [session]: the target part of a derived title
-  /// ("Host: Infrastructure" shows "Infrastructure") when every open
-  /// session is on the same machine, the full title otherwise.
+  /// Short display name for [session]: the project or agent part of a
+  /// derived title ("Host: Infrastructure" shows "Infrastructure"), so a
+  /// narrow tab never ends in the machine's name. The full title stays when
+  /// another open session on a different machine has the same target.
   static String labelFor(
     TerminalSessionController session,
     List<TerminalSessionController> sessions,
   ) {
     final title = session.title;
-    final machine = baseHostId(session.host.id);
-    final oneMachine = sessions.every(
-      (other) => baseHostId(other.host.id) == machine,
-    );
     final cut = title.lastIndexOf(': ');
-    if (!oneMachine ||
-        ConnectTarget.keyFromSessionHostId(session.host.id) == null ||
+    if (ConnectTarget.keyFromSessionHostId(session.host.id) == null ||
         cut <= 0 ||
         cut + 2 >= title.length) {
       return title;
     }
-    return title.substring(cut + 2);
+    final target = title.substring(cut + 2);
+    final machine = baseHostId(session.host.id);
+    final clash = sessions.any(
+      (other) =>
+          baseHostId(other.host.id) != machine &&
+          other.title.endsWith(': $target'),
+    );
+    return clash ? title : target;
   }
 
   @override

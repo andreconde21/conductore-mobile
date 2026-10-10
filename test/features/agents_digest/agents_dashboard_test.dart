@@ -531,10 +531,8 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: ShellDashboard(
-            needsYou: const [],
             sessions: const [],
             otherGroups: const [],
-            onOpenNeedsYou: (_) {},
             onNewSession: () {},
             agents: const Text('agents here'),
           ),
@@ -557,7 +555,6 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: HomeTopBar(
-            onLock: () {},
             onSettings: () {},
             onAgents: () => opened++,
             agentsBadge: 2,
@@ -570,9 +567,7 @@ void main() {
     expect(opened, 1);
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: HomeTopBar(onLock: () {}, onSettings: () {}),
-        ),
+        home: Scaffold(body: HomeTopBar(onSettings: () {})),
       ),
     );
     expect(find.byKey(const ValueKey('home-agents-dashboard')), findsNothing);
