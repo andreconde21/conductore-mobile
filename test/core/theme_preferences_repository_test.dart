@@ -254,8 +254,8 @@ void main() {
       expect(preferences.terminalToolbarStyle, TerminalToolbarStyle.keyRows);
     });
 
-    test('defaults the pill buttons to the Moshi set plus Herdr and persists '
-        'a reordered list', () async {
+    test('defaults the pill buttons to Ctrl, Esc, Tab, Herdr, Paste and Chat '
+        'and persists a reordered list', () async {
       final storage = InMemorySecureStorage();
       final repository = ThemePreferencesRepository(storage);
 
@@ -266,10 +266,8 @@ void main() {
         TerminalPillButton.esc,
         TerminalPillButton.tab,
         TerminalPillButton.herdr,
-        TerminalPillButton.reconnect,
         TerminalPillButton.paste,
         TerminalPillButton.chat,
-        TerminalPillButton.keyboard,
       ]);
 
       const custom = [
@@ -304,6 +302,54 @@ void main() {
       expect(
         (await repository.load()).terminalPillItems,
         defaultTerminalPillItems,
+      );
+    });
+
+    test('a pill list saved before CON-106 that is the old default gets the '
+        'new default; a customized one is kept', () async {
+      final storage = InMemorySecureStorage();
+      await storage.write(
+        key: 'conduit.terminal_pill_items.v1',
+        value:
+            '["ctrl","esc","tab","herdr","reconnect","paste","chat",'
+            '"keyboard"]',
+      );
+      final repository = ThemePreferencesRepository(storage);
+      expect(
+        (await repository.load()).terminalPillItems,
+        defaultTerminalPillItems,
+      );
+
+      await storage.write(
+        key: 'conduit.terminal_pill_items.v1',
+        value: '["ctrl","esc","reconnect","dictate","keyboard"]',
+      );
+      expect((await repository.load()).terminalPillItems, const [
+        TerminalPillItem.button(TerminalPillButton.ctrl),
+        TerminalPillItem.button(TerminalPillButton.esc),
+        TerminalPillItem.button(TerminalPillButton.reconnect),
+        TerminalPillItem.button(TerminalPillButton.dictate),
+        TerminalPillItem.button(TerminalPillButton.keyboard),
+      ]);
+    });
+
+    test('the old default chosen again after CON-106 stays', () async {
+      final storage = InMemorySecureStorage();
+      await storage.write(
+        key: 'conduit.terminal_pill_items.v1',
+        value: '["esc"]',
+      );
+      final repository = ThemePreferencesRepository(storage);
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.everforest,
+          terminalPillItems: legacyDefaultTerminalPillItems,
+        ),
+      );
+      expect(
+        (await repository.load()).terminalPillItems,
+        legacyDefaultTerminalPillItems,
       );
     });
 

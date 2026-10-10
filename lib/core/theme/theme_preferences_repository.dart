@@ -158,7 +158,11 @@ class ThemePreferencesRepository {
   static const _chatButtonHintSeenKey = 'conduit.chat_button_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
   static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
-  static const _terminalPillItemsKey = 'conduit.terminal_pill_items.v1';
+  static const _terminalPillItemsKey = 'conduit.terminal_pill_items.v2';
+
+  /// The pill list before CON-106, saved even when it was the default;
+  /// read only when there is no v2 list yet.
+  static const _legacyTerminalPillItemsKey = 'conduit.terminal_pill_items.v1';
   static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
   static const _speechLanguageKey = 'conduit.speech_language.v1';
@@ -243,6 +247,9 @@ class ThemePreferencesRepository {
     final rawComposeSubmitEnter = await read(_composeSubmitEnterKey);
     final rawTerminalToolbarStyle = await read(_terminalToolbarStyleKey);
     final rawTerminalPillItems = await read(_terminalPillItemsKey);
+    final rawLegacyTerminalPillItems = rawTerminalPillItems == null
+        ? await _storage.read(key: _legacyTerminalPillItemsKey)
+        : null;
 
     final rawMenuButtonsEnabled = await read(_menuButtonsEnabledKey);
     final rawTerminalGestures = await read(_terminalGesturesKey);
@@ -293,7 +300,11 @@ class ThemePreferencesRepository {
         (style) => style.name == rawTerminalToolbarStyle,
         orElse: () => TerminalToolbarStyle.floatingPill,
       ),
-      terminalPillItems: _parseTerminalPillItems(rawTerminalPillItems),
+      terminalPillItems: rawTerminalPillItems == null
+          ? migrateLegacyPillItems(
+              _parseTerminalPillItems(rawLegacyTerminalPillItems),
+            )
+          : _parseTerminalPillItems(rawTerminalPillItems),
       menuButtonsEnabled:
           rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),

@@ -92,9 +92,23 @@ class TerminalPillItem {
   String toString() => 'TerminalPillItem(${encode()})';
 }
 
-/// Moshi's pill (Ctrl, Esc, Tab, navigator, reconnect, paste, chat,
-/// keyboard) with Herdr as the navigator.
+/// The pill out of the box: Ctrl, Esc, Tab, Herdr, Paste and Chat, then
+/// the ⋯ button (CON-106). Redraw (Ctrl+L) is in the key rows behind ⋯,
+/// Reconnect in the ⋮ menu, and a tap on the terminal opens the keyboard;
+/// all of them can be added back from the configurator.
 const defaultTerminalPillItems = [
+  TerminalPillItem.button(TerminalPillButton.ctrl),
+  TerminalPillItem.button(TerminalPillButton.esc),
+  TerminalPillItem.button(TerminalPillButton.tab),
+  TerminalPillItem.button(TerminalPillButton.herdr),
+  TerminalPillItem.button(TerminalPillButton.paste),
+  TerminalPillItem.button(TerminalPillButton.chat),
+];
+
+/// The default before CON-106 (Moshi's pill, with Herdr as the
+/// navigator). The app saved it along with every other setting, so a
+/// stored list equal to it was never chosen and gets the new default.
+const legacyDefaultTerminalPillItems = [
   TerminalPillItem.button(TerminalPillButton.ctrl),
   TerminalPillItem.button(TerminalPillButton.esc),
   TerminalPillItem.button(TerminalPillButton.tab),
@@ -104,3 +118,19 @@ const defaultTerminalPillItems = [
   TerminalPillItem.button(TerminalPillButton.chat),
   TerminalPillItem.button(TerminalPillButton.keyboard),
 ];
+
+/// [items] as stored before CON-106: the old default becomes the new
+/// one, any other list is the user's own and stays as it is. Synced and
+/// backed-up lists are taken as they come: there the old default may be
+/// a choice made since.
+List<TerminalPillItem> migrateLegacyPillItems(List<TerminalPillItem> items) {
+  if (items.length != legacyDefaultTerminalPillItems.length) {
+    return items;
+  }
+  for (var i = 0; i < items.length; i++) {
+    if (items[i] != legacyDefaultTerminalPillItems[i]) {
+      return items;
+    }
+  }
+  return defaultTerminalPillItems;
+}
