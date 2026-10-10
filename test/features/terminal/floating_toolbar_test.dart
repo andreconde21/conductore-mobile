@@ -417,11 +417,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Quick prompts'), findsNothing);
-      await tester.fling(
-        find.byKey(_pill),
-        const Offset(0, -200),
-        1500,
-      );
+      await tester.fling(find.byKey(_pill), const Offset(0, -200), 1500);
       await tester.pumpAndSettle();
       expect(find.text('Quick prompts'), findsNothing);
     });
