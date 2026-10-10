@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
-import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
