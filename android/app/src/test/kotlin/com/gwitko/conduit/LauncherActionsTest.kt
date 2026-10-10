@@ -43,6 +43,10 @@ class LauncherActionsTest {
         var held: ((LauncherActions.Outcome?) -> Unit)? = null
         var changes = 0
 
+        /** Answers held for the unlock; [canHold] false: the store failed. */
+        val heldAnswers = mutableListOf<Pair<String, Map<String, String>>>()
+        var canHold = true
+
         override fun callerPermitted() = permitted
         override fun deviceLocked() = locked
         override fun appListening() = listening
@@ -55,7 +59,13 @@ class LauncherActionsTest {
         override fun itemsChanged() {
             changes++
         }
+        override fun hold(prompt: LauncherPrompt, action: Map<String, String>): Boolean {
+            if (canHold) heldAnswers.add(prompt.id to action)
+            return canHold
+        }
     }
+
+    private val held = LauncherActions.Outcome(ok = true, error = null, queued = true, pendingUnlock = true)
 
     private fun setUp(): Pair<FakeEnv, LauncherActions> {
         val env = FakeEnv()
@@ -95,25 +105,85 @@ class LauncherActionsTest {
     }
 
     @Test
-    fun aLockedAppIsRefusedEvenOnAnUnlockedPhone() {
+    fun aLockedAppHoldsTheAnswerForTheUnlock() {
         val (env, actions) = setUp()
         env.appLocked = true
-        assertEquals(LauncherActions.Outcome(false, "Unlock Conductore first"), actions.choose("h/s1", 0))
-        assertEquals(LauncherActions.Outcome(false, "Unlock Conductore first"), actions.reply("h/s3", "main"))
+        assertEquals(held, actions.choose("h/s1", 0))
+        assertEquals(held, actions.reply("h/s3", "main"))
+        // Nothing reaches the app until it is unlocked.
         assertTrue(env.dispatched.isEmpty())
+        assertEquals(
+            listOf(
+                "h/s1" to mapOf("hostId" to "h", "agentId" to "s1", "requestId" to "r1", "verdict" to "allow", "text" to ""),
+                "h/s3" to mapOf("hostId" to "h", "agentId" to "s3", "requestId" to "reply", "verdict" to "reply", "text" to "main"),
+            ),
+            env.heldAnswers,
+        )
+        // Not answered yet: /items has not changed.
+        assertEquals(0, env.changes)
     }
 
     @Test
-    fun anAppThatIsNotRunningIsRefused() {
+    fun aLockedPhoneStillRefusesEvenWithTheAppLocked() {
         val (env, actions) = setUp()
+        env.locked = true
+        env.appLocked = true
+        assertEquals(LauncherActions.Outcome(false, "Unlock your phone first"), actions.reply("h/s3", "main"))
+        assertTrue(env.heldAnswers.isEmpty())
+    }
+
+    @Test
+    fun aHeldAnswerIsCheckedLikeAnyOther() {
+        val (env, actions) = setUp()
+        env.appLocked = true
+        assertEquals("High-risk request: open it in Conductore", actions.choose("h/s4", 0).error)
+        assertEquals("No option 3: it has 3 (0 to 2)", actions.choose("h/s1", 3).error)
+        assertEquals("Type a message first", actions.reply("h/s3", " ").error)
+        assertEquals("That agent isn't waiting any more", actions.choose("h/gone", 0).error)
+        assertTrue(env.heldAnswers.isEmpty())
+    }
+
+    @Test
+    fun anAnswerThatCannotBeStoredIsRefusedAsBefore() {
+        val (env, actions) = setUp()
+        env.canHold = false
+        env.appLocked = true
+        assertEquals(LauncherActions.Outcome(false, "Unlock Conductore first"), actions.choose("h/s1", 0))
+        env.appLocked = false
         env.listening = false
         assertEquals(LauncherActions.Outcome(false, "Open Conductore first"), actions.reply("h/s3", "go"))
-        assertTrue(env.dispatched.isEmpty())
     }
 
     @Test
-    fun dartNotTakingItMeansOpenConductore() {
+    fun anAppThatIsNotRunningHoldsItForTheNextStart() {
         val (env, actions) = setUp()
+        env.listening = false
+        assertEquals(held, actions.reply("h/s3", "go"))
+        assertTrue(env.dispatched.isEmpty())
+        assertEquals("h/s3", env.heldAnswers.single().first)
+    }
+
+    @Test
+    fun anAppThatIsNotRunningWithoutTheAgentSaysOpenConductore() {
+        // A stopped engine left no prompts: nothing to hold.
+        val (env, actions) = setUp()
+        env.listening = false
+        env.prompts.clear()
+        assertEquals(LauncherActions.Outcome(false, "Open Conductore first"), actions.reply("h/s3", "go"))
+        assertTrue(env.heldAnswers.isEmpty())
+    }
+
+    @Test
+    fun dartNotTakingItHoldsTheAnswer() {
+        val (env, actions) = setUp()
+        env.outcome = null
+        assertEquals(held, actions.choose("h/s1", 0))
+        // Locked between the check and Dart: held as well.
+        env.outcome = LauncherActions.Outcome(false, "Unlock Conductore first")
+        assertEquals(held, actions.choose("h/s2", 0))
+        assertEquals(listOf("h/s1", "h/s2"), env.heldAnswers.map { it.first })
+        assertEquals(0, env.changes)
+        env.canHold = false
         env.outcome = null
         assertEquals(LauncherActions.Outcome(false, "Open Conductore first"), actions.choose("h/s1", 0))
     }

@@ -9,7 +9,9 @@ import java.security.SecureRandom
  * One agent line as rendered by the widget and tile. Mirrors
  * `AgentStatusEntry` on the Dart side. The ids (where a tap goes, as in
  * [DashboardLine]) and [changedAtMillis] (0 unknown) are empty in payloads
- * written before the launcher details provider (CON-075).
+ * written before the launcher details provider (CON-075). [project] (null:
+ * Other) and [busy] (null: unknown, judged from [state]) feed the
+ * launcher's `project` and `active` columns (CON-119).
  */
 data class AgentStatusLine(
     val name: String,
@@ -22,6 +24,8 @@ data class AgentStatusLine(
     val tab: String = "",
     val pane: String = "",
     val changedAtMillis: Long = 0L,
+    val project: String? = null,
+    val busy: Boolean? = null,
 ) {
     /** Needs input or blocked: the states a human should act on. */
     val urgent: Boolean get() = state == "needsInput" || state == "blocked"
@@ -63,6 +67,7 @@ data class AgentStatusLimitRing(val label: String, val usedPct: Int, val level: 
  * Mirrors `AgentStatusSnapshot` on the Dart side. [dashboard] is always
  * set: from payload 3 as Dart derived it, from older ones the attention
  * count alone ([WidgetDashboard.legacy]). [theme] is null before payload 3.
+ * [recentHours] is the project view's "active" window (CON-119).
  */
 data class AgentStatusSnapshot(
     val monitoring: Boolean,
@@ -74,10 +79,14 @@ data class AgentStatusSnapshot(
     val dashboard: WidgetDashboard = WidgetDashboard.legacy(attentionCount, agents),
     val theme: WidgetTheme? = null,
     val pcTheme: LauncherPcTheme? = null,
+    val recentHours: Int = DEFAULT_RECENT_HOURS,
 ) {
     fun limit(label: String): AgentStatusLimitRing? = limits.firstOrNull { it.label == label }
 
     companion object {
+        /** The project view's default "active" window (Dart's `ProjectPrefs.defaultRecentHours`). */
+        const val DEFAULT_RECENT_HOURS = 24
+
         /** Reads every payload version; null for something that is not one. */
         fun parse(json: String): AgentStatusSnapshot? = try {
             val root = JSONObject(json)
@@ -98,6 +107,8 @@ data class AgentStatusSnapshot(
                     tab = agent.optString("tab"),
                     pane = agent.optString("pane"),
                     changedAtMillis = agent.optLong("changedAt", 0L),
+                    project = agent.optString("project").takeIf { agent.has("project") && !agent.isNull("project") && it.isNotEmpty() },
+                    busy = if (agent.has("busy") && !agent.isNull("busy")) agent.optBoolean("busy") else null,
                 )
             }
             AgentStatusSnapshot(
@@ -119,6 +130,7 @@ data class AgentStatusSnapshot(
                     ?: WidgetDashboard.legacy(attentionCount, agents),
                 theme = if (version >= 3) parseTheme(root.optJSONObject("theme")) else null,
                 pcTheme = LauncherPcTheme.parse(root.optJSONObject("pcTheme")),
+                recentHours = root.optInt("recentHours", DEFAULT_RECENT_HOURS).takeIf { it > 0 } ?: DEFAULT_RECENT_HOURS,
             )
         } catch (_: Exception) {
             null

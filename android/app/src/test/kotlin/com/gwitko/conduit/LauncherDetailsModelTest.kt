@@ -87,11 +87,11 @@ class LauncherDetailsModelTest {
         val snapshot = AgentStatusSnapshot.parse(payload)
         // 7d's window already reset at this time: 0, not the stale 85.
         assertArrayEquals(
-            arrayOf<Any?>(1, 2, 1790000000000L, 42, 0, 2),
+            arrayOf<Any?>(1, 2, 1790000000000L, 42, 0, 3),
             LauncherDetailsModel.summary(snapshot, 1790000000000L),
         )
         val noLimits = AgentStatusSnapshot.parse(payload.replace(""""limits":[""", """"x":["""))
-        assertArrayEquals(arrayOf<Any?>(1, 2, 1790000000000L, -1, -1, 2), LauncherDetailsModel.summary(noLimits, 0L))
+        assertArrayEquals(arrayOf<Any?>(1, 2, 1790000000000L, -1, -1, 3), LauncherDetailsModel.summary(noLimits, 0L))
     }
 
     // As Dart's LauncherPrompt.encodeAll writes them (CON-082).
@@ -245,5 +245,60 @@ class LauncherDetailsModelTest {
         val stored = AgentStatusSnapshot.parse(AgentStatusSnapshot.notMonitoring(withPc)!!)!!
         assertEquals("nord", stored.pcTheme!!.name)
         assertTrue(stored.agents.isEmpty())
+    }
+
+    // Contract 3 (CON-119): project and active.
+
+    private val hour = 3_600_000L
+
+    @Test
+    fun projectIsTheGroupNameOrNullForOther() {
+        val withProjects = payload
+            .replace(""""pane":"p1",""", """"pane":"p1","project":"Conductore",""")
+            .replace(""""agentId":"s2",""", """"agentId":"s2","project":null,""")
+        val rows = LauncherDetailsModel.items(AgentStatusSnapshot.parse(withProjects), tokens, pkg, activity, nowMillis = 1790000000000L)
+        assertEquals("Conductore", column(rows.first { it[1] == "api" }, "project"))
+        assertNull(column(rows.first { it[1] == "ops" }, "project"))
+        // An older payload, or no project: null (Other).
+        assertNull(column(rows.first { it[1] == "web" }, "project"))
+        assertEquals(LauncherDetailsModel.ITEM_COLUMNS.size, rows.first().size)
+    }
+
+    @Test
+    fun activeKeepsBusyAgentsAndRecentChangesWithinTheViewsWindow() {
+        val now = 1789999900000L + 30 * hour
+        val rows = LauncherDetailsModel.items(AgentStatusSnapshot.parse(payload), tokens, pkg, activity, nowMillis = now)
+        fun active(name: String) = column(rows.first { it[1] == name }, "active")
+        // Needing the user, working or finished: always (the view's busy dots).
+        assertEquals(1, active("api"))
+        assertEquals(1, active("ops"))
+        assertEquals(1, active("web"))
+        assertEquals(1, active("done"))
+        // Idle with no known change: not active.
+        assertEquals(0, active("old"))
+        val idle = payload.replace(
+            """"state":"idle","label":"Idle","hostId":"host-1","agentId":"s5"""",
+            """"state":"idle","label":"Idle","hostId":"host-1","agentId":"s5","changedAt":${now - 23 * hour}""",
+        )
+        val snapshot = AgentStatusSnapshot.parse(idle)!!
+        val agent = snapshot.agents.first { it.name == "old" }
+        // The default window is 24 hours; the payload's own wins.
+        assertEquals(24, snapshot.recentHours)
+        assertEquals(1, LauncherDetailsModel.active(agent, snapshot.recentHours, now))
+        assertEquals(0, LauncherDetailsModel.active(agent, snapshot.recentHours, now + hour))
+        val narrow = AgentStatusSnapshot.parse(idle.replaceFirst("{", """{"recentHours":4,"""))!!
+        assertEquals(0, LauncherDetailsModel.active(agent, narrow.recentHours, now))
+    }
+
+    @Test
+    fun dartsBusyFlagWinsOverTheState() {
+        // With "Sync with sheprd", sheprd's active view decides: a working
+        // agent taken out of it is not busy, a kept idle one is.
+        val synced = payload
+            .replace(""""state":"working","label":"Working",""", """"state":"working","label":"Working","busy":false,""")
+            .replace(""""state":"idle","label":"Idle",""", """"state":"idle","label":"Idle","busy":true,""")
+        val rows = LauncherDetailsModel.items(AgentStatusSnapshot.parse(synced), tokens, pkg, activity, nowMillis = 1789999900000L + 30 * hour)
+        assertEquals(0, column(rows.first { it[1] == "web" }, "active"))
+        assertEquals(1, column(rows.first { it[1] == "old" }, "active"))
     }
 }

@@ -103,6 +103,13 @@ object LauncherPromptStore {
  * The action runs in the app: [Env.dispatch] hands it to Dart, which
  * answers it the way a notification's button does, and the call waits up
  * to its timeout for the outcome. One action per item at a time.
+ *
+ * Contract 3 (CON-119): while the app lock is up, or the engine is not
+ * running (or Dart cannot take it yet), a valid answer is held
+ * ([Env.hold], encrypted, 15 minutes) and the call returns `ok`, `queued`
+ * and `pendingUnlock`; Dart sends it after the next unlock, once it has
+ * checked that the agent still waits on the same request. The device
+ * lock still refuses.
  */
 class LauncherActions(private val env: Env, private val clock: () -> Long = System::currentTimeMillis) {
     interface Env {
@@ -128,10 +135,24 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
 
         /** `notifyChange` on `/items`. */
         fun itemsChanged()
+
+        /**
+         * Holds [action] on [prompt]'s item until the app is unlocked
+         * ([LauncherAnswerStore]); false when it could not be stored.
+         */
+        fun hold(prompt: LauncherPrompt, action: Map<String, String>): Boolean
     }
 
-    /** What the call returns: `ok`, `error` and, when still running, `queued`. */
-    data class Outcome(val ok: Boolean, val error: String?, val queued: Boolean = false)
+    /**
+     * What the call returns: `ok`, `error`, `queued` (when still running,
+     * or held) and `pending_unlock` (held until the app is unlocked).
+     */
+    data class Outcome(
+        val ok: Boolean,
+        val error: String?,
+        val queued: Boolean = false,
+        val pendingUnlock: Boolean = false,
+    )
 
     private val inFlight = ConcurrentHashMap<String, Long>()
 
@@ -147,9 +168,10 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
         }
         if (method != METHOD_REPLY && method != METHOD_CHOOSE) return fail("Unknown method $method")
         if (env.deviceLocked()) return fail(UNLOCK_FIRST)
-        if (!env.appListening()) return fail(OPEN_FIRST)
-        if (env.appLocked()) return fail(UNLOCK_APP_FIRST)
-        val prompt = itemId?.let(env::prompt) ?: return fail(STALE)
+        val listening = env.appListening()
+        // A stopped engine leaves no prompts (and lists no agents), unless
+        // the process died: then the stored ones are answered on next start.
+        val prompt = itemId?.let(env::prompt) ?: return fail(if (listening) STALE else OPEN_FIRST)
         val action = when (method) {
             METHOD_REPLY -> {
                 val verdict = prompt.replyVerdict
@@ -167,6 +189,8 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
                 actionOf(prompt, option.verdict, if (option.verdict == ANSWER) option.label else "")
             }
         }
+        if (!listening) return hold(prompt, action, OPEN_FIRST)
+        if (env.appLocked()) return hold(prompt, action, UNLOCK_APP_FIRST)
         val now = clock()
         val started = inFlight.putIfAbsent(prompt.id, now)
         if (started != null) {
@@ -176,9 +200,16 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
         val latch = CountDownLatch(1)
         var result: Outcome? = null
         var answered = false
-        env.dispatch(action) { outcome ->
+        env.dispatch(action) { taken ->
             inFlight.remove(prompt.id, now)
-            if (outcome?.ok == true) env.itemsChanged()
+            // Dart could not take it after all (locked meanwhile, still
+            // starting): held like an answer made while locked.
+            val outcome = if (taken == null || taken.error == UNLOCK_APP_FIRST || taken.error == OPEN_FIRST) {
+                hold(prompt, action, taken?.error ?: OPEN_FIRST)
+            } else {
+                taken
+            }
+            if (outcome.ok && !outcome.pendingUnlock) env.itemsChanged()
             synchronized(latch) {
                 result = outcome
                 answered = true
@@ -191,6 +222,10 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
             return result ?: fail(OPEN_FIRST)
         }
     }
+
+    /** [action] held for the unlock, or [refusal] when it cannot be stored. */
+    private fun hold(prompt: LauncherPrompt, action: Map<String, String>, refusal: String): Outcome =
+        if (env.hold(prompt, action)) HELD else fail(refusal)
 
     private fun actionOf(prompt: LauncherPrompt, verdict: String, text: String) = mapOf(
         "hostId" to prompt.hostId,
@@ -210,6 +245,10 @@ class LauncherActions(private val env: Env, private val clock: () -> Long = Syst
         const val RESULT_OK = "ok"
         const val RESULT_ERROR = "error"
         const val RESULT_QUEUED = "queued"
+        const val RESULT_PENDING_UNLOCK = "pending_unlock"
+
+        /** A held answer (contract 3): accepted, sent after the next unlock. */
+        val HELD = Outcome(ok = true, error = null, queued = true, pendingUnlock = true)
 
         /** The longest reply accepted. */
         const val MAX_TEXT = 4000
