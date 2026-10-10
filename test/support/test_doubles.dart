@@ -899,9 +899,14 @@ class InMemorySecureStorage extends FlutterSecureStorage {
 
 /// A digest that asks no machine: the Agents screen then builds every card
 /// from the agent monitor's status alone, and scripted runners see only
-/// the monitor's commands. Dispose it in a tear-down.
-DigestController monitorOnlyDigest() =>
-    DigestController(source: _NoDigestHosts(), observeLifecycle: false);
+/// the monitor's commands. [clock] sets the window ("Done since" two hours
+/// back). Dispose it in a tear-down.
+DigestController monitorOnlyDigest({DateTime Function()? clock}) =>
+    DigestController(
+      source: _NoDigestHosts(),
+      clock: clock,
+      observeLifecycle: false,
+    );
 
 class _NoDigestHosts extends ChangeNotifier implements DigestHostSource {
   @override

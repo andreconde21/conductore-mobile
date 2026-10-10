@@ -2,8 +2,7 @@ import 'package:conduit/features/agent_attention/data/conductore_host_attention_
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
-import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
@@ -15,11 +14,18 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/test_doubles.dart';
 import '../usage/usage_fakes.dart';
 
+/// What the Agents screen took over from the terminal's old Agents sheet
+/// (its Inbox and Usage tabs): live cards updated in place, hiding, the
+/// machine on each card, the Usage tab, and the sheet's bottom inset.
+
 typedef Harness = ({
   AgentAttentionController controller,
   List<AgentInfo> opened,
   List<AgentInfo> chats,
 });
+
+/// Two minutes after the scripted agents' times: they are "Done since".
+final _now = DateTime.fromMillisecondsSinceEpoch(1790000120000);
 
 void main() {
   SavedHost monitoredHost(String id) => buildHost(id).copyWith(
@@ -47,11 +53,10 @@ void main() {
       '${message == null ? '' : ',"lastMessage":"$message"'}'
       '${usage == null ? '' : ',"usage":$usage'}}';
 
-  /// Pumps the panel for one scripted runner per host id.
+  /// Pumps the screen for one scripted runner per host id.
   Future<Harness> pumpPanel(
     WidgetTester tester,
     Map<String, List<Object>> scripts, {
-    bool withChat = false,
     UsageController? usage,
   }) async {
     final workspace = TerminalWorkspaceController(FreshTerminalRepository());
@@ -66,6 +71,8 @@ void main() {
       pollInterval: const Duration(days: 1),
     );
     controller.setLongPoll(false);
+    final digest = monitorOnlyDigest(clock: () => _now);
+    addTearDown(digest.dispose);
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
     for (final id in scripts.keys) {
@@ -80,10 +87,13 @@ void main() {
         home: Scaffold(
           body: _withUsage(
             usage,
-            AgentAttentionSheet(
-              controller: controller,
-              onOpenAgent: (host, agent) => opened.add(agent),
-              onOpenChat: withChat ? (host, agent) => chats.add(agent) : null,
+            AgentsDashboardView(
+              controller: digest,
+              attention: controller,
+              tabs: true,
+              now: () => _now,
+              onOpenTerminal: (host, agent) => opened.add(agent),
+              onOpenChat: (host, agent) => chats.add(agent),
             ),
           ),
         ),
@@ -102,7 +112,11 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('a new event updates the existing row in place', (tester) async {
+  const card = ValueKey('digest-card-s-1');
+
+  testWidgets('a new event updates the existing card in place', (
+    tester,
+  ) async {
     final harness = await pumpPanel(tester, {
       'h': [
         status([agentJson('s-1', message: 'Reading the tests.')]),
@@ -116,33 +130,40 @@ void main() {
         ], seq: 2),
       ],
     });
-    final row = find.byKey(const ValueKey('agent-row-h/s-1'));
-    expect(row, findsOneWidget);
-    expect(find.text('WORKING  1'), findsOneWidget);
+    expect(find.byKey(card), findsOneWidget);
+    expect(find.byKey(const ValueKey('digest-section-working')), findsOne);
     expect(find.text('Reading the tests.'), findsOneWidget);
 
     await pollAgain(tester, harness.controller, 'h');
 
-    expect(row, findsOneWidget);
-    expect(find.text('api'), findsOneWidget);
+    expect(find.byKey(card), findsOneWidget);
     expect(find.text('Reading the tests.'), findsNothing);
     expect(find.text('All green.'), findsOneWidget);
     expect(find.text('Done'), findsOneWidget);
-    expect(find.text('WORKING  1'), findsNothing);
-    expect(find.text('DONE & IDLE  1'), findsOneWidget);
+    expect(find.byKey(const ValueKey('digest-section-working')), findsNothing);
+    expect(find.byKey(const ValueKey('digest-section-done')), findsOne);
   });
 
-  testWidgets('tapping a row opens that agent', (tester) async {
+  testWidgets('a tap opens the chat, a long-press the terminal', (
+    tester,
+  ) async {
     final harness = await pumpPanel(tester, {
       'h': [
         status([agentJson('s-1')]),
       ],
     });
-    await tester.tap(find.text('api'));
+    await tester.tap(find.byKey(card));
+    expect(harness.chats.single.id, 's-1');
+    expect(harness.opened, isEmpty);
+
+    await tester.longPress(find.byKey(card));
     expect(harness.opened.single.id, 's-1');
+    // No separate Chat or Terminal buttons on the card (CON-107).
+    expect(find.text('Chat'), findsNothing);
+    expect(find.text('Terminal'), findsNothing);
   });
 
-  testWidgets('swiping a finished agent hides it until it changes', (
+  testWidgets('swiping a done agent left hides it until it changes', (
     tester,
   ) async {
     final done = status([
@@ -158,24 +179,24 @@ void main() {
       ],
     });
 
-    await tester.drag(find.text('api'), const Offset(-600, 0));
+    await tester.drag(find.byKey(card), const Offset(-600, 0));
     await tester.pumpAndSettle();
-    expect(find.text('api'), findsNothing);
+    expect(find.byKey(card), findsNothing);
     expect(find.text('Show 1 hidden'), findsOneWidget);
     expect(find.textContaining('Nothing new'), findsOneWidget);
 
     // An unchanged poll keeps it hidden.
     await pollAgain(tester, harness.controller, 'h');
-    expect(find.text('api'), findsNothing);
+    expect(find.byKey(card), findsNothing);
 
     // The agent changing brings it back.
     await pollAgain(tester, harness.controller, 'h');
-    expect(find.text('api'), findsOneWidget);
+    expect(find.byKey(card), findsOneWidget);
     expect(find.text('Starting over.'), findsOneWidget);
     expect(find.text('Show 1 hidden'), findsNothing);
   });
 
-  testWidgets('working rows are not dismissible; hidden rows can return', (
+  testWidgets('working cards cannot be hidden; hidden cards can return', (
     tester,
   ) async {
     await pumpPanel(tester, {
@@ -186,84 +207,66 @@ void main() {
         ]),
       ],
     });
-    expect(find.byType(Dismissible), findsOneWidget);
-
-    await tester.drag(find.text('web'), const Offset(600, 0));
+    await tester.drag(find.byKey(card), const Offset(-600, 0));
     await tester.pumpAndSettle();
-    expect(find.text('web'), findsNothing);
+    expect(find.byKey(card), findsOneWidget);
+
+    const web = ValueKey('digest-card-s-2');
+    await tester.drag(find.byKey(web), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(find.byKey(web), findsNothing);
 
     await tester.tap(find.text('Show 1 hidden'));
     await tester.pump();
-    expect(find.text('web'), findsOneWidget);
+    expect(find.byKey(web), findsOneWidget);
   });
 
-  group('desktop hide (no swipe needed)', () {
+  group('desktop right-click', () {
     const desktops = TargetPlatformVariant({
       TargetPlatform.linux,
       TargetPlatform.windows,
       TargetPlatform.macOS,
     });
     final done = status([agentJson('s-1', state: 'ended')]);
-    const hide = ValueKey('agent-row-hide-h/s-1');
 
-    testWidgets('hovering a finished row shows Hide, which hides it', (
+    testWidgets('offers Mute and Hide, which do what swiping does', (
       tester,
     ) async {
-      await pumpPanel(tester, {
-        'h': [done],
-      });
-      expect(find.byKey(hide), findsNothing);
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: Offset.zero);
-      addTearDown(mouse.removePointer);
-      await mouse.moveTo(tester.getCenter(find.text('api')));
-      await tester.pump();
-      expect(find.byKey(hide), findsOneWidget);
-      expect(tester.widget<IconButton>(find.byKey(hide)).tooltip, 'Hide');
-      await tester.tap(find.byKey(hide));
-      await tester.pumpAndSettle();
-      expect(find.text('api'), findsNothing);
-      expect(find.text('Show 1 hidden'), findsOneWidget);
-    }, variant: desktops);
-
-    testWidgets('right-click offers Open and Hide', (tester) async {
       final harness = await pumpPanel(tester, {
         'h': [done],
       });
-      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.tap(find.byKey(card), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('agent-row-menu-Open')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('agent-row-menu-Open')));
+      await tester.tap(
+        find.byKey(const ValueKey('digest-menu-Mute notifications')),
+      );
       await tester.pumpAndSettle();
-      expect(harness.opened.single.id, 's-1');
+      expect(harness.controller.isAgentMuted('h', 's-1'), isTrue);
 
-      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.tap(find.byKey(card), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('agent-row-menu-Hide')));
+      expect(
+        find.byKey(const ValueKey('digest-menu-Unmute notifications')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('digest-menu-Hide')));
       await tester.pumpAndSettle();
-      expect(find.text('api'), findsNothing);
+      expect(find.byKey(card), findsNothing);
+      expect(find.text('Show 1 hidden'), findsOneWidget);
     }, variant: desktops);
 
-    testWidgets('phones keep swipe only: no Hide button, no menu', (
-      tester,
-    ) async {
+    testWidgets('phones keep swipe only: no menu', (tester) async {
       await pumpPanel(tester, {
         'h': [done],
       });
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: Offset.zero);
-      addTearDown(mouse.removePointer);
-      await mouse.moveTo(tester.getCenter(find.text('api')));
-      await tester.pump();
-      expect(find.byKey(hide), findsNothing);
-      await tester.tap(find.text('api'), buttons: kSecondaryButton);
+      await tester.tap(find.byKey(card), buttons: kSecondaryButton);
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('agent-row-menu-Open')), findsNothing);
+      expect(find.byKey(const ValueKey('digest-menu-Hide')), findsNothing);
       expect(find.byType(Dismissible), findsOneWidget);
     });
   });
 
-  testWidgets('groups by host and project with several machines', (
+  testWidgets('with several machines, every card names its machine', (
     tester,
   ) async {
     await pumpPanel(tester, {
@@ -274,27 +277,8 @@ void main() {
         status([agentJson('s-2', cwd: '/srv/web')]),
       ],
     });
-    expect(find.text('Host a / api'), findsOneWidget);
-    expect(find.text('Host b / web'), findsOneWidget);
-    // The group header names the machine, so the row does not repeat it.
-    expect(find.text('Host a'), findsNothing);
-  });
-
-  testWidgets('renders the Chat button only with a chat callback', (
-    tester,
-  ) async {
-    final script = {
-      'h': <Object>[
-        status([agentJson('s-1')]),
-      ],
-    };
-    await pumpPanel(tester, script);
-    expect(find.text('Chat'), findsNothing);
-
-    final harness = await pumpPanel(tester, script, withChat: true);
-    await tester.tap(find.text('Chat'));
-    expect(harness.chats.single.id, 's-1');
-    expect(harness.opened, isEmpty);
+    expect(find.textContaining('· Host a'), findsOneWidget);
+    expect(find.textContaining('· Host b'), findsOneWidget);
   });
 
   group('usage', () {
@@ -302,7 +286,7 @@ void main() {
         '{"contextUsedPct":42,"contextTokens":85000,"windowLabel":"200k",'
         '"limits":[{"label":"5h","usedPct":23.5}]}';
 
-    testWidgets('shows a ring when reported and Not reported otherwise', (
+    testWidgets('a card shows its context; the Usage tab the details', (
       tester,
     ) async {
       await pumpPanel(tester, {
@@ -313,13 +297,11 @@ void main() {
           ]),
         ],
       });
-      // The inbox row carries a small ring for the reporting agent only.
-      expect(find.byType(ContextRing), findsOneWidget);
+      // Only the reporting agent's card names its context.
+      expect(find.text('context 42%'), findsOneWidget);
       expect(
-        find.byWidgetPredicate(
-          (widget) => widget is ContextRing && widget.percent == 42,
-        ),
-        findsOneWidget,
+        find.byKey(const ValueKey('digest-fact-context-s-2')),
+        findsNothing,
       );
 
       await tester.tap(find.text('Usage'));
@@ -330,6 +312,8 @@ void main() {
       expect(find.text('5h limit'), findsOneWidget);
       expect(find.text('24%'), findsOneWidget);
       expect(find.text('Not reported'), findsOneWidget);
+      // The cards are on the Agents tab only.
+      expect(find.byKey(card), findsNothing);
     });
 
     testWidgets('with the companion usage, the tab shows the breakdown and '
@@ -381,11 +365,10 @@ void main() {
       await tester.pump();
       expect(find.textContaining("Claude Code's status line"), findsOneWidget);
       expect(find.text('Not reported'), findsOneWidget);
-      expect(find.byType(ContextRing), findsNothing);
     });
   });
 
-  testWidgets('keeps the last row above a three-button navigation bar', (
+  testWidgets('the sheet keeps its end above a three-button navigation bar', (
     tester,
   ) async {
     // Galaxy M53-like: 1080x2400 at 2.625, 48dp three-button bar.
@@ -416,6 +399,8 @@ void main() {
       pollInterval: const Duration(days: 1),
     );
     controller.setLongPoll(false);
+    final digest = monitorOnlyDigest(clock: () => _now);
+    addTearDown(digest.dispose);
     addTearDown(controller.dispose);
     addTearDown(workspace.dispose);
     await tester.runAsync(workspace.open(monitoredHost('h')).connect);
@@ -427,10 +412,12 @@ void main() {
           builder: (context) => Scaffold(
             body: Center(
               child: TextButton(
-                onPressed: () => showAgentAttentionSheet(
+                onPressed: () => showAgentsSheet(
                   context: context,
-                  controller: controller,
-                  onOpenAgent: (_, _) {},
+                  controller: digest,
+                  attention: controller,
+                  onOpenTerminal: (_, _) {},
+                  onOpenChat: (_, _) {},
                 ),
                 child: const Text('open'),
               ),
@@ -451,11 +438,10 @@ void main() {
     const screenHeight = 2400 / dpr;
     final lastControl = tester.getRect(find.byTooltip('Refresh Host h'));
     expect(lastControl.bottom, lessThanOrEqualTo(screenHeight - navBar));
-    // Equal times sort by name: project-9 is the last row.
-    final lastRow = tester.getRect(
-      find.byKey(const ValueKey('agent-row-h/s-9')),
+    final lastCard = tester.getRect(
+      find.byKey(const ValueKey('digest-card-s-11')),
     );
-    expect(lastRow.bottom, lessThanOrEqualTo(screenHeight - navBar));
+    expect(lastCard.bottom, lessThanOrEqualTo(screenHeight - navBar));
   });
 }
 
