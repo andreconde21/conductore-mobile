@@ -1,6 +1,7 @@
 import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +36,12 @@ void main() {
     expect(find.text('detailed'), findsOneWidget);
     // Infrastructure needs you: the counter says so.
     expect(find.byKey(const ValueKey('project-needs-you')), findsOneWidget);
+    // The view menu (⋮) sits at the bar's right edge.
+    expect(
+      tester.getRect(find.byType(ProjectViewBar)).right -
+          tester.getRect(find.byKey(const ValueKey('project-view-menu'))).right,
+      lessThanOrEqualTo(1),
+    );
 
     // tmux "main" is its own project (nothing named any yet), open.
     final mainRow = find.byKey(

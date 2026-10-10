@@ -38,7 +38,7 @@ void main() {
     expect(find.text('SESSIONS'), findsOneWidget);
     expect(find.byKey(const ValueKey('home-projects')), findsNothing);
     expect(find.byKey(const ValueKey('home-group-by-toggle')), findsNothing);
-    final toggle = find.byKey(const ValueKey('home-mode-switch'));
+    final toggle = find.byKey(const ValueKey('home-mode-projects'));
     await tester.tap(toggle);
     await settleShell(tester);
     expect(h.homePreferences.stored.mode, HomeMode.projects);
@@ -89,6 +89,12 @@ void main() {
       lessThanOrEqualTo(4),
     );
     expect(tester.widget<IconButton>(menu).onPressed, isNotNull);
+    // The view bar's ⋮ lines up with the boxes' ⋯ at the right edge.
+    final viewMenu = find.byIcon(Icons.more_vert_rounded);
+    expect(
+      (tester.getCenter(viewMenu).dx - tester.getCenter(menu).dx).abs(),
+      lessThanOrEqualTo(2),
+    );
     await tester.tap(ops);
     await settleShell(tester);
     expect(
@@ -104,7 +110,7 @@ void main() {
     expect(find.byKey(const ValueKey('home-projects')), findsOneWidget);
 
     // Back to Open / Closed.
-    final back = find.byKey(const ValueKey('home-mode-switch'));
+    final back = find.byKey(const ValueKey('home-mode-open'));
     await tester.scrollUntilVisible(back, -200, scrollable: homeScrollable);
     await tester.tap(back);
     await settleShell(tester);
@@ -204,7 +210,7 @@ void main() {
       find.byKey(ValueKey('home-session-${session.host.id}')),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(const ValueKey('home-mode-switch')));
+    await tester.tap(find.byKey(const ValueKey('home-mode-projects')));
     await settleShell(tester);
     expect(
       find.byKey(ValueKey('home-session-${session.host.id}')),
@@ -283,7 +289,7 @@ void main() {
       ProjectLayoutController.instance = null;
       layout.dispose();
     });
-    await tester.tap(find.byKey(const ValueKey('home-mode-switch')));
+    await tester.tap(find.byKey(const ValueKey('home-mode-projects')));
     await settleShell(tester);
     final needsYou = find.byKey(const ValueKey('project-needs-you'));
     expect(needsYou, findsOneWidget);

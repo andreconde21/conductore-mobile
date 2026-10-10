@@ -1135,8 +1135,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   /// The top of the list: the workspace search, and the switch between
-  /// Projects and Open / Closed (CON-105; not in the top bar, which is
-  /// full).
+  /// Projects and Open / Closed ("Projects | Open"; CON-105, not in the
+  /// top bar, which is full).
   Widget _buildListBar(BuildContext context) {
     final mode = ProjectLayoutController.instance == null ? null : _homeMode;
     return SliverPadding(
@@ -1160,25 +1160,36 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 onClear: () => setState(() => _search = HomeSearch.none),
               ),
             ),
-            if (mode != null)
-              IconButton(
+            if (mode != null) ...[
+              const SizedBox(width: 8),
+              SegmentedButton<HomeMode>(
                 key: const ValueKey('home-mode-switch'),
-                tooltip: mode == HomeMode.projects
-                    ? 'Projects: switch to Open / Closed'
-                    : 'Open / Closed: switch to Projects',
-                icon: Icon(
-                  mode == HomeMode.projects
-                      ? Icons.folder_copy_outlined
-                      : Icons.view_agenda_outlined,
-                ),
-                onPressed: () => _savePreferences(
-                  _preferences.copyWith(
-                    mode: mode == HomeMode.projects
-                        ? HomeMode.openClosed
-                        : HomeMode.projects,
+                segments: const [
+                  ButtonSegment(
+                    value: HomeMode.projects,
+                    tooltip: 'Everything by project',
+                    label: Text(
+                      'Projects',
+                      key: ValueKey('home-mode-projects'),
+                    ),
                   ),
+                  ButtonSegment(
+                    value: HomeMode.openClosed,
+                    tooltip: 'Open sessions, then the rest by machine',
+                    label: Text('Open', key: ValueKey('home-mode-open')),
+                  ),
+                ],
+                selected: {mode},
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onSelectionChanged: (picked) => _savePreferences(
+                  _preferences.copyWith(mode: picked.single),
                 ),
               ),
+            ],
           ],
         ),
       ),

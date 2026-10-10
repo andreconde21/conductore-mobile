@@ -159,14 +159,19 @@ class HomeProjectsList extends StatelessWidget {
             key: const ValueKey('home-projects'),
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ProjectViewBar(
-                controller: controller,
-                needsYou: ProjectLayoutController.needsYouCount(projects),
-                onNeedsYou: () => _openFirstNeedingYou(projects),
-                hiddenCount: projects.fold(
-                  0,
-                  (sum, project) =>
-                      sum + project.entries.where((e) => e.hidden).length,
+              // Its ⋮ lines up with the boxes' ⋯ (box border and padding,
+              // then the centre of a 32 dp button).
+              Padding(
+                padding: const EdgeInsets.only(right: 21.5),
+                child: ProjectViewBar(
+                  controller: controller,
+                  needsYou: ProjectLayoutController.needsYouCount(projects),
+                  onNeedsYou: () => _openFirstNeedingYou(projects),
+                  hiddenCount: projects.fold(
+                    0,
+                    (sum, project) =>
+                        sum + project.entries.where((e) => e.hidden).length,
+                  ),
                 ),
               ),
               if (shown.isEmpty)

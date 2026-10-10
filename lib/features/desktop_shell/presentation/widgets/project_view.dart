@@ -106,15 +106,18 @@ class ProjectViewBar extends StatelessWidget {
                 ),
               ),
             ),
-          const Spacer(),
-          Flexible(
-            child: label(
-              controller.compact ? 'compact' : 'detailed',
-              controller.compact
-                  ? 'One line per workspace. Tap for one row per agent.'
-                  : 'One row per agent. Tap for one line per workspace.',
-              () => controller.setCompact(!controller.compact),
-              const ValueKey('project-view-toggle'),
+          // The view and the menu sit at the right edge.
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: label(
+                controller.compact ? 'compact' : 'detailed',
+                controller.compact
+                    ? 'One line per workspace. Tap for one row per agent.'
+                    : 'One row per agent. Tap for one line per workspace.',
+                () => controller.setCompact(!controller.compact),
+                const ValueKey('project-view-toggle'),
+              ),
             ),
           ),
           _ViewMenu(controller: controller, hiddenCount: hiddenCount),
