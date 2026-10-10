@@ -108,7 +108,6 @@ Future<void> showAgentsSheet({
             attention: attention,
             scrollController: scrollController,
             tabs: true,
-            showTitle: true,
             inlineMenu: true,
             padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + bottomInset),
             onOpenChat: (host, agent) => close(onOpenChat, host, agent),
@@ -221,7 +220,6 @@ class AgentsDashboardView extends StatefulWidget {
     this.shrinkWrap = false,
     this.inlineMenu = false,
     this.tabs = false,
-    this.showTitle = false,
     this.scrollController,
     this.now,
     this.projects,
@@ -245,14 +243,12 @@ class AgentsDashboardView extends StatefulWidget {
   /// Inside another scroll view (the desktop dashboard).
   final bool shrinkWrap;
 
-  /// The window menu next to the header (no app bar to hold it).
+  /// The window menu next to the header, or the tabs (no app bar to hold
+  /// it).
   final bool inlineMenu;
 
   /// The Agents and Usage tabs, and the machines at the end.
   final bool tabs;
-
-  /// An "Agents" title on top (a sheet, with no app bar).
-  final bool showTitle;
 
   /// The sheet's scroll controller.
   final ScrollController? scrollController;
@@ -266,8 +262,7 @@ class AgentsDashboardView extends StatefulWidget {
 
 class _AgentsDashboardViewState extends State<AgentsDashboardView>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this)
-    ..addListener(_onTab);
+  late final TabController _tabs;
   VoidCallback? _detach;
   DigestController? _attachedTo;
   DigestController? _owned;
@@ -294,6 +289,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView>
   @override
   void initState() {
     super.initState();
+    _tabs = TabController(length: 2, vsync: this)..addListener(_onTab);
     // The auto-approved list: once per opening, then kept fresh by the
     // controller whenever a rule answers something.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -782,7 +778,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView>
         controller: controller,
         overview: overview,
         now: now,
-        menu: widget.inlineMenu && !widget.showTitle
+        menu: widget.inlineMenu && !widget.tabs
             ? DigestWindowMenu(controller: controller)
             : null,
       ),
@@ -957,41 +953,38 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView>
         final (overview, hidden) = _overview(controller);
         final now = (widget.now ?? DateTime.now)();
         final hosts = attention.monitoredHosts;
+        final tabBar = TabBar(
+          key: const ValueKey('agents-tabs'),
+          controller: _tabs,
+          tabs: [
+            Tab(
+              height: 40,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Agents'),
+                  if (attention.attentionCount case final count
+                      when count > 0) ...[
+                    const SizedBox(width: 6),
+                    Badge.count(count: count),
+                  ],
+                ],
+              ),
+            ),
+            const Tab(height: 40, text: 'Usage'),
+          ],
+        );
         final children = <Widget>[
-          if (widget.showTitle)
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Agents',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                if (widget.inlineMenu) DigestWindowMenu(controller: controller),
-              ],
-            ),
           if (widget.tabs) ...[
-            TabBar(
-              key: const ValueKey('agents-tabs'),
-              controller: _tabs,
-              tabs: [
-                Tab(
-                  height: 40,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Agents'),
-                      if (attention.attentionCount case final count
-                          when count > 0) ...[
-                        const SizedBox(width: 6),
-                        Badge.count(count: count),
-                      ],
-                    ],
-                  ),
-                ),
-                const Tab(height: 40, text: 'Usage'),
-              ],
-            ),
+            if (widget.inlineMenu)
+              Row(
+                children: [
+                  Expanded(child: tabBar),
+                  DigestWindowMenu(controller: controller),
+                ],
+              )
+            else
+              tabBar,
             const SizedBox(height: 8),
           ],
           if (widget.tabs && _tabs.index == 1)
