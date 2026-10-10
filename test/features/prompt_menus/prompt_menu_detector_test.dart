@@ -572,6 +572,24 @@ Setting up ripgrep (14.1.0) ...
       expect(menu!.options.length, 12);
     });
 
+    test('a pointer row indented to the sibling column does not crash', () {
+      // GlitchTip #430: the walk up from the lower pointer stopped on a row
+      // indented to its text column that is itself a deeper pointer row, and
+      // _findPointerBlock force-unwrapped the mismatch.
+      const nested = '''
+Which one?
+    ❯ nested
+  ❯ outer
+    sibling
+↑/↓ to navigate · Enter to select
+''';
+      final menu = detectPromptMenu(padded(nested), cursorRow: 4);
+
+      expect(menu, isNotNull);
+      expect(labels(menu), ['outer', 'sibling']);
+      expect(menu!.selectedIndex, 0);
+    });
+
     test('menus compare by content so an unchanged screen is a no-op', () {
       const prompt = '''
 Do you want to proceed?

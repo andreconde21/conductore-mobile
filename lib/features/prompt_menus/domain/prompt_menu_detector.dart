@@ -458,12 +458,16 @@ _Block? _findPointerBlock(_Screen screen) {
         screen.indentOf(start - 1) >= column) {
       start--;
     }
-    while (start < row && screen.indentOf(start) != column) {
+    // Start at the first row that is an option at this column. A deeper
+    // pointer row indented to the column is not one; [row] itself always is.
+    var first = _pointerLineAt(screen, start, column: column);
+    while (first == null) {
       start++;
+      first = _pointerLineAt(screen, start, column: column);
     }
     final block = _extendBlock(
       screen,
-      _pointerLineAt(screen, start, column: column)!,
+      first,
       next: (row, _) => _pointerLineAt(screen, row, column: column),
     );
     // A single highlighted row is only a pointer when there is exactly one.

@@ -292,6 +292,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     flow?.terminalRequests.addListener(_handleTerminalRequest);
     widget.launchRequests?.addListener(_handleLaunchRequest);
     widget.sessionRestore?.addListener(_handleRestoreChanged);
+    widget.sessionRestore?.autoClosed.addListener(_handleAutoClosed);
     widget.localDataChanges?.addListener(_handleLocalDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // The page exists only while unlocked: this is the app start (or the
@@ -353,6 +354,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
     widget.launchRequests?.removeListener(_handleLaunchRequest);
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
+    widget.sessionRestore?.autoClosed.removeListener(_handleAutoClosed);
     widget.localDataChanges?.removeListener(_handleLocalDataChanged);
     widget.sessionRestore?.setHomeVisible(false);
     widget.promptCoordinator.removeListener(_handlePromptChanged);
@@ -402,6 +404,26 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   void _handleRestoreChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// Restored tabs closed because their Herdr workspace has been gone for
+  /// over a day (CON-115): one notice, with Undo.
+  void _handleAutoClosed() {
+    final restore = widget.sessionRestore;
+    final closed = restore?.autoClosed.value;
+    if (!mounted || restore == null || closed == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(closed.message),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => unawaited(restore.undoAutoClose(closed)),
+          ),
+        ),
+      );
   }
 
   /// A backup import or a sync pull replaced saved data behind the page:

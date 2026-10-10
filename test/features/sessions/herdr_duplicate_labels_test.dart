@@ -135,6 +135,31 @@ void main() {
     );
   });
 
+  test('a session opening in Chat View by itself (openPreferredChatView) '
+      'looks where the Chat button does', () async {
+    final stale = open(
+      const ConnectTarget.herdr(workspaceId: 'wE', label: 'DTech'),
+    );
+    await stale.connect();
+    await settle();
+    server.focusPaneFromElsewhere('w1D:p1');
+
+    // Before: the gone workspace's empty place, so with Claude sessions in
+    // several workspaces the tab stayed in the terminal.
+    final location = (await preferredChatLocation(stale, focus))();
+    expect(location.herdrWorkspaceId, 'w1D');
+    expect(location.herdrPaneId, 'w1D:p1');
+
+    // A pinned tab is read live, as it was.
+    final pinned = open(
+      const ConnectTarget.herdr(workspaceId: 'w12', label: 'Projects'),
+    );
+    final read = await preferredChatLocation(pinned, focus);
+    expect(read().herdrWorkspaceId, 'w12');
+    focus.noteWorkspace(pinned, 'w1C');
+    expect(read().herdrWorkspaceId, 'w1C');
+  });
+
   test('a pinned tab keeps its own workspace for Chat View', () async {
     final pinned = open(
       const ConnectTarget.herdr(workspaceId: 'w12', label: 'Projects'),

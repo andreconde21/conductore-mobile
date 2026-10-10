@@ -206,7 +206,8 @@ tmux.
   workspace. *Phone may move Herdr focus* lets the session in use take it
   instead ([docs/herdr-shared-focus.md](docs/herdr-shared-focus.md)). A tab whose
   workspace was closed in Herdr says so and offers *Keep what Herdr shows* or
-  *Close tab*.
+  *Close tab*; once the workspace has been gone for over a day, the restored
+  tab closes on the next launch, with Undo.
 - **Projects and sheprd**: workspaces and agents group by project, read from
   sheprd's `sidebar.toml` and shared
   across your devices. With **Sync with sheprd** on, sheprd's shared view
@@ -301,7 +302,8 @@ tmux.
 - **Device sync through one of your own machines**, end-to-end encrypted, no
   cloud: saved machines, snippets, settings, connect preferences and the
   session list. Add a device by scanning a QR code and typing six words
-  (desktops paste the code). Passwords and keys sync only if you turn that
+  (desktops paste the code; on Android the first scan waits a moment,
+  "Getting the scanner ready…", while the barcode model downloads). Passwords and keys sync only if you turn that
   on ([docs/sync.md](docs/sync.md)).
 - **Continue on the other device**: each device shares where it is (machine,
   workspace, tab, Chat View position, unsent drafts), and the app offers to
@@ -309,7 +311,10 @@ tmux.
   in Settings › Sync ([docs/sync.md](docs/sync.md)).
 - Encrypted backups of settings, machines and trusted keys (same format as
   sync), and an optional device-auth app lock that locks again after a
-  time in the background you choose (Settings › Security). Android's own
+  time in the background you choose (Settings › Security). The longer
+  choices (1 hour, 4 hours, 8 hours, 1 day) count from the last unlock and
+  hold across app restarts, after a warning; a reboot or a clock moved back
+  asks again (iOS and desktops cannot tell a reboot). Android's own
   cloud backup and device transfer are off: machines move with these
   backups or sync.
 

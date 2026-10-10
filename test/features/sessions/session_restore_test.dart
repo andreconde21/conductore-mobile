@@ -475,4 +475,193 @@ void main() {
       await finish(tester);
     });
   });
+
+  group('tabs for workspaces gone over a day (CON-115)', () {
+    late ValueNotifier<Set<TerminalSessionController>> closed;
+    late DateTime now;
+    final launch = DateTime.utc(2026, 10, 10, 12);
+
+    setUp(() {
+      closed = ValueNotifier(const {});
+      now = launch;
+      restore.dispose();
+      restore = SessionRestoreController(
+        workspace: workspace,
+        repository: store,
+        findHost: (id) async => hosts[id],
+        closedWorkspaces: closed,
+        clock: () => now,
+      );
+      store.stored = SessionSnapshot(
+        entries: [
+          SessionSnapshotEntry(
+            hostId: 'a',
+            target: herdr('w1', label: 'api'),
+            customTitle: 'API',
+            // Found gone two days ago.
+            workspaceGoneAt: launch.subtract(const Duration(days: 2)),
+          ),
+          SessionSnapshotEntry(
+            hostId: 'a',
+            target: herdr('w2'),
+            // Found gone two hours ago: still young.
+            workspaceGoneAt: launch.subtract(const Duration(hours: 2)),
+          ),
+          SessionSnapshotEntry(hostId: 'a', target: herdr('w3')),
+          SessionSnapshotEntry(
+            hostId: 'a',
+            target: herdr('w4'),
+            workspaceGoneAt: launch.subtract(const Duration(days: 3)),
+          ),
+        ],
+        activeIndex: 2,
+      );
+    });
+
+    tearDown(() => closed.dispose());
+
+    TerminalSessionController tab(String id) =>
+        workspace.sessions.firstWhere((s) => s.host.id == 'a#herdr:$id');
+
+    test('the gone time round-trips through JSON', () {
+      final entry = SessionSnapshotEntry(
+        hostId: 'a',
+        target: herdr('w1'),
+        workspaceGoneAt: launch,
+      );
+      final back = SessionSnapshotEntry.fromJson(
+        jsonDecode(jsonEncode(entry.toJson())),
+      );
+      expect(back, entry);
+      expect(back!.workspaceGoneAt, launch);
+      expect(
+        SessionSnapshotEntry.fromJson(
+          jsonDecode(jsonEncode(store.stored.entries[2].toJson())),
+        )!.workspaceGoneAt,
+        isNull,
+      );
+    });
+
+    testWidgets('a tab gone over a day closes on launch, with Undo', (
+      tester,
+    ) async {
+      await restore.restore();
+      final active = workspace.activeSession;
+      // Herdr says w1 and w2 are gone; w4's workspace exists again.
+      closed.value = {tab('w1'), tab('w2')};
+      await tester.pump(const Duration(seconds: 1));
+      expect(workspace.sessions, hasLength(4));
+      await tester.pump(const Duration(seconds: 2));
+
+      expect(workspace.sessions.map((s) => s.host.id), [
+        'a#herdr:w2',
+        'a#herdr:w3',
+        'a#herdr:w4',
+      ]);
+      expect(workspace.activeSession, active);
+      final notice = restore.autoClosed.value!;
+      expect(
+        notice.message,
+        'Closed 1 tab for a workspace that no longer exists',
+      );
+      expect(notice.tabs.single.index, 0);
+
+      // Younger: the CON-103 notice stays, and so does its time.
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        store.stored.entries.first.workspaceGoneAt,
+        launch.subtract(const Duration(hours: 2)),
+      );
+
+      now = launch.add(const Duration(minutes: 1));
+      await restore.undoAutoClose(notice);
+      expect(workspace.sessions.map((s) => s.host.id), [
+        'a#herdr:w1',
+        'a#herdr:w2',
+        'a#herdr:w3',
+        'a#herdr:w4',
+      ]);
+      expect(workspace.sessions.first.title, 'API');
+      expect(workspace.activeSession, active);
+      expect(restore.autoClosed.value, isNull);
+
+      // Brought back: open for the rest of this run, gone from now on.
+      closed.value = {tab('w1'), tab('w2')};
+      await tester.pump(const Duration(seconds: 3));
+      expect(workspace.sessions, hasLength(4));
+      expect(
+        store.stored.entries.first.workspaceGoneAt,
+        launch.add(const Duration(minutes: 1)),
+      );
+      await finish(tester);
+    });
+
+    testWidgets('several close together under one notice', (tester) async {
+      await restore.restore();
+      closed.value = {tab('w1')};
+      await tester.pump(const Duration(seconds: 1));
+      closed.value = {tab('w1'), tab('w4')};
+      await tester.pump(const Duration(seconds: 2));
+
+      expect(workspace.sessions.map((s) => s.host.id), [
+        'a#herdr:w2',
+        'a#herdr:w3',
+      ]);
+      expect(
+        restore.autoClosed.value!.message,
+        'Closed 2 tabs for workspaces that no longer exist',
+      );
+      await restore.undoAutoClose(restore.autoClosed.value!);
+      expect(workspace.sessions.map((s) => s.host.id), [
+        'a#herdr:w1',
+        'a#herdr:w2',
+        'a#herdr:w3',
+        'a#herdr:w4',
+      ]);
+      await finish(tester);
+    });
+
+    testWidgets('a tab whose workspace exists is never closed', (tester) async {
+      await restore.restore();
+      // w4 was saved as gone three days ago, but Herdr has it now; another
+      // tab's change must not close it.
+      closed.value = {tab('w2')};
+      await tester.pump(const Duration(seconds: 5));
+      // Nor does a tab that was kept on a workspace again before the
+      // gathered close runs.
+      closed.value = {tab('w1')};
+      closed.value = const {};
+      await tester.pump(const Duration(seconds: 5));
+
+      expect(workspace.sessions, hasLength(4));
+      expect(restore.autoClosed.value, isNull);
+      await finish(tester);
+    });
+
+    testWidgets('a workspace found gone in this run is timed, not closed', (
+      tester,
+    ) async {
+      await restore.restore();
+      now = launch.add(const Duration(hours: 1));
+      closed.value = {tab('w3')};
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        store.stored.entries[2].workspaceGoneAt,
+        launch.add(const Duration(hours: 1)),
+      );
+
+      // A day later, still running: only a launch closes it.
+      now = launch.add(const Duration(days: 2));
+      // Another check finds it gone again.
+      closed.value = {tab('w3')};
+      await tester.pump(const Duration(seconds: 5));
+      expect(workspace.sessions, hasLength(4));
+
+      // Kept on what Herdr shows: no longer gone.
+      closed.value = const {};
+      await tester.pump(const Duration(seconds: 1));
+      expect(store.stored.entries[2].workspaceGoneAt, isNull);
+      await finish(tester);
+    });
+  });
 }

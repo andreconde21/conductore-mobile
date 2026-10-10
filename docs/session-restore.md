@@ -14,6 +14,9 @@ the background. Per session:
 - the connect target: shell, tmux session name, Herdr workspace id, label,
   tab and named Herdr server, or a directory;
 - the custom name from Rename, and the last shown title;
+- for a Herdr tab whose workspace was closed, when the app first found it
+  gone (a tab restored over a day after that closes on launch, see
+  [herdr-shared-focus.md](herdr-shared-focus.md));
 - plus which session was active. The list order is the tab order.
 
 No passwords, keys, Mosh session keys or terminal contents are stored.

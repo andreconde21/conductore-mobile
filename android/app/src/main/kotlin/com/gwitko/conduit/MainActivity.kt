@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
+import android.os.SystemClock
 import android.provider.Settings
 import com.gwitko.conduit.BackgroundServicePolicy.StopReason
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -111,6 +112,15 @@ class MainActivity : FlutterFragmentActivity() {
                     startActivity(Intent.createChooser(send, null))
                     result.success(null)
                 }
+                else -> result.notImplemented()
+            }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            DEVICE_CLOCK_CHANNEL, // app lock: tells a reboot from an app restart
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "elapsedRealtime" -> result.success(SystemClock.elapsedRealtime())
                 else -> result.notImplemented()
             }
         }
@@ -233,6 +243,7 @@ class MainActivity : FlutterFragmentActivity() {
     companion object {
         const val BACKGROUND_KEEPALIVE_CHANNEL = "conduit/background_keepalive"
         const val FIDO_USB_CHANNEL = "conduit/fido_usb"
+        const val DEVICE_CLOCK_CHANNEL = "conduit/device_clock"
         const val LOCAL_SHELL_CHANNEL = "conduit/local_shell"
         const val SHARE_TEXT_CHANNEL = "conduit/share_text"
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2001

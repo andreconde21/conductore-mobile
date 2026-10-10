@@ -686,12 +686,14 @@ class _LinkScannerPageState extends State<_LinkScannerPage> {
   final _controller = MobileScannerController(
     formats: const [BarcodeFormat.qrCode],
   );
+  final _readiness = ScannerReadiness();
   bool _done = false;
   String? _hint;
 
   @override
   void dispose() {
     _controller.dispose();
+    _readiness.dispose();
     super.dispose();
   }
 
@@ -722,17 +724,32 @@ class _LinkScannerPageState extends State<_LinkScannerPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          MobileScanner(controller: _controller, onDetect: _onDetect),
-          if (_hint case final hint?)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(12),
-                color: Colors.black54,
-                child: Text(hint, style: const TextStyle(color: Colors.white)),
-              ),
-            ),
+          MobileScanner(
+            controller: _controller,
+            onDetect: _onDetect,
+            onDetectError: _readiness.onDetectError,
+          ),
+          ListenableBuilder(
+            listenable: _readiness,
+            builder: (context, _) {
+              final hint = _readiness.gettingReady
+                  ? scannerGettingReadyText
+                  : _hint;
+              if (hint == null) return const SizedBox.shrink();
+              return Align(
+                alignment: Alignment.bottomCenter,
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(12),
+                  color: Colors.black54,
+                  child: Text(
+                    hint,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );

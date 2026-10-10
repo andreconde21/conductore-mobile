@@ -909,11 +909,42 @@ class _AgentMachineCard extends StatelessWidget {
 }
 
 /// "Lock again": how long Conductore may stay in the background before it
-/// asks for the fingerprint, face or PIN again.
+/// asks for the fingerprint, face or PIN again. Above 15 minutes it counts
+/// from the unlock, across restarts, and asks first (CON-118).
 class _RelockDelayTile extends StatelessWidget {
   const _RelockDelayTile({required this.controller});
 
   final AppLockController controller;
+
+  Future<void> _choose(BuildContext context, RelockDelay delay) async {
+    if (delay == controller.relockDelay) return;
+    if (delay.lastsAcrossRestarts) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          key: const ValueKey('settings-relock-warning'),
+          title: const Text('Ask less often?'),
+          content: Text(
+            "Anyone with your unlocked phone can open your machines' "
+            'terminals and approve agent actions for up to '
+            '${delay.spokenDuration}, even after Conductore restarts.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await controller.setRelockDelay(delay);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -925,7 +956,13 @@ class _RelockDelayTile extends StatelessWidget {
           children: [
             const Icon(Icons.timer_outlined, size: 22),
             const SizedBox(width: 16),
-            const Expanded(child: Text('Lock again in the background')),
+            Expanded(
+              child: Text(
+                controller.relockDelay.lastsAcrossRestarts
+                    ? 'Lock again after unlocking'
+                    : 'Lock again in the background',
+              ),
+            ),
             DropdownButton<RelockDelay>(
               key: const ValueKey('settings-relock-delay'),
               value: controller.relockDelay,
@@ -935,7 +972,7 @@ class _RelockDelayTile extends StatelessWidget {
                   DropdownMenuItem(value: delay, child: Text(delay.label)),
               ],
               onChanged: (delay) {
-                if (delay != null) unawaited(controller.setRelockDelay(delay));
+                if (delay != null) unawaited(_choose(context, delay));
               },
             ),
           ],

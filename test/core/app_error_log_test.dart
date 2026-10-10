@@ -104,4 +104,44 @@ void main() {
       'Bad state: async broke',
     ]);
   });
+
+  test('the barcode model download is an expected state, not an error', () {
+    // GlitchTip #563: mobile_scanner's torch and zoom listeners leave the
+    // per-frame "waiting for the barcode module" error uncaught.
+    final log = AppErrorLog();
+    final reported = <Object>[];
+    log.onRecord = (error, _) => reported.add(error);
+    final previousOnError = FlutterError.onError;
+    final previousPlatform = PlatformDispatcher.instance.onError;
+    addTearDown(() {
+      FlutterError.onError = previousOnError;
+      PlatformDispatcher.instance.onError = previousPlatform;
+    });
+    // Explicit: the default depends on the build mode.
+    // ignore: avoid_redundant_argument_values
+    log.install(replaceErrorWidget: false);
+
+    final handled = PlatformDispatcher.instance.onError!(
+      PlatformException(
+        code: 'MOBILE_SCANNER_BARCODE_ERROR',
+        message:
+            'Waiting for the barcode module to be downloaded. Please wait.',
+      ),
+      StackTrace.empty,
+    );
+    PlatformDispatcher.instance.onError!(
+      PlatformException(
+        code: 'MOBILE_SCANNER_BARCODE_ERROR',
+        message: 'Camera closed',
+      ),
+      StackTrace.empty,
+    );
+
+    expect(handled, isTrue);
+    expect(log.entries.map((entry) => entry.summary), [
+      'PlatformException(MOBILE_SCANNER_BARCODE_ERROR, Camera closed, null, '
+          'null)',
+    ]);
+    expect(reported, hasLength(1));
+  });
 }
