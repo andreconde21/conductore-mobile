@@ -5,11 +5,87 @@ import 'package:conduit/features/agent_attention/domain/agent_notifications.dart
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:flutter/material.dart';
 
-/// Settings › Agents › Notifications: the mode ("Ongoing + urgent",
-/// "Everything", "Urgent only"), which events notify, summary-only mode,
-/// quiet updates and muted agents (this device only).
-class AgentNotificationSettingsCard extends StatelessWidget {
-  const AgentNotificationSettingsCard({required this.controller, super.key});
+/// Settings › Agents › Notifications: "Notify me" (urgent only, urgent +
+/// finished, everything, or Custom for a mix made under Advanced) and the
+/// muted agents, this device only (CON-108).
+class AgentNotifyChoiceCard extends StatelessWidget {
+  const AgentNotifyChoiceCard({required this.controller, super.key});
+
+  final AgentAttentionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final preferences = controller.notificationPreferences;
+        void set(AgentNotificationPreferences next) =>
+            unawaited(controller.setNotificationPreferences(next));
+        final choice = preferences.choice;
+        final muted = preferences.mutedAgents.length;
+        return SettingsCard(
+          child: Column(
+            children: [
+              RadioGroup<AgentNotifyChoice>(
+                groupValue: choice,
+                onChanged: (next) {
+                  if (next != null) set(preferences.withChoice(next));
+                },
+                child: Column(
+                  children: [
+                    for (final option in AgentNotifyChoice.values)
+                      RadioListTile<AgentNotifyChoice>(
+                        key: ValueKey('agent-notify-choice-${option.name}'),
+                        value: option,
+                        title: Text(option.label),
+                        subtitle: Text(option.description),
+                      ),
+                  ],
+                ),
+              ),
+              if (choice == null)
+                const ListTile(
+                  key: ValueKey('agent-notify-choice-custom'),
+                  leading: Icon(Icons.tune_rounded),
+                  title: Text('Custom'),
+                  subtitle: Text(
+                    'Your own mix, kept under Advanced › Notification '
+                    'details. Pick one above to replace it.',
+                  ),
+                ),
+              if (muted > 0) ...[
+                const Divider(height: 1),
+                ListTile(
+                  key: const ValueKey('agent-notify-muted'),
+                  leading: const Icon(Icons.notifications_off_outlined),
+                  title: Text(
+                    muted == 1 ? '1 muted agent' : '$muted muted agents',
+                  ),
+                  subtitle: const Text(
+                    'Long-press an agent in the Agents panel to mute or '
+                    'unmute it.',
+                  ),
+                  trailing: TextButton(
+                    key: const ValueKey('agent-notify-unmute-all'),
+                    onPressed: () =>
+                        set(preferences.copyWith(mutedAgents: const {})),
+                    child: const Text('Unmute all'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Settings › Agents › Advanced › Notification details: the ongoing
+/// notification, which needs notify, summary-only mode and quiet updates
+/// (this device only). "Notify me" reads its choice from these.
+class AgentNotificationDetailsCard extends StatelessWidget {
+  const AgentNotificationDetailsCard({required this.controller, super.key});
 
   final AgentAttentionController controller;
 
@@ -40,39 +116,30 @@ class AgentNotificationSettingsCard extends StatelessWidget {
         }
 
         final urgent = preferences.mode.urgentOnlyAlerts;
-        final muted = preferences.mutedAgents.length;
         return SettingsCard(
           child: Column(
             children: [
-              RadioGroup<AgentNotificationMode>(
-                groupValue: preferences.mode,
-                onChanged: (mode) {
-                  if (mode != null) set(preferences.copyWith(mode: mode));
-                },
-                child: Column(
-                  children: [
-                    for (final mode in AgentNotificationMode.values)
-                      RadioListTile<AgentNotificationMode>(
-                        key: ValueKey('agent-notify-mode-${mode.name}'),
-                        value: mode,
-                        title: Text(mode.label),
-                        subtitle: Text(switch (mode) {
-                          AgentNotificationMode.ongoingAndUrgent =>
-                            'One silent notification with every agent\'s '
-                                'progress. Alerts only when an agent needs '
-                                'you, fails or looks stuck.',
-                          AgentNotificationMode.everything =>
-                            'A notification for each agent that needs you '
-                                'or finishes.',
-                          AgentNotificationMode.urgentOnly =>
-                            'Alerts only when an agent needs you, fails or '
-                                'looks stuck. No ongoing notification.',
-                        }),
-                      ),
-                  ],
+              // Everything notifies per agent, with no ongoing summary.
+              if (urgent) ...[
+                SwitchListTile(
+                  key: const ValueKey('agent-notify-ongoing'),
+                  secondary: const Icon(Icons.view_agenda_outlined),
+                  title: const Text('Ongoing notification'),
+                  subtitle: const Text(
+                    'One silent notification with every agent\'s progress, '
+                    'beside the alerts.',
+                  ),
+                  value: preferences.mode.showsOngoing,
+                  onChanged: (on) => set(
+                    preferences.copyWith(
+                      mode: on
+                          ? AgentNotificationMode.ongoingAndUrgent
+                          : AgentNotificationMode.urgentOnly,
+                    ),
+                  ),
                 ),
-              ),
-              const Divider(height: 1),
+                const Divider(height: 1),
+              ],
               tile(
                 id: 'approvals',
                 icon: Icons.verified_user_outlined,
@@ -152,26 +219,6 @@ class AgentNotificationSettingsCard extends StatelessWidget {
                 value: preferences.quietUpdates,
                 change: (value) => preferences.copyWith(quietUpdates: value),
               ),
-              if (muted > 0) ...[
-                const Divider(height: 1),
-                ListTile(
-                  key: const ValueKey('agent-notify-muted'),
-                  leading: const Icon(Icons.notifications_off_outlined),
-                  title: Text(
-                    muted == 1 ? '1 muted agent' : '$muted muted agents',
-                  ),
-                  subtitle: const Text(
-                    'Long-press an agent in the Agents panel to mute or '
-                    'unmute it.',
-                  ),
-                  trailing: TextButton(
-                    key: const ValueKey('agent-notify-unmute-all'),
-                    onPressed: () =>
-                        set(preferences.copyWith(mutedAgents: const {})),
-                    child: const Text('Unmute all'),
-                  ),
-                ),
-              ],
             ],
           ),
         );

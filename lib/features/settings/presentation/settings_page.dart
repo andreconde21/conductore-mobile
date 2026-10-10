@@ -60,6 +60,9 @@ class _SettingsPageState extends State<SettingsPage> {
   final _firstRowFocus = FocusNode(debugLabel: 'settings-first-row');
   late SettingsSection _selected =
       widget.initialSection ?? SettingsSection.appearance;
+
+  /// Whether the open section (two panes) shows Advanced unfolded.
+  bool _advancedOpen = false;
   bool _pushedInitial = false;
 
   @override
@@ -85,9 +88,18 @@ class _SettingsPageState extends State<SettingsPage> {
     ];
   }
 
-  void _open(SettingsSection section, {required bool wide}) {
+  /// Opens [section]; [advanced] unfolds its Advanced (a search result
+  /// that lives there).
+  void _open(
+    SettingsSection section, {
+    required bool wide,
+    bool advanced = false,
+  }) {
     if (wide) {
-      setState(() => _selected = section);
+      setState(() {
+        _selected = section;
+        _advancedOpen = advanced;
+      });
       return;
     }
     // A desktop window too narrow for two panes opens the section as a
@@ -95,8 +107,11 @@ class _SettingsPageState extends State<SettingsPage> {
     pushAdaptivePage<void>(
       context,
       desktopMaxWidth: 760,
-      builder: (_) =>
-          SettingsSectionPage(section: section, services: widget.services),
+      builder: (_) => SettingsSectionPage(
+        section: section,
+        services: widget.services,
+        expandAdvanced: advanced,
+      ),
     );
   }
 
@@ -126,7 +141,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   matches: _matches,
                   selected: wide ? _selected : null,
                   firstRowFocus: _firstRowFocus,
-                  onOpen: (section) => _open(section, wide: wide),
+                  onOpen: (section, {advanced = false}) =>
+                      _open(section, wide: wide, advanced: advanced),
                 );
                 if (!wide) return list;
                 return Row(
@@ -151,9 +167,10 @@ class _SettingsPageState extends State<SettingsPage> {
                                   maxWidth: 760,
                                 ),
                                 child: SettingsSectionBody(
-                                  key: ValueKey(_selected),
+                                  key: ValueKey((_selected, _advancedOpen)),
                                   section: _selected,
                                   services: widget.services,
+                                  expandAdvanced: _advancedOpen,
                                 ),
                               ),
                             ),
@@ -185,7 +202,10 @@ class _SectionList extends StatelessWidget {
   final List<SettingsEntry> matches;
   final SettingsSection? selected;
   final FocusNode firstRowFocus;
-  final ValueChanged<SettingsSection> onOpen;
+  final void Function(SettingsSection section, {bool advanced}) onOpen;
+
+  void _openEntry(SettingsEntry entry) =>
+      onOpen(entry.section, advanced: entry.under == settingsAdvanced);
 
   /// Desktop: Down in the search field moves to the first row, so the
   /// arrows and Enter take it from there. Phones get [field] unchanged.
@@ -235,7 +255,7 @@ class _SectionList extends StatelessWidget {
               // Desktop: Enter opens the first result.
               onSubmitted: PlatformFeatures.isDesktop
                   ? (_) {
-                      if (matches.isNotEmpty) onOpen(matches.first.section);
+                      if (matches.isNotEmpty) _openEntry(matches.first);
                     }
                   : null,
               decoration: InputDecoration(
@@ -271,8 +291,8 @@ class _SectionList extends StatelessWidget {
               focusNode: index == 0 ? firstRowFocus : null,
               leading: Icon(entry.section.icon),
               title: Text(entry.title),
-              subtitle: Text(entry.section.title),
-              onTap: () => onOpen(entry.section),
+              subtitle: Text(entry.place),
+              onTap: () => _openEntry(entry),
             ),
         ] else
           for (final section in SettingsSection.values)
@@ -329,11 +349,15 @@ class SettingsSectionPage extends StatelessWidget {
   const SettingsSectionPage({
     required this.section,
     required this.services,
+    this.expandAdvanced = false,
     super.key,
   });
 
   final SettingsSection section;
   final SettingsServices services;
+
+  /// Opens with Advanced unfolded.
+  final bool expandAdvanced;
 
   @override
   Widget build(BuildContext context) {
@@ -371,6 +395,7 @@ class SettingsSectionPage extends StatelessWidget {
                   child: SettingsSectionBody(
                     section: section,
                     services: services,
+                    expandAdvanced: expandAdvanced,
                   ),
                 ),
               ],

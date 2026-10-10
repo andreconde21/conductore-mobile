@@ -14,17 +14,17 @@ enum SettingsSection {
   ),
   terminal(
     'Terminal',
-    'Enter key, mouse taps, clipboard, menus, sessions, snippets',
+    'Agent sessions, Herdr focus, snippets, quick actions',
     Icons.terminal_rounded,
   ),
   input(
     'Input',
-    'Toolbar and pill buttons, key rows, gestures',
+    'Customize keys, key rows, gestures',
     Icons.keyboard_alt_outlined,
   ),
   chatVoice(
     'Chat & Voice',
-    'Composer, dictation, read replies aloud, Talk',
+    'Dictation, voice commands, voice guide, read aloud',
     Icons.forum_outlined,
   ),
   agents(
@@ -56,6 +56,16 @@ enum SettingsSection {
   final IconData icon;
 }
 
+/// Where a section keeps the settings most people never change (CON-108).
+const settingsAdvanced = 'Advanced';
+
+/// The Chat & Voice row that opens the voice guide's page.
+const voiceGuideTitle = 'Voice guide';
+
+/// Settings › Input: the editor of the toolbar in use (the pill's buttons
+/// by default, else the key rows).
+const customizeKeysTitle = 'Customize keys';
+
 /// One setting as Settings search finds it: the [title] shown on its
 /// section page, and extra words people may type for it.
 class SettingsEntry {
@@ -64,6 +74,7 @@ class SettingsEntry {
     this.title, {
     this.keywords = const [],
     this.availableWhen,
+    this.under,
   });
 
   final SettingsSection section;
@@ -71,6 +82,15 @@ class SettingsEntry {
   /// The exact text of the setting on its section page.
   final String title;
   final List<String> keywords;
+
+  /// Null on the section page itself; else what holds it there:
+  /// [settingsAdvanced], or the title of the row whose page it is on.
+  final String? under;
+
+  bool get isTopLevel => under == null;
+
+  /// Where search says it is: "Terminal" or "Terminal › Advanced".
+  String get place => [section.title, ?under].join(' › ');
 
   /// Null when always shown; else whether this build and setup show it.
   final bool Function(SettingsServices services)? availableWhen;
@@ -146,9 +166,10 @@ bool _selfMachine(SettingsServices s) =>
 bool _windowsShell(SettingsServices s) =>
     s.hostsController != null && showsWindowsShellSetting(s.hostsController!);
 
-/// Every setting the page offers, section by section. A test walks this
-/// list and checks each title on its section page, so nothing that used to
-/// live in the Appearance sheet gets lost.
+/// Every setting the page offers, section by section: about 40 on the
+/// section pages, the rest under Advanced or on a row's own page
+/// ([SettingsEntry.under]). A test walks this list and checks each title
+/// where it says, so nothing gets lost.
 const List<SettingsEntry> settingsCatalog = [
   // Appearance
   SettingsEntry(
@@ -176,6 +197,7 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.appearance,
     'Show local shell',
     keywords: ['home', 'local terminal'],
+    under: settingsAdvanced,
   ),
   // Terminal
   SettingsEntry(
@@ -183,11 +205,6 @@ const List<SettingsEntry> settingsCatalog = [
     'This computer: shell',
     keywords: ['windows', 'powershell', 'cmd', 'command prompt', 'wsl'],
     availableWhen: _windowsShell,
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    'Enter sends',
-    keywords: ['enter', 'return', 'crlf', 'newline', 'sequence'],
   ),
   SettingsEntry(
     SettingsSection.terminal,
@@ -203,49 +220,9 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.terminal,
-    'Send mouse taps',
-    keywords: ['mouse', 'click', 'tap'],
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    'Remote clipboard',
-    keywords: ['osc 52', 'copy', 'clipboard'],
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    'Menu buttons',
-    keywords: ['prompts', 'y/n', 'numbered menus'],
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    'Paste images as uploaded files',
-    keywords: ['image', 'paste', 'screenshot'],
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    'Restore sessions on launch',
-    keywords: ['restore', 'reopen', 'startup'],
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    keepScreenOnTitle,
-    keywords: ['wakelock', 'screen', 'sleep', 'battery', 'lock'],
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    sshKeepaliveTitle,
-    keywords: ['keepalive', 'keep-alive', 'battery', 'data', 'disconnect'],
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
     'Open agent sessions in',
     keywords: ['default view', 'chat view', 'claude'],
     availableWhen: _sessionViews,
-  ),
-  SettingsEntry(
-    SettingsSection.terminal,
-    'Multiplexer tabs on phone',
-    keywords: ['herdr tabs', 'tmux windows', 'strip', 'compact', 'tablet'],
   ),
   SettingsEntry(
     SettingsSection.terminal,
@@ -257,21 +234,73 @@ const List<SettingsEntry> settingsCatalog = [
     'Quick actions',
     keywords: ['commands', 'buttons', 'project', 'code-workspace', 'run'],
   ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Enter sends',
+    keywords: ['enter', 'return', 'crlf', 'newline', 'sequence'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Send mouse taps',
+    keywords: ['mouse', 'click', 'tap'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Remote clipboard',
+    keywords: ['osc 52', 'copy', 'clipboard'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Menu buttons',
+    keywords: ['prompts', 'y/n', 'numbered menus'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Paste images as uploaded files',
+    keywords: ['image', 'paste', 'screenshot'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Restore sessions on launch',
+    keywords: ['restore', 'reopen', 'startup'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    keepScreenOnTitle,
+    keywords: ['wakelock', 'screen', 'sleep', 'battery', 'lock'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    sshKeepaliveTitle,
+    keywords: ['keepalive', 'keep-alive', 'battery', 'data', 'disconnect'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
+    'Multiplexer tabs on phone',
+    keywords: ['herdr tabs', 'tmux windows', 'strip', 'compact', 'tablet'],
+    under: settingsAdvanced,
+  ),
   // Input
   SettingsEntry(
     SettingsSection.input,
-    'Toolbar style',
-    keywords: ['pill', 'keyboard bar', 'toolbar'],
-  ),
-  SettingsEntry(
-    SettingsSection.input,
-    'Pill buttons',
-    keywords: ['pill', 'configure', 'customize', 'buttons'],
-  ),
-  SettingsEntry(
-    SettingsSection.input,
-    'Key rows',
-    keywords: ['keys', 'shortcuts', 'ctrl', 'esc', 'tab', 'keyboard'],
+    customizeKeysTitle,
+    keywords: [
+      'pill buttons',
+      'keys',
+      'toolbar',
+      'pill',
+      'configure',
+      'customize',
+      'buttons',
+    ],
   ),
   SettingsEntry(
     SettingsSection.input,
@@ -281,36 +310,35 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.input,
+    'Toolbar style',
+    keywords: ['pill', 'keyboard bar', 'toolbar'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.input,
+    'Key rows',
+    keywords: ['keys', 'shortcuts', 'ctrl', 'esc', 'tab', 'keyboard'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.input,
     'Swipe switches window',
     keywords: ['gesture', 'swipe'],
+    under: settingsAdvanced,
   ),
   SettingsEntry(
     SettingsSection.input,
     'Pinch to zoom',
     keywords: ['gesture', 'zoom'],
+    under: settingsAdvanced,
   ),
   SettingsEntry(
     SettingsSection.input,
     'Drag scrolls the remote app (mouse wheel)',
     keywords: ['gesture', 'scroll', 'drag', 'terminal'],
+    under: settingsAdvanced,
   ),
   // Chat & Voice
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'Press Enter after inserting',
-    keywords: ['composer', 'prompt', 'chat mode', 'enter', 'submit', 'send'],
-  ),
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'Tool activity',
-    keywords: ['tools', 'tool calls', 'commands', 'collapse', 'hide'],
-  ),
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'Where to find voice',
-    keywords: ['mic', 'microphone', 'dictate', 'talk', 'speech', 'voice'],
-    availableWhen: _speech,
-  ),
   SettingsEntry(
     SettingsSection.chatVoice,
     'Language',
@@ -339,69 +367,98 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
+    voiceGuideTitle,
+    keywords: ['guide', 'hands-free', 'driving', 'talk to the fleet', 'voice'],
+    availableWhen: _guide,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
     'Send words',
     keywords: ['voice command', 'send', 'enviar', 'dictation'],
     availableWhen: _speech,
+    under: voiceCommandsTitle,
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
     'Cancel words',
     keywords: ['voice command', 'cancel', 'cancelar', 'discard', 'dictation'],
     availableWhen: _speech,
-  ),
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'Silence beeps between phrases',
-    keywords: ['beep', 'mute', 'experimental'],
-    availableWhen: _beeps,
-  ),
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'Read replies aloud by default',
-    keywords: ['tts', 'text to speech', 'speak', 'read aloud'],
-    availableWhen: _tts,
-  ),
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'How much to read',
-    keywords: ['brief', 'full', 'summary', 'read aloud', 'length'],
-    availableWhen: _tts,
-  ),
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'Talk: send after a pause of',
-    keywords: ['talk', 'voice mode', 'hands-free'],
-    availableWhen: _tts,
-  ),
-  SettingsEntry(
-    SettingsSection.chatVoice,
-    'Voice guide',
-    keywords: ['guide', 'hands-free', 'driving', 'talk to the fleet', 'voice'],
-    availableWhen: _guide,
+    under: voiceCommandsTitle,
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
     'Brain machine',
     keywords: ['guide', 'claude', 'haiku'],
     availableWhen: _guide,
+    under: voiceGuideTitle,
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
     'Say yes before acting',
     keywords: ['guide', 'confirm', 'approve', 'low risk'],
     availableWhen: _guide,
+    under: voiceGuideTitle,
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
     'Guide language',
     keywords: ['guide', 'portuguese', 'english'],
     availableWhen: _guide,
+    under: voiceGuideTitle,
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
     'Wake with headset button',
     keywords: ['guide', 'headset', 'bluetooth', 'media button', 'driving'],
     availableWhen: _guide,
+    under: voiceGuideTitle,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Press Enter after inserting',
+    keywords: ['composer', 'prompt', 'chat mode', 'enter', 'submit', 'send'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Review changes',
+    keywords: ['review', 'diff', 'after each turn', 'accept', 'reject'],
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Silence beeps between phrases',
+    keywords: ['beep', 'mute', 'experimental'],
+    availableWhen: _beeps,
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Read replies aloud by default',
+    keywords: ['tts', 'text to speech', 'speak', 'read aloud'],
+    availableWhen: _tts,
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Reading language',
+    keywords: [
+      'read aloud',
+      'tts',
+      'voice',
+      'speed',
+      'pitch',
+      'text to speech',
+    ],
+    availableWhen: _tts,
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'Talk: send after a pause of',
+    keywords: ['talk', 'voice mode', 'hands-free'],
+    availableWhen: _tts,
+    under: settingsAdvanced,
   ),
   // Agents
   SettingsEntry(
@@ -419,48 +476,16 @@ const List<SettingsEntry> settingsCatalog = [
   SettingsEntry(
     SettingsSection.agents,
     'Notifications',
-    keywords: ['notify', 'alerts', 'approvals'],
-    availableWhen: _machines,
-  ),
-  SettingsEntry(
-    SettingsSection.agents,
-    'Ongoing + urgent',
     keywords: [
       'notify',
-      'notifications',
-      'mode',
-      'ongoing',
-      'status',
+      'notify me',
+      'alerts',
+      'approvals',
       'urgent',
+      'finished',
       'everything',
-      'verbose',
-      'quiet',
     ],
-    availableWhen: _agentNotifications,
-  ),
-  SettingsEntry(
-    SettingsSection.agents,
-    'Also alert when an agent finishes',
-    keywords: ['notify', 'finished', 'done', 'turn ended', 'idle'],
-    availableWhen: _agentNotifications,
-  ),
-  SettingsEntry(
-    SettingsSection.agents,
-    'Stuck or looping',
-    keywords: ['notify', 'stuck', 'loop', 'repeating', 'no progress'],
-    availableWhen: _agentNotifications,
-  ),
-  SettingsEntry(
-    SettingsSection.agents,
-    'Summary only',
-    keywords: ['notify', 'buttons', 'allow', 'deny', 'actions'],
-    availableWhen: _agentNotifications,
-  ),
-  SettingsEntry(
-    SettingsSection.agents,
-    'Quiet updates',
-    keywords: ['notify', 'silent', 'sound', 'vibrate', 'verbose'],
-    availableWhen: _agentNotifications,
+    availableWhen: _machines,
   ),
   SettingsEntry(
     SettingsSection.agents,
@@ -500,6 +525,52 @@ const List<SettingsEntry> settingsCatalog = [
     'Add quick-settings tile',
     keywords: ['tile', 'widget', 'quick settings'],
     availableWhen: _homeWidget,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Ongoing notification',
+    keywords: [
+      'ongoing + urgent',
+      'notify',
+      'notifications',
+      'mode',
+      'ongoing',
+      'status',
+      'urgent',
+      'everything',
+      'verbose',
+      'quiet',
+    ],
+    availableWhen: _agentNotifications,
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Also alert when an agent finishes',
+    keywords: ['notify', 'finished', 'done', 'turn ended', 'idle'],
+    availableWhen: _agentNotifications,
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Stuck or looping',
+    keywords: ['notify', 'stuck', 'loop', 'repeating', 'no progress'],
+    availableWhen: _agentNotifications,
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Summary only',
+    keywords: ['notify', 'buttons', 'allow', 'deny', 'actions'],
+    availableWhen: _agentNotifications,
+    under: settingsAdvanced,
+  ),
+  SettingsEntry(
+    SettingsSection.agents,
+    'Quiet updates',
+    keywords: ['notify', 'silent', 'sound', 'vibrate', 'verbose'],
+    availableWhen: _agentNotifications,
+    under: settingsAdvanced,
   ),
   // Sync & Backup
   SettingsEntry(
