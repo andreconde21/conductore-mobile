@@ -30,7 +30,7 @@ void main() {
     return h;
   }
 
-  for (final width in [320.0, 800.0])
+  for (final width in [320.0, 800.0]) {
     testWidgets('the view bar keeps its ⋮ at the right edge, with the '
         'needs-you counter, ${width.round()} dp wide', (tester) async {
       final theme = ThemeController(InMemoryThemePreferences());
@@ -58,6 +58,7 @@ void main() {
         lessThanOrEqualTo(1),
       );
     });
+  }
 
   testWidgets("the Projects tab is sheprd's: header, move to a project, "
       'collapsed count, compact view, active filter', (tester) async {
