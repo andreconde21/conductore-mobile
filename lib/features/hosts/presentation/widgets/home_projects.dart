@@ -236,6 +236,7 @@ class HomeProjectsList extends StatelessWidget {
             _HomeProjectRow(
               key: ValueKey('home-project-row-${entry.node.key}'),
               node: entry.node,
+              open: entry.node.openInApp,
               dot: entry.dot,
               sheprd: entry.sheprdOf(entry.node),
               title: _entryText(entry, project, names).title,
@@ -255,6 +256,7 @@ class HomeProjectsList extends StatelessWidget {
                 _HomeProjectRow(
                   key: ValueKey('home-project-agent-${agent.key}'),
                   node: agent,
+                  open: entry.node.openInApp || agent.openInApp,
                   dot: entry.dotOf(agent),
                   sheprd: entry.sheprdOf(agent),
                   title: _agentText(entry, agent, project, names).title,
@@ -340,6 +342,7 @@ class _HomeProjectRow extends StatelessWidget {
     required this.faded,
     required this.onTap,
     required this.onLongPress,
+    this.open = false,
     this.title,
     this.dot,
     this.sheprd,
@@ -347,6 +350,9 @@ class _HomeProjectRow extends StatelessWidget {
   });
 
   final SidebarNode node;
+
+  /// Its workspace or session is open in the app: marked "open".
+  final bool open;
 
   /// The prominent text; null uses [node]'s label.
   final String? title;
@@ -417,7 +423,7 @@ class _HomeProjectRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (node.openInApp)
+            if (open)
               Padding(
                 padding: const EdgeInsets.only(left: 6),
                 child: _OpenMark(

@@ -23,4 +23,26 @@ void main() {
       const HomePreferences(machineFilter: {'a'}),
     );
   });
+
+  test('the home mode round-trips, and older saves have none', () {
+    const projects = HomePreferences(mode: HomeMode.projects);
+    expect(projects.toJson()['mode'], 'projects');
+    expect(HomePreferences.fromJson(projects.toJson()), projects);
+    expect(
+      HomePreferences.fromJson(
+        const HomePreferences(mode: HomeMode.openClosed).toJson(),
+      ).mode,
+      HomeMode.openClosed,
+    );
+    // Saved before CON-105: no key, no mode (the page picks one).
+    expect(const HomePreferences().toJson().containsKey('mode'), isFalse);
+    expect(
+      HomePreferences.fromJson(const {
+        'sessionsView': 'list',
+        'workspacesView': 'grid',
+      }).mode,
+      isNull,
+    );
+    expect(HomePreferences.fromJson(const {'mode': 'tiles'}).mode, isNull);
+  });
 }
