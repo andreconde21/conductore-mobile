@@ -11,6 +11,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../desktop_shell/shell_harness.dart';
 
+/// The home list's scrollable (the search field has one of its own).
+final homeScrollable = find
+    .descendant(
+      of: find.byKey(const ValueKey('home-scroll')),
+      matching: find.byType(Scrollable),
+    )
+    .first;
+
 void main() {
   testWidgets('the top-bar switch goes to Projects and back, remembered; '
       'long-press to move, collapse with a count', (tester) async {
@@ -47,7 +55,7 @@ void main() {
         'home-project-row-${SidebarKeys.tmuxSession('workstation', 'main')}',
       ),
     );
-    await tester.scrollUntilVisible(main, 200);
+    await tester.scrollUntilVisible(main, 200, scrollable: homeScrollable);
     await tester.ensureVisible(main);
     await tester.pumpAndSettle();
     await tester.longPress(main);
@@ -62,7 +70,7 @@ void main() {
     ]);
 
     final ops = find.byKey(const ValueKey('project-header-ops'));
-    await tester.scrollUntilVisible(ops, 200);
+    await tester.scrollUntilVisible(ops, 200, scrollable: homeScrollable);
     await tester.ensureVisible(ops);
     await tester.pumpAndSettle();
     // The project is a box with its header inside.
@@ -97,7 +105,7 @@ void main() {
 
     // Back to Open / Closed.
     final back = find.byKey(const ValueKey('home-mode-switch'));
-    await tester.scrollUntilVisible(back, -200);
+    await tester.scrollUntilVisible(back, -200, scrollable: homeScrollable);
     await tester.tap(back);
     await settleShell(tester);
     expect(h.homePreferences.stored.mode, HomeMode.openClosed);
@@ -208,7 +216,7 @@ void main() {
         '${SidebarKeys.herdrTab('workstation', 'w2', 'w2:t1')}',
       ),
     );
-    await tester.scrollUntilVisible(agent, 200);
+    await tester.scrollUntilVisible(agent, 200, scrollable: homeScrollable);
     expect(agent, findsOneWidget);
     expect(
       find.descendant(of: agent, matching: find.text('open')),
@@ -288,6 +296,160 @@ void main() {
     await tearDownShell(tester);
   });
 
+  Future<ShellHarness> pumpSearchHome(
+    WidgetTester tester, {
+    required HomeMode mode,
+  }) async {
+    late ProjectLayoutController layout;
+    final h = await pumpShell(
+      tester,
+      size: const Size(390, 844),
+      shellMode: false,
+      before: (h) {
+        layout = ProjectLayoutController.instance = ProjectLayoutController(
+          theme: h.theme,
+          clock: () => h.now,
+        );
+        h.homePreferences.stored = HomePreferences(mode: mode);
+        unawaited(
+          h.theme.setProjectPrefs(
+            h.theme.projectPrefs.copyWith(
+              layout: const ProjectLayout().add('Ops', rules: ['TheCalendar']),
+            ),
+          ),
+        );
+      },
+    );
+    addTearDown(() {
+      ProjectLayoutController.instance = null;
+      layout.dispose();
+    });
+    return h;
+  }
+
+  final searchField = find.byKey(const ValueKey('home-workspace-search'));
+  final boxes = find.byWidgetPredicate(
+    (widget) =>
+        widget.key is ValueKey<String> &&
+        (widget.key! as ValueKey<String>).value.startsWith('home-project-box-'),
+  );
+
+  Future<void> search(WidgetTester tester, String query) async {
+    await tester.enterText(
+      find.descendant(of: searchField, matching: find.byType(TextField)),
+      query,
+    );
+    await settleShell(tester);
+  }
+
+  testWidgets('Projects mode search: pane title, workspace, tab, project and '
+      'machine; a project with no match hides; clearing restores', (
+    tester,
+  ) async {
+    await pumpSearchHome(tester, mode: HomeMode.projects);
+    expect(searchField, findsOneWidget);
+    final all = boxes.evaluate().length;
+    expect(all, greaterThan(1));
+    expect(find.textContaining('Deploying images'), findsOneWidget);
+
+    // Pane title, case-insensitive: that agent only, in its one box.
+    await search(tester, 'pROOFING');
+    expect(find.textContaining('Proofing PR 398'), findsOneWidget);
+    expect(find.textContaining('Deploying images'), findsNothing);
+    expect(find.textContaining('Nightly E2E'), findsNothing);
+    expect(boxes, findsOneWidget);
+
+    // Tab name: Infrastructure's "review" tab.
+    await search(tester, 'review');
+    expect(find.textContaining('Proofing PR 398'), findsOneWidget);
+    expect(find.textContaining('Deploying images'), findsNothing);
+
+    // Workspace label: both of Infrastructure's agents.
+    await search(tester, 'infrastruct');
+    expect(find.textContaining('Proofing PR 398'), findsOneWidget);
+    expect(find.textContaining('Deploying images'), findsOneWidget);
+    expect(find.textContaining('Nightly E2E'), findsNothing);
+
+    // Project name: everything in Ops (TheCalendar), and only that box.
+    await search(tester, 'ops');
+    expect(find.byKey(const ValueKey('home-project-box-ops')), findsOneWidget);
+    expect(find.textContaining('Nightly E2E'), findsOneWidget);
+    expect(boxes, findsOneWidget);
+
+    // Machine name: build-box's tmux session only.
+    await search(tester, 'build-box');
+    expect(
+      find.byKey(
+        ValueKey(
+          'home-project-row-${SidebarKeys.tmuxSession('build-box', 'ci')}',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Proofing PR 398'), findsNothing);
+
+    // Nothing matches: says so.
+    await search(tester, 'zzz-nothing');
+    expect(boxes, findsNothing);
+    expect(find.byKey(const ValueKey('home-projects-empty')), findsOneWidget);
+
+    // Clearing restores the view.
+    await tester.tap(
+      find.descendant(of: searchField, matching: find.byTooltip('Clear')),
+    );
+    await settleShell(tester);
+    expect(boxes.evaluate().length, all);
+    expect(find.textContaining('Deploying images'), findsOneWidget);
+    await tearDownShell(tester);
+  });
+
+  testWidgets('Open / Closed search filters sessions and other workspaces, '
+      'machine groups without a match hide', (tester) async {
+    final h = await pumpSearchHome(tester, mode: HomeMode.openClosed);
+    final session = await h.open(
+      tester,
+      workstation,
+      const ConnectTarget.herdr(workspaceId: 'w1', label: 'Infrastructure'),
+    );
+    await settleShell(tester);
+    final tile = find.byKey(ValueKey('home-session-${session.host.id}'));
+    const calendar = ValueKey('other-herdr-workstation-w2');
+    const main = ValueKey('other-tmux-workstation-main');
+    const ci = ValueKey('other-tmux-build-box-ci');
+    expect(tile, findsOneWidget);
+    expect(find.byKey(calendar), findsOneWidget);
+
+    // A pane title inside the open workspace keeps its session.
+    await search(tester, 'proofing');
+    expect(tile, findsOneWidget);
+    expect(find.byKey(calendar), findsNothing);
+    expect(find.byKey(main), findsNothing);
+
+    // The project name (Ops holds TheCalendar).
+    await search(tester, 'OPS');
+    expect(tile, findsNothing);
+    expect(find.byKey(calendar), findsOneWidget);
+    expect(find.byKey(main), findsNothing);
+    expect(find.byKey(ci), findsNothing);
+
+    // A machine name keeps that machine's group.
+    await search(tester, 'build-box');
+    await tester.scrollUntilVisible(
+      find.byKey(ci),
+      200,
+      scrollable: homeScrollable,
+    );
+    expect(find.byKey(ci), findsOneWidget);
+    expect(find.byKey(calendar), findsNothing);
+    expect(find.byKey(const ValueKey('other-group-workstation')), findsNothing);
+
+    await search(tester, '');
+    await tester.scrollUntilVisible(tile, -200, scrollable: homeScrollable);
+    expect(tile, findsOneWidget);
+    expect(find.byKey(calendar), findsOneWidget);
+    await tearDownShell(tester);
+  });
+
   testWidgets('in project mode an unreachable machine keeps its notice as '
       'one line, with Retry and the details', (tester) async {
     late ProjectLayoutController layout;
@@ -319,7 +481,7 @@ void main() {
     await tester.pumpWidget(h.page(shellMode: false));
     await settleShell(tester);
     final line = find.byKey(const ValueKey('home-notice-line-build-box'));
-    await tester.scrollUntilVisible(line, 200);
+    await tester.scrollUntilVisible(line, 200, scrollable: homeScrollable);
     expect(line, findsOneWidget);
     expect(
       find.descendant(of: line, matching: find.textContaining("Can't reach")),
