@@ -46,8 +46,8 @@ import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 /// "summary", "toolInput", "createdAt"}]}` (timestamps in epoch ms), plus
 /// the optional `kind` (`claude`, `codex`, `opencode`...), `project` (git
 /// repository name) and `usage` (`{"contextUsedPct", "contextTokens",
-/// "windowLabel", "limits": [{"label", "usedPct", "resetsAt"}]}`, see
-/// `docs/usage-proposal.md`); a daemon without them still parses. An
+/// "windowLabel", "limits": [{"label", "usedPct", "resetsAt"}]}`,
+/// set by the companion's statusline); a daemon without them still parses. An
 /// agent in `needs_permission` with an empty `pending` list has a prompt
 /// waiting in the terminal that the phone can no longer answer.
 ///
