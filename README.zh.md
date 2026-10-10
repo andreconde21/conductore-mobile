@@ -1,3 +1,5 @@
+> **Note:** this page is the upstream Conduit README, translated, and is out of date for Conductore. The English [README.md](README.md) is the current one (agents, Chat View, host companion and more).
+
 # Conduit：终端、SSH、Mosh 与 SFTP
 
 [![Latest release](https://img.shields.io/github/v/release/gwitko/Conduit)](https://github.com/gwitko/Conduit/releases/latest)

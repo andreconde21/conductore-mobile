@@ -75,6 +75,11 @@ An agent has at most one alert, and it is posted only for these needs:
 | Stuck | the agents dashboard flags it: no progress, the same failure repeated, a command run over and over, or a long wait for an approval |
 | Finished | only with "Also alert when an agent finishes" turned on |
 
+A Permission or Question alert stays answerable from the phone for 15
+minutes (the companion's `permission-wait` setting, 1 to 60). If that wait
+runs out, the card stays and the answer is typed into Claude Code's own
+dialog in the pane ("via terminal"), after the companion checks the screen.
+
 The companion reports a turn that simply ended as `waiting_input`. That
 case is not a question: it updates the ongoing status and does not alert.
 
