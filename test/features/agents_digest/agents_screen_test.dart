@@ -15,7 +15,12 @@ void main() {
       buildHost(id).copyWith(agentAttentionEnabled: true);
 
   Future<
-    (AgentAttentionController, ScriptedAgentCommandRunner, List<AgentInfo>)
+    (
+      AgentAttentionController,
+      ScriptedAgentCommandRunner,
+      List<AgentInfo>,
+      List<AgentInfo>,
+    )
   >
   pumpSheet(
     WidgetTester tester,
@@ -40,6 +45,7 @@ void main() {
       await tester.runAsync(pumpEventQueue);
     }
     final opened = <AgentInfo>[];
+    final chats = <AgentInfo>[];
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -47,13 +53,13 @@ void main() {
             attention: controller,
             tabs: true,
             onOpenTerminal: (host, agent) => opened.add(agent),
-            onOpenChat: (host, agent) => fail('no chat on Herdr'),
+            onOpenChat: (host, agent) => chats.add(agent),
           ),
         ),
       ),
     );
     await tester.pump();
-    return (controller, runner, opened);
+    return (controller, runner, opened, chats);
   }
 
   testWidgets('shows an empty state when nothing is monitored', (tester) async {
@@ -86,7 +92,7 @@ void main() {
   testWidgets('swipe a card to the right to mute its notifications', (
     tester,
   ) async {
-    final (controller, _, _) = await pumpSheet(tester, [
+    final (controller, _, _, _) = await pumpSheet(tester, [
       const AgentCommandResult(
         stdout: '[{"name": "builder", "state": "working"}]',
         stderr: '',
@@ -112,7 +118,7 @@ void main() {
   testWidgets('swipe a done card to the left to hide it until it changes', (
     tester,
   ) async {
-    final (controller, _, _) = await pumpSheet(tester, [
+    final (controller, _, _, _) = await pumpSheet(tester, [
       const AgentCommandResult(
         stdout:
             '[{"name": "builder", "state": "working"},'
@@ -167,7 +173,7 @@ void main() {
   });
 
   testWidgets('tapping an agent opens its terminal', (tester) async {
-    final (_, _, opened) = await pumpSheet(tester, [
+    final (_, _, opened, chats) = await pumpSheet(tester, [
       const AgentCommandResult(
         stdout: '[{"name": "builder", "state": "blocked"}]',
         stderr: '',
@@ -180,5 +186,38 @@ void main() {
 
     expect(opened, hasLength(1));
     expect(opened.single.name, 'builder');
+    expect(chats, isEmpty);
+  });
+
+  testWidgets('on a Herdr machine the long-press still tries the chat, and '
+      'a waiting agent offers no Answer (no companion to send it)', (
+    tester,
+  ) async {
+    final (_, _, opened, chats) = await pumpSheet(tester, [
+      const AgentCommandResult(
+        stdout:
+            '[{"name": "builder", "kind": "claude-code", "state": "blocked",'
+            ' "workspace_id": "w1", "tab_id": "w1:t2"}]',
+        stderr: '',
+        exitCode: 0,
+      ),
+    ]);
+    expect(find.text('Asks you'), findsOneWidget);
+    expect(find.text('Answer'), findsNothing);
+
+    await tester.longPress(find.textContaining('builder'));
+    expect(chats.single.name, 'builder');
+    expect(opened, isEmpty);
+  });
+
+  testWidgets('the Usage tab keeps the machines\' status', (tester) async {
+    final (controller, _, _, _) = await pumpSheet(tester, [
+      const AgentCommandResult(stdout: '[]', stderr: '', exitCode: 0),
+    ]);
+    await tester.tap(find.text('Usage'));
+    await tester.pump();
+    expect(find.text('MACHINES'), findsOneWidget);
+    expect(find.byTooltip('Refresh Host h'), findsOneWidget);
+    expect(controller.monitoredHosts, hasLength(1));
   });
 }
