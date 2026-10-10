@@ -967,7 +967,7 @@ void main() {
           tester.getSemantics(
             find.byKey(ValueKey('agent-notify-choice-${choice.name}')),
           ),
-          containsSemantics(isChecked: choice == selected),
+          isSemantics(isChecked: choice == selected),
           reason: choice.name,
         );
       }
