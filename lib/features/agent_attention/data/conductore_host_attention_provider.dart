@@ -494,6 +494,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       },
       workspaceLabel: workspaceLabel,
       herdrServer: herdr is Map ? herdrServerOf(herdr) : null,
+      awaitsApproval: _string(item['state']) == 'needs_permission',
     );
   }
 

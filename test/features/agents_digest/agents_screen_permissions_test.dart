@@ -134,13 +134,15 @@ void main() {
     '"Permission prompt is waiting in the terminal","pending":[]}]}',
   );
 
-  testWidgets('a prompt the phone missed shows without buttons', (
+  testWidgets('a prompt the phone missed still needs you, without buttons', (
     tester,
   ) async {
-    await pumpSheet(tester, [inTerminal]);
-    // No time and no approval: under the collapsed Quiet section.
-    await tester.tap(find.byKey(const ValueKey('digest-section-quiet')));
-    await tester.pump();
+    final (controller, _) = await pumpSheet(tester, [inTerminal]);
+    // Still a prompt: it needs the user, and the badge counts it.
+    expect(controller.attentionCount, 1);
+    expect(find.text('NEEDS YOU'), findsOneWidget);
+    expect(find.text('Needs approval'), findsOneWidget);
+    expect(find.text('Answer'), findsNothing);
 
     expect(
       find.text('Permission prompt is waiting in the terminal'),
@@ -168,6 +170,7 @@ void main() {
 
     expect(find.textContaining('answer it in the terminal'), findsWidgets);
     expect(find.text('Allow'), findsNothing);
-    expect(find.text('Needs approval'), findsNothing);
+    // Still at the prompt in the terminal.
+    expect(find.text('Needs approval'), findsOneWidget);
   });
 }

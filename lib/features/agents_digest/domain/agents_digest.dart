@@ -522,10 +522,13 @@ DigestReport digestFromStatus({
             // Done with its turn (Herdr's "done") or ended; the monitor
             // still lists it, so it can still be opened.
             AgentAttentionState.finished => 'done',
-            _ when agent.pendingRequests.isNotEmpty => 'needs_permission',
+            _ when agent.pendingRequests.isNotEmpty || agent.awaitsApproval =>
+              'needs_permission',
             _ => 'waiting_input',
           },
-          attention: agent.pendingRequests.isNotEmpty
+          attention:
+              agent.pendingRequests.isNotEmpty ||
+                  (agent.awaitsApproval && agent.state.needsAttention)
               ? DigestAttention.permission
               : agent.needsYou(waitingNeedsYou: waitingNeedsYou)
               ? DigestAttention.question

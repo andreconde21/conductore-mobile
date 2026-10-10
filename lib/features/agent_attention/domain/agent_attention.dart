@@ -417,6 +417,7 @@ class AgentInfo {
     this.lastError,
     this.workspaceLabel,
     this.herdrServer,
+    this.awaitsApproval = false,
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -488,6 +489,11 @@ class AgentInfo {
   /// `herdr@<session>`), when the provider can tell.
   final String? herdrServer;
 
+  /// The companion reports it at a permission prompt (`needs_permission`)
+  /// even with no request for the app to answer (it timed out, or the
+  /// phone missed it): it still needs the user.
+  final bool awaitsApproval;
+
   /// What the app calls this agent's project: its Herdr [workspaceLabel],
   /// else its [repoLabel]. The inbox groups by it.
   String? get projectLabel {
@@ -540,6 +546,7 @@ class AgentInfo {
       lastError: lastError,
       workspaceLabel: workspaceLabel,
       herdrServer: herdrServer,
+      awaitsApproval: awaitsApproval,
     );
   }
 
@@ -567,6 +574,7 @@ class AgentInfo {
       lastError: lastError,
       workspaceLabel: label,
       herdrServer: herdrServer,
+      awaitsApproval: awaitsApproval,
     );
   }
 
@@ -592,6 +600,7 @@ class AgentInfo {
         other.lastError == lastError &&
         other.workspaceLabel == workspaceLabel &&
         other.herdrServer == herdrServer &&
+        other.awaitsApproval == awaitsApproval &&
         _sameRequests(other.pendingRequests, pendingRequests);
   }
 
@@ -632,6 +641,7 @@ class AgentInfo {
       lastError,
       workspaceLabel,
       herdrServer,
+      awaitsApproval,
     ),
     Object.hashAll(pendingRequests),
   );
@@ -640,7 +650,8 @@ class AgentInfo {
 /// The agents that need the user now, the same rule everywhere: the Agents
 /// screen's "Needs you" and the Agents button's badge.
 extension AgentNeedsYou on AgentInfo {
-  /// A pending approval, or waiting with a question: it asked with
+  /// A pending approval (or a prompt the app cannot answer,
+  /// [AgentInfo.awaitsApproval]), or waiting with a question: it asked with
   /// AskUserQuestion or ExitPlanMode, or its last reply ends in a question
   /// (the companion's `digest` rule). An agent that only finished its turn
   /// does not count. [waitingNeedsYou]: every wait counts (Herdr reports
@@ -648,7 +659,7 @@ extension AgentNeedsYou on AgentInfo {
   bool needsYou({bool waitingNeedsYou = false}) {
     if (pendingRequests.isNotEmpty) return true;
     if (!state.needsAttention) return false;
-    return waitingNeedsYou || asksQuestion;
+    return awaitsApproval || waitingNeedsYou || asksQuestion;
   }
 
   /// See [needsYou].
