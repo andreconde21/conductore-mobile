@@ -332,8 +332,8 @@ Both multiplexers are first-class: everything below works for Herdr and for
 tmux.
 
 - **Home screen built around your servers**: pick one, several or all
-  machines, and switch the list between two modes (the button next to the
-  search field). **Projects** (the default when you have a sheprd project
+  machines, and switch the list between two modes with *Projects | Open*
+  next to the search field. **Projects** (the default when you have a sheprd project
   layout) puts every workspace in a box per project, open and closed
   together, each agent's pane title on its row and the ones open in the app
   marked *open*. **Open / Closed** shows your open sessions as live previews
