@@ -5,6 +5,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_find_bar.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_markdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -344,6 +345,44 @@ void main() {
     expect(runner.commands[1], contains('interrupt s-1'));
     await tester.tap(find.text('Terminal'));
     expect(toTerminal, 1);
+  });
+
+  // The review saw Stop on an Idle session: the composer drew it always,
+  // only tinted red while working (CON-107).
+  testWidgets('Stop shows only while the agent works', (tester) async {
+    final idle = assistantLine('a1', [text('All done.')]);
+    await pumpPage(tester, [
+      ok(page([idle])),
+    ]);
+    final status = tester.widget<Text>(
+      find.byKey(const ValueKey('chat-header-status')),
+    );
+    expect(status.data, startsWith('Idle'));
+    expect(find.byTooltip('Interrupt (Esc)'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await pumpPage(tester, [ok(page([], state: 'working'))]);
+    expect(find.byTooltip('Interrupt (Esc)'), findsOneWidget);
+  });
+
+  testWidgets('the app bar: Terminal and ⋮ (Review only with changes); '
+      'search lives in ⋮', (tester) async {
+    await pumpPage(tester, [ok(page([]))]);
+    final bar = find.byType(AppBar);
+    // The ⋮ button is the only icon: no search, read-aloud or Talk.
+    expect(
+      find.descendant(of: bar, matching: find.byType(IconButton)),
+      findsOneWidget,
+    );
+    expect(find.descendant(of: bar, matching: find.text('Terminal')), findsOne);
+    expect(find.byKey(const ValueKey('chat-menu')), findsOneWidget);
+    expect(find.byKey(const ValueKey('chat-search')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('chat-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('chat-search')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ChatFindBar), findsOneWidget);
   });
 
   testWidgets('a missing companion explains how to install it', (tester) async {

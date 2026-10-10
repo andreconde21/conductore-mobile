@@ -388,10 +388,10 @@ class SettingsSectionBody extends StatelessWidget {
         'line from the pill\'s Chat button, the prompt composer, Chat '
         'View). Add a Dictate button to the pill (long-press the pill), '
         'or swipe up on the pill and pick Dictate.\n'
-        'Talk: the speaking-head button in Chat View\'s composer runs a '
-        'hands-free conversation with the agent. Long-press it for the voice '
-        'guide, which talks to all your agents (also the headset-mic button at '
-        'the top of home and the Voice guide quick-settings tile).\n'
+        'Talk: long-press the mic in Chat View for a hands-free '
+        'conversation with the agent. The voice guide, which talks to all '
+        'your agents, is the headset-mic button at the top of home and the '
+        'Voice guide quick-settings tile.\n'
         'A crossed-out mic means this phone has no speech recognizer yet; '
         'tap it to see how to get one.',
       ),

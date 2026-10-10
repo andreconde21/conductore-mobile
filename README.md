@@ -97,23 +97,31 @@ Older previews, one line each (full notes are on the
     teammate that finished gets one "*X* finished" row.
   - Scrolled up, the thread stays still. New messages wait behind a pill.
   - What you send shows at once as a pending bubble.
+  - The composer is the field (it grows with the message; images through
+    the icon inside it), the mic and Send, plus Stop while Claude works.
+    The header has Review (when there are changes), Terminal and ⋮.
   - Long-press a message to copy, share, quote it or send it to another
-    agent; find in the conversation with Ctrl+F (Cmd+F).
+    agent; find in the conversation from ⋮ or with Ctrl+F (Cmd+F).
 - **Voice** (Android and iPhone): read Claude's final answer aloud, and
   hands-free **Talk mode** that listens, sends after a pause, reads the
   answer and answers approvals by voice. Dictation keeps listening across
-  pauses. The mic and Talk are in Chat View whichever way you open it.
+  pauses. In Chat View, whichever way you open it, tap the mic to
+  dictate and long-press it for Talk.
 - **Voice guide**: talk to the whole app hands-free: ask what is waiting,
   open an agent, approve, read a reply or switch accounts. Common phrases
   work offline in English and Portuguese, the rest goes to Claude through
   the companion (0.8). It confirms aloud before it acts, always for high
   risk.
-- **Read-aloud length** (Brief, Full or a Claude summary) and **tool
-  activity** in Chat View (Show all, Collapsed or Hidden), from the header
-  menu or Settings.
+- **Read aloud**, its **length** (Brief, Full or a Claude summary) and
+  **tool activity** in Chat View (Show all, Collapsed or Hidden), from the
+  ⋮ menu or Settings. While a reply is read, the ⋮ shows a sound wave.
 - **Agents dashboard**: since your last look, each agent's facts (files,
   lines, tests, failed commands, tokens and cost), stuck flags, and a Claude
-  summary made only when you open it (companion 0.9).
+  summary made only when you open it (companion 0.9). Tap a card to open
+  it where its sessions open (Chat View or the terminal, per your setting),
+  long-press for the other; an agent without Chat View opens its terminal.
+  A card carries its approvals and at most one more button: Answer for a
+  question, or Review.
 - **Review mode and undo** (companion 1.0): every turn is snapshotted;
   review it file by file, reject one file, send feedback, or undo the turn.
 - **Other agents**: Codex and OpenCode work like Claude Code (dashboard,
@@ -347,7 +355,7 @@ Rendered from the app's own widgets with demo data by
     <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
     <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage explorer: limit rings, ranges, a week by day and tokens per project"><br><sub>Usage explorer: a week by day and project</sub></td>
     <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Chat View: tool calls collapsed</sub></td>
-    <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>Read-aloud length and tool activity</sub></td>
+    <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: find, read aloud, its length and tool activity"><br><sub>Find, read aloud and tool activity</sub></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/30-approval-risk.png" width="200" alt="Chat View approval card with a Low risk label, Trust… and Always"><br><sub>Approvals: risk label, Trust… and Always</sub></td>

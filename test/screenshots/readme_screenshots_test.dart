@@ -1208,7 +1208,7 @@ void main() {
       ),
     );
     await pumpFrames(tester);
-    await tester.tap(find.byKey(const ValueKey('chat-talk')));
+    await tester.longPress(find.byKey(const ValueKey('dictation-button')));
     await tester.pump();
     mic.say('Yes, remind me the evening before');
     await tester.pump();
@@ -2305,6 +2305,8 @@ void main() {
 
   testWidgets('40 chat find', (tester) async {
     await pumpActionsChat(tester);
+    await tester.tap(find.byKey(const ValueKey('chat-menu')));
+    await pumpFrames(tester, 8);
     await tester.tap(find.byKey(const ValueKey('chat-search')));
     await pumpFrames(tester, 8);
     await tester.enterText(

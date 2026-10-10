@@ -82,14 +82,6 @@ mixin ChatThreadExtras on State<ChatViewPage> {
     _pageFocus.requestFocus();
   }
 
-  /// The header's search button.
-  Widget searchButton() => IconButton(
-    key: const ValueKey('chat-search'),
-    tooltip: 'Find in conversation',
-    onPressed: openSearch,
-    icon: const Icon(Icons.search_rounded),
-  );
-
   /// The find bar while search is open.
   Widget? findBar() {
     if (!search.isOpen) return null;

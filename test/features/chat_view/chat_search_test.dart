@@ -94,6 +94,9 @@ void main() {
   }
 
   Future<void> search(WidgetTester tester, String query) async {
+    // Find in conversation is in the ⋮ menu (CON-107).
+    await tester.tap(find.byKey(const ValueKey('chat-menu')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('chat-search')));
     await tester.pumpAndSettle();
     await tester.enterText(field, query);

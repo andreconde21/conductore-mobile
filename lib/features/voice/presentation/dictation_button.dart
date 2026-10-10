@@ -40,6 +40,7 @@ class DictationButton extends StatefulWidget {
     this.autoStart = false,
     this.onMessage,
     this.onVoiceCommand,
+    this.onLongPress,
     super.key,
   });
 
@@ -62,6 +63,10 @@ class DictationButton extends StatefulWidget {
   /// field already holds the text without the command words. Null leaves
   /// the words as text.
   final ValueChanged<VoiceCommand>? onVoiceCommand;
+
+  /// A long press while not dictating (Chat View: Talk, the hands-free
+  /// loop). Null: no long press.
+  final VoidCallback? onLongPress;
 
   @override
   State<DictationButton> createState() => _DictationButtonState();
@@ -286,6 +291,7 @@ class _DictationButtonState extends State<DictationButton> {
           onPressed: canTap
               ? () => unawaited(controller.toggle(_sink, options: _options()))
               : null,
+          onLongPress: widget.enabled && !active ? widget.onLongPress : null,
         );
       },
     );

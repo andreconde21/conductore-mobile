@@ -11,6 +11,7 @@ import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbo
 import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
@@ -19,6 +20,7 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_launcher.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
@@ -226,14 +228,29 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
       .where((live) => live.id == agent.sessionId)
       .firstOrNull;
 
-  void _open(DigestAgent agent, {bool? chat}) {
+  /// A card's tap: the agent's effective view (Open sessions in, or the
+  /// session's own choice); [other] (the long-press) the other one. An
+  /// agent with no Chat View always gets its terminal (CON-107). [chat]
+  /// forces one.
+  void _open(DigestAgent agent, {bool? chat, bool other = false}) {
     final host = _host(agent.hostId);
     final live = _live(agent);
     if (host == null || live == null) return;
-    final preferChat =
-        chat ??
-        (SessionViewScope.maybeOf(context)?.defaultView ?? SessionView.chat) ==
-            SessionView.chat;
+    final attention = widget.attention;
+    final hasChat =
+        supportsChatView(live, attention.agentKinds(host.id)) &&
+        chatViewAvailable(attention, host);
+    final views = SessionViewScope.maybeOf(context);
+    // Without the app's view settings (tests, embeds), Chat View.
+    final inChat =
+        views == null ||
+        agentOpensInChat(
+          views: views,
+          attention: attention,
+          monitoredHost: host,
+          agent: live,
+        );
+    final preferChat = chat ?? (hasChat && inChat != other);
     if (preferChat) {
       widget.onOpenChat(host, live);
     } else {
@@ -425,6 +442,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
             isDeciding: widget.attention.isDeciding,
             now: now,
             onOpen: () => _open(agent),
+            onOpenOther: () => _open(agent, other: true),
             onChat: () => _open(agent, chat: true),
             onTerminal: () => _open(agent, chat: false),
             onReview: _reviewAction(agent),
@@ -766,6 +784,7 @@ class DigestAgentCard extends StatelessWidget {
   const DigestAgentCard({
     required this.agent,
     required this.onOpen,
+    required this.onOpenOther,
     required this.onChat,
     required this.onTerminal,
     required this.onTell,
@@ -785,7 +804,8 @@ class DigestAgentCard extends StatelessWidget {
   /// Opens Review of its last turn; null hides the button.
   final VoidCallback? onReview;
 
-  /// Hands the agent's work off through Talkbawt; null hides the button.
+  /// Hands the agent's work off through Talkbawt (desktop right-click
+  /// menu); null leaves it out.
   final VoidCallback? onHandOff;
 
   /// The monitor's record of it (its requests, with their full input);
@@ -795,7 +815,15 @@ class DigestAgentCard extends StatelessWidget {
   final bool summarizing;
   final bool Function(String requestId)? isDeciding;
   final DateTime? now;
+
+  /// The card's tap: the agent's effective view (the terminal with no
+  /// transcript).
   final VoidCallback onOpen;
+
+  /// The card's long-press: the other view.
+  final VoidCallback onOpenOther;
+
+  /// Chat and Terminal in the desktop right-click menu.
   final VoidCallback onChat;
   final VoidCallback onTerminal;
 
@@ -843,6 +871,7 @@ class DigestAgentCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: interactive ? onOpen : null,
+        onLongPress: interactive ? onOpenOther : null,
         // Desktop: right-click offers the card's buttons as a menu.
         onSecondaryTapUp: interactive && PlatformFeatures.isDesktop
             ? (details) => unawaited(_menu(context, details.globalPosition))
@@ -972,70 +1001,42 @@ class DigestAgentCard extends StatelessWidget {
                     ),
                   ),
                 ],
+              // One secondary action at most; the card's tap opens its
+              // view and the long-press the other one (CON-107).
               if (interactive)
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  children: [
-                    if (agent.state != 'needs_permission')
-                      TextButton.icon(
-                        key: ValueKey('digest-tell-${agent.sessionId}'),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        onPressed: () =>
-                            onTell(agent.attention == DigestAttention.question),
-                        icon: const Icon(Icons.reply_rounded, size: 18),
-                        label: Text(
-                          agent.attention == DigestAttention.question
-                              ? 'Answer'
-                              : 'Tell it…',
-                        ),
-                      ),
-                    if (onReview case final review?)
-                      TextButton.icon(
-                        key: ValueKey('digest-review-${agent.sessionId}'),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        onPressed: review,
-                        icon: const Icon(Icons.rate_review_outlined, size: 18),
-                        label: const Text('Review'),
-                      ),
-                    if (onHandOff case final handOff?)
-                      TextButton.icon(
-                        key: ValueKey('digest-handoff-${agent.sessionId}'),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        onPressed: handOff,
-                        icon: const Icon(Icons.outbox_outlined, size: 18),
-                        label: const Text('Hand off'),
-                      ),
-                    TextButton.icon(
-                      key: ValueKey('digest-chat-${agent.sessionId}'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      onPressed: onChat,
-                      icon: const Icon(Icons.forum_outlined, size: 18),
-                      label: const Text('Chat'),
-                    ),
-                    TextButton.icon(
-                      key: ValueKey('digest-terminal-${agent.sessionId}'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      onPressed: onTerminal,
-                      icon: const Icon(Icons.terminal_rounded, size: 18),
-                      label: const Text('Terminal'),
-                    ),
-                  ],
-                ),
+                if (_secondary() case final action?)
+                  Align(alignment: Alignment.centerRight, child: action),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// Answer when it asks something, else Review when there is a turn to
+  /// review. "Tell it…" and Hand off live in Chat View (and in the
+  /// desktop right-click menu).
+  Widget? _secondary() {
+    if (agent.attention == DigestAttention.question &&
+        agent.state != 'needs_permission') {
+      return TextButton.icon(
+        key: ValueKey('digest-tell-${agent.sessionId}'),
+        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+        onPressed: () => onTell(true),
+        icon: const Icon(Icons.reply_rounded, size: 18),
+        label: const Text('Answer'),
+      );
+    }
+    if (onReview case final review?) {
+      return TextButton.icon(
+        key: ValueKey('digest-review-${agent.sessionId}'),
+        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+        onPressed: review,
+        icon: const Icon(Icons.rate_review_outlined, size: 18),
+        label: const Text('Review'),
+      );
+    }
+    return null;
   }
 
   Future<void> _menu(BuildContext context, Offset position) async {
