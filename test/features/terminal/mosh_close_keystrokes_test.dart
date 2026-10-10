@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -273,45 +274,65 @@ void main() {
     });
   });
 
-  testWidgets('the pill\'s reconnect (long-press) detaches Herdr cleanly', (
-    tester,
-  ) async {
-    HerdrKeymapCache.instance.put('m', devCentral);
-    final themeController = ThemeController(InMemoryThemePreferences());
-    await themeController.load();
-    final repository = FreshTerminalRepository();
-    final workspace = TerminalWorkspaceController(repository);
-    final session = workspace.open(mosh(herdr));
-    await tester.runAsync(session.connect);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TerminalPage(
-          workspace: workspace,
-          themeController: themeController,
-          sftpRepository: NoNetworkSftpRepository(),
-        ),
-      ),
+  for (final viaMenu in [false, true]) {
+    testWidgets(
+      viaMenu
+          ? 'the ⋮ menu\'s Reconnect detaches Herdr cleanly'
+          : 'the pill\'s ^L key (long-press) reconnects and detaches Herdr '
+                'cleanly',
+      (tester) async {
+        HerdrKeymapCache.instance.put('m', devCentral);
+        final themeController = ThemeController(InMemoryThemePreferences());
+        await themeController.load();
+        if (!viaMenu) {
+          // Not on the pill by default since CON-106.
+          await themeController.setTerminalPillItems(const [
+            TerminalPillItem.button(TerminalPillButton.reconnect),
+          ]);
+        }
+        final repository = FreshTerminalRepository();
+        final workspace = TerminalWorkspaceController(repository);
+        final session = workspace.open(mosh(herdr));
+        await tester.runAsync(session.connect);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: TerminalPage(
+              workspace: workspace,
+              themeController: themeController,
+              sftpRepository: NoNetworkSftpRepository(),
+            ),
+          ),
+        );
+        await tester.pump();
+        final remote = repository.sessions.single;
+        final before = remote.sent.length;
+
+        if (viaMenu) {
+          await tester.tap(find.byTooltip('More'));
+          await tester.pumpAndSettle();
+          await tester.tap(
+            find.byKey(const ValueKey('terminal-menu-reconnect')),
+          );
+        } else {
+          await tester.longPress(find.byKey(const ValueKey('toolbar-redraw')));
+        }
+        // The close waits (on real time) for the remote, then reconnects.
+        for (var i = 0; i < 12 && repository.sessions.length < 2; i++) {
+          await tester.runAsync(pumpEventQueue);
+          await tester.pump(const Duration(milliseconds: 200));
+        }
+
+        expect(closingBytes(remote, before).first, [0x00, 0x64]);
+        expect(
+          closingBytes(remote, before).expand((bytes) => bytes),
+          isNot(contains(0x04)),
+        );
+        expect(repository.sessions, hasLength(2));
+
+        await tester.pumpWidget(const SizedBox());
+        workspace.dispose();
+        await tester.pump(const Duration(seconds: 1));
+      },
     );
-    await tester.pump();
-    final remote = repository.sessions.single;
-    final before = remote.sent.length;
-
-    await tester.longPress(find.byKey(const ValueKey('toolbar-redraw')));
-    // The close waits (on real time) for the remote, then reconnects.
-    for (var i = 0; i < 12 && repository.sessions.length < 2; i++) {
-      await tester.runAsync(pumpEventQueue);
-      await tester.pump(const Duration(milliseconds: 200));
-    }
-
-    expect(closingBytes(remote, before).first, [0x00, 0x64]);
-    expect(
-      closingBytes(remote, before).expand((bytes) => bytes),
-      isNot(contains(0x04)),
-    );
-    expect(repository.sessions, hasLength(2));
-
-    await tester.pumpWidget(const SizedBox());
-    workspace.dispose();
-    await tester.pump(const Duration(seconds: 1));
-  });
+  }
 }
