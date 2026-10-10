@@ -185,7 +185,9 @@ void main() {
       expect(controller.status, DictationStatus.idle);
     });
 
-    testWidgets('a sink without onCommand never gets commands', (tester) async {
+    testWidgets('a sink without onCommand never gets commands', (
+      tester,
+    ) async {
       await controller.start(sink(commands: false), options: options());
       recognizer
         ..emit(const SpeechReady())
