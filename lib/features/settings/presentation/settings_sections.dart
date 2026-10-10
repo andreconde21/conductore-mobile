@@ -258,7 +258,7 @@ class SettingsSectionBody extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: SnippetListEditor(
           title: 'Global snippets',
-          caption: 'Shown from the Snip key-row menu on every machine.',
+          caption: 'Shown in the Snip palette on every machine.',
           snippets: theme.terminalSnippets,
           onChanged: theme.setTerminalSnippets,
         ),

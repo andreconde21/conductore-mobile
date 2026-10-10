@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
@@ -330,6 +332,81 @@ void main() {
         TerminalPillItem.button(TerminalPillButton.reconnect),
         TerminalPillItem.button(TerminalPillButton.dictate),
         TerminalPillItem.button(TerminalPillButton.keyboard),
+      ]);
+    });
+
+    test(
+      'default key rows have Chat after Tab and no colon key (CON-106)',
+      () async {
+        final defaults = await ThemePreferencesRepository(
+          InMemorySecureStorage(),
+        ).load();
+        final actions = [
+          for (final item in defaults.terminalKeyboardRows.single.items)
+            item.action,
+        ];
+        expect(actions.take(5), [
+          TerminalKeyboardAction.escape,
+          TerminalKeyboardAction.control,
+          TerminalKeyboardAction.alt,
+          TerminalKeyboardAction.tab,
+          TerminalKeyboardAction.compose,
+        ]);
+        expect(actions, isNot(contains(TerminalKeyboardAction.colon)));
+        expect(actions, hasLength(preChatDefaultTerminalKeyboardItems.length));
+      },
+    );
+
+    test('key rows saved before CON-106 that are the old default get the new '
+        'default; changed rows are kept', () async {
+      String rowsJson(List<TerminalKeyboardItem> items, {double height = 50}) =>
+          jsonEncode([
+            {
+              'height': height,
+              'items': [
+                for (final item in items)
+                  {
+                    'id': item.id,
+                    'kind': item.kind.name,
+                    'label': item.label,
+                    'action': item.action?.name,
+                  },
+              ],
+            },
+          ]);
+
+      final storage = InMemorySecureStorage();
+      await storage.write(
+        key: 'conduit.terminal_keyboard_rows.v1',
+        value: rowsJson(preChatDefaultTerminalKeyboardItems),
+      );
+      final repository = ThemePreferencesRepository(storage);
+      expect(
+        (await repository.load()).terminalKeyboardRows,
+        defaultTerminalKeyboardRows,
+      );
+
+      // Same keys at another height: the user changed them.
+      await storage.write(
+        key: 'conduit.terminal_keyboard_rows.v1',
+        value: rowsJson(preChatDefaultTerminalKeyboardItems, height: 60),
+      );
+      final changed = (await repository.load()).terminalKeyboardRows;
+      expect(changed.single.height, 60);
+      expect(changed.single.items, preChatDefaultTerminalKeyboardItems);
+
+      // Saved since CON-106 (v2), the old default is a choice and stays.
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.everforest,
+          terminalKeyboardRows: [
+            TerminalKeyboardRow(items: preChatDefaultTerminalKeyboardItems),
+          ],
+        ),
+      );
+      expect((await repository.load()).terminalKeyboardRows, const [
+        TerminalKeyboardRow(items: preChatDefaultTerminalKeyboardItems),
       ]);
     });
 
