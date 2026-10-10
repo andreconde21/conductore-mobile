@@ -23,8 +23,9 @@ enum ToolbarQuickPrompt {
   final String? text;
 }
 
-/// Opens the swipe-up palette: quick prompts first, then the host's and the
-/// global saved snippets (the same lists the Snip key-row menu shows).
+/// Opens the prompt palette (the Snip key behind ⋯, or the pill's Snippets
+/// button): quick prompts first, then the host's and the global saved
+/// snippets.
 ///
 /// Selecting an entry pops the sheet and reports it through the callbacks.
 Future<void> showToolbarSnippetPalette({

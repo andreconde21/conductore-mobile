@@ -369,7 +369,7 @@ void main() {
       await tester.pump();
       expect(controller.sentText, ['/clear']);
       expect(controller.sentKeys, isEmpty);
-      await tester.pump(floatingToolbarSubmitDelay);
+      await tester.pump(quickPromptSubmitDelay);
       expect(controller.sentKeys, [TerminalKey.enter]);
       await tester.pumpAndSettle();
       expect(find.text('Quick prompts'), findsNothing);
@@ -396,7 +396,7 @@ void main() {
       await tester.pump();
       expect(controller.sentText, ['/clear', 'make deploy']);
       expect(controller.sentKeys.last, TerminalKey.escape);
-      await tester.pump(floatingToolbarSubmitDelay);
+      await tester.pump(quickPromptSubmitDelay);
       expect(controller.sentKeys.last, TerminalKey.enter);
       await tester.pumpAndSettle();
     });

@@ -147,7 +147,12 @@ class ThemePreferencesRepository {
   static const _terminalFontSizeKey = 'conduit.terminal_font_size.v1';
   static const _terminalKeyboardActionsKey =
       'conduit.terminal_keyboard_actions.v1';
-  static const _terminalKeyboardRowsKey = 'conduit.terminal_keyboard_rows.v1';
+  static const _terminalKeyboardRowsKey = 'conduit.terminal_keyboard_rows.v2';
+
+  /// The key rows before CON-106, saved even when they were the default;
+  /// read only when there are no v2 rows yet.
+  static const _legacyTerminalKeyboardRowsKey =
+      'conduit.terminal_keyboard_rows.v1';
   static const _terminalKeyboardSeenActionsKey =
       'conduit.terminal_keyboard_seen_actions.v1';
   static const _terminalSnippetsKey = 'conduit.terminal_snippets.v1';
@@ -234,7 +239,10 @@ class ThemePreferencesRepository {
     final rawOmarchySyncedTheme = await read(_omarchySyncedThemeKey);
     final rawTerminalFontSize = await read(_terminalFontSizeKey);
     final rawTerminalKeyboardActions = await read(_terminalKeyboardActionsKey);
-    final rawTerminalKeyboardRows = await read(_terminalKeyboardRowsKey);
+    final rawTerminalKeyboardRowsV2 = await read(_terminalKeyboardRowsKey);
+    final rawTerminalKeyboardRows =
+        rawTerminalKeyboardRowsV2 ??
+        await _storage.read(key: _legacyTerminalKeyboardRowsKey);
     final rawTerminalKeyboardSeenActions = await read(
       _terminalKeyboardSeenActionsKey,
     );
@@ -267,11 +275,14 @@ class ThemePreferencesRepository {
     );
     final rawPasteImagesAsFiles = await read(_pasteImagesAsFilesKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
+    final parsedRows = _parseTerminalKeyboardRows(
+      rawTerminalKeyboardRows,
+      rawTerminalKeyboardActions,
+    );
     final terminalKeyboardRows = _appendUnseenBuiltIns(
-      _parseTerminalKeyboardRows(
-        rawTerminalKeyboardRows,
-        rawTerminalKeyboardActions,
-      ),
+      rawTerminalKeyboardRowsV2 == null
+          ? migratePreChatKeyboardRows(parsedRows)
+          : parsedRows,
       _parseSeenActionNames(rawTerminalKeyboardSeenActions),
     );
 

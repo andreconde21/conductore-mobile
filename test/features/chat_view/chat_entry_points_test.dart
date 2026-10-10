@@ -115,12 +115,7 @@ void main() {
       MaterialApp(
         home: Builder(
           builder: (context) => TextButton(
-            onPressed: () => openChatViewForHost(
-              context: context,
-              attention: null,
-              host: host,
-              onOpenTerminal: (_) {},
-            ),
+            onPressed: () => showChatViewUnavailable(context, host: host),
             child: const Text('go'),
           ),
         ),
@@ -151,12 +146,7 @@ void main() {
         child: MaterialApp(
           home: Builder(
             builder: (context) => TextButton(
-              onPressed: () => openChatViewForHost(
-                context: context,
-                attention: null,
-                host: host,
-                onOpenTerminal: (_) {},
-              ),
+              onPressed: () => showChatViewUnavailable(context, host: host),
               child: const Text('go'),
             ),
           ),

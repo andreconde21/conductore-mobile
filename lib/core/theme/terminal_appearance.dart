@@ -215,6 +215,7 @@ const defaultTerminalKeyboardActions = [
   TerminalKeyboardAction.control,
   TerminalKeyboardAction.alt,
   TerminalKeyboardAction.tab,
+  TerminalKeyboardAction.compose,
   TerminalKeyboardAction.arrowUp,
   TerminalKeyboardAction.arrowDown,
   TerminalKeyboardAction.arrowLeft,
@@ -227,7 +228,6 @@ const defaultTerminalKeyboardActions = [
   TerminalKeyboardAction.controlD,
   TerminalKeyboardAction.controlZ,
   TerminalKeyboardAction.controlL,
-  TerminalKeyboardAction.colon,
   TerminalKeyboardAction.home,
   TerminalKeyboardAction.end,
   TerminalKeyboardAction.pageUp,
@@ -304,7 +304,44 @@ const tmuxTerminalKeyboardActions = [
   TerminalKeyboardAction.tmuxMenu,
 ];
 
+/// The key rows out of the box. Chat follows Tab, as on the pill; the
+/// colon key made room for it (CON-106).
 const defaultTerminalKeyboardItems = [
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.escape),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.control),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.alt),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tab),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.compose),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.arrowUp),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.arrowDown),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.arrowLeft),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.arrowRight),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.slash),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.dash),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.pipe),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.paste),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.controlC),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.controlD),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.controlZ),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.controlL),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.home),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.end),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.pageUp),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.pageDown),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.functionKeys),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxPrefix),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxScrollback),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxMenu),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.herdrMenu),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.snippets),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.touchMode),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.fullscreen),
+];
+
+/// The default key rows before CON-106 (no Chat key, a colon key). Saved
+/// with every other setting, so a stored row equal to it was never chosen
+/// and gets [defaultTerminalKeyboardRows].
+const preChatDefaultTerminalKeyboardItems = [
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.escape),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.control),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.alt),
@@ -457,4 +494,18 @@ extension TerminalKeyboardActionDetails on TerminalKeyboardAction {
     TerminalKeyboardAction.touchMode => 'Touch',
     TerminalKeyboardAction.compose => 'Chat',
   };
+}
+
+/// [rows] as stored before CON-106: the old default (one row of
+/// [preChatDefaultTerminalKeyboardItems] at the default height) becomes
+/// [defaultTerminalKeyboardRows]; rows the user changed stay as they are.
+List<TerminalKeyboardRow> migratePreChatKeyboardRows(
+  List<TerminalKeyboardRow> rows,
+) {
+  const legacy = TerminalKeyboardRow(
+    items: preChatDefaultTerminalKeyboardItems,
+  );
+  return rows.length == 1 && rows.single == legacy
+      ? defaultTerminalKeyboardRows
+      : rows;
 }

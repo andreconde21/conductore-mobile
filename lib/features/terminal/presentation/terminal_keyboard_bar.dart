@@ -8,10 +8,15 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/toolbar_snippet_palette.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+/// Delay between a quick prompt's text and its Enter, kept as a separate
+/// write so TUIs do not classify the line as a paste (see the compose bar).
+const quickPromptSubmitDelay = Duration(milliseconds: 120);
 
 class TerminalKeyboardBar extends StatelessWidget {
   const TerminalKeyboardBar({
@@ -50,7 +55,7 @@ class TerminalKeyboardBar extends StatelessWidget {
   final bool composeActive;
   final VoidCallback? onToggleCompose;
 
-  /// What a tap on the floating pill's Chat button does, when it should do
+  /// What a tap on the Chat key (pill or key rows) does, when it should do
   /// more than [onToggleCompose] (the page opens Chat View for a Claude
   /// session). A long-press then toggles the composer. Null: the tap
   /// toggles the composer.
@@ -175,12 +180,16 @@ class TerminalKeyboardBar extends StatelessWidget {
           _focusTerminal();
         },
       ),
+      // The same Chat key as the pill's (CON-106): Chat View when an agent
+      // runs in the session, else the chat line; long-press for the chat
+      // line.
       TerminalKeyboardAction.compose => _ToggleKey(
         label: action.label,
         palette: palette,
         brightness: brightness,
         selected: composeActive,
-        onPressed: () => onToggleCompose?.call(),
+        onPressed: () => (onChatButton ?? onToggleCompose)?.call(),
+        onLongPress: onChatButton == null ? null : onToggleCompose,
       ),
       TerminalKeyboardAction.fullscreen => _Key(
         icon: fullscreen
@@ -292,13 +301,13 @@ class TerminalKeyboardBar extends StatelessWidget {
             ),
         ],
       ),
-      TerminalKeyboardAction.snippets => _MenuKey<_SnippetMenuItem>(
-        label: action.label,
-        tooltip: 'Snippets',
-        palette: palette,
-        brightness: brightness,
-        onSelected: _triggerSnippetMenuItem,
-        items: _snippetMenuItems(),
+      TerminalKeyboardAction.snippets => Builder(
+        builder: (context) => _Key(
+          label: action.label,
+          palette: palette,
+          brightness: brightness,
+          onPressed: () => unawaited(openPromptPalette(context)),
+        ),
       ),
       TerminalKeyboardAction.touchMode => _TouchModeKey(
         controller: controller,
@@ -370,71 +379,57 @@ class TerminalKeyboardBar extends StatelessWidget {
     }
   }
 
-  List<PopupMenuEntry<_SnippetMenuItem>> _snippetMenuItems() {
-    final entries = <PopupMenuEntry<_SnippetMenuItem>>[];
-    void addSnippetGroup(String label, List<TerminalSnippet> snippets) {
-      final valid = snippets.where((snippet) => snippet.isValid).toList();
-      if (valid.isEmpty) {
-        return;
+  /// The quick prompt and snippet palette (the Snip key, and the pill's
+  /// Snippets button): /clear, /compact and the other prompts, then the
+  /// host's and the global snippets. [focusTerminal] replaces the bar's own
+  /// refocus (the pill keeps the keyboard away when it was hidden).
+  Future<void> openPromptPalette(
+    BuildContext context, {
+    VoidCallback? focusTerminal,
+  }) async {
+    final focus = focusTerminal ?? _focusTerminal;
+    void runQuickPrompt(ToolbarQuickPrompt prompt) {
+      final text = prompt.text;
+      if (text != null) {
+        // Enter in a separate write shortly after, the same trick the chat
+        // bar uses so readline-style TUIs treat it as a keypress instead of
+        // the tail of a paste.
+        controller.sendText(text);
+        Future.delayed(quickPromptSubmitDelay, () {
+          controller.sendKey(TerminalKey.enter);
+        });
+      } else if (prompt == ToolbarQuickPrompt.escapeTwice) {
+        controller
+          ..sendKey(TerminalKey.escape)
+          ..sendKey(TerminalKey.escape);
+      } else if (prompt == ToolbarQuickPrompt.interrupt) {
+        controller.sendControl(TerminalKey.keyC);
       }
-      if (entries.isNotEmpty) {
-        entries.add(const PopupMenuDivider(height: 8));
-      }
-      entries.add(PopupMenuItem(enabled: false, child: Text(label)));
-      for (final snippet in valid) {
-        entries.add(
-          PopupMenuItem(
-            value: _SnippetMenuItem.snippet(snippet),
-            child: _SnippetMenuRow(snippet: snippet),
-          ),
-        );
-      }
+      focus();
     }
 
-    addSnippetGroup('Host', controller.host.snippets);
-    addSnippetGroup('Global', globalSnippets);
-    if (controller.host.password.isNotEmpty) {
-      if (entries.isNotEmpty) {
-        entries.add(const PopupMenuDivider(height: 8));
-      }
-      entries.add(
-        PopupMenuItem(
-          value: _SnippetMenuItem.password(controller.host.password),
-          child: const _SnippetMenuRow(
-            snippet: TerminalSnippet(
-              id: 'host-password',
-              label: 'Password',
-              text: '',
-              hidden: true,
-              submit: false,
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (entries.isEmpty) {
-      entries.add(
-        const PopupMenuItem(enabled: false, child: Text('No snippets saved')),
-      );
-    }
-    return entries;
-  }
-
-  void _triggerSnippetMenuItem(_SnippetMenuItem item) {
-    switch (item) {
-      case _SnippetMenuSnippet(:final snippet):
-        _sendSnippet(snippet);
-      case _SnippetMenuPassword(:final password):
-        _sendText(password);
-    }
-  }
-
-  void _sendSnippet(TerminalSnippet snippet) {
-    if (snippet.text.isNotEmpty) {
-      unawaited(controller.sendAppText(snippet.text, submit: snippet.submit));
-    }
-    _focusTerminal();
+    await showToolbarSnippetPalette(
+      context: context,
+      palette: palette,
+      brightness: brightness,
+      hostSnippets: controller.host.snippets,
+      globalSnippets: globalSnippets,
+      hostPassword: controller.host.password,
+      onQuickPrompt: runQuickPrompt,
+      onSnippet: (snippet) {
+        if (snippet.text.isNotEmpty) {
+          unawaited(
+            controller.sendAppText(snippet.text, submit: snippet.submit),
+          );
+        }
+        focus();
+      },
+      onPassword: (password) {
+        controller.sendText(password);
+        focus();
+      },
+    );
+    focus();
   }
 
   void _triggerTmuxAction(_TmuxAction action) {
@@ -539,63 +534,6 @@ class TerminalKeyboardBar extends StatelessWidget {
     if (focusNode.canRequestFocus) {
       focusNode.requestFocus();
     }
-  }
-}
-
-sealed class _SnippetMenuItem {
-  const _SnippetMenuItem();
-
-  factory _SnippetMenuItem.snippet(TerminalSnippet snippet) =
-      _SnippetMenuSnippet;
-
-  factory _SnippetMenuItem.password(String password) = _SnippetMenuPassword;
-}
-
-class _SnippetMenuSnippet extends _SnippetMenuItem {
-  const _SnippetMenuSnippet(this.snippet);
-
-  final TerminalSnippet snippet;
-}
-
-class _SnippetMenuPassword extends _SnippetMenuItem {
-  const _SnippetMenuPassword(this.password);
-
-  final String password;
-}
-
-class _SnippetMenuRow extends StatelessWidget {
-  const _SnippetMenuRow({required this.snippet});
-
-  final TerminalSnippet snippet;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Icon(
-          snippet.hidden ? Icons.visibility_off_rounded : Icons.code_rounded,
-          size: 18,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(snippet.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-              if (!snippet.hidden && snippet.text.isNotEmpty)
-                Text(
-                  snippet.submit ? '${snippet.text} + Enter' : snippet.text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall,
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
   }
 }
 
@@ -801,12 +739,17 @@ class _KeySurface extends StatefulWidget {
     required this.color,
     required this.child,
     this.onPressed,
+    this.onLongPress,
     this.repeat = false,
   });
 
   final Color color;
   final Widget child;
   final VoidCallback? onPressed;
+
+  /// Held past the long-press timeout: runs instead of [onPressed], with a
+  /// haptic. Not combined with [repeat].
+  final VoidCallback? onLongPress;
   final bool repeat;
 
   @override
@@ -843,6 +786,21 @@ class _KeySurfaceState extends State<_KeySurface> {
     _pointerStart = position;
     _dragCanceled = false;
     _repeatStarted = false;
+    final onLongPress = widget.onLongPress;
+    if (onLongPress != null && !widget.repeat) {
+      _holding = true;
+      _delayTimer?.cancel();
+      _delayTimer = Timer(kLongPressTimeout, () {
+        if (!_holding || _dragCanceled) {
+          return;
+        }
+        // Counts as the press: the release then sends nothing.
+        _repeatStarted = true;
+        unawaited(HapticFeedback.mediumImpact());
+        onLongPress();
+      });
+      return;
+    }
     if (!widget.repeat) {
       return;
     }
@@ -934,6 +892,7 @@ class _ToggleKey extends StatelessWidget {
     required this.brightness,
     required this.selected,
     required this.onPressed,
+    this.onLongPress,
   });
 
   final String label;
@@ -941,6 +900,7 @@ class _ToggleKey extends StatelessWidget {
   final Brightness brightness;
   final bool selected;
   final VoidCallback onPressed;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -954,6 +914,7 @@ class _ToggleKey extends StatelessWidget {
     return _KeySurface(
       color: background,
       onPressed: onPressed,
+      onLongPress: onLongPress,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         height: _keyHeight,
