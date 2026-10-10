@@ -1,15 +1,35 @@
 # Agent notifications
 
-Settings › Agents › Notifications picks one of three modes. The choice is
-kept on this device only and never synced, so a phone can notify while a
-computer stays quiet. Each machine's own notification level still applies
-on top of it.
+Settings › Agents › Notifications is one choice, **Notify me about**:
 
-| Mode | Ongoing status | Alerts |
+| Choice | Alerts |
+| --- | --- |
+| **Urgent only** (default) | a permission request, a question, an error, an agent that looks stuck |
+| **Urgent + finished** | the same, plus each finished turn |
+| **Everything** | one notification per agent for every need, finished turns included, no ongoing status (the behaviour before CON-074) |
+
+The choice is kept on this device only and never synced, so a phone can
+notify while a computer stays quiet. Each machine's own notification level
+still applies on top of it.
+
+The details are under Settings › Agents › Advanced › Notification details,
+and "Notify me" is read from them (`AgentNotificationPreferences.choice`,
+CON-108):
+
+| Detail | Urgent choices | Everything |
 | --- | --- | --- |
-| **Ongoing + urgent** (default) | yes | urgent only |
-| **Everything** | no | one per agent for every need, finished turns included (the behaviour before CON-074) |
-| **Urgent only** | no | urgent only |
+| **Ongoing notification** (the status below; on by default) | either way | never |
+| Approvals, Questions, Errors | on | on |
+| **Stuck or looping** | on | not used |
+| **Also alert when an agent finishes** | off: Urgent only, on: Urgent + finished | not used |
+| **Notify when an agent finishes** | not used | on |
+| Summary only, Quiet updates, muted agents | either way | either way |
+
+Any other mix (a need switched off) shows as **Custom** and keeps working
+as set. Picking a choice turns every need back on and keeps the ongoing
+notification setting, summary only, quiet updates and mutes. Preferences
+saved before CON-108 keep their meaning: the old "Ongoing + urgent" and
+"Urgent only" modes are the ongoing notification on and off.
 
 ## The ongoing status notification
 
@@ -76,7 +96,7 @@ An agent has at most one alert, and it is posted only for these needs:
 | Question | an AskUserQuestion request, a question tool that is still open, a last line that asks something, or a prompt that timed out into the terminal |
 | Error | the turn ended on an API error (the companion's `lastError`), or Herdr reports the agent as blocked |
 | Stuck | the agents dashboard flags it: no progress, the same failure repeated, a command run over and over, or a long wait for an approval |
-| Finished | only with "Also alert when an agent finishes" turned on |
+| Finished | only with Urgent + finished ("Also alert when an agent finishes") |
 
 A Permission or Question alert stays answerable from the phone for 15
 minutes (the companion's `permission-wait` setting, 1 to 60). If that wait

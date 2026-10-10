@@ -118,8 +118,13 @@ Older previews, one line each (full notes are on the
   risk. Start it from the Quick Settings tile or the headset button in a
   terminal.
 - **Read aloud**, its **length** (Brief, Full or a Claude summary) and
-  **tool activity** in Chat View (Show all, Collapsed or Hidden), from the
-  ⋮ menu or Settings. While a reply is read, the ⋮ shows a sound wave.
+  **tool activity** in Chat View (Show all, Collapsed or Hidden), from its
+  ⋮ menu. While a reply is read, the ⋮ shows a sound wave. Reading aloud
+  by default, the reading language, voice, speed and pitch are in
+  Settings › Chat & Voice › Advanced.
+- **Voice commands** ("send", "cancel") and the **voice guide** each have
+  one row in Settings › Chat & Voice that opens their own page. The guide
+  speaks the dictation Language unless you pick another.
 - **One Agents screen**, the heart-monitor button with the count of agents
   waiting on you: a page from home, a sheet from the terminal, the right
   panel on a desktop. Its Agents tab shows, since your last look, each
@@ -170,8 +175,10 @@ Older previews, one line each (full notes are on the
   or jump to its exact pane, straight from the notification; acting from the
   lock screen asks you to unlock first. Each agent has one alert that sounds
   once, goes away once it is resolved, and can be muted with a long-press.
-  "Everything" brings back one notification per agent for every need. See
-  [docs/notifications.md](docs/notifications.md).
+  Settings › Agents › Notifications is one choice, **Urgent only**,
+  **Urgent + finished** or **Everything** (one notification per agent for
+  every need); the details are under Advanced, and a mix of your own shows
+  as Custom. See [docs/notifications.md](docs/notifications.md).
 - **Home screen widget and Quick Settings tile** (Android) showing the
   dashboard: agents that need you or are stuck, and the limit rings.
 - **Tasks**: one list across your trackers (GitHub Issues and Projects,
@@ -323,6 +330,13 @@ tmux.
   workspace, tab, Chat View position, unsent drafts), and the app offers to
   pick up there on another. You can leave places or drafts out or turn it off
   in Settings › Sync ([docs/sync.md](docs/sync.md)).
+- **Settings** in nine sections, searchable. Each section shows about
+  four or five settings; the ones most people never change (Enter
+  sequence, mouse taps, clipboard, keepalive, toolbar style and key rows,
+  gestures, notification details, read-aloud voice) sit under **Advanced**
+  at its end. Search finds those too, says where ("Terminal › Advanced")
+  and opens Advanced unfolded. The floating pill is the default toolbar;
+  **Customize keys** edits the one you use.
 - Encrypted backups of settings, machines and trusted keys (same format as
   sync), and an optional device-auth app lock that locks again after a
   time in the background you choose (Settings › Security). The longer
