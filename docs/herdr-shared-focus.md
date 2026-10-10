@@ -117,8 +117,19 @@ This tab shows whatever Herdr has focused, not <label>.*, with:
 - **Close tab**: closes the tab.
 
 Chat View opened from a tab like this (or from any tab that is not pinned
-to a workspace of its own) opens the agent in the pane Herdr has focused,
-which is what is on screen.
+to a workspace of its own), by its Chat button or because the tab opens in
+Chat View, opens the agent in the pane Herdr has focused, which is what is
+on screen.
+
+The app keeps the time it first found the workspace gone with the saved
+tab list. When a tab restored on launch is found gone again and that time
+is more than 24 hours old, the tab closes by itself (CON-115). Tabs closed
+this way within 2 seconds share one notice, *Closed 3 tabs for workspaces
+that no longer exist*, whose **Undo** reopens them in place; they then stay
+for the rest of that run. A tab is closed only when Herdr has just said its
+workspace is gone, never on the saved time alone, and never while the app
+keeps running: only a launch (or unlocking after a lock) closes one.
+*Keep what Herdr shows* clears the time.
 
 ### Either way
 

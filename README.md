@@ -200,7 +200,8 @@ tmux.
   workspace. *Phone may move Herdr focus* lets the session in use take it
   instead ([docs/herdr-shared-focus.md](docs/herdr-shared-focus.md)). A tab whose
   workspace was closed in Herdr says so and offers *Keep what Herdr shows* or
-  *Close tab*.
+  *Close tab*; once the workspace has been gone for over a day, the restored
+  tab closes on the next launch, with Undo.
 - **Projects and sheprd**: workspaces and agents group by project, read from
   sheprd's `sidebar.toml` and shared
   across your devices. With **Sync with sheprd** on, sheprd's shared view

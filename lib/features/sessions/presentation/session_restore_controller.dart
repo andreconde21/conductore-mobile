@@ -38,6 +38,13 @@ enum RestoredSessionMode {
 ///
 /// Mosh sessions are not resumed: see `docs/session-restore.md`. They
 /// bootstrap a fresh mosh-server over SSH like any new connection.
+///
+/// Tabs whose Herdr workspace was closed ([closedWorkspaces], CON-103)
+/// keep the time that was first seen. A restored one whose workspace was
+/// already gone more than [closeGoneAfter] before, and is found gone
+/// again, closes by itself: they are gathered for [autoCloseDelay], then
+/// closed together and announced in [autoClosed], which [undoAutoClose]
+/// takes back (CON-115).
 class SessionRestoreController extends ChangeNotifier {
   SessionRestoreController({
     required TerminalWorkspaceController workspace,
@@ -52,8 +59,14 @@ class SessionRestoreController extends ChangeNotifier {
       Duration(seconds: 10),
       Duration(seconds: 30),
     ],
-  }) : _workspace = workspace {
+    this.closedWorkspaces,
+    this.closeGoneAfter = const Duration(hours: 24),
+    this.autoCloseDelay = const Duration(seconds: 2),
+    DateTime Function()? clock,
+  }) : _workspace = workspace,
+       _clock = clock ?? DateTime.now {
     workspace.addListener(_handleWorkspaceChanged);
+    closedWorkspaces?.addListener(_handleClosedWorkspaces);
   }
 
   final TerminalWorkspaceController _workspace;
@@ -73,6 +86,34 @@ class SessionRestoreController extends ChangeNotifier {
   /// Waits between failed reconnects; after the last one the session is
   /// left for a tap.
   final List<Duration> backoff;
+
+  /// The tabs whose Herdr workspace was closed (HerdrSessionFocus).
+  final ValueListenable<Set<TerminalSessionController>>? closedWorkspaces;
+
+  /// How long a workspace must have been gone before its restored tab
+  /// closes on launch.
+  final Duration closeGoneAfter;
+
+  /// How long tabs to close are gathered, so one notice covers them.
+  final Duration autoCloseDelay;
+
+  final DateTime Function() _clock;
+
+  /// The last tabs closed for a workspace that no longer exists, for the
+  /// home page's notice with Undo.
+  final autoClosed = ValueNotifier<AutoClosedTabs?>(null);
+
+  /// When each open tab's workspace was first seen gone, from the saved
+  /// list for a restored tab not checked yet, else from this run.
+  final _goneSince = <TerminalSessionController, DateTime>{};
+
+  /// Restored tabs whose workspace was already gone in an earlier run and
+  /// that have not been checked in this one: the only ones that may close
+  /// by themselves.
+  final _goneBefore = <TerminalSessionController>{};
+
+  final _toClose = <TerminalSessionController>{};
+  Timer? _closeTimer;
 
   bool _enabled;
   bool _restoring = false;
@@ -185,16 +226,11 @@ class SessionRestoreController extends ChangeNotifier {
         if (index == snapshot.activeIndex) active = existing;
         continue;
       }
-      final session = _workspace.open(
-        sessionHost,
-        startupCommand: entry.target.startupCommand,
-        target: entry.target,
-      );
-      if (entry.customTitle != null) session.rename(entry.customTitle);
-      // Opening the terminal on one restored tab must not connect them all.
-      _workspace.holdUntilActive(session);
-      final mode = modeFor(host, entry.target);
-      _restoredSessions[session] = _RestoredSession(mode);
+      final (session, mode) = _open(host, entry);
+      if (entry.workspaceGoneAt case final gone?) {
+        _goneSince[session] = gone;
+        _goneBefore.add(session);
+      }
       if (mode == RestoredSessionMode.automatic) automatic.add(session);
       if (index == snapshot.activeIndex) active = session;
     }
@@ -203,6 +239,111 @@ class SessionRestoreController extends ChangeNotifier {
     // The active session first, then the tab order.
     if (automatic.remove(front)) automatic.insert(0, front!);
     _queue.addAll(automatic);
+    _schedulePump();
+  }
+
+  /// Opens [entry] as a restored tab, disconnected.
+  (TerminalSessionController, RestoredSessionMode) _open(
+    SavedHost host,
+    SessionSnapshotEntry entry,
+  ) {
+    final session = _workspace.open(
+      entry.target.apply(host),
+      startupCommand: entry.target.startupCommand,
+      target: entry.target,
+    );
+    if (entry.customTitle != null) session.rename(entry.customTitle);
+    // Opening the terminal on one restored tab must not connect them all.
+    _workspace.holdUntilActive(session);
+    final mode = modeFor(host, entry.target);
+    _restoredSessions[session] = _RestoredSession(mode);
+    return (session, mode);
+  }
+
+  void _handleClosedWorkspaces() {
+    if (_disposed) return;
+    final closed = closedWorkspaces!.value;
+    final now = _clock();
+    var changed = false;
+    for (final session in closed) {
+      final since = _goneSince[session];
+      if (_goneBefore.remove(session) &&
+          since != null &&
+          now.difference(since) > closeGoneAfter) {
+        _toClose.add(session);
+      } else if (since == null) {
+        _goneSince[session] = now;
+        changed = true;
+      }
+    }
+    // Kept on a workspace again (Keep what Herdr shows): no longer gone.
+    _goneSince.removeWhere((session, _) {
+      final kept = !closed.contains(session) && !_goneBefore.contains(session);
+      changed |= kept;
+      return kept;
+    });
+    if (changed) _scheduleSave();
+    if (_toClose.isNotEmpty) {
+      _closeTimer ??= Timer(autoCloseDelay, () => unawaited(_closeGone()));
+    }
+  }
+
+  /// Closes the gathered tabs whose workspace is still gone.
+  Future<void> _closeGone() async {
+    _closeTimer = null;
+    final closed = closedWorkspaces?.value ?? const {};
+    final sessions = _workspace.sessions;
+    final tabs = <AutoClosedTab>[];
+    for (final (index, session) in sessions.indexed) {
+      if (!_toClose.contains(session) || !closed.contains(session)) continue;
+      tabs.add(
+        AutoClosedTab(
+          index: index,
+          entry: SessionSnapshotEntry(
+            hostId: baseHostId(session.host.id),
+            target: _workspace.targetOf(session),
+            customTitle: session.customTitle,
+            title: session.title,
+            workspaceGoneAt: _goneSince[session],
+          ),
+        ),
+      );
+    }
+    _toClose.clear();
+    if (tabs.isEmpty || _disposed) return;
+    for (final tab in tabs) {
+      final session = sessions[tab.index];
+      await _workspace.close(session);
+    }
+    if (_disposed) return;
+    autoClosed.value = AutoClosedTabs(tabs);
+  }
+
+  /// Brings back [closed] (the notice's Undo) where they were, without
+  /// changing the tab in front. They stay open for the rest of this run;
+  /// their workspace counts as gone from now on.
+  Future<void> undoAutoClose(AutoClosedTabs closed) async {
+    if (identical(autoClosed.value, closed)) autoClosed.value = null;
+    final front = _workspace.activeSession;
+    final now = _clock();
+    for (final tab in closed.tabs) {
+      final host = await findHost(tab.entry.hostId);
+      if (_disposed) return;
+      if (host == null) continue;
+      final existing = _workspace.sessions.any(
+        (session) => session.host.id == tab.entry.target.apply(host).id,
+      );
+      if (existing) continue;
+      final (session, mode) = _open(host, tab.entry);
+      _goneSince[session] = now;
+      _workspace.move(
+        _workspace.sessions.length - 1,
+        tab.index.clamp(0, _workspace.sessions.length - 1),
+      );
+      if (mode == RestoredSessionMode.automatic) _queue.add(session);
+    }
+    if (front != null) _workspace.activate(front);
+    _scheduleSave();
     _schedulePump();
   }
 
@@ -266,6 +407,7 @@ class SessionRestoreController extends ChangeNotifier {
           target: _workspace.targetOf(session),
           customTitle: session.customTitle,
           title: session.title,
+          workspaceGoneAt: _goneSince[session],
         ),
       );
     }
@@ -275,6 +417,9 @@ class SessionRestoreController extends ChangeNotifier {
   void _handleWorkspaceChanged() {
     if (_disposed) return;
     final open = _workspace.sessions.toSet();
+    _goneSince.removeWhere((session, _) => !open.contains(session));
+    _goneBefore.retainWhere(open.contains);
+    _toClose.retainWhere(open.contains);
     _forget(
       (session, _) =>
           !open.contains(session) ||
@@ -355,10 +500,37 @@ class SessionRestoreController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _saveTimer?.cancel();
+    _closeTimer?.cancel();
+    closedWorkspaces?.removeListener(_handleClosedWorkspaces);
+    autoClosed.dispose();
     _forget((_, _) => true);
     _workspace.removeListener(_handleWorkspaceChanged);
     super.dispose();
   }
+}
+
+/// A tab closed because its Herdr workspace no longer exists: where it was
+/// and how to reopen it.
+@immutable
+class AutoClosedTab {
+  const AutoClosedTab({required this.index, required this.entry});
+
+  /// Its place in the tab order when it closed.
+  final int index;
+  final SessionSnapshotEntry entry;
+}
+
+/// The tabs one launch closed together, for one notice.
+@immutable
+class AutoClosedTabs {
+  const AutoClosedTabs(this.tabs);
+
+  final List<AutoClosedTab> tabs;
+
+  /// "Closed 3 tabs for workspaces that no longer exist".
+  String get message => tabs.length == 1
+      ? 'Closed 1 tab for a workspace that no longer exists'
+      : 'Closed ${tabs.length} tabs for workspaces that no longer exist';
 }
 
 class _RestoredSession {

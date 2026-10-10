@@ -466,6 +466,8 @@ void main() {
     ready: themeLoaded.then((_) {
       sessionRestore.enabled = themeController.restoreSessionsOnLaunch;
     }),
+    // Restored tabs for Herdr workspaces gone over a day close (CON-115).
+    closedWorkspaces: connectFlow.herdr.closedWorkspaces,
   );
   themeController.addListener(
     () => sessionRestore.enabled = themeController.restoreSessionsOnLaunch,
