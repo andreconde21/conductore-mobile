@@ -138,10 +138,10 @@ void main() {
     expect(find.byType(DormantWorkspaceTile), findsNothing);
     expect(find.byType(HomeBoardNoticeTile), findsNothing);
     expect(runnerHosts, isEmpty);
-    // Lock sits in the bar; the gear opens the full Settings page with
+    // The bar has no lock; the gear opens the full Settings page with
     // every section (backup under Sync & Backup, trusted keys and "Lock
     // now" under Security).
-    expect(find.byTooltip('Lock'), findsOneWidget);
+    expect(find.byTooltip('Lock'), findsNothing);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
@@ -416,7 +416,8 @@ void main() {
     expect(find.text('Close session'), findsOneWidget);
     await tester.tap(find.text('Rename'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Deploys');
+    // The rename dialog's field (the home's search field is below it).
+    await tester.enterText(find.byType(TextField).last, 'Deploys');
     await tester.tap(find.widgetWithText(FilledButton, 'Rename'));
     await tester.pumpAndSettle();
     expect(session.title, 'Deploys');

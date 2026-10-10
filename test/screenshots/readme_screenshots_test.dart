@@ -1955,7 +1955,6 @@ void main() {
       dictation.dispose();
     });
     await pumpHome(tester, guide: guide);
-    expect(find.byKey(const ValueKey('home-voice-guide')), findsOneWidget);
     guide.start();
     for (var i = 0; i < 6; i++) {
       await tester.pump(const Duration(milliseconds: 1));

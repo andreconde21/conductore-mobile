@@ -13,6 +13,7 @@ class SessionSnapshotEntry {
     required this.target,
     this.customTitle,
     this.title = '',
+    this.workspaceGoneAt,
   });
 
   /// The saved host id (never a derived `<hostId>#<key>` id).
@@ -28,6 +29,11 @@ class SessionSnapshotEntry {
   /// The title the tile last showed, used while the machine is not loaded.
   final String title;
 
+  /// When the app first found the Herdr workspace gone (closed in Herdr,
+  /// CON-103), or null while it is not known to be gone. A tab restored
+  /// more than a day after that closes on launch (CON-115).
+  final DateTime? workspaceGoneAt;
+
   /// The derived session host id this entry reopens as.
   String get sessionHostId => target.kind == ConnectTargetKind.shell
       ? hostId
@@ -38,6 +44,8 @@ class SessionSnapshotEntry {
     'target': target.toJson(),
     if (customTitle != null) 'customTitle': customTitle,
     if (title.isNotEmpty) 'title': title,
+    if (workspaceGoneAt case final gone?)
+      'workspaceGoneAt': gone.toUtc().toIso8601String(),
   };
 
   static SessionSnapshotEntry? fromJson(Object? json) {
@@ -47,6 +55,7 @@ class SessionSnapshotEntry {
     if (hostId is! String || hostId.isEmpty || target == null) return null;
     final customTitle = json['customTitle'];
     final title = json['title'];
+    final gone = json['workspaceGoneAt'];
     return SessionSnapshotEntry(
       hostId: hostId,
       target: target,
@@ -54,6 +63,7 @@ class SessionSnapshotEntry {
           ? customTitle
           : null,
       title: title is String ? title : '',
+      workspaceGoneAt: gone is String ? DateTime.tryParse(gone) : null,
     );
   }
 
@@ -63,10 +73,12 @@ class SessionSnapshotEntry {
       other.hostId == hostId &&
       other.target == target &&
       other.customTitle == customTitle &&
-      other.title == title;
+      other.title == title &&
+      other.workspaceGoneAt == workspaceGoneAt;
 
   @override
-  int get hashCode => Object.hash(hostId, target, customTitle, title);
+  int get hashCode =>
+      Object.hash(hostId, target, customTitle, title, workspaceGoneAt);
 }
 
 /// The app's open sessions, in tab order, and which one was active.

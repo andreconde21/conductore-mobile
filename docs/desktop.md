@@ -118,9 +118,9 @@ narrower than 900 dp, keep the phone layout.
   focus* on, the focused pane owns it)
   ([herdr-shared-focus.md](herdr-shared-focus.md)).
 - **Dashboard.** With no view open, or after the home button at the left
-  of the tabs, the main area shows columns: *Needs you* cards (with
-  Allow / Deny for approvals the companion relays), a usage slot, the
-  open sessions as live previews, and the other workspaces per machine.
+  of the tabs, the main area shows the agents dashboard, the open
+  sessions as live previews, and the other workspaces per machine. *Needs
+  you* and the usage summary live in the sidebar only.
 - **Layouts, with the mouse.** The layout button in the toolbar (the
   dashboard icon) lays the panes out as *Single*, *Two side by side*,
   *Two stacked*, *One and two*, *2 × 2* or *3 × 2*: what is on screen

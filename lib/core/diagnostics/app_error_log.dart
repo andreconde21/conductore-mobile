@@ -138,6 +138,7 @@ class AppErrorLog extends ChangeNotifier {
     final dispatcher = PlatformDispatcher.instance;
     final previousPlatform = dispatcher.onError;
     dispatcher.onError = (error, stack) {
+      if (isExpectedUncaughtError(error)) return true;
       recordError(error, stack);
       return previousPlatform?.call(error, stack) ?? false;
     };
@@ -147,6 +148,22 @@ class AppErrorLog extends ChangeNotifier {
     }
   }
 }
+
+/// Whether [message] is ML Kit saying Google Play services is still
+/// downloading the barcode model. The APK ships without it
+/// (mobile_scanner useUnbundled), so the first scans on a fresh install
+/// fail with this until the download is done; then scanning works by itself.
+bool isBarcodeModuleDownloading(String? message) =>
+    message?.toLowerCase().contains('module to be downloaded') ?? false;
+
+/// Uncaught errors that are an expected state, not a fault: neither logged
+/// nor reported. mobile_scanner's torch and zoom listeners share the barcode
+/// event stream without an error handler, so every frame that fails while
+/// the barcode model downloads also surfaces here as uncaught.
+bool isExpectedUncaughtError(Object error) =>
+    error is PlatformException &&
+    error.code == 'MOBILE_SCANNER_BARCODE_ERROR' &&
+    isBarcodeModuleDownloading(error.message);
 
 /// What a widget that failed to build shows instead of a blank page: the
 /// error, where it happened, and a button that copies the error log.

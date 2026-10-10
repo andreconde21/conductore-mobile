@@ -13,7 +13,7 @@ shell. It is a fork of
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/01-home.png" width="200" alt="Home screen with live session previews"><br><sub>Home: live sessions and other workspaces</sub></td>
+    <td align="center"><img src="docs/screenshots/01-home.png" width="200" alt="Home in Open / Closed mode: workspace search, live session previews, other workspaces by machine"><br><sub>Home, Open / Closed: search, live sessions, other workspaces</sub></td>
     <td align="center"><img src="docs/screenshots/10-chat-working.png" width="200" alt="Chat View with a table, an agent card and the working indicator"><br><sub>Chat View while Claude works</sub></td>
     <td align="center"><img src="docs/screenshots/09-quick-switcher.png" width="200" alt="Quick switcher with a waiting agent and open sessions"><br><sub>Quick switcher</sub></td>
     <td align="center"><img src="docs/screenshots/02-terminal.png" width="200" alt="Terminal on a Herdr session running Claude Code"><br><sub>Terminal on a Herdr session</sub></td>
@@ -39,6 +39,10 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 Previews 29 to 31 (companion 1.8.0 bundled):
 
 - **Preview 31**
+  - Home's top bar is down to four controls (machine filter, Agents,
+    **Switch to…**, Settings), the desktop home shows Needs you and usage
+    once (in the sidebar), and a terminal tab is named after its project or
+    agent instead of the machine.
   - A tab whose Herdr workspace was closed says so, with **Keep what Herdr
     shows** and **Close tab**, instead of silently following another
     workspace. Chat View from such a tab opens the agent on screen.
@@ -111,7 +115,8 @@ Older previews, one line each (full notes are on the
   open an agent, approve, read a reply or switch accounts. Common phrases
   work offline in English and Portuguese, the rest goes to Claude through
   the companion (0.8). It confirms aloud before it acts, always for high
-  risk.
+  risk. Start it from the Quick Settings tile or the headset button in a
+  terminal.
 - **Read aloud**, its **length** (Brief, Full or a Claude summary) and
   **tool activity** in Chat View (Show all, Collapsed or Hidden), from the
   ⋮ menu or Settings. While a reply is read, the ⋮ shows a sound wave.
@@ -187,10 +192,19 @@ Most of this needs the [host companion](#host-companion) on the machine.
 Both multiplexers are first-class: everything below works for Herdr and for
 tmux.
 
-- **Home screen built around your servers**: pick one, several or all machines;
-  your open sessions show as live previews (grid, large tiles or a list) with
-  Mosh/SSH badges and each agent's state, and **Other workspaces** lists the
-  Herdr workspaces and tmux sessions you have not opened yet.
+- **Home screen built around your servers**: pick one, several or all
+  machines, and switch the list between two modes with *Projects | Open*
+  next to the search field. **Projects** (the default when you have a sheprd project
+  layout) puts every workspace in a box per project, open and closed
+  together, each agent's pane title on its row and the ones open in the app
+  marked *open*. **Open / Closed** shows your open sessions as live previews
+  (grid, large tiles or a list) with Mosh/SSH badges and each agent's state,
+  then **Other workspaces** by machine: the Herdr workspaces and tmux sessions
+  you have not opened yet. The search field above the list filters both
+  modes as you type, by pane title, workspace, tab, project or machine.
+  The top bar has four controls: the machine filter, Agents, the switcher
+  (**Switch to…**, search across every machine) and Settings. The app locks
+  by itself; **Lock now** is the first entry of Settings › Security.
 - **Quick switcher**: agents waiting on you, open sessions with live
   thumbnails, other workspaces and recents, with search across every
   machine. Swipe the top row
@@ -206,7 +220,8 @@ tmux.
   workspace. *Phone may move Herdr focus* lets the session in use take it
   instead ([docs/herdr-shared-focus.md](docs/herdr-shared-focus.md)). A tab whose
   workspace was closed in Herdr says so and offers *Keep what Herdr shows* or
-  *Close tab*.
+  *Close tab*; once the workspace has been gone for over a day, the restored
+  tab closes on the next launch, with Undo.
 - **Projects and sheprd**: workspaces and agents group by project, read from
   sheprd's `sidebar.toml` and shared
   across your devices. With **Sync with sheprd** on, sheprd's shared view
@@ -301,7 +316,8 @@ tmux.
 - **Device sync through one of your own machines**, end-to-end encrypted, no
   cloud: saved machines, snippets, settings, connect preferences and the
   session list. Add a device by scanning a QR code and typing six words
-  (desktops paste the code). Passwords and keys sync only if you turn that
+  (desktops paste the code; on Android the first scan waits a moment,
+  "Getting the scanner ready…", while the barcode model downloads). Passwords and keys sync only if you turn that
   on ([docs/sync.md](docs/sync.md)).
 - **Continue on the other device**: each device shares where it is (machine,
   workspace, tab, Chat View position, unsent drafts), and the app offers to
@@ -309,16 +325,20 @@ tmux.
   in Settings › Sync ([docs/sync.md](docs/sync.md)).
 - Encrypted backups of settings, machines and trusted keys (same format as
   sync), and an optional device-auth app lock that locks again after a
-  time in the background you choose (Settings › Security). Android's own
+  time in the background you choose (Settings › Security). The longer
+  choices (1 hour, 4 hours, 8 hours, 1 day) count from the last unlock and
+  hold across app restarts, after a warning; a reboot or a clock moved back
+  asks again (iOS and desktops cannot tell a reboot). Android's own
   cloud backup and device transfer are off: machines move with these
   backups or sync.
 
 ### Desktop
 
 - **Desktop shell** on desktops and tablets: a sidebar tree of machines,
-  workspaces, tabs and agents with a Needs you group, pins and groups; up
-  to 4 splits mixing terminal, Chat View, file, diff and preview; a
-  dashboard home; and a right panel for the Agents screen, preview and usage.
+  workspaces, tabs and agents with a Needs you group and the usage summary,
+  pins and groups; up to 4 splits mixing terminal, Chat View, file, diff and
+  preview; a dashboard home with the agents, recent sessions and other
+  workspaces; and a right panel for the Agents screen, preview and usage.
 - A **command palette**, saved **layouts** and presets, drag to place a pane,
   and pages that open as dialogs with Enter, Esc and Ctrl+S; right-click
   menus on tiles, tabs, terminal, agents and files.
@@ -401,7 +421,7 @@ Rendered from the app's own widgets with demo data by
   </tr>
 </table>
 
-<p align="center"><img src="docs/screenshots/22-desktop-shell-dashboard.png" width="820" alt="Desktop shell dashboard: Needs you, usage, recent sessions and other workspaces"><br><sub>Desktop shell: the dashboard home</sub></p>
+<p align="center"><img src="docs/screenshots/22-desktop-shell-dashboard.png" width="820" alt="Desktop shell dashboard: agents, recent sessions and other workspaces"><br><sub>Desktop shell: the dashboard home</sub></p>
 
 <p align="center"><img src="docs/screenshots/23-desktop-shell-split.png" width="820" alt="Desktop shell with two terminal splits side by side"><br><sub>Desktop shell: two sessions in splits, the tab strip above</sub></p>
 

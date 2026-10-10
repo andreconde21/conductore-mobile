@@ -81,6 +81,9 @@ class ShellHarness {
   HerdrFakeRunner runnerFor(SavedHost host) =>
       runners[baseHostId(host.id)] ?? HerdrFakeRunner.tmuxOnly();
 
+  /// The home's remembered choices, kept across [page] rebuilds.
+  final homePreferences = InMemoryHomePreferencesRepository();
+
   /// The app's usage controller, provided above the page when set.
   UsageController? usageController;
 
@@ -111,7 +114,7 @@ class ShellHarness {
         ),
         fileExport: RecordingFileExport(),
         homeBoards: boards,
-        homePreferences: InMemoryHomePreferencesRepository(),
+        homePreferences: homePreferences,
         connectFlow: flow,
         previewRefreshInterval: const Duration(days: 1),
         desktopShell: shell,

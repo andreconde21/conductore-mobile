@@ -2,6 +2,8 @@ import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/app_lock/domain/app_lock_preferences.dart';
+import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_page.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
@@ -55,6 +57,56 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('Security: a lock delay above 15 minutes warns first, each '
+      'time it is chosen (CON-118)', (tester) async {
+    final lock = AppLockController(AlwaysAuthenticates());
+    addTearDown(lock.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsSectionPage(
+          section: SettingsSection.security,
+          services: SettingsServices(theme: controller, appLock: lock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final dropdown = find.byKey(const ValueKey('settings-relock-delay'));
+    final warning = find.byKey(const ValueKey('settings-relock-warning'));
+
+    Future<void> choose(String label) async {
+      await tester.tap(dropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label).last);
+      await tester.pumpAndSettle();
+    }
+
+    await choose('After 5 minutes');
+    expect(warning, findsNothing);
+    expect(lock.relockDelay, RelockDelay.fiveMinutes);
+
+    await choose('After 8 hours');
+    expect(warning, findsOneWidget);
+    expect(
+      find.textContaining('approve agent actions for up to 8 hours'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(lock.relockDelay, RelockDelay.fiveMinutes);
+
+    await choose('After 8 hours');
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+    expect(lock.relockDelay, RelockDelay.eightHours);
+    expect(find.text('Lock again after unlocking'), findsOneWidget);
+
+    await choose('After 1 day');
+    expect(find.textContaining('for up to 1 day'), findsOneWidget);
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+    expect(lock.relockDelay, RelockDelay.oneDay);
+  });
 
   testWidgets('Agents: the 5-hour alert is a per-device switch (Android)', (
     tester,

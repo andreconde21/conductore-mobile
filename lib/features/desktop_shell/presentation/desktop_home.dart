@@ -1577,131 +1577,6 @@ class DesktopHomeState extends State<DesktopHome> {
 
   // The dashboard.
 
-  List<DashboardNeedsYou> _needsYou() {
-    final names = {for (final node in _tree) node.machineId: node.label};
-    final attention = widget.agentAttention;
-    final seenAgents = <String>{};
-    String? hostIdOf(AgentInfo agent) {
-      for (final host in attention.monitoredHosts) {
-        final agents =
-            attention.statusFor(host.id)?.agents ?? const <AgentInfo>[];
-        if (agents.any((other) => other.id == agent.id)) return host.id;
-      }
-      return null;
-    }
-
-    AgentInfo? companionFor(SidebarNode node) {
-      final target = node.target;
-      if (target is AgentPaneTarget) return target.pane.agent;
-      // A Herdr tab with one waiting agent: that agent (its pane title).
-      if (target is HerdrTabTarget) {
-        final waiting = [
-          for (final pane in target.workspace.panes)
-            if (pane.agent.tab == target.tab.id &&
-                pane.agent.state.needsAttention)
-              pane.agent,
-        ];
-        if (waiting.length == 1) return waiting.single;
-      }
-      final machine = SidebarTreeBuilder.find(
-        _tree,
-        SidebarKeys.machine(node.machineId),
-      );
-      if (machine == null) return null;
-      for (final host in attention.monitoredHosts) {
-        if (baseHostId(host.id) != node.machineId) continue;
-        for (final agent
-            in attention.statusFor(host.id)?.agents ?? const <AgentInfo>[]) {
-          if (!agent.state.needsAttention) continue;
-          final matches = switch (target) {
-            TmuxWindowTarget(:final session, :final window) =>
-              agent.tab == '$session:${window.index}',
-            TmuxSessionTarget(:final session) =>
-              agent.tab == session.name ||
-                  (agent.tab?.startsWith('${session.name}:') ?? false),
-            HerdrTabTarget(:final tab) => agent.tab == tab.id,
-            HerdrWorkspaceTarget(:final workspace) =>
-              agent.workspace == workspace.id,
-            _ => false,
-          };
-          if (matches) return agent;
-        }
-      }
-      return null;
-    }
-
-    String where(SidebarNode node) {
-      final parts = <String>[names[node.machineId] ?? ''];
-      final machine = SidebarTreeBuilder.find(
-        _tree,
-        SidebarKeys.machine(node.machineId),
-      );
-      for (final ancestor
-          in machine?.descendantsAndSelf ?? const <SidebarNode>[]) {
-        if (ancestor.kind == SidebarNodeKind.machine) continue;
-        if (ancestor.key != node.key &&
-            SidebarKeys.isUnder(node.key, ancestor.key)) {
-          parts.add(ancestor.label);
-        }
-      }
-      return parts.where((part) => part.isNotEmpty).join(' › ');
-    }
-
-    final items = <DashboardNeedsYou>[];
-    for (final node in SidebarTreeBuilder.needsYou(_tree)) {
-      final agent = companionFor(node);
-      if (agent != null) seenAgents.add(agent.id);
-      items.add(
-        DashboardNeedsYou(
-          node: node,
-          where: where(node),
-          agent: agent,
-          hostId: agent == null ? null : hostIdOf(agent),
-        ),
-      );
-    }
-    // Agents the companion reports outside any listed workspace.
-    for (final host in attention.monitoredHosts) {
-      final machine = widget.hostsController.findById(baseHostId(host.id));
-      if (machine == null) continue;
-      for (final agent
-          in attention.statusFor(host.id)?.agents ?? const <AgentInfo>[]) {
-        if (!agent.state.needsAttention || !seenAgents.add(agent.id)) {
-          continue;
-        }
-        items.add(
-          DashboardNeedsYou(
-            node: SidebarNode(
-              key:
-                  '${SidebarKeys.openSession(machine.id, host.id)}/a/${agent.id}',
-              kind: SidebarNodeKind.openSession,
-              machineId: machine.id,
-              label: agent.name,
-              dot: SidebarDot.needsYou,
-              agentKind: agent.kind,
-              target: OpenSessionTarget(machine, host.id),
-            ),
-            where: machine.name,
-            agent: agent,
-            hostId: host.id,
-          ),
-        );
-      }
-    }
-    return items;
-  }
-
-  Future<void> _openNeedsYou(DashboardNeedsYou item) async {
-    final agent = item.agent;
-    final flow = widget.connectFlow;
-    if (agent != null && flow != null && item.node.target is! AgentPaneTarget) {
-      await flow.openAgent(item.node.target.host, agent);
-      _controller.showHome = false;
-      return;
-    }
-    await open(item.node);
-  }
-
   Widget _dashboard(BuildContext context) {
     final palette = widget.themeController.palette;
     final brightness = Theme.of(context).brightness;
@@ -1791,7 +1666,6 @@ class DesktopHomeState extends State<DesktopHome> {
     return ListenableBuilder(
       listenable: widget.sessionRestore ?? _never,
       builder: (context, _) => ShellDashboard(
-        needsYou: _needsYou(),
         sessions: [
           for (final session in sessions)
             HomeSessionTile(
@@ -1822,29 +1696,7 @@ class DesktopHomeState extends State<DesktopHome> {
             ),
         ],
         otherGroups: groups,
-        onOpenNeedsYou: (item) => unawaited(_openNeedsYou(item)),
-        onChat: (item) {
-          final agent = item.agent;
-          if (agent == null) return;
-          unawaited(widget.actions.openChat(item.node.target.host, agent));
-        },
-        onDecide: (item, request, verdict) {
-          final hostId = item.hostId;
-          if (hostId == null) return;
-          final messenger = ScaffoldMessenger.maybeOf(context);
-          unawaited(
-            attention.decide(hostId, request, verdict).catchError((
-              Object error,
-            ) {
-              messenger?.showSnackBar(
-                SnackBar(content: Text('Could not answer: $error')),
-              );
-            }),
-          );
-        },
-        isDeciding: attention.isDeciding,
         onNewSession: () => unawaited(widget.actions.newSession()),
-        usage: _usageView(context, dashboard: true),
         agents: _agentsDigest(context),
         actions: [_agentsToggle(), _previewToggle()],
         // Crash reports and usage counts, once, like the phone's home.
@@ -1883,13 +1735,13 @@ class DesktopHomeState extends State<DesktopHome> {
   /// Usage at a glance (companion `usage`): the app's usage controller in
   /// its compact layout; a tap opens the breakdown in the right panel.
   /// Null without usage (the dashboard then keeps its note).
-  Widget? _usageView(BuildContext context, {bool dashboard = false}) {
+  Widget? _usageView(BuildContext context) {
     final custom = widget.usageSummary;
-    if (custom != null) return custom(context, compact: !dashboard);
+    if (custom != null) return custom(context, compact: true);
     final usage = UsageScope.maybeOf(context);
     if (usage == null) return null;
     return UsageSummaryView(
-      key: ValueKey(dashboard ? 'dashboard-usage' : 'sidebar-usage'),
+      key: const ValueKey('sidebar-usage'),
       controller: usage,
       layout: UsageSummaryLayout.compact,
       onTap: _openUsage,
