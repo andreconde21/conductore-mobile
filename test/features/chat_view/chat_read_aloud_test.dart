@@ -49,6 +49,28 @@ Future<void> settleMenu(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 500));
 }
 
+/// The read-aloud switch, which lives in the ⋮ menu (CON-107).
+Future<void> tapReadAloud(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('chat-menu')));
+  await settleMenu(tester);
+  await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
+  await settleMenu(tester);
+}
+
+/// Whether the ⋮ menu shows read-aloud on; the menu closes again.
+Future<bool> readAloudChecked(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('chat-menu')));
+  await settleMenu(tester);
+  final item = tester.widget<CheckedPopupMenuItem<Object>>(
+    find.byKey(const ValueKey('chat-read-aloud')),
+  );
+  await tester.tapAt(Offset.zero);
+  await settleMenu(tester);
+  return item.checked;
+}
+
+final _mic = find.byKey(const ValueKey('dictation-button'));
+
 void main() {
   late FakeTts tts;
   late ThemeController settings;
@@ -110,13 +132,9 @@ void main() {
         ], offset: 200),
       ),
     ]);
-    final toggle = find.byKey(const ValueKey('chat-read-aloud'));
-    expect(toggle, findsOneWidget);
-    expect(find.byTooltip('Read replies aloud'), findsOneWidget);
-
-    await tester.tap(toggle);
-    await tester.pump();
-    expect(find.byTooltip('Stop reading replies aloud'), findsOneWidget);
+    expect(await readAloudChecked(tester), isFalse);
+    await tapReadAloud(tester);
+    expect(await readAloudChecked(tester), isTrue);
     expect(settings.voice.readAloudFor('s-1'), isTrue);
     expect(settings.voice.readAloudFor('other'), isFalse);
     expect(tts.spoken, isEmpty, reason: 'history is never read');
@@ -126,8 +144,7 @@ void main() {
     // Only the turn's final answer; the commands are never read.
     expect(tts.spoken, ['All done, see todos.ts.']);
 
-    await tester.tap(toggle);
-    await tester.pump();
+    await tapReadAloud(tester);
     expect(tts.stops, 1, reason: 'turning it off stops at once');
     expect(settings.voice.readAloudFor('s-1'), isFalse);
   });
@@ -146,7 +163,7 @@ void main() {
       ok('{"ok":true}'),
       ok(page([], offset: 200)),
     ]);
-    expect(find.byTooltip('Stop reading replies aloud'), findsOneWidget);
+    expect(await readAloudChecked(tester), isTrue);
 
     await chat.refresh();
     await tester.pump();
@@ -256,7 +273,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
     expect(tts.stops, 0, reason: 'coming back is not leaving');
-    expect(find.byTooltip('Stop reading replies aloud'), findsOneWidget);
+    expect(await readAloudChecked(tester), isTrue);
   });
 
   testWidgets('Talk: speak, auto-send, stay quiet, hear the answer, touch '
@@ -284,7 +301,7 @@ void main() {
       runner: runner,
     );
 
-    await tester.tap(find.byKey(const ValueKey('chat-talk')));
+    await tester.longPress(_mic);
     await tester.pump();
     expect(find.byKey(const ValueKey('talk-panel')), findsOneWidget);
     expect(find.text('Listening…'), findsOneWidget);
@@ -339,7 +356,7 @@ void main() {
       ),
     ], dictation: dictation);
 
-    await tester.tap(find.byKey(const ValueKey('chat-talk')));
+    await tester.longPress(_mic);
     await tester.pump();
     expect(find.text('Listening…'), findsOneWidget);
     expect(dictation.isActive, isTrue);
@@ -355,80 +372,99 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     expect(dictation.isActive, isTrue);
     expect(find.text('Say allow, deny, or always.'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('chat-talk-toggle')));
+    await tester.tap(find.byKey(const ValueKey('talk-stop')));
     await tester.pump(const Duration(seconds: 5));
   });
 
-  group('header toggles', () {
-    IconButton readAloudButton(WidgetTester tester) => tester
-        .widget<IconButton>(find.byKey(const ValueKey('chat-read-aloud')));
-
-    testWidgets('read aloud is always in the header on a phone, filled '
-        'while on, and says what it did', (tester) async {
+  group('read aloud in ⋮, Talk in its panel', () {
+    testWidgets('read aloud is in ⋮ on a phone, checked while on, and says '
+        'what it did', (tester) async {
       tester.view.physicalSize = const Size(360, 740);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await pumpPage(tester, [ok(page(history))]);
 
-      expect(find.byKey(const ValueKey('chat-read-aloud')), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-read-aloud')), findsNothing);
       expect(tester.takeException(), isNull, reason: 'no header overflow');
       expect(find.byTooltip('Terminal'), findsOneWidget);
-      expect(readAloudButton(tester).isSelected, isFalse);
+      expect(await readAloudChecked(tester), isFalse);
 
-      await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
-      await tester.pump();
+      await tapReadAloud(tester);
       expect(find.text('Reading replies aloud'), findsOneWidget);
-      expect(readAloudButton(tester).isSelected, isTrue);
-      expect(find.byTooltip('Stop reading replies aloud'), findsOneWidget);
+      expect(await readAloudChecked(tester), isTrue);
 
-      await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
-      await tester.pump();
+      await tapReadAloud(tester);
       expect(find.text('Stopped reading aloud'), findsOneWidget);
-      expect(readAloudButton(tester).isSelected, isFalse);
+      expect(await readAloudChecked(tester), isFalse);
       await tester.pump(const Duration(seconds: 5));
     });
 
-    testWidgets('without a speech engine it shows muted and explains', (
+    testWidgets('without a speech engine it says so and explains', (
       tester,
     ) async {
       tts.available = false;
       await pumpPage(tester, [ok(page(history))]);
       await tester.pump();
 
-      expect(find.byTooltip('Read aloud unavailable'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
-      await tester.pump();
+      await tapReadAloud(tester);
       expect(find.textContaining('text-to-speech engine'), findsOneWidget);
       expect(settings.voice.readAloudFor('s-1'), isFalse);
 
       // Installed meanwhile: a tap looks again and finds it.
       tts.available = true;
+      await tester.tap(find.byKey(const ValueKey('chat-menu')));
+      await settleMenu(tester);
+      expect(find.text('Read aloud unavailable'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
       await tester.pump(const Duration(seconds: 5));
-      expect(find.byTooltip('Read replies aloud'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('chat-menu')));
+      await settleMenu(tester);
+      expect(find.text('Read replies aloud'), findsOneWidget);
+      await tester.tapAt(Offset.zero);
+      await settleMenu(tester);
     });
 
-    testWidgets('Talk mode shows as on in the header and ends from there', (
+    testWidgets('while a reply is read the ⋮ shows a sound wave', (
       tester,
     ) async {
+      await settings.setVoice(
+        settings.voice.copyWith(readAloudByDefault: true),
+      );
+      final chat = await pumpPage(tester, [
+        ok(page(history)),
+        ok(
+          page([
+            assistantLine('a2', [text('Hi.')]),
+          ], offset: 200),
+        ),
+      ]);
+      final wave = find.byKey(const ValueKey('chat-menu-speaking'));
+      expect(wave, findsNothing);
+      await chat.refresh();
+      await tester.pump();
+      expect(wave, findsOneWidget);
+      expect(find.byTooltip('Reading aloud'), findsOneWidget);
+      tts.done();
+      await tester.pump();
+      expect(wave, findsNothing);
+    });
+
+    testWidgets('Talk starts with a long press of the mic, shows only its '
+        'panel and ends from there', (tester) async {
       final mic = FakeSpeechRecognizer();
       final dictation = DictationController(mic, language: () => 'en-US');
       addTearDown(dictation.dispose);
       await pumpPage(tester, [ok(page(history))], dictation: dictation);
 
-      final toggle = find.byKey(const ValueKey('chat-talk-toggle'));
-      expect(toggle, findsNothing);
-      await tester.tap(find.byKey(const ValueKey('chat-talk')));
+      await tester.longPress(_mic);
       await tester.pump();
-      expect(toggle, findsOneWidget);
-      expect(find.byTooltip('End Talk mode'), findsOneWidget);
       expect(find.byKey(const ValueKey('talk-panel')), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-talk-toggle')), findsNothing);
 
       mic.emit(const SpeechPartial('and deploy'));
       await tester.pump();
-      await tester.tap(toggle);
+      await tester.tap(find.byKey(const ValueKey('talk-stop')));
       await tester.pump();
-      expect(toggle, findsNothing);
       expect(find.byKey(const ValueKey('talk-panel')), findsNothing);
       expect(dictation.isActive, isFalse);
       final field = find.byKey(const ValueKey('chat-composer-field'));

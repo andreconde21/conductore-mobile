@@ -1770,8 +1770,8 @@ class _Centered extends StatelessWidget {
   }
 }
 
-/// The header menu: Find in conversation, the read-aloud switch and
-/// length, Tool activity (the same settings as Settings › Chat & Voice),
+/// The header menu: Find in conversation, the read-aloud switch (its
+/// one place since CON-107) and length, Tool activity (the same settings as Settings › Chat & Voice),
 /// and "Hand off…" (Talkbawt) when this machine's companion can.
 class _ChatMenu extends StatelessWidget {
   const _ChatMenu({
@@ -1801,11 +1801,36 @@ class _ChatMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final readAloud = this.readAloud;
+    return readAloud == null
+        ? _menu(context)
+        : ListenableBuilder(
+            listenable: readAloud,
+            builder: (context, _) => _menu(context),
+          );
+  }
+
+  /// While a reply is read (or its summary awaited) the ⋮ shows a sound
+  /// wave: the switch that stops it is inside.
+  Widget _menu(BuildContext context) {
     final length = readAloudLength;
     final readAloud = this.readAloud;
+    final summarizing = readAloud?.summarizing ?? false;
+    final speaking = readAloud?.speaking ?? false;
     return PopupMenuButton<Object>(
       key: const ValueKey('chat-menu'),
-      tooltip: 'Chat options',
+      tooltip: summarizing
+          ? 'Summarizing…'
+          : speaking
+          ? 'Reading aloud'
+          : 'Chat options',
+      icon: summarizing || speaking
+          ? Icon(
+              Icons.graphic_eq_rounded,
+              key: const ValueKey('chat-menu-speaking'),
+              color: Theme.of(context).colorScheme.primary,
+            )
+          : null,
       onSelected: (value) => switch (value) {
         final ReadAloudLength length => onReadAloudLength(length),
         final ToolActivity mode => onToolActivity(mode),

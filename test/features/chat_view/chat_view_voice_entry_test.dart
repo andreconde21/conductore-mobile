@@ -39,10 +39,9 @@ class _TrackedRecognizer extends FakeSpeechRecognizer {
 AgentCommandResult ok(String stdout) =>
     AgentCommandResult(stdout: stdout, stderr: '', exitCode: 0);
 
-/// The mic and Talk are in Chat View however it was opened, not only from
+/// The mic (and Talk, its long press) is in Chat View however it was opened, not only from
 /// the terminal (which hands over its own dictation).
 void main() {
-  final talk = find.byKey(const ValueKey('chat-talk'));
   final mic = find.byType(DictationButton);
 
   const agent = AgentInfo(
@@ -109,10 +108,11 @@ void main() {
     ),
   );
 
-  void expectVoice() {
+  void expectVoice(WidgetTester tester) {
     expect(find.byType(ChatViewPage), findsOneWidget);
     expect(mic, findsOneWidget);
-    expect(talk, findsOneWidget);
+    // Talk is the mic's long press.
+    expect(tester.widget<DictationButton>(mic).onLongPress, isNotNull);
   }
 
   group('opened without a dictation controller', () {
@@ -133,7 +133,7 @@ void main() {
           ),
         ),
       );
-      expectVoice();
+      expectVoice(tester);
     });
 
     testWidgets('a session that opens in Chat View (openPreferredChatView)', (
@@ -166,7 +166,7 @@ void main() {
         ),
       );
       expect(opened, isTrue);
-      expectVoice();
+      expectVoice(tester);
     });
 
     testWidgets('"Open chat view" for a machine (openChatViewForHost)', (
@@ -186,7 +186,7 @@ void main() {
           ),
         ),
       );
-      expectVoice();
+      expectVoice(tester);
     });
 
     testWidgets('a desktop shell tab (ChatViewPresenter)', (tester) async {
@@ -222,7 +222,7 @@ void main() {
       );
       await settle(tester);
       addTearDown(() => tester.pumpWidget(const SizedBox()));
-      expectVoice();
+      expectVoice(tester);
     });
   });
 
@@ -259,7 +259,7 @@ void main() {
   ) async {
     final recognizer = _TrackedRecognizer();
     await pumpPage(tester, speechRecognizer: recognizer);
-    expectVoice();
+    expectVoice(tester);
     final own = tester.widget<DictationButton>(mic).controller;
 
     await tester.tap(mic);
@@ -283,7 +283,6 @@ void main() {
     await pumpPage(tester);
     expect(find.byType(ChatViewPage), findsOneWidget);
     expect(mic, findsNothing);
-    expect(talk, findsNothing);
     await tester.pumpWidget(const SizedBox());
     debugDefaultTargetPlatformOverride = null;
   });
@@ -297,7 +296,7 @@ void main() {
       addTearDown(terminal.dispose);
       final unused = FakeSpeechRecognizer();
       await pumpPage(tester, dictation: terminal, speechRecognizer: unused);
-      expectVoice();
+      expectVoice(tester);
       expect(tester.widget<DictationButton>(mic).controller, same(terminal));
 
       await tester.tap(mic);
