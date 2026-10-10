@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- fix: an agent in a Herdr pane is named after its Herdr workspace, the label Herdr and sheprd show ("Infrastructure", "Vaultwarden"), no longer after its folder ("root", "Projects") (CON-116). The live bridge's workspaces fill `herdr.workspaceLabel` and `name` on every status, hook event and workspace rename (change reason `herdr-label`); a label is kept while the bridge is off and dropped when the agent moves workspace or Herdr no longer lists it. A live pane name still wins; tmux agents keep their window name. Herdr-only agents are named the same way and carry the pane's terminal title as `title`.
+
 ## 1.8.0 (2026-10-09)
 
 - fix: every cswap account row (and the unmanaged live login) carries an `id`, the same on every machine whatever the slot or alias there (CON-100): a truncated SHA-256 of the lower-cased email and organisation uuid, never the email itself. The phone merges accounts across machines by it instead of by label, which showed one account twice when two machines named it differently. The cswap cache moves to version 3 so old rows without an id are fetched again.

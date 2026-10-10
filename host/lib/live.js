@@ -296,14 +296,18 @@ class LiveBridge {
         if (prevState === 'idle' && herdrState === 'done') state = 'idle'
       }
       const server = this.herdr.get(pane.server)
+      const label = labels.get(`${pane.server}/${pane.workspaceId}`) || null
       const record = {
         sessionId: target,
         source: 'herdr',
         kind: pane.agent,
-        name: pane.name || pane.title || null,
+        // Like the companion's own agents (CON-116): the pane's live name,
+        // else its workspace; the terminal title is the per-agent line.
+        name: pane.name || label || pane.title || null,
+        title: pane.title || null,
         cwd: pane.cwd || null,
-        project: labels.get(`${pane.server}/${pane.workspaceId}`) || null,
-        herdr: { server: pane.server, workspaceId: pane.workspaceId, tabId: pane.tabId, paneId: pane.id, name: pane.name || null, socket: server ? server.server.socket : null },
+        project: label,
+        herdr: { server: pane.server, workspaceId: pane.workspaceId, tabId: pane.tabId, paneId: pane.id, name: pane.name || null, workspaceLabel: label, socket: server ? server.server.socket : null },
         state,
         stateSeq: pane.seq,
         pending: [],

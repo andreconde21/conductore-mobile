@@ -56,6 +56,22 @@ test('a Herdr-only agent shows after the grace period, with its kind', () => {
   assert.equal(r.record.herdr.paneId, 'w1:p1')
 })
 
+test('a Herdr-only agent is named after its workspace; its title stays the per-agent line (CON-116)', () => {
+  const { b, pane, tick, agents } = bridge()
+  b.store.set('ws:herdr:w1', { kind: 'workspace', server: 'herdr', id: 'w1', label: 'Improvise' })
+  pane('w1:p1', 'idle')
+  tick(NEW_AGENT_GRACE_MS)
+  const r = agents().at(-1).record
+  assert.equal(r.name, 'Improvise')
+  assert.equal(r.title, 'fix tests')
+  assert.equal(r.project, 'Improvise')
+  assert.equal(r.herdr.workspaceLabel, 'Improvise')
+  // A live name someone gave the pane wins.
+  pane('w1:p1', 'idle', { name: 'reviewer' })
+  tick(10)
+  assert.equal(agents().at(-1).record.name, 'reviewer')
+})
+
 test('a turn shorter than the hysteresis never shows as working, nor finishes', () => {
   const { b, pane, tick, agents } = bridge()
   pane('w1:p1', 'idle')

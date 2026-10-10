@@ -245,3 +245,42 @@ test('a question PreToolUse spooled after its PermissionRequest keeps the reques
   assert.equal(a.pending[0].summary, 'Pick?')
   assert.deepEqual(a.pending[0].questions, [{ question: 'Pick?', kind: 'choice', multiSelect: false, options: [{ label: 'A' }, { label: 'B' }] }])
 })
+
+test('an agent in a Herdr pane takes its workspace label, kept across hook events (CON-116)', () => {
+  const herdr = { workspaceId: 'w4', tabId: 'w4:t4', paneId: 'w4:p4', name: null, socket: null }
+  const st = state.createState()
+  state.reduce(st, { session_id: 'h', cwd: '/root', hook_event_name: 'SessionStart', herdr }, 1)
+  const tmux = { session: 'main', window: 1, paneId: '%1', windowName: 'fixer' }
+  state.reduce(st, { session_id: 't', cwd: '/root', hook_event_name: 'SessionStart', tmux }, 2)
+  assert.equal(st.agents.h.name, 'root')
+  const labels = { w4: 'Infrastructure' }
+  const changes = state.syncHerdrLabels(st, a => labels[a.herdr.workspaceId])
+  assert.deepEqual(changes.map(c => [c.sessionId, c.reason, c.agent.name]), [['h', 'herdr-label', 'Infrastructure']])
+  assert.equal(st.agents.h.herdr.workspaceLabel, 'Infrastructure')
+  // tmux agents keep their window name.
+  assert.equal(st.agents.t.name, 'fixer')
+  // Same label again: nothing to say.
+  assert.deepEqual(state.syncHerdrLabels(st, a => labels[a.herdr.workspaceId]), [])
+  // Hooks carry the workspace, not the label: the name stays.
+  state.reduce(st, { session_id: 'h', cwd: '/root', hook_event_name: 'UserPromptSubmit', herdr }, 3)
+  assert.equal(st.agents.h.name, 'Infrastructure')
+  // Unknown (no live bridge): kept.
+  assert.deepEqual(state.syncHerdrLabels(st, () => undefined), [])
+  assert.equal(st.agents.h.name, 'Infrastructure')
+  // Renamed in Herdr.
+  state.syncHerdrLabels(st, () => '✳ Vaultwarden')
+  assert.equal(st.agents.h.name, 'Vaultwarden')
+  // A live pane name still wins over the workspace.
+  state.reduce(st, { session_id: 'h', cwd: '/root', hook_event_name: 'Stop', herdr: { ...herdr, name: 'reviewer' } }, 4)
+  assert.equal(st.agents.h.name, 'reviewer')
+  // Moved to another workspace: its label is not this one's.
+  state.reduce(st, { session_id: 'h', cwd: '/root', hook_event_name: 'Stop', herdr: { ...herdr, workspaceId: 'w9', paneId: 'w9:p1' } }, 5)
+  assert.equal(st.agents.h.herdr.workspaceLabel, undefined)
+  assert.equal(st.agents.h.name, 'root')
+  // A workspace Herdr no longer lists drops the label.
+  state.syncHerdrLabels(st, () => 'Migrations')
+  assert.equal(st.agents.h.name, 'Migrations')
+  state.syncHerdrLabels(st, () => '')
+  assert.equal(st.agents.h.herdr.workspaceLabel, undefined)
+  assert.equal(st.agents.h.name, 'root')
+})

@@ -286,6 +286,7 @@ class Daemon {
       }
     })
     this.sidebarQueued = false
+    this.labelsQueued = false
     this.adapterCaps = null
   }
 
@@ -464,6 +465,7 @@ class Daemon {
     if (event.hook_event_name === 'PermissionRequest') return this.onPermission(event, fifo, header.timeout, mtime)
     this.releaseAnswered(event, mtime)
     this.commit(state.reduce(this.state, event))
+    this.syncHerdrLabels()
     this.activity.onEvent(event)
     // Queues git snapshots in the background; never awaited here.
     this.turns.onEvent(event)
@@ -714,10 +716,37 @@ class Daemon {
     this.changeChars += entry.line.length
     this.trimChanges()
     for (const p of [...this.pollers]) this.servePoller(p)
+    if (r.key && (r.key.startsWith('ws:') || r.key.startsWith('srv:herdr'))) this.scheduleHerdrLabels()
     if (r.key && r.key.startsWith('pane:') && !this.sidebarQueued) {
       this.sidebarQueued = true
       setImmediate(() => { this.sidebarQueued = false; this.sidebar.update(this.state.agents) })
     }
+  }
+
+  // Names the agents in Herdr panes after their workspace (CON-116), as
+  // the live bridge sees the workspaces. Without the bridge (or with its
+  // server down) labels stay as they were.
+  syncHerdrLabels () {
+    if (!this.live.running) return
+    const herdrApi = require('./herdr-api')
+    const servers = new Map()
+    const serverOf = socket => {
+      if (!servers.has(socket)) servers.set(socket, herdrApi.idForSocket(socket))
+      return servers.get(socket)
+    }
+    this.commit(state.syncHerdrLabels(this.state, agent => {
+      const server = serverOf(agent.herdr.socket || null)
+      const srv = this.live.store.get(`srv:${server}`)
+      if (!srv || srv.state !== 'up') return undefined
+      const ws = this.live.store.get(`ws:${server}:${agent.herdr.workspaceId}`)
+      return ws ? ws.label : ''
+    }))
+  }
+
+  scheduleHerdrLabels () {
+    if (this.labelsQueued) return
+    this.labelsQueued = true
+    setImmediate(() => { this.labelsQueued = false; if (!this.stopping) this.syncHerdrLabels() })
   }
 
   // Agents that will never send SessionEnd (their Claude Code is gone). Runs
@@ -941,6 +970,8 @@ class Daemon {
   // `status`; with the etag of the phone's last copy, only a marker when
   // nothing changed since (an idle machine's poll stays a few bytes).
   replyStatus (req, c) {
+    // Before the etag: a label just seen bumps seq.
+    this.syncHerdrLabels()
     const variant = `${req.live ? 'l' : ''}${req.herdrAgents ? 'h' : ''}`
     const etag = `${this.epoch}.${this.state.seq}${variant ? '.' + variant : ''}`
     if (typeof req.etag === 'string' && req.etag === etag) {
@@ -954,6 +985,7 @@ class Daemon {
 
   // `status` / a resync snapshot, with what the request asked for.
   snapshotFor (req) {
+    this.syncHerdrLabels()
     const snap = state.snapshot(this.state)
     if (req.herdrAgents) snap.agents = snap.agents.concat(this.live.herdrAgents())
     if (req.live) snap.live = { running: this.live.running, entities: this.live.entities() }

@@ -237,8 +237,11 @@ word as its value) and answer plain JSON, so check for `encoding`.
 * `pending[].toolKind` / `pending[].answerable`: set only by adapters that
   need them (never for Claude Code): the neutral tool kind, and `false` when
   the phone can only watch the request (answer it in the terminal).
-* `name`: Herdr agent name, else the tmux window name (unless it is a generic
-  process name like `node` or `claude`), else the basename of `cwd`. Leading
+* `name`: Herdr agent (pane) name, else the Herdr workspace's label (the
+  name Herdr and sheprd show; `herdr.workspaceLabel`, known once the live
+  bridge ran, e.g. for the phone's `--herdr-agents` polls), else the tmux
+  window name (unless it is a generic process name like `node` or
+  `claude`), else the basename of `cwd`. Leading
   status glyphs from Claude Code's terminal title (`⚠`, `✳`, `●`, emoji,
   spinner dots) are stripped first.
 * `tmux` / `herdr` are `null` when unknown. `transcriptPath` is the
@@ -1169,7 +1172,9 @@ findings and the measured cost). In short:
   (Herdr) and sessions and windows (tmux) as entities with keys, delivered as
   `{"type": "live", "key", "entity"}` lines through the same long-poll.
   `--herdr-agents` adds the agents only Herdr detects (any of its agent kinds)
-  as ordinary agent records with `source: "herdr"`.
+  as ordinary agent records with `source: "herdr"`, named like the others
+  (pane name, else workspace label) with the pane's terminal title as
+  `title`.
 - The bridge starts with the first such request and stops 15 minutes after the
   last one. It subscribes to each Herdr server's socket (`events.subscribe`,
   read-only connections). Only with `config set tmux-live on` (off by
