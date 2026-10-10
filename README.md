@@ -288,7 +288,8 @@ tmux.
 - **Device sync through one of your own machines**, end-to-end encrypted, no
   cloud: saved machines, snippets, settings, connect preferences and the
   session list. Add a device by scanning a QR code and typing six words
-  (desktops paste the code). Passwords and keys sync only if you turn that
+  (desktops paste the code; on Android the first scan waits a moment,
+  "Getting the scanner ready…", while the barcode model downloads). Passwords and keys sync only if you turn that
   on ([docs/sync.md](docs/sync.md)).
 - **Continue on the other device**: each device shares where it is (machine,
   workspace, tab, Chat View position, unsent drafts), and the app offers to

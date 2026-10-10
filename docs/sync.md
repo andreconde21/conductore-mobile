@@ -131,6 +131,9 @@ device left behind pushed within 10 s or on leaving.
    `mobile_scanner`) or paste, type the words. It saves the hub with that
    key and pins the host key, installs a key of its own through it, removes
    the one-time key with the new one, then pulls everything.
+   On Android the barcode model is not in the APK: the first scan on a
+   fresh install waits while Google Play services downloads it, showing
+   "Getting the scanner ready…", then scans by itself.
 
 **Manual path**: save the hub machine by hand, then **Set up sync** with the
 same machine and passphrase.
