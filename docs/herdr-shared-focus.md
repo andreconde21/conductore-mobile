@@ -104,6 +104,22 @@ are you driving Herdr, the same as keys typed into it.
 - **The laptop follows the phone.** Focusing a workspace from the phone
   moves the Herdr TUI on the laptop too, and the other way round.
 
+### A workspace closed in Herdr (CON-103)
+
+When the workspace a tab was opened on is closed in Herdr (on your laptop,
+say), the tab does not jump to another one and is never pinned again to
+what it mirrored. This is noticed with the setting on or off, and it never
+moves Herdr's focus. The tab shows a notice, *<label> was closed in Herdr.
+This tab shows whatever Herdr has focused, not <label>.*, with:
+
+- **Keep what Herdr shows**: the tab stays on the workspace Herdr shows
+  now;
+- **Close tab**: closes the tab.
+
+Chat View opened from a tab like this (or from any tab that is not pinned
+to a workspace of its own) opens the agent in the pane Herdr has focused,
+which is what is on screen.
+
 ### Either way
 
 - Rendering previews never changes Herdr's focus.

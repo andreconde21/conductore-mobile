@@ -1,11 +1,8 @@
 # Agent adapters (companion and app)
 
-CON-045 makes Conductore agent-agnostic. Step 2 (this document's state)
-moved Claude Code onto an adapter interface with no behaviour change; Codex
-(CON-068) and OpenCode (CON-069) are the next adapters. The research and
-the per-agent findings are in the design doc
-(`/root/.config/conductore/agent-adapters-design.md`, 2026-09-27); this page
-is the code as it is.
+CON-045 makes Conductore agent-agnostic. Claude Code sits behind an adapter
+interface, and Codex (CON-068), OpenCode (CON-069), Gemini CLI (CON-072) and
+Cursor (CON-073) are adapters too. This page is the code as it is.
 
 ## Companion: where things are
 
@@ -87,7 +84,9 @@ Neither is ever set for Claude Code, so its JSON is unchanged.
 4. Approvals: `approvals: 'hook'` + `hookAnswer(event, decision, message,
    answers)` returning the one line the hook prints (`'\n'` = let the
    agent's own prompt ask). `'server'` agents answer through the agent; the
-   daemon side of that is not built yet (OpenCode, see below).
+   no adapter uses it today (OpenCode answers through its hook, see below).
+   `'observe'` agents (Gemini CLI, Cursor) are only watched: the request is
+   shown, never answered from the phone.
 5. Chat: `readTranscript(agent, opts)` returns a page built with
    `chat-items.js` (`format: "items"`) or `{ error }` (add `notYet: true`
    when the session simply has no transcript yet, before its first turn:
@@ -223,33 +222,9 @@ Differences from the design doc:
 * No brain (no tool-off switch, no schema, chats saved), no usage section
   (per-turn tokens only in `stop`), no accounts. `launch: 'cursor-agent'`.
 
-## What the next adapters need (from the design doc)
+## OpenCode (CON-069, built)
 
-**Codex (CON-068, hooks and pane first; socket later).**
-`install()`: our entries in `~/.codex/hooks.json` (`{"hooks":{…}}`, merged
-by our mark `conductore-hook --agent codex`), never `config.toml`; tell the
-user to trust them once in `/hooks`, and have `doctor()` read the
-`[hooks.state]` trust hashes read-only (`capabilities().setup =
-['trust-hooks']`). `normalize()`: the 12 Codex hook events map almost 1:1
-(Codex has no Notification/StopFailure; SessionStart `source`, Stop
-`last_assistant_message`); tool names onto Claude's (`exec_command` → Bash,
-`apply_patch` → Edit). Approvals: the PermissionRequest hook prints Claude's
-exact decision JSON, so `hookAnswer` can reuse `permission.js` but without
-`updatedPermissions` ("always" becomes a Conductore rule; `always: false`).
-Liveness: comm `codex`; in daemon mode (0.157+) hooks run in Codex's daemon
-environment, so `$TMUX_PANE` and the pid describe the daemon, not the TUI
-(needs a live test; location may fall back to matching the pane's cwd).
-Chat: rollout JSONL `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
-(maybe `.zst`), both the paginated `item_completed` TurnItems (0.145+) and
-legacy `response_item`, into `chat-items.js`. Usage: already in `usage.js`
-(`codexLineHandler`, the `codex` section); limits from `token_count`
-`rate_limits`. Brain: `codex exec --ephemeral --json --output-schema <file>
---sandbox read-only --disable shell_tool --skip-git-repo-check
---ignore-user-config -m <model>`. Accounts: show the active account and its
-limits only (decision 8).
-
-**OpenCode (CON-069, built).** As built, differing from the plan below:
-the plugin does not write spool files itself but runs `conductore-hook
+The plugin does not write spool files itself but runs `conductore-hook
 --agent opencode <event>` (so the spool format, the daemon wake-up and the
 PermissionRequest FIFO wait are shared); a permission or question runs the
 hook as `PermissionRequest`, and the plugin replies through `ctx.client`
@@ -262,41 +237,6 @@ file the Claude readers would parse). Usage goes through the adapter's
 `usageReport()` (a generic hook in `usage.js`). Verified live with
 1.18.34: `opencode run`, `opencode serve` and the TUI in tmux (Docker).
 
-**OpenCode (CON-069, plugin only, no --port), the plan.**
-`install()`: drop `~/.config/opencode/plugins/conductore.js`, a file we
-own, exporting `{ id, server, setup }` (both loader shapes, like Herdr's);
-never touch `opencode.json`. The plugin writes spool files itself with
-`agent=opencode` and the pane env from `process.env`, folding child
-sessions (`info.parentID`) into the root. `normalize()`: `session.status`
-busy/retry → UserPromptSubmit/PreToolUse-like working, `session.idle` →
-Stop, `permission.asked` → PermissionRequest, `question.asked` →
-AskUserQuestion, `session.error` → StopFailure, `session.deleted` →
-SessionEnd. Approvals are `'server'`: the plugin waits for the daemon's
-decision and replies through `ctx.client` (`once` / `always` / `reject`);
-this needs a daemon op the plugin can long-poll (a waiter without a FIFO),
-which does not exist yet. Chat: SQLite via `opencode db "<sql>" --format
-json` (read-only; Node 18 has no sqlite), cursor = last part id. Usage:
-tokens and cost per assistant message (prefer OpenCode's own cost); no plan
-limits (`limits: false`). Brain: `OPENCODE_DB=:memory:
-OPENCODE_PERMISSION='{"*":"deny"}' opencode run --pure --format json` with
-stdin closed; no schema in `run` (`brainSchema: false`).
-
-## Where main moved since the design doc (2026-09-27)
-
-* `host/lib/agents.js` already exists (agent-to-agent messaging,
-  CON-037), so the adapters live in `host/lib/adapters/`, not
-  `host/lib/agents/`.
-* `status.agents` is the agent list, so the per-kind capability map is
-  called `adapters`, not `agents`. It is not a new entry in `capabilities`
-  either: that list is asserted exactly by `approvals.test.js`, and the
-  map's presence is the feature flag.
-* CON-062 (questions and plans) landed after the design: the
-  AskUserQuestion answers (`decide … answer`), the plan's `updatedInput`
-  echo and the plan's `setMode` "always" all sit in `permission.js`, behind
-  `hookAnswer` / `checkAnswers`.
-* cswap gained unmanaged logins (1.2.1) and is being reworked (CON-067):
-  the adapter only wraps `cswap.accounts` / `switchAccount`.
-
 ## Deferred from the design's step 2 table
 
 * 2c: `state.reduce()` still switches on `hook_event_name` (the design
@@ -305,6 +245,6 @@ stdin closed; no schema in `run` (`brainSchema: false`).
   Claude Code's tool names are the neutral vocabulary instead, so they need
   no change. `toolKind()` exists for the phone's `pending[].toolKind`.
 * 2g: the usage scanners (`claudeLineHandler`, `codexLineHandler`) stay in
-  `usage.js` until CON-067 lands, to avoid conflicting with it.
+  `usage.js`.
 * `talkbawt.js` runs its own `claude -p` for link summaries; not routed
   through the brain runner yet.

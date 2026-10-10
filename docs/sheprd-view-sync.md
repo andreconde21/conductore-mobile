@@ -7,18 +7,17 @@ can also write presence marks back. The app has an opt-in setting for this,
 specific to one team: machine names, groups and paths all come from the
 user's own sheprd.
 
-Status: agreed with the sheprd agent on 2026-10-05, shipped in sheprd
-0.9.3-15. sheprd writes
-`view.json` only when `share_view = true` is set in its `sidebar.toml`
-(default false). The relay forwards it to each machine, with `self` set
-per machine, and drains each machine's `view-updates.jsonl` into the hub's
-file, so there is one applier. v1 covers marks only; layout edits wait for
-v2. While sync is on and no machine shares a view, Conductore keeps its
-own layout and says how to turn sharing on.
+Status: v1 (marks) shipped in sheprd 0.9.3-15. v2 (layout edits from the
+app) shipped in the app with preview 30 and in companion 1.8.0, and needs
+sheprd 0.9.3-20 or newer. sheprd writes `view.json` only when
+`share_view = true` is set in its `sidebar.toml` (default false). The relay
+forwards it to each machine, with `self` set per machine, and drains each
+machine's `view-updates.jsonl` into the hub's file, so there is one
+applier. While sync is on and no machine shares a view, Conductore keeps
+its own layout and says how to turn sharing on.
 
-Contract v2 (CON-101, draft of 2026-10-09, awaiting the sheprd agent's
-review) adds layout edits from the app: moving a workspace to a project or
-to Other, hide/show, creating, renaming, pinning and deleting projects,
+Contract v2 adds layout edits from the app: moving a workspace to a project
+or to Other, hide/show, creating, renaming, pinning and deleting projects,
 their match rules and short tag, reordering, and "remove from active" /
 "keep active". See [Contract v2: layout edits](#contract-v2-layout-edits).
 v1 stays as it is: v2 only adds keys to `view.json` and a new line version
@@ -262,7 +261,6 @@ nothing. The v1 form (`--op … --agent …`) is unchanged. `sheprd-view`
 passes `updates` and `rejected` on.
 
 ## Conductore side
-## Conductore side
 
 - Companion, capability `sheprd-view`:
   - `conductore-hostd sheprd-view` returns `{found: false}` or
@@ -279,12 +277,3 @@ passes `updates` and `rejected` on.
   edits go back too, as v2 lines; otherwise they are paused while sync is
   on, with a hint naming what to update. When sync is off, the app's own
   grouping is back unchanged and v2 is not used.
-
-## Open questions for sheprd
-
-1. Can the relay carry `view.json` and drain `view-updates.jsonl` on its
-   existing connection, or does it need its own channel?
-2. Is `self` easy to produce on each machine? It is the hub's endpoint
-   label for that machine.
-3. Should layout edits (move to a project, hide) be write-back ops in v2?
-   v1 covers marks only. (Answered: yes, see contract v2.)

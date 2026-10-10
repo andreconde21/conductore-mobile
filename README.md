@@ -34,230 +34,55 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 - **Agents first.** The app is built around watching and steering coding agents
   (Claude Code) inside Herdr and tmux, not around a generic terminal.
 
-## New in preview 17
+## What's new
 
-- **Review mode and undo** (companion 1.0): the companion snapshots the
-  repository at the start and end of every Claude turn, so you can review a
-  turn file by file on swipeable cards with coloured diffs, reject a single
-  file (it is reverted), comment on lines, send feedback, or undo the whole
-  turn and redo it. It opens from Chat View, the dashboard, the inbox, or
-  after each turn if you want. The voice guide knows "undo that" and
-  "review", and asks before it undoes.
-- **Usage explorer**: ranges from today to 30 days or your own, a day
-  chart you tap to see that day's hours, projects, models, sessions,
-  machines and accounts, rows that filter the whole view, tokens or cost,
-  the change from the previous period, and a CSV export.
-- **Chat View messages**: long-press (or right-click) any message to copy
-  it with or without Markdown, share it, quote it in your reply, select
-  its text or send it to another agent. Code blocks have their own copy
-  button, and **find in the conversation** (Ctrl+F, Cmd+F) counts and
-  highlights matches and loads older messages as needed.
-- **Android widget and tile** show the dashboard: the needs-you and stuck
-  counts, up to three agent lines and both limit rings, in the app's
-  theme. Tapping a line opens that agent.
-- **Safe SFTP saves**: an edited file is written to a temporary file and
-  renamed over the original, so a dropped connection never leaves it half
-  written.
-- Host companion **1.0.0**, with `turns`, `diff`, `undo` and `redo`, and
-  usage by range, hour and session.
+Previews 29 to 31 (companion 1.8.0 bundled):
 
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/37-review-cards.png" width="200" alt="Review mode: a file card with a coloured diff, accept and reject"><br><sub>Review a turn file by file</sub></td>
-    <td align="center"><img src="docs/screenshots/38-usage-explorer-day.png" width="200" alt="Usage explorer: one day by hour, project and session"><br><sub>Usage explorer: one day</sub></td>
-    <td align="center"><img src="docs/screenshots/39-chat-message-menu.png" width="200" alt="Chat View message menu: copy, share, quote, send to another agent"><br><sub>A message's menu</sub></td>
-    <td align="center"><img src="docs/screenshots/40-chat-find.png" width="200" alt="Chat View find bar with highlighted matches"><br><sub>Find in the conversation</sub></td>
-  </tr>
-</table>
+- **Preview 31**
+  - A tab whose Herdr workspace was closed says so, with **Keep what Herdr
+    shows** and **Close tab**, instead of silently following another
+    workspace. Chat View from such a tab opens the agent on screen.
+  - Project rows lead with the agent's own title and show the pane's
+    sidebar text, with a three-dots menu on editable group headers.
+- **Preview 30**
+  - **Prompts wait for you for 15 minutes** (companion setting
+    `permission-wait`, 1 to 60). Answering in the terminal ends the wait at
+    once; after it runs out, the card stays and your answer is typed into
+    Claude Code's own dialog.
+  - **Sync with sheprd v2**: layout edits made in the app (move to a project
+    or Other, hide, projects, rules, order, remove from active) go back to
+    sheprd, shown as pending until sheprd confirms. Needs sheprd 0.9.3-20 or
+    newer.
+  - **Swipe back** from the left edge on phones (predictive back on
+    Android), the mouse back button and Alt+Left on desktop.
+  - Each Claude account shows once in Usage, even when two machines name it
+    differently; each half of a Herdr split opens on its own pane.
+- **Preview 29**: lower battery, network and CPU use in the background
+  (polling backs off, SSH keepalives, the screen stays on only for a
+  terminal in front); approvals fail safe (a command the companion cannot
+  fully read is high risk and never auto-approved, plans are never trusted);
+  started tasks clean up their agents and branches.
 
-## New in preview 16
+Older previews, one line each (full notes are on the
+[Releases](../../releases) page):
 
-- **Agents dashboard**, from the home bar (and above the sessions on the
-  desktop): what each agent did since your last look, grouped as Needs
-  you, Stuck, Working and Done, with its facts (files and lines changed,
-  test runs, failed commands, tokens and cost), a flag when an agent looks
-  stuck, and approval, Answer, Chat and Terminal buttons on each card. A one- or
-  two-sentence Claude summary is made only when you open it and only for
-  agents that changed; Settings › Agents › Dashboard turns summaries off
-  and sets when an agent counts as stuck. Ask the voice guide to "catch me
-  up" to hear it.
-- **Sent messages show at once** in Chat View as a pending bubble
-  (Sending…, then Sent) until Claude's transcript has them; a refused send
-  offers Retry and Edit.
-- **The default view everywhere**: a workspace opens in Chat View or the
-  terminal, as set in Settings › Terminal › Open Claude sessions in, from
-  the home screen, the switcher, notifications and the dashboard alike.
-- Fixes from the code review's leftovers: live preview keeps working after
-  a reconnect, Talk no longer sends a cut-off phrase when another mic takes
-  over and follows the thread while it listens, agents in a named
-  (non-default) Herdr session can be sent prompts, and builds can set a
-  mirror for the local shell's rootfs
-  ([Local-shell rootfs mirror](#local-shell-rootfs-mirror)).
-- Host companion **0.9.0**, with `digest` for the dashboard.
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/35-agents-dashboard.png" width="200" alt="Agents dashboard: needs you, stuck and done cards with facts and summaries"><br><sub>The agents dashboard</sub></td>
-    <td align="center"><img src="docs/screenshots/36-chat-pending-bubble.png" width="200" alt="Chat View with a just-sent message as a pending bubble"><br><sub>A sent message, pending</sub></td>
-  </tr>
-</table>
-
-## New in preview 15
-
-- **Voice guide**: talk to the app hands-free. Common phrases ("what's
-  waiting", "open api", "approve", "read the last reply") work offline in
-  English and Portuguese; anything else goes to Claude through the
-  companion's `guide` command. It answers aloud and asks before it acts,
-  and a high-risk approval is always confirmed. Start it with the
-  headset-mic button on the home screen, the Quick Settings tile, a long
-  press on Talk, or the headset's assistant button. Settings › Chat &
-  Voice › Voice guide.
-- **Smart approvals** (companion 0.8):
-  - a Low, Medium or High risk label, with a reason, on every approval;
-  - **Trust…** allows exactly that call for N minutes, and **Always**
-    saves a rule in Claude Code's `Tool(pattern)` syntax;
-  - **Approve all safe** for the low-risk ones, and a list of what was
-    auto-approved, with Undo;
-  - Settings › Agents › Approval rules lists, edits and revokes each
-    machine's rules;
-  - high risk always asks, and the terminal prompt is unchanged.
-- **Voice on iPhone**: dictation, read-aloud and Talk. A call pauses
-  reading and it resumes afterwards; AirPods work for both.
-- **Every cswap account in Usage**: an Accounts section with each Claude
-  account's limits, a "+N accounts" chip on the usage bar, and switching
-  the account for new sessions, after a confirmation.
-- **This computer**: the PC recognises its own synced machine entry and
-  folds it into *This computer*.
-- **Chat View**: the mic and Talk on every way in; messages from other
-  Claude sessions show as their own rows, never as yours, and "*X*
-  finished" rows carry a teammate's result.
-- **Security and reliability** from a full code review:
-  - approving from a lock-screen notification needs an unlock, and the app
-    lock locks again after a time in the background you choose
-    (Settings › Security);
-  - a changed host key is replaced in two steps, with SHA256 fingerprints;
-  - reconnecting no longer leaks the old connection, SSH handshakes time
-    out, and a sync never loses edits made while it runs;
-  - remote commands are safe under fish, and Android backup is off;
-  - the companion no longer crashes under load, checks the pane before it
-    types, and keeps its socket in one place.
-- Host companion **0.8.1**, with `guide`, `trust`, `rules`, `approve-low`,
-  `approvals` and `cswap-switch`.
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/30-approval-risk.png" width="200" alt="Chat View approval card with a Low risk label, Trust… and Always"><br><sub>A risk label, Trust… and Always</sub></td>
-    <td align="center"><img src="docs/screenshots/31-approval-rules.png" width="200" alt="Approval rules for the workstation: a timed trust and standing rules"><br><sub>Settings › Agents › Approval rules</sub></td>
-    <td align="center"><img src="docs/screenshots/32-voice-guide.png" width="200" alt="Voice guide card on the home screen asking to confirm an approval"><br><sub>The voice guide asks before it approves</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/33-usage-accounts.png" width="200" alt="Usage explorer with an Accounts section for two cswap accounts"><br><sub>Usage for every cswap account</sub></td>
-    <td align="center"><img src="docs/screenshots/34-chat-peer-messages.png" width="200" alt="Chat View with a message from another session and a finished row"><br><sub>Another session's message, a teammate finished</sub></td>
-  </tr>
-</table>
-
-## New in preview 14
-
-- **Desktop shell** on desktops and tablets (900 dp and wider):
-  - a sidebar tree of machines, Herdr workspaces, tabs and agents, and tmux
-    sessions and windows, with state dots, unread markers, a **Needs you**
-    group, pins, groups, a filter, drag and drop, and a resizable,
-    collapsible width;
-  - up to 4 split panes that mix terminal, Chat View, file, diff and
-    preview, with Chat View opening as a tab;
-  - a dashboard home (Needs you, usage, live previews, other workspaces)
-    and a right panel (inbox, preview, usage);
-  - shortcuts: Ctrl+Shift+\ splits right, Ctrl+Shift+- splits down,
-    Alt+arrows move between splits and Ctrl+Shift+U opens the next unread
-    (on macOS Cmd+D, Cmd+Shift+D, Cmd+Option+arrows and Cmd+Shift+U).
-
-  Phones are unchanged. See [docs/desktop.md](docs/desktop.md#the-desktop-shell).
-- **Usage at a glance** (companion 0.6 or newer): Claude's 5-hour and weekly
-  limit rings, today's tokens and an estimated cost at API prices, and a
-  breakdown by machine, project, model and day, with Codex when it is
-  installed. It shows in a bar on the phone's home screen, the Usage tab,
-  and rings on the Android widget and Quick Settings tile. An optional alert
-  fires at 80% of the 5-hour window.
-- **Voice**:
-  - new messages, unlocking and notification sounds no longer cut speech
-    off, and calls pause and resume it;
-  - read-aloud length: Brief (the default; say "more" in Talk), Full, or a
-    Claude summary (companion 0.7 `summarize`);
-  - tool activity in Chat View: Show all, Collapsed (the default) or Hidden;
-  - speech stays with its own chat when agents open and close;
-  - read-aloud and Talk have toggles that are always in the header;
-  - the mic is never hidden: it is muted with an explanation instead, and
-    Dictate is in the terminal palette and pill.
-- **Clearer connection errors**: "Can't reach *machine*", with a Tailscale
-  hint for 100.x and `ts.net` addresses, and plain sign-in and host key
-  messages, each with Details and Retry. Back from Chat View goes straight
-  home.
-- **Privacy**: crash reports (self-hosted GlitchTip) and anonymous usage
-  counts (self-hosted Plausible), each with a switch in Settings › Privacy.
-  See [Privacy](#privacy).
-- Host companion **0.7.0**, with the `usage` and `summarize` commands.
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
-    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage explorer: limit rings, ranges, a week by day and tokens per project"><br><sub>Usage in detail (the explorer since preview 17)</sub></td>
-    <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Tool activity collapsed</sub></td>
-    <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>The Chat View menu</sub></td>
-  </tr>
-</table>
-
-<p align="center"><img src="docs/screenshots/22-desktop-shell-dashboard.png" width="820" alt="Desktop shell dashboard: Needs you, usage, recent sessions and other workspaces"><br><sub>The desktop shell's dashboard home</sub></p>
-
-## New in preview 13
-
-- **Settings screen**: one searchable page for every preference, with the
-  section list and the open section side by side on a desktop.
-- **Import refresh**: machines imported from a backup show their workspaces
-  on the home screen straight away, without a restart.
-- **This computer** on the desktop: a local terminal, Herdr and tmux on the
-  machine the app runs on, listed with your other machines.
-- **Herdr and tmux tabs**: a compact tab label with a tab list on phones, a
-  full tab strip on desktops, and rename, move and close.
-- **Desktop shortcuts and zoom**: standard terminal shortcuts,
-  Ctrl+PgUp/PgDn between tabs, and Ctrl+wheel, Ctrl+= or Ctrl+- to zoom
-  (Cmd on macOS).
-- **Desktop dialogs**: pickers open as centred dialogs and action menus as
-  popovers instead of bottom sheets.
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/07-settings.png" width="200" alt="Settings section list on a phone"><br><sub>Settings on a phone</sub></td>
-    <td align="center"><img src="docs/screenshots/18-herdr-tabs.png" width="200" alt="Compact Herdr tab label and the tab list"><br><sub>Herdr tabs: compact label and tab list</sub></td>
-  </tr>
-</table>
-
-<p align="center"><img src="docs/screenshots/17-desktop-settings.png" width="820" alt="Settings on a 1280x800 desktop window, two panes"><br><sub>Settings on the desktop: sections beside the open one</sub></p>
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/20-desktop-this-computer.png" width="400" alt="Machine list with This computer first"><br><sub>This computer in the machine list</sub></td>
-    <td align="center"><img src="docs/screenshots/21-desktop-connect-dialog.png" width="400" alt="Connect picker as a centred dialog"><br><sub>The connect picker as a centred dialog</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/15-desktop-terminal.png" width="400" alt="Desktop terminal with the Herdr tab strip"><br><sub>The tab strip under the session tabs</sub></td>
-    <td align="center"><img src="docs/screenshots/19-desktop-tab-popover.png" width="400" alt="Tab actions popover on the desktop"><br><sub>Tab actions as a popover</sub></td>
-  </tr>
-</table>
-
-## New in preview 12
-
-- **Desktop builds** for Linux, Windows and macOS, next to the Android and
-  iOS apps.
-- **Quick switcher** for sessions, workspaces and agents that need you.
-- **Voice**: read replies aloud, hands-free Talk mode, continuous dictation.
-- **Chat View**: working indicator, real tables, agent cards, and a thread
-  that holds still while you read.
-- **Device sync** through your own machine, set up with a QR code.
-- **Live preview** finds dev servers by itself and sends screenshots to
-  Claude.
-- **Session restore**, **image paste** and **drag scrolling** in full-screen
-  programs.
-- Host companion **0.5.0**.
+- **28**: the markdown task folder can hold several projects, with a Project filter.
+- **27**: honours sheprd's "removed from active" flag.
+- **26**: Sync with sheprd (marks and layout, read from its shared view), a more compact usage card, a details provider for the Outsmartis launcher.
+- **25**: start one or many tasks as agents, each in its own worktree and branch.
+- **24**: Tasks from GitHub, GitLab, Jira, Linear, Trello, ClickUp, Asana, Notion or a markdown folder; Gemini CLI and Cursor agents.
+- **23**: Codex and OpenCode agents next to Claude Code; usage follows the account in use.
+- **22**: project-grouped views shared with sheprd's sidebar, search across every machine from the home, create a Herdr workspace or tmux session from New session.
+- **21**: usage lists a Claude login that cswap does not manage; crisper terminal cells.
+- **20**: Herdr clicks on another workspace are dropped, not typed.
+- **19**: live Herdr and tmux state, agent-to-agent messages, Talkbawt hand-offs, continue on the other device.
+- **18**: desktop polish (command palette, layouts, dialogs, right-click menus, quick actions) and one summary notification per agent.
+- **17**: Review mode and undo, usage explorer, Chat View message menu and find, Android widget.
+- **16**: agents dashboard, pending bubbles for sent messages, one default view everywhere.
+- **15**: smart approvals and the voice guide.
+- **14**: desktop shell.
+- **13**: Settings screen, *This computer*, Herdr and tmux tabs.
+- **12**: desktop builds, quick switcher, voice, Chat View, device sync, live preview.
 
 ## Features
 
@@ -291,8 +116,17 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   summary made only when you open it (companion 0.9).
 - **Review mode and undo** (companion 1.0): every turn is snapshotted;
   review it file by file, reject one file, send feedback, or undo the turn.
+- **Other agents**: Codex and OpenCode work like Claude Code (dashboard,
+  notifications, Chat View, approvals from the phone, usage); Gemini CLI and
+  Cursor CLI are watched, and a request they raise says *Answer it in the
+  terminal*. Each is named as itself in chat, approvals and notifications.
+- **Message agents** from Chat View: send to one or several, ask and wait for
+  the answer, and relay it back.
 - **Inbox** of every agent across your machines, with permission requests you
-  answer with Allow, Deny or Always, and a Usage tab.
+  answer with Allow, Deny or Always, and a Usage tab. A prompt or question
+  waits for you for 15 minutes (companion setting `permission-wait`); if
+  you answer in the terminal the wait ends, and after it runs out the card
+  stays and your answer is typed into Claude Code's own dialog.
 - **Smarter approvals** (companion with `smart-approvals`): every request
   carries a Low, Medium or High risk label with a one-line reason. "Trust…"
   allows a pattern such as `Bash(npm test *)` for 15 min, 1 h or until the
@@ -321,8 +155,16 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   [docs/notifications.md](docs/notifications.md).
 - **Home screen widget and Quick Settings tile** (Android) showing the
   dashboard: agents that need you or are stuck, and the limit rings.
-- Agent attention dashboard that polls Herdr and shows which agents are
-  working, waiting, or finished.
+- **Tasks**: one list across your trackers (GitHub Issues and Projects,
+  GitLab, Jira Cloud and Server, Linear, Trello, ClickUp, Asana, Notion, or a
+  folder of markdown files on a machine). **Start** a task, or several, as
+  agents: each gets its own git worktree, branch and agent in a Herdr tab or
+  tmux window, with attempts, a cap and optional "mark done". Finished runs
+  keep their agent open for review and then clean up
+  ([docs/task-sources.md](docs/task-sources.md),
+  [docs/task-runs.md](docs/task-runs.md)).
+- **Talkbawt hand-offs**: hand a piece of work to another person's agent
+  through a shared link, and read or answer links sent to you.
 
 Most of this needs the [host companion](#host-companion) on the machine.
 
@@ -336,7 +178,8 @@ tmux.
   Mosh/SSH badges and each agent's state, and **Other workspaces** lists the
   Herdr workspaces and tmux sessions you have not opened yet.
 - **Quick switcher**: agents waiting on you, open sessions with live
-  thumbnails, other workspaces and recents, with search. Swipe the top row
+  thumbnails, other workspaces and recents, with search across every
+  machine. Swipe the top row
   or press Ctrl+Shift+K (Cmd+K on macOS).
 - **Chat View or Terminal by default**: choose how Claude sessions open, per
   session or for all.
@@ -347,11 +190,21 @@ tmux.
   composer and snippet text goes to each session's own pane, typed keys
   wait while Herdr shows another workspace, and tiles read their own
   workspace. *Phone may move Herdr focus* lets the session in use take it
-  instead ([docs/herdr-shared-focus.md](docs/herdr-shared-focus.md)).
+  instead ([docs/herdr-shared-focus.md](docs/herdr-shared-focus.md)). A tab whose
+  workspace was closed in Herdr says so and offers *Keep what Herdr shows* or
+  *Close tab*.
+- **Projects and sheprd**: workspaces and agents group by project, read from
+  sheprd's `sidebar.toml` and shared
+  across your devices. With **Sync with sheprd** on, sheprd's shared view
+  gives the layout and each agent's unread, kept and dismissed marks, and your
+  edits (move, hide, projects, rules, order, remove from active) go back to
+  sheprd ([docs/sheprd-view-sync.md](docs/sheprd-view-sync.md)).
 - **Navigators** for Herdr and tmux: every pane with its agent and state, tap to
   switch, one-tap **Split right / Split down / New tab / New workspace** (tmux:
   new window), windows or tabs 1-9, zoom, kill pane and detach. Long-press the
   toolbar's Herdr or tmux button for the split menu.
+- **Back**: swipe right from the left edge of any page on a phone (predictive
+  back on Android), or the mouse back button and Alt+Left on a desktop.
 - **Gestures**: swipe for tabs or windows, two fingers sideways for panes, two
   fingers up/down for workspaces (Herdr) or scrollback (tmux), pinch for the
   font size. Every mapping is configurable.
@@ -417,6 +270,10 @@ tmux.
   session list. Add a device by scanning a QR code and typing six words
   (desktops paste the code). Passwords and keys sync only if you turn that
   on ([docs/sync.md](docs/sync.md)).
+- **Continue on the other device**: each device shares where it is (machine,
+  workspace, tab, Chat View position, unsent drafts), and the app offers to
+  pick up there on another. You can leave places or drafts out or turn it off
+  in Settings › Sync ([docs/sync.md](docs/sync.md)).
 - Encrypted backups of settings, machines and trusted keys (same format as
   sync), and an optional device-auth app lock that locks again after a
   time in the background you choose (Settings › Security). Android's own
@@ -429,6 +286,9 @@ tmux.
   workspaces, tabs and agents with a Needs you group, pins and groups; up
   to 4 splits mixing terminal, Chat View, file, diff and preview; a
   dashboard home; and a right panel for the inbox, preview and usage.
+- A **command palette**, saved **layouts** and presets, drag to place a pane,
+  and pages that open as dialogs with Enter, Esc and Ctrl+S; right-click
+  menus on tiles, tabs, terminal, agents and files.
 - The same app on Linux, Windows and macOS, with the terminal **keyboard
   first**: keys go straight to the shell, Alt is Meta, mouse selection and
   wheel scrollback. The on-screen keys are one toggle away.
@@ -517,7 +377,7 @@ Rendered from the app's own widgets with demo data by
 ## Install
 
 Builds are previews. Get them from
-[Releases](../../releases/tag/v0.1.0-conductore.17) or, for the Outsmartis
+[Releases](../../releases/tag/v0.1.0-conductore.31) or, for the Outsmartis
 team, from the store test channels. Each release lists `SHA256SUMS` files
 next to the downloads.
 
@@ -585,40 +445,61 @@ keychain, where it keeps hosts and keys. Apple silicon and Intel, macOS
 
 ## Host companion
 
-The companion is a small Node.js daemon plus a Claude Code hook client that
-runs on the machine where your agents run. It turns Claude Code hook events
-into a live view of every agent (working, waiting for input, waiting for
-permission, ended) and lets the app answer permission prompts. The app
-talks to it only through SSH exec commands. It opens no ports and needs no
-relay.
+The companion is a small Node.js daemon plus hook clients that run on the
+machine where your agents run. It turns agent hook events (Claude Code,
+Codex, OpenCode, Gemini CLI, Cursor CLI) into a live view of every agent
+(working, waiting for input, waiting for permission, ended) and lets the app
+answer permission prompts. The app talks to it only through SSH exec
+commands. It opens no ports and needs no relay.
 
-Preview 17 bundles **companion 1.0.0**. What the app asks it for, by the
-version that added it:
+Preview 31 bundles **companion 1.8.0**. What the app asks it for, by the
+version that added it (older companions keep working without the features
+they lack, and the app offers the update on the Agent hooks screen):
 
-- `turns`, `diff`, `undo` and `redo` (1.0), for Review mode. The companion
+- **Agents and approvals.** `status`, `events`, `transcript`, `send`,
+  `interrupt` and `decide` (the core); `trust`, `rules`, `approve-low` and
+  `approvals` for smart approvals (0.8); `terminal-answer` (1.8), which types
+  an answer into Claude Code's own dialog once the phone's wait has run out;
+  `permission-wait` (1.8, via `config set`), how long a prompt stays
+  answerable from the phone, 1 to 60 minutes, 15 by default. Rules live in
+  `~/.conductore/rules.json`, never in Claude Code's settings; the daemon
+  allows a matching request by itself, even with the phone offline, and never
+  a high-risk or unreadable one.
+- **Other agents** (1.4 and 1.5): Codex, OpenCode, Gemini CLI and Cursor CLI.
+  `install` registers the hooks in each agent's own config and says what is left to do (Codex asks you to trust
+  the new hooks once). Codex and OpenCode can be answered from the phone;
+  Gemini and Cursor are watch-only.
+- **Review and undo.** `turns`, `diff`, `undo` and `redo` (1.0). The companion
   snapshots the repository at the start and end of every Claude turn as git
-  objects under `refs/conductore/snapshots/`, never a commit on your
-  branch, pruned after 7 days. `undo` puts the work tree, or single files,
-  back to before the turn, and is refused while the agent works.
-- `digest` (0.9), for the agents dashboard: each agent's facts and stuck
-  flags, and, only when the app asks, a short summary per agent that
-  changed.
-- `guide` (0.8), for the voice guide: what the phone did not recognise
-  becomes one action from a closed list. It gets only short ids and labels,
-  never transcripts.
-- `trust`, `rules`, `approve-low` and `approvals` (0.8), for smart
-  approvals. Rules live in `~/.conductore/rules.json`, never in Claude
-  Code's settings; the daemon allows a matching request by itself, even
-  with the phone offline, and never a high-risk one.
-- `usage` (0.6; ranges, hours and sessions in 1.0, every cswap account in
-  0.8) and `cswap-switch` (0.8), for the usage bar, tab and explorer.
-- `summarize` (0.7), for the Claude summary read-aloud length, and `ports`
-  (0.5), for the Preview ready chip.
+  objects under `refs/conductore/snapshots/`, never a commit on your branch,
+  pruned after 7 days. `undo` puts the work tree, or single files, back to
+  before the turn, and is refused while the agent works.
+- **Dashboard and voice.** `digest` (0.9) for each agent's facts, stuck flags
+  and, only when asked, a short summary; `guide` (0.8), where what the phone
+  did not recognise becomes one action from a closed list (it gets only short
+  ids and labels, never transcripts); `summarize` (0.7).
+- **Usage.** `usage` (0.6; ranges, hours and sessions in 1.0, every cswap
+  account in 0.8, a stable id per account in 1.8) and `cswap-switch` (0.8).
+- **Live state and messages** (1.2): `status --live` and `events --live`
+  push Herdr and tmux workspaces, tabs and panes; `agents`, `agent-send`,
+  `agent-wait` and `agent-read` message agents; Herdr sidebar tokens. Live
+  tmux is opt-in (`config set tmux-live on`).
+- **Tasks** (1.5 to 1.7): `tasks` for a markdown folder, `worktree`,
+  `task-start` and `task-runs`. A finished run's agent stays open for the
+  `task-agent-keep` setting (24 hours by default, or `forever`).
+- **sheprd** (1.3 to 1.8): `sidebar-layout`, `sheprd-view` and
+  `sheprd-view-update` read sheprd's sidebar and shared view and write your
+  mark and layout edits back.
+- **Other.** `ports` (0.5) for the Preview ready chip, and `talkbawt` (1.2),
+  the Talkbawt client.
 
-`summarize`, `guide` and `digest` summaries use Claude Haiku through
-`claude -p` with no tools, no hooks and no session saved, and store nothing.
-The app offers the update on the Agent hooks screen. Older companions keep
-working without the features they lack.
+`conductore-hostd config get|set` holds the settings: `permission-wait`,
+`task-agent-keep`, `worktree-location`, `herdr-sidebar` and `tmux-live`.
+`summarize`, `guide` and `digest` summaries use a headless run of the agent
+(Claude Haiku through `claude -p` by default) with no tools, no hooks and no
+session saved, and store nothing. Every command is listed in
+`conductore-hostd help` and in [host/README.md](host/README.md); each release
+is described in [host/CHANGELOG](host/CHANGELOG).
 
 It is built to stay out of the way. Claude Code hooks and the status line are
 small POSIX `sh` scripts that hand each event to a background daemon and exit;
@@ -633,13 +514,14 @@ Linux server with companion 0.4.0:
 | Disk | under 200 KB, no dependencies |
 
 It is light: no npm dependencies, not a service, and it exits by itself after
-24 hours without a request.
+6 hours without a request.
 
 **Install from the app.** Open a machine's Agent hooks screen and tap install.
 The app uploads the companion over SFTP as one archive, unpacks it with
 `tar`, checks each file's sha256 and runs its installer.
 
-**Install by hand.** Needs Node.js 18 or newer on Linux or macOS.
+**Install by hand.** Needs Node.js 18 or newer on Linux or macOS (22.5 or
+newer for OpenCode's chat and for Talkbawt).
 
 ```sh
 git clone https://github.com/andreconde21/conductore-mobile && cd conductore-mobile/host && ./install.sh
