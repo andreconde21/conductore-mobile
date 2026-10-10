@@ -115,13 +115,19 @@ Older previews, one line each (full notes are on the
 - **Read aloud**, its **length** (Brief, Full or a Claude summary) and
   **tool activity** in Chat View (Show all, Collapsed or Hidden), from the
   ⋮ menu or Settings. While a reply is read, the ⋮ shows a sound wave.
-- **Agents dashboard**: since your last look, each agent's facts (files,
-  lines, tests, failed commands, tokens and cost), stuck flags, and a Claude
-  summary made only when you open it (companion 0.9). Tap a card to open
-  it where its sessions open (Chat View or the terminal, per your setting),
-  long-press for the other; an agent without Chat View opens its terminal.
-  A card carries its approvals and at most one more button: Answer for a
-  question, or Review.
+- **One Agents screen**, the heart-monitor button with the count of agents
+  waiting on you: a page from home, a sheet from the terminal, the right
+  panel on a desktop. Its Agents tab shows, since your last look, each
+  agent's facts (files, lines, tests, failed commands, tokens, cost and
+  context), stuck flags, and a Claude summary made only when you open it
+  (companion 0.9), for every monitored machine (Herdr-monitored ones show
+  states and messages). Tap a card to open it where its sessions open (Chat
+  View or the terminal, per your setting), long-press for the other; an
+  agent without Chat View opens its terminal. A card carries its approvals
+  and at most one more button: Answer for a question, or Review. Swipe a
+  card right to mute its alerts, left to hide a finished one until it
+  changes (right-click on a desktop). The Usage tab has the limits, tokens
+  and each session's context, and every machine's monitor status.
 - **Review mode and undo** (companion 1.0): every turn is snapshotted;
   review it file by file, reject one file, send feedback, or undo the turn.
 - **Other agents**: Codex and OpenCode work like Claude Code (dashboard,
@@ -130,8 +136,8 @@ Older previews, one line each (full notes are on the
   terminal*. Each is named as itself in chat, approvals and notifications.
 - **Message agents** from Chat View: send to one or several, ask and wait for
   the answer, and relay it back.
-- **Inbox** of every agent across your machines, with permission requests you
-  answer with Allow, Deny or Always, and a Usage tab. A prompt or question
+- **Approvals** from every agent across your machines, on its Agents card:
+  Allow, Deny or Always. A prompt or question
   waits for you for 15 minutes (companion setting `permission-wait`); if
   you answer in the terminal the wait ends, and after it runs out the card
   stays and your answer is typed into Claude Code's own dialog.
@@ -141,8 +147,8 @@ Older previews, one line each (full notes are on the
   session ends, in one session, one repo or all repos; "Always" saves the
   same kind of rule until revoked. The companion answers matching requests by
   itself, even with the phone offline, and never answers a high-risk one.
-  "Approve all N safe" clears the low-risk ones in one go, the inbox lists
-  what was auto-approved in the last 24 h with "Undo trust", and Settings ›
+  "Approve all N safe" clears the low-risk ones in one go, the Agents screen
+  lists what was auto-approved in the last 24 h with "Undo trust", and Settings ›
   Agents › Approval rules lists and edits each machine's rules.
 - **Usage** (companion 0.6 or newer): Claude's 5-hour and weekly limits,
   tokens and an estimated cost per day, machine, project and model, Codex
@@ -223,7 +229,7 @@ tmux.
 - **Gestures**: swipe for tabs or windows, two fingers sideways for panes, two
   fingers up/down for workspaces (Herdr) or scrollback (tmux), pinch for the
   font size. Every mapping is configurable.
-- **Deep links** from notifications, the home screen and the inbox open an
+- **Deep links** from notifications, the home screen and the Agents screen open an
   agent at its exact workspace, tab and pane, in Herdr or tmux.
 - **The host's own keybindings**: Herdr keys are read from the machine's
   `~/.config/herdr/config.toml`, falling back to Herdr's defaults.
@@ -312,7 +318,7 @@ tmux.
 - **Desktop shell** on desktops and tablets: a sidebar tree of machines,
   workspaces, tabs and agents with a Needs you group, pins and groups; up
   to 4 splits mixing terminal, Chat View, file, diff and preview; a
-  dashboard home; and a right panel for the inbox, preview and usage.
+  dashboard home; and a right panel for the Agents screen, preview and usage.
 - A **command palette**, saved **layouts** and presets, drag to place a pane,
   and pages that open as dialogs with Enter, Esc and Ctrl+S; right-click
   menus on tiles, tabs, terminal, agents and files.
@@ -355,7 +361,7 @@ Rendered from the app's own widgets with demo data by
   <tr>
     <td align="center"><img src="docs/screenshots/11-talk-mode.png" width="200" alt="Talk mode sending a spoken reply"><br><sub>Talk mode: a spoken reply, sent after a pause</sub></td>
     <td align="center"><img src="docs/screenshots/03-chat-view.png" width="200" alt="Chat View with an approval"><br><sub>Chat View with an approval</sub></td>
-    <td align="center"><img src="docs/screenshots/04-agents-inbox.png" width="200" alt="Agents inbox"><br><sub>Inbox: approvals, then working and done agents</sub></td>
+    <td align="center"><img src="docs/screenshots/04-agents-inbox.png" width="200" alt="The Agents sheet over the terminal"><br><sub>Agents from the terminal: approvals, then working and done agents</sub></td>
     <td align="center"><img src="docs/screenshots/14-live-preview-ready.png" width="200" alt="Preview ready chip over a Vite dev server"><br><sub>Live preview finds a new dev server</sub></td>
   </tr>
   <tr>
@@ -384,7 +390,7 @@ Rendered from the app's own widgets with demo data by
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/34-chat-peer-messages.png" width="200" alt="Chat View with a message from another session and a finished row"><br><sub>Chat View: other sessions and teammates</sub></td>
-    <td align="center"><img src="docs/screenshots/35-agents-dashboard.png" width="200" alt="Agents dashboard: needs you, stuck and done cards with facts and summaries"><br><sub>Agents dashboard: facts and summaries</sub></td>
+    <td align="center"><img src="docs/screenshots/35-agents-dashboard.png" width="200" alt="Agents dashboard: needs you, stuck and done cards with facts and summaries"><br><sub>Agents from home: facts and summaries</sub></td>
     <td align="center"><img src="docs/screenshots/36-chat-pending-bubble.png" width="200" alt="Chat View with a just-sent message as a pending bubble"><br><sub>A sent message shows at once</sub></td>
     <td align="center"><img src="docs/screenshots/37-review-cards.png" width="200" alt="Review mode: a file card with a coloured diff, accept and reject"><br><sub>Review mode: one card per file</sub></td>
   </tr>

@@ -854,9 +854,13 @@ void main() {
 
     if (inbox) {
       final context = tester.element(find.byType(TerminalPage));
+      // The demo machines answer `status` only: cards from the monitor.
+      final digest = monitorOnlyDigest();
+      addTearDown(digest.dispose);
       unawaited(
         showAgentsSheet(
           context: context,
+          controller: digest,
           attention: agentAttention,
           onOpenTerminal: (_, _) {},
           onOpenChat: (_, _) {},
