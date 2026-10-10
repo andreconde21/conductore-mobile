@@ -36,18 +36,32 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## What's new
 
-Previews 29 to 31 (companion 1.8.0 bundled):
+Previews 30 to 32 (companion 1.8.1 bundled):
 
+- **Preview 32**: a calmer app.
+  - **Home has two modes**, **Projects | Open**, with a search field that
+    filters workspaces by title, workspace, tab, project or machine.
+    Projects shows one box per sheprd project, with open sessions marked
+    in place. The top bar is down to four controls.
+  - **Fewer buttons**: the terminal ⋮ menu and key bar, the Chat View
+    composer and top bar, and the agent cards each lost their duplicates.
+    One mic everywhere: tap to dictate, long-press in Chat View to talk.
+  - **One Agents screen** (Agents | Usage) from home, the terminal and the
+    desktop, with one badge that counts only agents that really need you.
+  - **Settings 72 → 39**, with an Advanced section per page and one
+    **Notify me** choice.
+  - Agents are named after their Herdr/sheprd workspace (companion 1.8.1),
+    not their folder. New workspace has a folder picker.
+  - App lock can wait 1 h to 1 day across restarts (with a warning).
+    Restored tabs for workspaces gone over a day close (with Undo).
+    Yoke launcher contract 3: answers given while Conductore is locked are
+    held and sent after you unlock.
+  - Fixes: the QR scanner's first-use wait, a prompt-menu crash.
 - **Preview 31**
-  - Home's top bar is down to four controls (machine filter, Agents,
-    **Switch to…**, Settings), the desktop home shows Needs you and usage
-    once (in the sidebar), and a terminal tab is named after its project or
-    agent instead of the machine.
   - A tab whose Herdr workspace was closed says so, with **Keep what Herdr
     shows** and **Close tab**, instead of silently following another
     workspace. Chat View from such a tab opens the agent on screen.
-  - Project rows lead with the agent's own title and show the pane's
-    sidebar text, with a three-dots menu on editable group headers.
+  - Project rows lead with the agent's own title, the pane's sidebar text.
 - **Preview 30**
   - **Prompts wait for you for 15 minutes** (companion setting
     `permission-wait`, 1 to 60). Answering in the terminal ends the wait at
@@ -61,15 +75,10 @@ Previews 29 to 31 (companion 1.8.0 bundled):
     Android), the mouse back button and Alt+Left on desktop.
   - Each Claude account shows once in Usage, even when two machines name it
     differently; each half of a Herdr split opens on its own pane.
-- **Preview 29**: lower battery, network and CPU use in the background
-  (polling backs off, SSH keepalives, the screen stays on only for a
-  terminal in front); approvals fail safe (a command the companion cannot
-  fully read is high risk and never auto-approved, plans are never trusted);
-  started tasks clean up their agents and branches.
-
 Older previews, one line each (full notes are on the
 [Releases](../../releases) page):
 
+- **29**: lower battery, network and CPU use in the background; approvals fail safe; started tasks clean up their agents and branches.
 - **28**: the markdown task folder can hold several projects, with a Project filter.
 - **27**: honours sheprd's "removed from active" flag.
 - **26**: Sync with sheprd (marks and layout, read from its shared view), a more compact usage card, a details provider for the Outsmartis launcher.
@@ -444,7 +453,7 @@ Rendered from the app's own widgets with demo data by
 ## Install
 
 Builds are previews. Get them from
-[Releases](../../releases/tag/v0.1.0-conductore.31) or, for the Outsmartis
+[Releases](../../releases/tag/v0.1.0-conductore.32) or, for the Outsmartis
 team, from the store test channels. Each release lists `SHA256SUMS` files
 next to the downloads.
 
@@ -519,7 +528,7 @@ Codex, OpenCode, Gemini CLI, Cursor CLI) into a live view of every agent
 answer permission prompts. The app talks to it only through SSH exec
 commands. It opens no ports and needs no relay.
 
-Preview 31 bundles **companion 1.8.0**. What the app asks it for, by the
+Preview 32 bundles **companion 1.8.1**. What the app asks it for, by the
 version that added it (older companions keep working without the features
 they lack, and the app offers the update on the Agent hooks screen):
 
