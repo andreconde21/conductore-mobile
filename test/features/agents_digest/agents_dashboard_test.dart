@@ -255,7 +255,7 @@ void main() {
     );
   });
 
-  testWidgets('an agent with no transcript opens its terminal on tap', (
+  testWidgets('an agent with no transcript always opens its terminal', (
     tester,
   ) async {
     await start(
@@ -272,9 +272,12 @@ void main() {
         },
       ]),
     );
-    final opened = await pumpView(tester);
+    final views = SessionViewController(_MemoryViews());
+    await views.setDefaultView(SessionView.chat);
+    final opened = await pumpView(tester, views: views);
     await tester.tap(find.byKey(const ValueKey('digest-line-repo')));
-    expect(opened, ['terminal:repo']);
+    await tester.longPress(find.byKey(const ValueKey('digest-line-repo')));
+    expect(opened, ['terminal:repo', 'terminal:repo']);
   });
 
   testWidgets('group by project: layout projects first, then Other; '
@@ -330,20 +333,32 @@ void main() {
     expect(runner.sent('decide').single, contains('req-1 allow'));
   });
 
-  testWidgets('tap opens Chat whatever the default view, long-press the '
-      'terminal; one secondary action, no wrapped row (CON-107)', (
-    tester,
-  ) async {
+  testWidgets('tap follows the effective view, long-press opens the other; '
+      'one secondary action, no wrapped row (CON-107)', (tester) async {
     await start(tester, facts: _digest());
     final sent = <String>[];
     final views = SessionViewController(_MemoryViews());
     await views.setDefaultView(SessionView.terminal);
     final opened = await pumpView(tester, views: views, sentText: sent);
+    final docs = find.byKey(const ValueKey('digest-line-docs'));
 
-    await tester.tap(find.byKey(const ValueKey('digest-line-docs')));
+    await tester.tap(docs);
+    expect(opened.last, 'terminal:docs');
+    await tester.longPress(docs);
     expect(opened.last, 'chat:docs');
-    await tester.longPress(find.byKey(const ValueKey('digest-line-web')));
-    expect(opened.last, 'terminal:web');
+
+    await views.setDefaultView(SessionView.chat);
+    await tester.tap(docs);
+    expect(opened.last, 'chat:docs');
+    await tester.longPress(docs);
+    expect(opened.last, 'terminal:docs');
+
+    // The session's own choice wins over the default.
+    await views.setOverride('h', SessionView.terminal);
+    await tester.tap(docs);
+    expect(opened.last, 'terminal:docs');
+    await tester.longPress(docs);
+    expect(opened.last, 'chat:docs');
 
     // Chat, Terminal, Tell it and Hand off are no longer card buttons.
     for (final gone in ['chat', 'terminal', 'handoff']) {

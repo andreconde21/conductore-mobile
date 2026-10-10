@@ -117,10 +117,11 @@ Older previews, one line each (full notes are on the
   ⋮ menu or Settings. While a reply is read, the ⋮ shows a sound wave.
 - **Agents dashboard**: since your last look, each agent's facts (files,
   lines, tests, failed commands, tokens and cost), stuck flags, and a Claude
-  summary made only when you open it (companion 0.9). Tap a card for Chat
-  View (the terminal for an agent without one), long-press it for the
-  terminal. A card carries its approvals and at most one more button:
-  Answer for a question, or Review.
+  summary made only when you open it (companion 0.9). Tap a card to open
+  it where its sessions open (Chat View or the terminal, per your setting),
+  long-press for the other; an agent without Chat View opens its terminal.
+  A card carries its approvals and at most one more button: Answer for a
+  question, or Review.
 - **Review mode and undo** (companion 1.0): every turn is snapshotted;
   review it file by file, reject one file, send feedback, or undo the turn.
 - **Other agents**: Codex and OpenCode work like Claude Code (dashboard,

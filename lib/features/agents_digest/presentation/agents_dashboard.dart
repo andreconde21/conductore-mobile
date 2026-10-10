@@ -19,6 +19,8 @@ import 'package:conduit/features/desktop_shell/presentation/widgets/project_view
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_launcher.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
@@ -226,17 +228,29 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
       .where((live) => live.id == agent.sessionId)
       .firstOrNull;
 
-  /// A card's tap: Chat View when the agent has a transcript the app
-  /// shows, its terminal otherwise (CON-107). [chat] forces one.
-  void _open(DigestAgent agent, {bool? chat}) {
+  /// A card's tap: the agent's effective view (Open sessions in, or the
+  /// session's own choice); [other] (the long-press) the other one. An
+  /// agent with no Chat View always gets its terminal (CON-107). [chat]
+  /// forces one.
+  void _open(DigestAgent agent, {bool? chat, bool other = false}) {
     final host = _host(agent.hostId);
     final live = _live(agent);
     if (host == null || live == null) return;
     final attention = widget.attention;
-    final preferChat =
-        chat ??
-        (supportsChatView(live, attention.agentKinds(host.id)) &&
-            chatViewAvailable(attention, host));
+    final hasChat =
+        supportsChatView(live, attention.agentKinds(host.id)) &&
+        chatViewAvailable(attention, host);
+    final views = SessionViewScope.maybeOf(context);
+    // Without the app's view settings (tests, embeds), Chat View.
+    final inChat =
+        views == null ||
+        agentOpensInChat(
+          views: views,
+          attention: attention,
+          monitoredHost: host,
+          agent: live,
+        );
+    final preferChat = chat ?? (hasChat && inChat != other);
     if (preferChat) {
       widget.onOpenChat(host, live);
     } else {
@@ -428,6 +442,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
             isDeciding: widget.attention.isDeciding,
             now: now,
             onOpen: () => _open(agent),
+            onOpenOther: () => _open(agent, other: true),
             onChat: () => _open(agent, chat: true),
             onTerminal: () => _open(agent, chat: false),
             onReview: _reviewAction(agent),
@@ -769,6 +784,7 @@ class DigestAgentCard extends StatelessWidget {
   const DigestAgentCard({
     required this.agent,
     required this.onOpen,
+    required this.onOpenOther,
     required this.onChat,
     required this.onTerminal,
     required this.onTell,
@@ -800,11 +816,14 @@ class DigestAgentCard extends StatelessWidget {
   final bool Function(String requestId)? isDeciding;
   final DateTime? now;
 
-  /// The card's tap: Chat View, or the terminal with no transcript.
+  /// The card's tap: the agent's effective view (the terminal with no
+  /// transcript).
   final VoidCallback onOpen;
 
-  /// Chat and Terminal in the desktop right-click menu; Terminal is also
-  /// the card's long-press.
+  /// The card's long-press: the other view.
+  final VoidCallback onOpenOther;
+
+  /// Chat and Terminal in the desktop right-click menu.
   final VoidCallback onChat;
   final VoidCallback onTerminal;
 
@@ -852,7 +871,7 @@ class DigestAgentCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: interactive ? onOpen : null,
-        onLongPress: interactive ? onTerminal : null,
+        onLongPress: interactive ? onOpenOther : null,
         // Desktop: right-click offers the card's buttons as a menu.
         onSecondaryTapUp: interactive && PlatformFeatures.isDesktop
             ? (details) => unawaited(_menu(context, details.globalPosition))
@@ -982,8 +1001,8 @@ class DigestAgentCard extends StatelessWidget {
                     ),
                   ),
                 ],
-              // One secondary action at most; Chat is the card's tap and
-              // the terminal its long-press (CON-107).
+              // One secondary action at most; the card's tap opens its
+              // view and the long-press the other one (CON-107).
               if (interactive)
                 if (_secondary() case final action?)
                   Align(alignment: Alignment.centerRight, child: action),
