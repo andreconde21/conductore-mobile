@@ -67,22 +67,26 @@ class HomeTopBar extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final tight = constraints.maxWidth - 20 - buttons * 48 < _chipRoom;
-        return Theme(
-          data: tight
-              ? theme.copyWith(visualDensity: VisualDensity.compact)
-              : theme,
-          child: _bar(theme.colorScheme),
+        return _bar(
+          theme.colorScheme,
+          tight
+              ? IconButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                )
+              : null,
         );
       },
     );
   }
 
-  Widget _bar(ColorScheme colorScheme) {
+  Widget _bar(ColorScheme colorScheme, ButtonStyle? style) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
       child: Row(
         children: [
           IconButton(
+            style: style,
             tooltip: 'Lock',
             iconSize: 26,
             color: colorScheme.onSurface,
@@ -91,6 +95,7 @@ class HomeTopBar extends StatelessWidget {
           ),
           if (mode case final mode? when onMode != null)
             IconButton(
+              style: style,
               key: const ValueKey('home-mode-switch'),
               tooltip: mode == HomeMode.projects
                   ? 'Projects: switch to Open / Closed'
@@ -108,13 +113,14 @@ class HomeTopBar extends StatelessWidget {
                     : HomeMode.projects,
               ),
             ),
-          const SizedBox(width: 4),
+          SizedBox(width: style == null ? 4 : 0),
           Expanded(
             child: Center(child: machine ?? const ConduitGlyph(size: 24)),
           ),
-          const SizedBox(width: 4),
+          SizedBox(width: style == null ? 4 : 0),
           if (onAgents != null)
             IconButton(
+              style: style,
               key: const ValueKey('home-agents-dashboard'),
               tooltip: 'Agents dashboard',
               iconSize: 24,
@@ -128,6 +134,7 @@ class HomeTopBar extends StatelessWidget {
             ),
           if (onGuide != null)
             IconButton(
+              style: style,
               key: const ValueKey('home-voice-guide'),
               tooltip: 'Voice guide',
               iconSize: 24,
@@ -137,6 +144,7 @@ class HomeTopBar extends StatelessWidget {
             ),
           if (onSearch != null)
             IconButton(
+              style: style,
               key: const ValueKey('home-search'),
               tooltip: 'Search workspaces, sessions and agents',
               iconSize: 24,
@@ -146,6 +154,7 @@ class HomeTopBar extends StatelessWidget {
             ),
           if (onSwitcher != null)
             IconButton(
+              style: style,
               key: const ValueKey('home-open-switcher'),
               tooltip: 'Switch sessions',
               iconSize: 24,
@@ -154,6 +163,7 @@ class HomeTopBar extends StatelessWidget {
               onPressed: onSwitcher,
             ),
           IconButton(
+            style: style,
             tooltip: 'Settings',
             iconSize: 26,
             color: colorScheme.onSurface,

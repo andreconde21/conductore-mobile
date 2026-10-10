@@ -37,6 +37,11 @@ void main() {
         ),
       );
       expect(tester.takeException(), isNull);
+    // The mode switch leaves the machine chip room (compact buttons).
+    expect(
+      tester.getSize(find.byType(MachineChip)).width,
+      greaterThanOrEqualTo(48),
+    );
       await tester.tap(find.byKey(const ValueKey('home-search')));
       expect(searches, 1);
       await tester.tap(find.byKey(const ValueKey('home-mode-switch')));
