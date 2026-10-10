@@ -6,6 +6,7 @@ class HostSearchField extends StatelessWidget {
     required this.onChanged,
     required this.hasContent,
     required this.onClear,
+    this.hintText = 'Search machines, hosts, tags…',
     super.key,
   });
 
@@ -13,6 +14,7 @@ class HostSearchField extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final bool hasContent;
   final VoidCallback onClear;
+  final String hintText;
 
   @override
   Widget build(BuildContext context) {
@@ -21,7 +23,7 @@ class HostSearchField extends StatelessWidget {
       onChanged: onChanged,
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
-        hintText: 'Search machines, hosts, tags…',
+        hintText: hintText,
         prefixIcon: const Icon(Icons.search_rounded, size: 20),
         suffixIcon: hasContent
             ? IconButton(

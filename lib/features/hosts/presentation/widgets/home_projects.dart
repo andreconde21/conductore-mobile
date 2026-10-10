@@ -12,6 +12,7 @@ import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_state_dot.dart';
+import 'package:conduit/features/hosts/domain/home_search.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
@@ -28,7 +29,8 @@ import 'package:flutter/material.dart';
 /// box per project, under the project view's header (filter, needs-you
 /// counter, view). A workspace open in the app is its one row, marked
 /// open. A row opens on tap (an open one goes to its session); a long
-/// press offers "Move to project…", "Move to Other" and "Hide".
+/// press offers "Move to project…", "Move to Other" and "Hide". [search]
+/// keeps the rows it matches, and the projects with any.
 class HomeProjectsList extends StatelessWidget {
   const HomeProjectsList({
     required this.controller,
@@ -38,6 +40,7 @@ class HomeProjectsList extends StatelessWidget {
     required this.onOpen,
     this.boards,
     this.herdrWorkspaceOf,
+    this.search,
     super.key,
   });
 
@@ -53,6 +56,19 @@ class HomeProjectsList extends StatelessWidget {
   /// The Herdr workspace an open session shows.
   final String? Function(TerminalSessionController session)? herdrWorkspaceOf;
   final ValueChanged<SidebarTarget> onOpen;
+
+  /// The home's workspace search; null shows every row.
+  final HomeSearch? search;
+
+  /// The shown machines by project with the current layout (also what
+  /// Open / Closed mode's search reads project names from).
+  List<ProjectGroup> projectGroups() => _groups(_tree());
+
+  List<ProjectGroup> _groups(List<SidebarNode> tree) => controller.build(
+    tree,
+    agentsByMachine: {for (final host in hosts) host.id: _agentsOf(host)},
+    hosts: hosts,
+  );
 
   /// Every shown machine as the sidebar's tree.
   List<SidebarNode> _tree() => SidebarTreeBuilder.build([
@@ -119,16 +135,24 @@ class HomeProjectsList extends StatelessWidget {
       listenable: Listenable.merge([controller, ?usage]),
       builder: (context, _) {
         final tree = _tree();
-        final projects = controller.build(
-          tree,
-          agentsByMachine: {for (final host in hosts) host.id: _agentsOf(host)},
-          hosts: hosts,
-        );
+        final projects = _groups(tree);
+        final search = this.search ?? HomeSearch.none;
         final tokens = usage == null
             ? const <String, int>{}
             : controller.tokensToday(projects, usage.summary);
         final names = {for (final node in tree) node.machineId: node.label};
-        final shown = controller.visibleGroups(projects);
+        final shown = [
+          for (final project in controller.visibleGroups(projects))
+            if (_projectRows(
+                  context,
+                  project,
+                  names,
+                  tokens[project.key],
+                  search,
+                )
+                case final rows?)
+              (project, rows),
+        ];
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Column(
@@ -149,7 +173,10 @@ class HomeProjectsList extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text(
-                    controller.activeOnly
+                    key: const ValueKey('home-projects-empty'),
+                    !search.isEmpty
+                        ? 'No workspace matches the search.'
+                        : controller.activeOnly
                         ? 'Nothing active in the last '
                               '${controller.recentHours} h.'
                         : 'No workspaces listed yet.',
@@ -158,15 +185,10 @@ class HomeProjectsList extends StatelessWidget {
                     ),
                   ),
                 ),
-              for (final project in shown)
+              for (final (project, rows) in shown)
                 _ProjectBox(
                   key: ValueKey('home-project-box-${project.key}'),
-                  children: _projectRows(
-                    context,
-                    project,
-                    names,
-                    tokens[project.key],
-                  ),
+                  children: rows,
                 ),
             ],
           ),
@@ -189,14 +211,99 @@ class HomeProjectsList extends StatelessWidget {
     }
   }
 
-  List<Widget> _projectRows(
+  /// [project]'s header and rows; null when [search] matches none of
+  /// them. While searching, a collapsed project shows its matches too.
+  List<Widget>? _projectRows(
     BuildContext context,
     ProjectGroup project,
     Map<String, String> names,
     int? tokens,
+    HomeSearch search,
   ) {
     final entries = controller.visibleEntries(project);
     final collapsed = controller.isCollapsed(project);
+    // The project's own name matches: all of it.
+    final all = search.isEmpty || search.matches([project.name]);
+    final rows = <Widget>[];
+    for (final entry in entries) {
+      final machine = names[entry.node.machineId] ?? '';
+      if (controller.compact || entry.agentRows.isEmpty) {
+        final text = _entryText(entry, project, names);
+        if (!all &&
+            !search.matches([
+              text.title,
+              text.subtitle,
+              entry.node.label,
+              machine,
+              for (final agent in entry.agentRows) ...[
+                agent.label,
+                ..._agentFields(_agentText(entry, agent, project, names)),
+              ],
+            ])) {
+          continue;
+        }
+        rows.add(
+          _HomeProjectRow(
+            key: ValueKey('home-project-row-${entry.node.key}'),
+            node: entry.node,
+            open: entry.node.openInApp,
+            dot: entry.dot,
+            sheprd: entry.sheprdOf(entry.node),
+            title: text.title,
+            detail: text.subtitle,
+            faded: !entry.active || entry.hidden,
+            onTap: () => _open(entry, entry.node),
+            onLongPress: () => showProjectEntrySheet(
+              context,
+              controller,
+              entry,
+              project: project,
+            ),
+          ),
+        );
+        continue;
+      }
+      for (final agent in entry.agentRows) {
+        if (controller.removedFromActive(entry, agent)) continue;
+        final text = _agentText(entry, agent, project, names);
+        if (!all &&
+            !search.matches([
+              ..._agentFields(text),
+              agent.label,
+              entry.node.label,
+              machine,
+            ])) {
+          continue;
+        }
+        rows.add(
+          _HomeProjectRow(
+            key: ValueKey('home-project-agent-${agent.key}'),
+            node: agent,
+            open: entry.node.openInApp || agent.openInApp,
+            dot: entry.dotOf(agent),
+            sheprd: entry.sheprdOf(agent),
+            title: text.title,
+            detail: text.subtitle,
+            faded:
+                !entry.active ||
+                entry.hidden ||
+                (entry.sheprdOf(agent)?.dismissed ?? false),
+            onTap: () => _open(entry, agent),
+            onLongPress: () => showProjectEntrySheet(
+              context,
+              controller,
+              entry,
+              project: project,
+              row: agent,
+            ),
+          ),
+        );
+      }
+    }
+    if (!search.isEmpty && rows.isEmpty) return null;
+    final menuless =
+        project.isOther ||
+        (!controller.canEditLayout && controller.sheprdEditsPaused == null);
     return [
       ProjectHeaderTile(
         project: project,
@@ -205,16 +312,10 @@ class HomeProjectsList extends StatelessWidget {
         tokensToday: tokens,
         pending: controller.groupPending(project),
         onToggle: () => controller.toggleCollapsed(project),
-        onMenu:
-            project.isOther ||
-                (!controller.canEditLayout &&
-                    controller.sheprdEditsPaused == null)
+        onMenu: menuless
             ? null
             : (position) => _projectMenu(context, project, position),
-        trailing:
-            project.isOther ||
-                (!controller.canEditLayout &&
-                    controller.sheprdEditsPaused == null)
+        trailing: menuless
             ? null
             : IconButton(
                 key: ValueKey('home-project-menu-${project.key}'),
@@ -230,52 +331,16 @@ class HomeProjectsList extends StatelessWidget {
                 icon: const Icon(Icons.more_horiz_rounded),
               ),
       ),
-      if (!collapsed)
-        for (final entry in entries)
-          if (controller.compact || entry.agentRows.isEmpty)
-            _HomeProjectRow(
-              key: ValueKey('home-project-row-${entry.node.key}'),
-              node: entry.node,
-              open: entry.node.openInApp,
-              dot: entry.dot,
-              sheprd: entry.sheprdOf(entry.node),
-              title: _entryText(entry, project, names).title,
-              detail: _entryText(entry, project, names).subtitle,
-              faded: !entry.active || entry.hidden,
-              onTap: () => _open(entry, entry.node),
-              onLongPress: () => showProjectEntrySheet(
-                context,
-                controller,
-                entry,
-                project: project,
-              ),
-            )
-          else
-            for (final agent in entry.agentRows)
-              if (!controller.removedFromActive(entry, agent))
-                _HomeProjectRow(
-                  key: ValueKey('home-project-agent-${agent.key}'),
-                  node: agent,
-                  open: entry.node.openInApp || agent.openInApp,
-                  dot: entry.dotOf(agent),
-                  sheprd: entry.sheprdOf(agent),
-                  title: _agentText(entry, agent, project, names).title,
-                  detail: _agentText(entry, agent, project, names).subtitle,
-                  faded:
-                      !entry.active ||
-                      entry.hidden ||
-                      (entry.sheprdOf(agent)?.dismissed ?? false),
-                  onTap: () => _open(entry, agent),
-                  onLongPress: () => showProjectEntrySheet(
-                    context,
-                    controller,
-                    entry,
-                    project: project,
-                    row: agent,
-                  ),
-                ),
+      if (!collapsed || !search.isEmpty) ...rows,
     ];
   }
+
+  /// A row's text as search fields: the pane title, then the tab,
+  /// workspace and machine of the subtitle one by one.
+  static List<String> _agentFields(AgentRowText text) => [
+    text.title,
+    ...text.subtitle.split(' · '),
+  ];
 
   static AgentRowText _entryText(
     ProjectEntry entry,
