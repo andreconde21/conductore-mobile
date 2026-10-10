@@ -6,8 +6,8 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
 import 'package:conduit/features/chat_view/domain/neutral_chat_items.dart';
@@ -130,12 +130,17 @@ void main() {
     );
     await tester.runAsync(session.connect);
     await tester.runAsync(pumpEventQueue);
+    final digest = monitorOnlyDigest();
+    addTearDown(digest.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: AgentAttentionSheet(
-            controller: controller,
-            onOpenAgent: (host, agent) {},
+          body: AgentsDashboardView(
+            controller: digest,
+            attention: controller,
+            tabs: true,
+            onOpenTerminal: (host, agent) {},
+            onOpenChat: (host, agent) {},
           ),
         ),
       ),

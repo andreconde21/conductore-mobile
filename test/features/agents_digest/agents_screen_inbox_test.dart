@@ -114,9 +114,7 @@ void main() {
 
   const card = ValueKey('digest-card-s-1');
 
-  testWidgets('a new event updates the existing card in place', (
-    tester,
-  ) async {
+  testWidgets('a new event updates the existing card in place', (tester) async {
     final harness = await pumpPanel(tester, {
       'h': [
         status([agentJson('s-1', message: 'Reading the tests.')]),

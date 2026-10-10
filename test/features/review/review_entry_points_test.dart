@@ -4,7 +4,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -111,12 +111,20 @@ void main() {
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
     final attention = await start(tester, _Companion());
+    // Just after the agent's last turn: "Done since", not Quiet.
+    final digest = monitorOnlyDigest(
+      clock: () => DateTime.fromMillisecondsSinceEpoch(1790000120000),
+    );
+    addTearDown(digest.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: AgentAttentionSheet(
-            controller: attention,
-            onOpenAgent: (host, agent) {},
+          body: AgentsDashboardView(
+            controller: digest,
+            attention: attention,
+            tabs: true,
+            onOpenTerminal: (host, agent) {},
+            onOpenChat: (host, agent) {},
           ),
         ),
       ),
@@ -125,7 +133,7 @@ void main() {
     final review = find.byWidgetPredicate(
       (w) =>
           w.key is ValueKey<String> &&
-          (w.key! as ValueKey<String>).value.startsWith('agent-review-'),
+          (w.key! as ValueKey<String>).value.startsWith('digest-review-'),
     );
     expect(review, findsOneWidget);
     await tester.tap(review);
