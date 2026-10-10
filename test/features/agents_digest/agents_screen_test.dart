@@ -2,7 +2,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
@@ -43,9 +43,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: AgentAttentionSheet(
-            controller: controller,
-            onOpenAgent: (host, agent) => opened.add(agent),
+          body: AgentsDashboardView(
+            attention: controller,
+            tabs: true,
+            onOpenTerminal: (host, agent) => opened.add(agent),
+            onOpenChat: (host, agent) => fail('no chat on Herdr'),
           ),
         ),
       ),
@@ -56,10 +58,7 @@ void main() {
 
   testWidgets('shows an empty state when nothing is monitored', (tester) async {
     await pumpSheet(tester, [], connect: false);
-    expect(
-      find.textContaining('No machines are being monitored'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('No machine reports agents'), findsOneWidget);
   });
 
   testWidgets('shows agents with states, kind, and machine', (tester) async {
@@ -74,16 +73,19 @@ void main() {
       ),
     ]);
 
-    expect(find.text('builder'), findsOneWidget);
+    expect(find.textContaining('builder'), findsOneWidget);
     expect(find.text('Working'), findsOneWidget);
-    // The kind badge names the CLI; the meta line names the machine.
-    expect(find.byTooltip('Claude Code (claude-code)'), findsOneWidget);
-    expect(find.text('Host h'), findsWidgets);
-    expect(find.text('reviewer'), findsOneWidget);
-    expect(find.text('Needs input'), findsOneWidget);
+    // The card names the machine; the Machines section the provider.
+    expect(find.textContaining('· Host h'), findsNWidgets(2));
+    expect(find.textContaining('reviewer'), findsOneWidget);
+    // Herdr saw it waiting: it needs the user.
+    expect(find.text('Asks you'), findsOneWidget);
+    expect(find.text('NEEDS YOU'), findsOneWidget);
   });
 
-  testWidgets('long-press an agent to mute its notifications', (tester) async {
+  testWidgets('swipe a card to the right to mute its notifications', (
+    tester,
+  ) async {
     final (controller, _, _) = await pumpSheet(tester, [
       const AgentCommandResult(
         stdout: '[{"name": "builder", "state": "working"}]',
@@ -92,27 +94,60 @@ void main() {
       ),
     ]);
     final agent = controller.statusFor('h')!.agents.single;
+    final card = find.byKey(ValueKey('digest-card-${agent.id}'));
 
-    await tester.longPress(find.text('builder'));
-    await tester.pumpAndSettle();
-    expect(find.text('Mute notifications'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('agent-menu-mute')));
+    await tester.drag(card, const Offset(500, 0));
     await tester.pumpAndSettle();
     expect(controller.isAgentMuted('h', agent.id), isTrue);
-    expect(find.textContaining('Muted'), findsOneWidget);
+    // The card stays, marked muted.
+    expect(card, findsOneWidget);
+    expect(find.byKey(ValueKey('digest-muted-${agent.id}')), findsOneWidget);
 
-    await tester.longPress(find.text('builder'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Unmute notifications'));
+    await tester.drag(card, const Offset(500, 0));
     await tester.pumpAndSettle();
     expect(controller.isAgentMuted('h', agent.id), isFalse);
+    expect(find.byKey(ValueKey('digest-muted-${agent.id}')), findsNothing);
+  });
+
+  testWidgets('swipe a done card to the left to hide it until it changes', (
+    tester,
+  ) async {
+    final (controller, _, _) = await pumpSheet(tester, [
+      const AgentCommandResult(
+        stdout:
+            '[{"name": "builder", "state": "working"},'
+            ' {"name": "lint", "state": "done"}]',
+        stderr: '',
+        exitCode: 0,
+      ),
+    ]);
+    // Done long ago: under the collapsed Quiet section.
+    await tester.tap(find.byKey(const ValueKey('digest-section-quiet')));
+    await tester.pumpAndSettle();
+    final lint = controller.statusFor('h')!.agents.last;
+    final card = find.byKey(ValueKey('digest-card-${lint.id}'));
+    expect(card, findsOneWidget);
+
+    await tester.drag(card, const Offset(-500, 0));
+    await tester.pumpAndSettle();
+    expect(card, findsNothing);
+    await tester.tap(find.byKey(const ValueKey('agents-show-hidden')));
+    await tester.pumpAndSettle();
+    expect(card, findsOneWidget);
+
+    // A working agent cannot be hidden: swiping left does nothing.
+    final builder = controller.statusFor('h')!.agents.first;
+    final working = find.byKey(ValueKey('digest-card-${builder.id}'));
+    await tester.drag(working, const Offset(-500, 0));
+    await tester.pumpAndSettle();
+    expect(working, findsOneWidget);
   });
 
   testWidgets('shows the no-agents empty state', (tester) async {
     await pumpSheet(tester, [
       const AgentCommandResult(stdout: '[]', stderr: '', exitCode: 0),
     ]);
-    expect(find.textContaining('No agents are running'), findsOneWidget);
+    expect(find.textContaining('No agents in this window'), findsOneWidget);
   });
 
   testWidgets('shows the provider-unavailable state', (tester) async {
@@ -131,7 +166,7 @@ void main() {
     expect(find.textContaining('Could not read agent state'), findsOneWidget);
   });
 
-  testWidgets('tapping an agent invokes the open callback', (tester) async {
+  testWidgets('tapping an agent opens its terminal', (tester) async {
     final (_, _, opened) = await pumpSheet(tester, [
       const AgentCommandResult(
         stdout: '[{"name": "builder", "state": "blocked"}]',
@@ -140,7 +175,7 @@ void main() {
       ),
     ]);
 
-    await tester.tap(find.text('builder'));
+    await tester.tap(find.textContaining('builder'));
     await tester.pump();
 
     expect(opened, hasLength(1));

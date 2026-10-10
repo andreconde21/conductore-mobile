@@ -375,6 +375,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView>
             hostId: host.id,
             hostName: host.name,
             agents: _attention.statusFor(host.id)?.agents ?? const [],
+            waitingNeedsYou: !chatViewAvailable(_attention, host),
           ).agents,
     ];
     final dismissals = _attention.inboxDismissals;
@@ -403,16 +404,16 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView>
 
   /// A card's tap: the agent's effective view (Open sessions in, or the
   /// session's own choice); [other] (the long-press) the other one. An
-  /// agent with no Chat View always gets its terminal (CON-107). [chat]
-  /// forces one.
+  /// agent with no Chat View always gets its terminal (CON-107); on a
+  /// machine Herdr monitors, the long-press still tries its chat (the
+  /// companion may be there too). [chat] forces one.
   void _open(DigestAgent agent, {bool? chat, bool other = false}) {
     final host = _host(agent.hostId);
     final live = _live(agent);
     if (host == null || live == null) return;
     final attention = _attention;
-    final hasChat =
-        supportsChatView(live, attention.agentKinds(host.id)) &&
-        chatViewAvailable(attention, host);
+    final canChat = supportsChatView(live, attention.agentKinds(host.id));
+    final hasChat = canChat && chatViewAvailable(attention, host);
     final views = SessionViewScope.maybeOf(context);
     // Without the app's view settings (tests, embeds), Chat View.
     final inChat =
@@ -423,7 +424,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView>
           monitoredHost: host,
           agent: live,
         );
-    final preferChat = chat ?? (hasChat && inChat != other);
+    final preferChat = chat ?? (hasChat ? inChat != other : canChat && other);
     if (preferChat) {
       widget.onOpenChat(host, live);
     } else {
@@ -683,6 +684,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView>
       live: live,
       canAct: host != null,
       muted: muted,
+      canTell: host != null && chatViewAvailable(_attention, host),
       kinds: host == null ? null : _attention.agentKinds(host.id),
       summarizing: controller.isSummarizing && agent.summaryPending,
       isDeciding: _attention.isDeciding,
@@ -1283,6 +1285,7 @@ class DigestAgentCard extends StatelessWidget {
     this.onToggleMute,
     this.onHide,
     this.muted = false,
+    this.canTell = true,
     this.kinds,
     super.key,
   });
@@ -1302,6 +1305,10 @@ class DigestAgentCard extends StatelessWidget {
 
   /// Its notifications are muted on this device.
   final bool muted;
+
+  /// Prompts can be sent to it (the companion's `send`): Answer and
+  /// "Tell it…".
+  final bool canTell;
 
   /// The machine's agent kinds, for the agent's name on approvals.
   final AgentKindCatalog? kinds;
@@ -1544,7 +1551,8 @@ class DigestAgentCard extends StatelessWidget {
   /// review. "Tell it…" and Hand off live in Chat View (and in the
   /// desktop right-click menu).
   Widget? _secondary() {
-    if (agent.attention == DigestAttention.question &&
+    if (canTell &&
+        agent.attention == DigestAttention.question &&
         agent.state != 'needs_permission') {
       return TextButton.icon(
         key: ValueKey('digest-tell-${agent.sessionId}'),
@@ -1575,7 +1583,7 @@ class DigestAgentCard extends StatelessWidget {
         ('Review', Icons.rate_review_outlined, review),
       if (onHandOff case final handOff?)
         ('Hand off…', Icons.outbox_outlined, handOff),
-      if (agent.state != 'needs_permission')
+      if (canTell && agent.state != 'needs_permission')
         (
           question ? 'Answer…' : 'Tell it…',
           Icons.reply_rounded,

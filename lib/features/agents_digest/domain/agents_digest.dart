@@ -493,12 +493,16 @@ DigestAgent? _parseAgent(
 }
 
 /// A digest from the agent monitor's status alone, for a companion
-/// without `digest`: states, approvals and last messages; no counts, no
-/// stuck flags, no summaries.
+/// without `digest` (or a machine Herdr monitors): states, approvals and
+/// last messages; no counts, no stuck flags, no summaries. With
+/// [waitingNeedsYou] (Herdr: it saw a question or approval on screen),
+/// every agent waiting for input needs the user, not only one whose last
+/// message asks something.
 DigestReport digestFromStatus({
   required String hostId,
   required String hostName,
   required List<AgentInfo> agents,
+  bool waitingNeedsYou = false,
 }) {
   return DigestReport(
     fromStatus: true,
@@ -523,7 +527,8 @@ DigestReport digestFromStatus({
           },
           attention: agent.pendingRequests.isNotEmpty
               ? DigestAttention.permission
-              : agent.state.needsAttention && _asks(agent.lastMessage)
+              : agent.state.needsAttention &&
+                    (waitingNeedsYou || _asks(agent.lastMessage))
               ? DigestAttention.question
               : null,
           lastActivityAt: agent.stateChangedAt,
