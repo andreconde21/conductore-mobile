@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/test_doubles.dart';
 import 'shell_harness.dart';
 
 final _linux = TargetPlatformVariant.only(TargetPlatform.linux);
@@ -27,6 +29,35 @@ void main() {
     await tester.pump();
     return h;
   }
+
+  for (final width in [320.0, 800.0])
+    testWidgets('the view bar keeps its ⋮ at the right edge, with the '
+        'needs-you counter, ${width.round()} dp wide', (tester) async {
+      final theme = ThemeController(InMemoryThemePreferences());
+      await theme.load();
+      final controller = ProjectLayoutController(theme: theme);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: width,
+                child: ProjectViewBar(controller: controller, needsYou: 3),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(
+        width -
+            tester
+                .getRect(find.byKey(const ValueKey('project-view-menu')))
+                .right,
+        lessThanOrEqualTo(1),
+      );
+    });
 
   testWidgets("the Projects tab is sheprd's: header, move to a project, "
       'collapsed count, compact view, active filter', (tester) async {

@@ -1143,7 +1143,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       padding: const EdgeInsets.fromLTRB(
         HomeGridMetrics.horizontalPadding,
         4,
-        6,
+        HomeGridMetrics.horizontalPadding,
         2,
       ),
       sliver: SliverToBoxAdapter(
@@ -1184,6 +1184,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 style: const ButtonStyle(
                   visualDensity: VisualDensity.compact,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 10),
+                  ),
                 ),
                 onSelectionChanged: (picked) => _savePreferences(
                   _preferences.copyWith(mode: picked.single),
