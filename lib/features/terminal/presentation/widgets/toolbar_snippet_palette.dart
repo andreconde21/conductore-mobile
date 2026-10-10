@@ -23,8 +23,9 @@ enum ToolbarQuickPrompt {
   final String? text;
 }
 
-/// Opens the swipe-up palette: quick prompts first, then the host's and the
-/// global saved snippets (the same lists the Snip key-row menu shows).
+/// Opens the prompt palette (the Snip key behind ⋯, or the pill's Snippets
+/// button): quick prompts first, then the host's and the global saved
+/// snippets.
 ///
 /// Selecting an entry pops the sheet and reports it through the callbacks.
 Future<void> showToolbarSnippetPalette({
@@ -37,7 +38,6 @@ Future<void> showToolbarSnippetPalette({
   required ValueChanged<TerminalSnippet> onSnippet,
   String hostPassword = '',
   ValueChanged<String>? onPassword,
-  VoidCallback? onDictate,
 }) {
   return showAdaptiveModal<void>(
     kind: AdaptiveModalKind.palette,
@@ -65,12 +65,6 @@ Future<void> showToolbarSnippetPalette({
               Navigator.of(context).pop();
               onPassword(password);
             },
-      onDictate: onDictate == null
-          ? null
-          : () {
-              Navigator.of(context).pop();
-              onDictate();
-            },
     ),
   );
 }
@@ -85,7 +79,6 @@ class ToolbarSnippetPalette extends StatelessWidget {
     required this.onSnippet,
     this.hostPassword = '',
     this.onPassword,
-    this.onDictate,
     super.key,
   });
 
@@ -97,9 +90,6 @@ class ToolbarSnippetPalette extends StatelessWidget {
   final ValueChanged<TerminalSnippet> onSnippet;
   final String hostPassword;
   final ValueChanged<String>? onPassword;
-
-  /// Opens the chat line with dictation running; null hides the chip.
-  final VoidCallback? onDictate;
 
   @override
   Widget build(BuildContext context) {
@@ -127,22 +117,6 @@ class ToolbarSnippetPalette extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              if (onDictate != null)
-                Tooltip(
-                  message: 'Speak a line into the chat line',
-                  child: ActionChip(
-                    key: const ValueKey('palette-dictate'),
-                    avatar: Icon(Icons.mic_none_rounded, color: foreground),
-                    label: const Text('Dictate'),
-                    labelStyle: TextStyle(
-                      color: foreground,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    backgroundColor: palette.panelElevatedFor(brightness),
-                    side: BorderSide(color: palette.hairlineFor(brightness)),
-                    onPressed: onDictate,
-                  ),
-                ),
               for (final prompt in ToolbarQuickPrompt.values)
                 Tooltip(
                   message: prompt.description,
@@ -339,21 +313,13 @@ class _DesktopSnippetPaletteState extends State<_DesktopSnippetPalette> {
         .where((snippet) => snippet.isValid)
         .toList();
     return [
-      if (p.onDictate case final onDictate?)
-        _PaletteEntry(
-          label: 'Dictate',
-          detail: 'Speak a line into the chat line',
-          icon: Icons.mic_none_rounded,
-          onSelect: onDictate,
-          section: 'Quick prompts',
-        ),
       for (final (i, prompt) in ToolbarQuickPrompt.values.indexed)
         _PaletteEntry(
           label: prompt.label,
           detail: prompt.description,
           icon: Icons.bolt_rounded,
           onSelect: () => p.onQuickPrompt(prompt),
-          section: i == 0 && p.onDictate == null ? 'Quick prompts' : null,
+          section: i == 0 ? 'Quick prompts' : null,
         ),
       for (final (i, snippet) in host.indexed)
         _PaletteEntry(

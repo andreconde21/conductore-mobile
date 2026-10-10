@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  Future<void> pump(WidgetTester tester, {VoidCallback? onDictate}) {
-    return tester.pumpWidget(
+  // One mic (CON-106): dictation starts from the chat line's mic, not
+  // from the quick prompt palette.
+  testWidgets('the palette has quick prompts and no mic', (tester) async {
+    await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: ToolbarSnippetPalette(
@@ -15,29 +17,13 @@ void main() {
             globalSnippets: const [],
             onQuickPrompt: (_) {},
             onSnippet: (_) {},
-            onDictate: onDictate,
           ),
         ),
       ),
     );
-  }
 
-  testWidgets('the swipe-up palette offers Dictate first', (tester) async {
-    var dictated = 0;
-    await pump(tester, onDictate: () => dictated += 1);
-
-    final chip = find.byKey(const ValueKey('palette-dictate'));
-    expect(chip, findsOneWidget);
-    expect(
-      tester.getTopLeft(chip).dx,
-      lessThan(tester.getTopLeft(find.text('/clear')).dx),
-    );
-    await tester.tap(chip);
-    expect(dictated, 1);
-  });
-
-  testWidgets('no Dictate without voice input', (tester) async {
-    await pump(tester);
+    expect(find.text('/clear'), findsOneWidget);
     expect(find.byKey(const ValueKey('palette-dictate')), findsNothing);
+    expect(find.byIcon(Icons.mic_none_rounded), findsNothing);
   });
 }

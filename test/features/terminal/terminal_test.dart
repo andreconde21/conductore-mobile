@@ -625,9 +625,8 @@ void main() {
       expect(controller.sentControlKeys, [TerminalKey.keyA]);
     });
 
-    testWidgets('snippets key sends host, global, and password entries', (
-      tester,
-    ) async {
+    testWidgets('the Snip key opens the palette: quick prompts, then host, '
+        'global and password entries', (tester) async {
       final controller = _RecordingTerminalSessionController(
         host: buildHost('snippets').copyWith(
           password: 'secret-password',
@@ -681,7 +680,9 @@ void main() {
       );
 
       await _openSnippetsMenu(tester);
-      await tester.pumpAndSettle();
+      expect(find.text('Quick prompts'), findsOneWidget);
+      expect(find.text('/clear'), findsOneWidget);
+      expect(find.text('/compact'), findsOneWidget);
       await tester.tap(find.text('Host deploy'));
       // A submitting snippet presses Enter as its own write, a moment later.
       expect(controller.sentText, ['deploy host']);
@@ -694,9 +695,66 @@ void main() {
       expect(controller.sentText, ['deploy host', 'ls -la']);
 
       await _openSnippetsMenu(tester);
-      await tester.pumpAndSettle();
+      // Below the quick prompts and snippets, in the sheet's own scroll.
+      await tester.scrollUntilVisible(
+        find.text('Password'),
+        100,
+        scrollable: find.byType(Scrollable).last,
+      );
       await tester.tap(find.text('Password'));
       expect(controller.sentText, ['deploy host', 'ls -la', 'secret-password']);
+    });
+
+    testWidgets('the key rows\' Chat key works like the pill\'s: tap is '
+        'Chat (View), long-press the chat line (CON-106)', (tester) async {
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+      var chats = 0;
+      var lineToggles = 0;
+
+      Widget bar({required bool withChatButton}) => MaterialApp(
+        home: Scaffold(
+          body: TerminalKeyboardBar(
+            controller: controller,
+            focusNode: focusNode,
+            palette: AppPalette.catppuccin,
+            brightness: Brightness.dark,
+            rows: const [
+              TerminalKeyboardRow(
+                items: [
+                  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.compose),
+                ],
+              ),
+            ],
+            globalSnippets: const [],
+            fullscreen: false,
+            onToggleFullscreen: () {},
+            onToggleCompose: () => lineToggles += 1,
+            onChatButton: withChatButton ? () => chats += 1 : null,
+            onEnterTmuxScrollMode: () {},
+            onExitTmuxScrollMode: () {},
+            tmuxPrefixKey: MultiplexerPrefixKey.controlB,
+            tmuxScrollMode: false,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(bar(withChatButton: true));
+      await tester.tap(find.text('Chat'));
+      await tester.pump();
+      expect((chats, lineToggles), (1, 0));
+
+      await tester.longPress(find.text('Chat'));
+      await tester.pump();
+      expect((chats, lineToggles), (1, 1));
+
+      // Without a Chat View route (a local shell) the tap is the chat line.
+      await tester.pumpWidget(bar(withChatButton: false));
+      await tester.tap(find.text('Chat'));
+      await tester.pump();
+      expect((chats, lineToggles), (1, 2));
     });
 
     testWidgets('tmux scroll key enters scrollback mode', (tester) async {
@@ -2600,15 +2658,10 @@ class _RecordingInputHandler extends TerminalInputHandler {
   }
 }
 
-Finder _snippetsMenuButton() {
-  return find.byWidgetPredicate(
-    (widget) => widget is PopupMenuButton && widget.tooltip == 'Snippets',
-  );
-}
-
+/// The Snip key opens the quick prompt and snippet palette (CON-106).
 Future<void> _openSnippetsMenu(WidgetTester tester) async {
-  final dynamic state = tester.state(_snippetsMenuButton());
-  // ignore: avoid_dynamic_calls
-  state.showButtonMenu();
+  // Let a palette that is closing go first.
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Snip'));
   await tester.pumpAndSettle();
 }

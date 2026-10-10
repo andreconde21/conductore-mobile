@@ -258,7 +258,7 @@ class SettingsSectionBody extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: SnippetListEditor(
           title: 'Global snippets',
-          caption: 'Shown from the Snip key-row menu on every machine.',
+          caption: 'Shown in the Snip palette on every machine.',
           snippets: theme.terminalSnippets,
           onChanged: theme.setTerminalSnippets,
         ),
@@ -385,9 +385,8 @@ class SettingsSectionBody extends StatelessWidget {
       const SettingsHeading('Where to find voice'),
       const SettingsNote(
         'Dictate: tap the mic next to any chat field (the terminal chat '
-        'line from the pill\'s Chat button, the prompt composer, Chat '
-        'View). Add a Dictate button to the pill (long-press the pill), '
-        'or swipe up on the pill and pick Dictate.\n'
+        'line from the pill\'s Chat button, Chat View). Add a Dictate '
+        'button to the pill (long-press the pill).\n'
         'Talk: long-press the mic in Chat View for a hands-free '
         'conversation with the agent. The voice guide, which talks to all '
         'your agents, is the headset-mic button at the top of home and the '

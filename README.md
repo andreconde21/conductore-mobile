@@ -226,8 +226,20 @@ tmux.
 
 ### Terminal
 
-- **Compact pill toolbar** with modifiers, arrows, function keys, snippets and
-  your own key combos. Its layout is configurable.
+- **Compact pill toolbar**: Ctrl, Esc, Tab, Herdr, Paste and Chat, then ⋯
+  for the full key rows (Chat, arrows, function keys, ^L to redraw, Snip,
+  fullscreen and your own key combos). Long-press the pill to add, remove
+  or reorder buttons; a list or rows you customized are kept as they are.
+- **Snip** opens the prompt palette: /clear, /compact, continue, Esc Esc and
+  the other quick prompts, then the machine's and your global snippets.
+- **Chat button** (on the pill and in the key rows): opens Chat View when an
+  agent runs in the session, and the chat line otherwise. Long-press it for
+  the chat line. The chat line's
+  mic dictates, and its expand arrow opens the full prompt composer.
+- **One ⋮ menu** for what has no button of its own: quick actions (when the
+  session's project has some), git diff, live preview, Reconnect, new
+  session, Settings and Close session; recent folders and keyboard
+  shortcuts on desktop.
 - **Drag scrolling in full-screen programs**: a one-finger drag scrolls Herdr,
   tmux, vim, htop and Claude Code's full-screen view like a mouse wheel
   ([docs/terminal-drag-scrolling.md](docs/terminal-drag-scrolling.md)).

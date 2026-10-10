@@ -266,12 +266,21 @@ void main() {
         MaterialApp(
           home: Builder(
             builder: (context) => TextButton(
-              onPressed: () => openChatViewForHost(
-                context: context,
-                attention: attention,
-                host: host,
-                onOpenTerminal: (_) {},
-              ),
+              onPressed: () async {
+                final access = await checkChatViewAccessWithProgress(
+                  context,
+                  attention: attention,
+                  host: host,
+                );
+                if (access == null || !context.mounted) return;
+                await openChatView(
+                  context: context,
+                  attention: attention,
+                  host: host,
+                  agent: access.agents.single,
+                  onOpenTerminal: () {},
+                );
+              },
               child: const Text('go'),
             ),
           ),
@@ -307,12 +316,19 @@ void main() {
         MaterialApp(
           home: Builder(
             builder: (context) => TextButton(
-              onPressed: () => openChatViewForHost(
-                context: context,
-                attention: attention,
-                host: host,
-                onOpenTerminal: (_) {},
-              ),
+              onPressed: () async {
+                final access = await checkChatViewAccessWithProgress(
+                  context,
+                  attention: attention,
+                  host: host,
+                );
+                if (access == null || !context.mounted) return;
+                await showChatViewUnavailable(
+                  context,
+                  host: host,
+                  access: access,
+                );
+              },
               child: const Text('go'),
             ),
           ),

@@ -147,7 +147,12 @@ class ThemePreferencesRepository {
   static const _terminalFontSizeKey = 'conduit.terminal_font_size.v1';
   static const _terminalKeyboardActionsKey =
       'conduit.terminal_keyboard_actions.v1';
-  static const _terminalKeyboardRowsKey = 'conduit.terminal_keyboard_rows.v1';
+  static const _terminalKeyboardRowsKey = 'conduit.terminal_keyboard_rows.v2';
+
+  /// The key rows before CON-106, saved even when they were the default;
+  /// read only when there are no v2 rows yet.
+  static const _legacyTerminalKeyboardRowsKey =
+      'conduit.terminal_keyboard_rows.v1';
   static const _terminalKeyboardSeenActionsKey =
       'conduit.terminal_keyboard_seen_actions.v1';
   static const _terminalSnippetsKey = 'conduit.terminal_snippets.v1';
@@ -158,7 +163,11 @@ class ThemePreferencesRepository {
   static const _chatButtonHintSeenKey = 'conduit.chat_button_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
   static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
-  static const _terminalPillItemsKey = 'conduit.terminal_pill_items.v1';
+  static const _terminalPillItemsKey = 'conduit.terminal_pill_items.v2';
+
+  /// The pill list before CON-106, saved even when it was the default;
+  /// read only when there is no v2 list yet.
+  static const _legacyTerminalPillItemsKey = 'conduit.terminal_pill_items.v1';
   static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
   static const _speechLanguageKey = 'conduit.speech_language.v1';
@@ -230,7 +239,10 @@ class ThemePreferencesRepository {
     final rawOmarchySyncedTheme = await read(_omarchySyncedThemeKey);
     final rawTerminalFontSize = await read(_terminalFontSizeKey);
     final rawTerminalKeyboardActions = await read(_terminalKeyboardActionsKey);
-    final rawTerminalKeyboardRows = await read(_terminalKeyboardRowsKey);
+    final rawTerminalKeyboardRowsV2 = await read(_terminalKeyboardRowsKey);
+    final rawTerminalKeyboardRows =
+        rawTerminalKeyboardRowsV2 ??
+        await _storage.read(key: _legacyTerminalKeyboardRowsKey);
     final rawTerminalKeyboardSeenActions = await read(
       _terminalKeyboardSeenActionsKey,
     );
@@ -243,6 +255,9 @@ class ThemePreferencesRepository {
     final rawComposeSubmitEnter = await read(_composeSubmitEnterKey);
     final rawTerminalToolbarStyle = await read(_terminalToolbarStyleKey);
     final rawTerminalPillItems = await read(_terminalPillItemsKey);
+    final rawLegacyTerminalPillItems = rawTerminalPillItems == null
+        ? await _storage.read(key: _legacyTerminalPillItemsKey)
+        : null;
 
     final rawMenuButtonsEnabled = await read(_menuButtonsEnabledKey);
     final rawTerminalGestures = await read(_terminalGesturesKey);
@@ -260,11 +275,14 @@ class ThemePreferencesRepository {
     );
     final rawPasteImagesAsFiles = await read(_pasteImagesAsFilesKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
+    final parsedRows = _parseTerminalKeyboardRows(
+      rawTerminalKeyboardRows,
+      rawTerminalKeyboardActions,
+    );
     final terminalKeyboardRows = _appendUnseenBuiltIns(
-      _parseTerminalKeyboardRows(
-        rawTerminalKeyboardRows,
-        rawTerminalKeyboardActions,
-      ),
+      rawTerminalKeyboardRowsV2 == null
+          ? migratePreChatKeyboardRows(parsedRows)
+          : parsedRows,
       _parseSeenActionNames(rawTerminalKeyboardSeenActions),
     );
 
@@ -293,7 +311,11 @@ class ThemePreferencesRepository {
         (style) => style.name == rawTerminalToolbarStyle,
         orElse: () => TerminalToolbarStyle.floatingPill,
       ),
-      terminalPillItems: _parseTerminalPillItems(rawTerminalPillItems),
+      terminalPillItems: rawTerminalPillItems == null
+          ? migrateLegacyPillItems(
+              _parseTerminalPillItems(rawLegacyTerminalPillItems),
+            )
+          : _parseTerminalPillItems(rawTerminalPillItems),
       menuButtonsEnabled:
           rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),

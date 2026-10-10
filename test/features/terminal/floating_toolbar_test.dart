@@ -116,14 +116,9 @@ void main() {
     return calls;
   }
 
-  /// Swipes up starting on the Esc key: any spot on the pill works except the
-  /// arrow pad, which claims its own drags.
-  Future<void> swipeUp(WidgetTester tester) {
-    return tester.dragFrom(
-      tester.getCenter(find.text('Esc')),
-      const Offset(0, -80),
-    );
-  }
+  /// Opens the quick prompt palette from the Snippets button.
+  Future<void> openPalette(WidgetTester tester) =>
+      tester.tap(find.byKey(const ValueKey('toolbar-snippets')));
 
   group('FloatingTerminalToolbar', () {
     testWidgets('long-press alternates: Esc sends Ctrl+C, Tab sends Shift+Tab, '
@@ -337,8 +332,8 @@ void main() {
       ]);
     });
 
-    testWidgets('swipe up opens the palette; quick prompts type the line '
-        'and press Enter separately', (tester) async {
+    testWidgets('the Snippets button opens the palette; quick prompts type '
+        'the line and press Enter separately', (tester) async {
       final controller = _RecordingTerminalSessionController();
       final focusNode = FocusNode();
       addTearDown(focusNode.dispose);
@@ -351,11 +346,15 @@ void main() {
           globalSnippets: const [
             TerminalSnippet(id: 'g1', label: 'Deploy', text: 'make deploy'),
           ],
+          pillItems: const [
+            TerminalPillItem.button(TerminalPillButton.esc),
+            TerminalPillItem.button(TerminalPillButton.snippets),
+          ],
         ),
       );
       expect(find.text('Quick prompts'), findsNothing);
 
-      await swipeUp(tester);
+      await openPalette(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Quick prompts'), findsOneWidget);
@@ -370,12 +369,12 @@ void main() {
       await tester.pump();
       expect(controller.sentText, ['/clear']);
       expect(controller.sentKeys, isEmpty);
-      await tester.pump(floatingToolbarSubmitDelay);
+      await tester.pump(quickPromptSubmitDelay);
       expect(controller.sentKeys, [TerminalKey.enter]);
       await tester.pumpAndSettle();
       expect(find.text('Quick prompts'), findsNothing);
 
-      await swipeUp(tester);
+      await openPalette(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Esc Esc'));
       await tester.pumpAndSettle();
@@ -385,21 +384,42 @@ void main() {
         TerminalKey.escape,
       ]);
 
-      await swipeUp(tester);
+      await openPalette(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Ctrl+C'));
       await tester.pumpAndSettle();
       expect(controller.sentControlKeys, [TerminalKey.keyC]);
 
-      await swipeUp(tester);
+      await openPalette(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Deploy'));
       await tester.pump();
       expect(controller.sentText, ['/clear', 'make deploy']);
       expect(controller.sentKeys.last, TerminalKey.escape);
-      await tester.pump(floatingToolbarSubmitDelay);
+      await tester.pump(quickPromptSubmitDelay);
       expect(controller.sentKeys.last, TerminalKey.enter);
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('a swipe up on the pill no longer opens the palette '
+        '(CON-106)', (tester) async {
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        buildToolbar(controller: controller, focusNode: focusNode),
+      );
+      await tester.dragFrom(
+        tester.getCenter(find.text('Esc')),
+        const Offset(0, -80),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Quick prompts'), findsNothing);
+      await tester.fling(find.byKey(_pill), const Offset(0, -200), 1500);
+      await tester.pumpAndSettle();
+      expect(find.text('Quick prompts'), findsNothing);
     });
 
     testWidgets('a short or sideways drag does not open the palette', (
@@ -509,9 +529,19 @@ void main() {
           controller: controller,
           focusNode: focusNode,
           onReconnect: () async => reconnects += 1,
+          pillItems: legacyDefaultTerminalPillItems,
         ),
       );
 
+      // ^L, not the ↻ glyph, which means Reconnect everywhere else.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('toolbar-redraw')),
+          matching: find.text('^L'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.refresh_rounded), findsNothing);
       await tester.tap(find.byKey(const ValueKey('toolbar-redraw')));
       expect(controller.sentControlKeys, [TerminalKey.keyL]);
       expect(reconnects, 0);
@@ -564,7 +594,11 @@ void main() {
       );
 
       await tester.pumpWidget(
-        buildToolbar(controller: controller, focusNode: focusNode),
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          pillItems: legacyDefaultTerminalPillItems,
+        ),
       );
       expect(find.byIcon(Icons.keyboard_rounded), findsOneWidget);
 
@@ -583,8 +617,8 @@ void main() {
       expect(textInputCalls, ['TextInput.show', 'TextInput.hide']);
     });
 
-    testWidgets('default pill is Moshi-compact: 40 dp high, 36 dp buttons, '
-        'Moshi set plus Herdr in order', (tester) async {
+    testWidgets('default pill is compact: 40 dp high, 36 dp buttons, Ctrl '
+        'Esc Tab Herdr Paste Chat then ⋯ (CON-106)', (tester) async {
       final controller = _RecordingTerminalSessionController();
       final focusNode = FocusNode();
       addTearDown(focusNode.dispose);
@@ -607,12 +641,13 @@ void main() {
         'toolbar-esc',
         'toolbar-tab',
         'toolbar-herdr',
-        'toolbar-redraw',
         'toolbar-paste',
         'toolbar-chat',
-        'toolbar-keyboard',
         'toolbar-more',
       ];
+      expect(find.byKey(const ValueKey('toolbar-redraw')), findsNothing);
+      expect(find.byKey(const ValueKey('toolbar-keyboard')), findsNothing);
+      expect(find.byKey(const ValueKey('toolbar-dictate')), findsNothing);
       final xs = [
         for (final key in order) tester.getCenter(find.byKey(ValueKey(key))).dx,
       ];
@@ -726,9 +761,7 @@ void main() {
         'tab',
         'ctrl',
         'herdr',
-        'reconnect',
         'chat',
-        'keyboard',
         'arrows',
       ]);
     });

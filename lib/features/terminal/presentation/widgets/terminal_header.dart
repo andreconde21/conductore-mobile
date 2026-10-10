@@ -15,18 +15,19 @@ import 'package:flutter/material.dart';
 enum SessionTool { gitDiff, livePreview }
 
 /// Actions in the terminal row's overflow menu.
+///
+/// Only what has no button elsewhere (CON-106): Chat View is the key bar's
+/// Chat button, fullscreen its Full key (and a desktop shortcut), and the
+/// prompt composer opens from the chat line.
 enum TerminalHeaderAction {
-  chatView,
   gitDiff,
   livePreview,
   reconnect,
-  fullscreen,
   newSession,
   settings,
   closeSession,
   keyboardShortcuts,
   quickActions,
-  composePrompt,
   recentDirectories,
 }
 
@@ -37,8 +38,9 @@ String _withKeys(String label, String keys) =>
 
 /// The terminal's single chrome row (~40 dp): back, the scrollable session
 /// and file tabs, then the session grid, the agents badge and ONE overflow
-/// menu: chat view and the session tools (git diff, live preview), then
-/// reconnect, fullscreen and new session, then close session.
+/// menu: the session tools (quick actions, recent folders on desktop, git
+/// diff, live preview), then reconnect, new session, settings and, on
+/// desktop, keyboard shortcuts, then close session.
 ///
 /// Swipes on the row, like an app switcher: up or down opens the quick
 /// switcher (the grid button's action, and the swipe from the terminal's
@@ -56,13 +58,10 @@ class TerminalHeader extends StatelessWidget {
     required this.onFileTabSelected,
     required this.onFileTabClosed,
     this.onReconnect,
-    this.onToggleFullscreen,
     this.onNewSession,
     this.onShowShortcuts,
     this.onQuickActions,
-    this.onComposePrompt,
     this.onRecentDirectories,
-    this.onOpenChatView,
     this.onOpenSettings,
     this.attentionCount = 0,
     this.onOpenAgentAttention,
@@ -114,9 +113,6 @@ class TerminalHeader extends StatelessWidget {
   /// Reconnects the active session; null hides the menu entry.
   final VoidCallback? onReconnect;
 
-  /// Enters fullscreen (which hides this row); null hides the entry.
-  final VoidCallback? onToggleFullscreen;
-
   /// Opens a new session through the connect flow; null hides the entry.
   final VoidCallback? onNewSession;
 
@@ -127,14 +123,9 @@ class TerminalHeader extends StatelessWidget {
   /// The session's project quick actions; null hides the entry.
   final VoidCallback? onQuickActions;
 
-  /// Desktop: the prompt composer and recent folders, which phones reach
-  /// from the on-screen keys.
-  final VoidCallback? onComposePrompt;
+  /// Desktop: recent folders, which phones reach from the Herdr or tmux
+  /// key's long-press.
   final VoidCallback? onRecentDirectories;
-
-  /// Opens the chat view of the active session's Claude agent; null hides
-  /// the entry.
-  final VoidCallback? onOpenChatView;
 
   /// Opens the Settings page (the ⋮ menu's "Settings"); null hides it.
   final VoidCallback? onOpenSettings;
@@ -250,13 +241,10 @@ class TerminalHeader extends StatelessWidget {
               session: session,
               color: foreground,
               onReconnect: onReconnect,
-              onToggleFullscreen: onToggleFullscreen,
               onNewSession: onNewSession,
               onShowShortcuts: onShowShortcuts,
               onQuickActions: onQuickActions,
-              onComposePrompt: onComposePrompt,
               onRecentDirectories: onRecentDirectories,
-              onOpenChatView: onOpenChatView,
               onOpenSettings: onOpenSettings,
               onOpenSessionTool: onOpenSessionTool,
               onClose: session == null
@@ -393,14 +381,11 @@ class _OverflowMenu extends StatelessWidget {
     required this.session,
     required this.color,
     required this.onReconnect,
-    required this.onToggleFullscreen,
     required this.onNewSession,
     required this.onClose,
     this.onShowShortcuts,
     this.onQuickActions,
-    this.onComposePrompt,
     this.onRecentDirectories,
-    this.onOpenChatView,
     this.onOpenSessionTool,
     this.onOpenSettings,
   });
@@ -408,7 +393,6 @@ class _OverflowMenu extends StatelessWidget {
   final TerminalSessionController? session;
   final Color color;
   final VoidCallback? onReconnect;
-  final VoidCallback? onToggleFullscreen;
   final VoidCallback? onNewSession;
   final VoidCallback? onClose;
   final VoidCallback? onShowShortcuts;
@@ -416,11 +400,8 @@ class _OverflowMenu extends StatelessWidget {
   /// The session's project quick actions; null hides the entry.
   final VoidCallback? onQuickActions;
 
-  /// Desktop: the prompt composer and recent folders, which phones reach
-  /// from the on-screen keys.
-  final VoidCallback? onComposePrompt;
+  /// Desktop only, see [TerminalHeader.onRecentDirectories].
   final VoidCallback? onRecentDirectories;
-  final VoidCallback? onOpenChatView;
   final ValueChanged<SessionTool>? onOpenSessionTool;
   final VoidCallback? onOpenSettings;
 
@@ -440,42 +421,28 @@ class _OverflowMenu extends StatelessWidget {
         padding: EdgeInsets.zero,
       ),
       onSelected: (action) => switch (action) {
-        TerminalHeaderAction.chatView => onOpenChatView?.call(),
         TerminalHeaderAction.gitDiff => tools?.call(SessionTool.gitDiff),
         TerminalHeaderAction.livePreview => tools?.call(
           SessionTool.livePreview,
         ),
         TerminalHeaderAction.reconnect => onReconnect?.call(),
-        TerminalHeaderAction.fullscreen => onToggleFullscreen?.call(),
         TerminalHeaderAction.newSession => onNewSession?.call(),
         TerminalHeaderAction.settings => onOpenSettings?.call(),
         TerminalHeaderAction.closeSession => onClose?.call(),
         TerminalHeaderAction.keyboardShortcuts => onShowShortcuts?.call(),
         TerminalHeaderAction.quickActions => onQuickActions?.call(),
-        TerminalHeaderAction.composePrompt => onComposePrompt?.call(),
         TerminalHeaderAction.recentDirectories => onRecentDirectories?.call(),
       },
       itemBuilder: (context) {
         final theme = Theme.of(context);
-        // Grouped: agent and session tools, session control, close.
+        // Grouped: session tools, session control, close.
         final groups = [
           <PopupMenuEntry<TerminalHeaderAction>>[
-            if (onOpenChatView != null)
-              const PopupMenuItem(
-                value: TerminalHeaderAction.chatView,
-                child: _MenuRow(Icons.forum_outlined, 'Open chat view'),
-              ),
             if (onQuickActions != null)
               const PopupMenuItem(
                 key: ValueKey('terminal-menu-quick-actions'),
                 value: TerminalHeaderAction.quickActions,
                 child: _MenuRow(Icons.bolt_rounded, 'Quick actions'),
-              ),
-            if (onComposePrompt != null)
-              const PopupMenuItem(
-                key: ValueKey('terminal-menu-compose'),
-                value: TerminalHeaderAction.composePrompt,
-                child: _MenuRow(Icons.edit_note_rounded, 'Compose a prompt…'),
               ),
             if (onRecentDirectories != null)
               const PopupMenuItem(
@@ -497,22 +464,16 @@ class _OverflowMenu extends StatelessWidget {
           <PopupMenuEntry<TerminalHeaderAction>>[
             if (onReconnect != null)
               PopupMenuItem(
+                key: const ValueKey('terminal-menu-reconnect'),
                 value: TerminalHeaderAction.reconnect,
+                // ↻ means Reconnect here as on home and the session grid;
+                // the pill's redraw key is ^L.
                 child: _MenuRow(
                   Icons.refresh_rounded,
                   // A local shell starts over; there is no connection.
                   session?.runsOnThisComputer ?? false
                       ? 'Restart'
                       : 'Reconnect',
-                ),
-              ),
-            if (onToggleFullscreen != null)
-              const PopupMenuItem(
-                value: TerminalHeaderAction.fullscreen,
-                child: _MenuRow(
-                  Icons.fullscreen_rounded,
-                  'Fullscreen',
-                  action: DesktopAction.toggleFullscreen,
                 ),
               ),
             if (onNewSession != null)

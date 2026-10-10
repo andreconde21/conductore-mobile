@@ -601,7 +601,7 @@ class HostAdvancedSection extends StatelessWidget {
         SnippetListEditor(
           title: 'Host snippets',
           caption:
-              'Shown in the Snip key-row menu for this machine. Hidden '
+              'Shown in the Snip palette for this machine. Hidden '
               'snippets are useful for passwords or other secrets.',
           snippets: snippets,
           onChanged: onSnippetsChanged,

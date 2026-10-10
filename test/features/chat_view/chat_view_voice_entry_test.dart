@@ -169,26 +169,6 @@ void main() {
       expectVoice(tester);
     });
 
-    testWidgets('"Open chat view" for a machine (openChatViewForHost)', (
-      tester,
-    ) async {
-      final attention = await monitor(tester, companionHost());
-      await tapGo(
-        tester,
-        goButton(
-          (context) => unawaited(
-            openChatViewForHost(
-              context: context,
-              attention: attention,
-              host: companionHost(),
-              onOpenTerminal: (_) {},
-            ),
-          ),
-        ),
-      );
-      expectVoice(tester);
-    });
-
     testWidgets('a desktop shell tab (ChatViewPresenter)', (tester) async {
       final attention = await monitor(tester, companionHost());
       ChatViewRequest? request;
