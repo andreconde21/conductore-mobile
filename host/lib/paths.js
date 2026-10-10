@@ -15,7 +15,7 @@ const os = require('os')
 const path = require('path')
 
 const PROTOCOL_VERSION = 1
-const VERSION = '1.8.0'
+const VERSION = '1.8.1'
 
 // V8 flags the daemon runs with (measured in README "Footprint"). It holds a
 // few hundred KB of state, but a burst of changes while long permission
