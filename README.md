@@ -39,6 +39,10 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 Previews 29 to 31 (companion 1.8.0 bundled):
 
 - **Preview 31**
+  - Home's top bar is down to four controls (machine filter, Agents,
+    **Switch to…**, Settings), the desktop home shows Needs you and usage
+    once (in the sidebar), and a terminal tab is named after its project or
+    agent instead of the machine.
   - A tab whose Herdr workspace was closed says so, with **Keep what Herdr
     shows** and **Close tab**, instead of silently following another
     workspace. Chat View from such a tab opens the agent on screen.
@@ -111,7 +115,8 @@ Older previews, one line each (full notes are on the
   open an agent, approve, read a reply or switch accounts. Common phrases
   work offline in English and Portuguese, the rest goes to Claude through
   the companion (0.8). It confirms aloud before it acts, always for high
-  risk.
+  risk. Start it from the Quick Settings tile or the headset button in a
+  terminal.
 - **Read aloud**, its **length** (Brief, Full or a Claude summary) and
   **tool activity** in Chat View (Show all, Collapsed or Hidden), from the
   ⋮ menu or Settings. While a reply is read, the ⋮ shows a sound wave.
@@ -191,6 +196,9 @@ tmux.
   then **Other workspaces** by machine: the Herdr workspaces and tmux sessions
   you have not opened yet. The search field above the list filters both
   modes as you type, by pane title, workspace, tab, project or machine.
+  The top bar has four controls: the machine filter, Agents, the switcher
+  (**Switch to…**, search across every machine) and Settings. The app locks
+  by itself; **Lock now** is the first entry of Settings › Security.
 - **Quick switcher**: agents waiting on you, open sessions with live
   thumbnails, other workspaces and recents, with search across every
   machine. Swipe the top row
@@ -321,9 +329,10 @@ tmux.
 ### Desktop
 
 - **Desktop shell** on desktops and tablets: a sidebar tree of machines,
-  workspaces, tabs and agents with a Needs you group, pins and groups; up
-  to 4 splits mixing terminal, Chat View, file, diff and preview; a
-  dashboard home; and a right panel for the inbox, preview and usage.
+  workspaces, tabs and agents with a Needs you group and the usage summary,
+  pins and groups; up to 4 splits mixing terminal, Chat View, file, diff and
+  preview; a dashboard home with the agents, recent sessions and other
+  workspaces; and a right panel for the inbox, preview and usage.
 - A **command palette**, saved **layouts** and presets, drag to place a pane,
   and pages that open as dialogs with Enter, Esc and Ctrl+S; right-click
   menus on tiles, tabs, terminal, agents and files.
@@ -406,7 +415,7 @@ Rendered from the app's own widgets with demo data by
   </tr>
 </table>
 
-<p align="center"><img src="docs/screenshots/22-desktop-shell-dashboard.png" width="820" alt="Desktop shell dashboard: Needs you, usage, recent sessions and other workspaces"><br><sub>Desktop shell: the dashboard home</sub></p>
+<p align="center"><img src="docs/screenshots/22-desktop-shell-dashboard.png" width="820" alt="Desktop shell dashboard: agents, recent sessions and other workspaces"><br><sub>Desktop shell: the dashboard home</sub></p>
 
 <p align="center"><img src="docs/screenshots/23-desktop-shell-split.png" width="820" alt="Desktop shell with two terminal splits side by side"><br><sub>Desktop shell: two sessions in splits, the tab strip above</sub></p>
 

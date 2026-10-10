@@ -307,7 +307,7 @@ void main() {
   ) async {
     await pumpHome(tester);
 
-    await tester.tap(find.byTooltip('Switch sessions'));
+    await tester.tap(find.byTooltip('Switch to…'));
     await settle(tester);
     await tester.tap(
       find.byKey(const ValueKey('switcher-workspace-a-herdr-w2')),

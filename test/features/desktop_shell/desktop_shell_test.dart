@@ -705,62 +705,54 @@ void main() {
     await tearDownShell(tester);
   }, variant: _linux);
 
-  testWidgets('the dashboard: Needs you, usage, previews and workspaces', (
-    tester,
-  ) async {
-    final h = await pumpShell(
-      tester,
-      usage: (context, {required compact}) =>
-          Text(compact ? 'Usage 42%' : 'Usage 42% today'),
-    );
-    // The waiting agent, by its pane title.
-    final review = SidebarKeys.herdrTab('workstation', 'w1', 'w1:t2');
-    final card = find.byKey(ValueKey('dashboard-needs-you-$review'));
-    expect(card, findsOneWidget);
-    expect(
-      find.descendant(of: card, matching: find.text('Proofing PR 398')),
-      findsOneWidget,
-    );
-    // The usage feature fills the dashboard's slot and the sidebar's.
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('dashboard-usage-slot')),
-        matching: find.text('Usage 42% today'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('sidebar-usage-slot')),
-        matching: find.text('Usage 42%'),
-      ),
-      findsOneWidget,
-    );
-    // Other workspaces per machine; a tile opens its session.
-    final build = find.byKey(
-      ValueKey(
-        'dashboard-other-${SidebarKeys.tmuxSession('workstation', 'build')}',
-      ),
-    );
-    await tester.ensureVisible(build);
-    await tester.tap(build);
-    await settleShell(tester);
-    expect(h.workspace.sessions.single.host.id, 'workstation#tmux:build');
-    expect(_home(tester).terminalVisible, isTrue);
-    // Back home, the session is a live preview and no longer "other".
-    h.shell.showHome = true;
-    await tester.pump();
-    expect(
-      find.byKey(const ValueKey('dashboard-session-workstation#tmux:build')),
-      findsOneWidget,
-    );
-    expect(build, findsNothing);
-    await tearDownShell(tester);
-  }, variant: _linux);
+  testWidgets(
+    'the dashboard: previews and workspaces, Needs you and usage in the sidebar',
+    (tester) async {
+      final h = await pumpShell(
+        tester,
+        usage: (context, {required compact}) =>
+            Text(compact ? 'Usage 42%' : 'Usage 42% today'),
+      );
+      // Needs you and usage live in the sidebar only, not in the main pane.
+      expect(find.text('Usage 42% today'), findsNothing);
+      expect(find.byKey(const ValueKey('dashboard-usage-slot')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('dashboard-needs-you-empty')),
+        findsNothing,
+      );
+      // The usage feature fills the sidebar's slot.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('sidebar-usage-slot')),
+          matching: find.text('Usage 42%'),
+        ),
+        findsOneWidget,
+      );
+      // Other workspaces per machine; a tile opens its session.
+      final build = find.byKey(
+        ValueKey(
+          'dashboard-other-${SidebarKeys.tmuxSession('workstation', 'build')}',
+        ),
+      );
+      await tester.ensureVisible(build);
+      await tester.tap(build);
+      await settleShell(tester);
+      expect(h.workspace.sessions.single.host.id, 'workstation#tmux:build');
+      expect(_home(tester).terminalVisible, isTrue);
+      // Back home, the session is a live preview and no longer "other".
+      h.shell.showHome = true;
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('dashboard-session-workstation#tmux:build')),
+        findsOneWidget,
+      );
+      expect(build, findsNothing);
+      await tearDownShell(tester);
+    },
+    variant: _linux,
+  );
 
-  testWidgets('the app usage shows on the dashboard and in the sidebar', (
-    tester,
-  ) async {
+  testWidgets('the app usage shows in the sidebar only', (tester) async {
     final usage = UsageController(
       source: FakeUsageSource(const [], const {}),
       preferences: MemoryUsagePreferencesStore(),
@@ -774,12 +766,12 @@ void main() {
         matching: find.byType(UsageSummaryView),
       ),
     );
-    expect(inSlot('dashboard-usage-slot').layout, UsageSummaryLayout.compact);
+    expect(find.byKey(const ValueKey('dashboard-usage-slot')), findsNothing);
     expect(inSlot('sidebar-usage-slot').layout, UsageSummaryLayout.compact);
     // Not the phone's home bar.
     expect(find.byType(UsageHomeBar), findsNothing);
     // A tap opens the explorer in the main area, with room for it.
-    inSlot('dashboard-usage-slot').onTap!();
+    inSlot('sidebar-usage-slot').onTap!();
     await tester.pump();
     expect(h.shell.showUsage, isTrue);
     expect(find.byType(UsageExplorerView), findsOneWidget);

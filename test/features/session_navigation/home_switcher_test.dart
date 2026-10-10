@@ -139,7 +139,7 @@ void main() {
       'workspaces and recents; one opens in the terminal', (tester) async {
     final (workspace, _) = await pumpHome(tester);
 
-    await tester.tap(find.byTooltip('Switch sessions'));
+    await tester.tap(find.byTooltip('Switch to…'));
     await settle(tester);
 
     expect(switcher, findsOneWidget);

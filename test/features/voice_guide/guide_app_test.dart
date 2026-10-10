@@ -7,7 +7,6 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
-import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/voice/domain/speech_event.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
@@ -173,33 +172,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(started, 1);
     expect(find.byType(BottomSheet), findsNothing);
-  });
-
-  testWidgets('home shows the Guide button only when given one', (
-    tester,
-  ) async {
-    var started = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: HomeTopBar(
-            onLock: () {},
-            onSettings: () {},
-            onGuide: () => started += 1,
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.byKey(const ValueKey('home-voice-guide')));
-    expect(started, 1);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: HomeTopBar(onLock: () {}, onSettings: () {}),
-        ),
-      ),
-    );
-    expect(find.byKey(const ValueKey('home-voice-guide')), findsNothing);
   });
 
   testWidgets(
