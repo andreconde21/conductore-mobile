@@ -86,6 +86,47 @@ abstract final class NewWorkspaceCommands {
     return shellQuoteArgument(folder);
   }
 
+  /// The subfolders to pick a starting folder from, one absolute path per
+  /// line (read by [parseFolders]). With no [folder]: the visible
+  /// subfolders of `~/Projects` and `~`, then the git repositories one
+  /// level below them. With a [folder]: its visible subfolders. One shell
+  /// command that only reads directory names.
+  static String listFolders([String? folder]) {
+    if (folder != null && folder.isNotEmpty) {
+      return posixShellCommand(
+        [
+          'dir=${folderWord(folder)}',
+          'if [ ! -d "\$dir" ]; then exit $missingFolderExit; fi',
+          'for d in "\$dir"/*/; do '
+              '[ -d "\$d" ] && printf \'%s\\n\' "\${d%/}"; done',
+          'exit 0',
+        ].join('\n'),
+      );
+    }
+    return posixShellCommand(
+      [
+        'for r in "\$HOME/Projects" "\$HOME"; do',
+        '  for d in "\$r"/*/; do '
+            '[ -d "\$d" ] && printf \'%s\\n\' "\${d%/}"; done',
+        'done',
+        'for r in "\$HOME/Projects" "\$HOME"; do',
+        '  for d in "\$r"/*/; do',
+        '    [ -d "\$d" ] || continue',
+        '    for e in "\$d"*/; do '
+            '[ -d "\$e.git" ] && printf \'%s\\n\' "\${e%/}"; done',
+        '  done',
+        'done',
+        'exit 0',
+      ].join('\n'),
+    );
+  }
+
+  /// The folders [listFolders] printed, without repeats, in order.
+  static List<String> parseFolders(String stdout) => {
+    for (final line in const LineSplitter().convert(stdout))
+      if (line.trim().isNotEmpty) line.trim(),
+  }.toList();
+
   /// The basename of [folder], to name a workspace after it.
   static String folderName(String folder) {
     final parts = folder
