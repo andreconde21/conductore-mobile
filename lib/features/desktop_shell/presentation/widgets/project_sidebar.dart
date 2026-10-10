@@ -443,6 +443,11 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     final collapsed =
         controller.filter.trim().isEmpty && layout.isCollapsed(project);
     final names = widget.machineNames;
+    AgentRowText entryText(ProjectEntry entry) => AgentRowText.ofEntry(
+      entry,
+      projectName: project.name,
+      machine: names[entry.node.machineId] ?? '',
+    );
     AgentRowText agentText(ProjectEntry entry, SidebarNode agent) =>
         AgentRowText.of(
           agent,
@@ -491,7 +496,8 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
               node: entry.node,
               dot: entry.dot,
               sheprd: entry.sheprdOf(entry.node),
-              machineName: names[entry.node.machineId] ?? '',
+              title: entryText(entry).title,
+              machineName: entryText(entry).subtitle,
               selected: entry.node.key == widget.selectedKey,
               faded: !entry.active || entry.hidden,
               onOpen: () => _open(layout, entry, entry.node),

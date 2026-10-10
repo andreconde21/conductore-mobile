@@ -214,7 +214,8 @@ class HomeProjectsList extends StatelessWidget {
               node: entry.node,
               dot: entry.dot,
               sheprd: entry.sheprdOf(entry.node),
-              detail: names[entry.node.machineId] ?? '',
+              title: _entryText(entry, project, names).title,
+              detail: _entryText(entry, project, names).subtitle,
               faded: !entry.active || entry.hidden,
               onTap: () => _open(entry, entry.node),
               onLongPress: () => showProjectEntrySheet(
@@ -249,6 +250,16 @@ class HomeProjectsList extends StatelessWidget {
                 ),
     ];
   }
+
+  static AgentRowText _entryText(
+    ProjectEntry entry,
+    ProjectGroup project,
+    Map<String, String> names,
+  ) => AgentRowText.ofEntry(
+    entry,
+    projectName: project.name,
+    machine: names[entry.node.machineId] ?? '',
+  );
 
   static AgentRowText _agentText(
     ProjectEntry entry,

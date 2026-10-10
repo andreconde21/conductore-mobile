@@ -525,6 +525,28 @@ class AgentRowText {
   /// Tab name · workspace · machine; empty parts and repeats dropped.
   final String subtitle;
 
+  /// The one-line (compact) row of [entry]'s workspace: with a single
+  /// agent it carries that agent's text, else the workspace name and machine.
+  factory AgentRowText.ofEntry(
+    ProjectEntry entry, {
+    required String projectName,
+    required String machine,
+  }) {
+    final node = entry.node;
+    if (entry.agentRows.length == 1) {
+      return AgentRowText.of(
+        entry.agentRows.single,
+        workspace: node.label,
+        projectName: projectName,
+        machine: machine,
+      );
+    }
+    return AgentRowText(
+      title: node.label,
+      subtitle: [if (machine.isNotEmpty) machine].join(' · '),
+    );
+  }
+
   /// [row] is one of [ProjectEntry.agentRows]; [workspace] is the entry's
   /// workspace row. A workspace named like its [projectName] is not
   /// repeated; a title equal to the workspace or tab name is not repeated.

@@ -32,10 +32,7 @@ void main() {
   });
 
   test('a workspace named like its project is not repeated', () {
-    final text = of(
-      _tab('2', 'CI/CD setup'),
-      workspace: 'Cockpit',
-    );
+    final text = of(_tab('2', 'CI/CD setup'), workspace: 'Cockpit');
     expect(text.subtitle, 'tab 2 · omarchy');
   });
 
@@ -69,5 +66,37 @@ void main() {
     final text = of(pane);
     expect(text.title, 'Refactor tests');
     expect(text.subtitle, 'cockpit-board · omarchy');
+  });
+
+  SidebarNode ws(List<SidebarNode> kids) => SidebarNode(
+    key: 'ws',
+    kind: SidebarNodeKind.herdrWorkspace,
+    machineId: 'm',
+    label: 'Projects',
+    target: MachineTarget(buildHost('m')),
+    children: kids,
+  );
+
+  test('a workspace row with one agent shows that agent\'s title', () {
+    final tab = _tab('1', 'Fix the login bug');
+    final text = AgentRowText.ofEntry(
+      ProjectEntry(node: ws([tab]), memberKey: 'm/ws', agentRows: [tab]),
+      projectName: 'Other',
+      machine: 'omarchy',
+    );
+    expect(text.title, 'Fix the login bug');
+    expect(text.subtitle, 'tab 1 · Projects · omarchy');
+  });
+
+  test('a workspace row with no or several agents keeps its name', () {
+    final a = _tab('1', 'A');
+    final b = _tab('2', 'B');
+    final text = AgentRowText.ofEntry(
+      ProjectEntry(node: ws([a, b]), memberKey: 'm/ws', agentRows: [a, b]),
+      projectName: 'Other',
+      machine: 'omarchy',
+    );
+    expect(text.title, 'Projects');
+    expect(text.subtitle, 'omarchy');
   });
 }

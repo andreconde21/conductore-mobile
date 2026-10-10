@@ -105,9 +105,7 @@ void main() {
     expect(field(tester), isEmpty);
   });
 
-  testWidgets('"… send" after a pause sends without the word', (
-    tester,
-  ) async {
+  testWidgets('"… send" after a pause sends without the word', (tester) async {
     await pump(tester);
     await dictate(tester, 'fix the bug');
     await tester.pump(const Duration(seconds: 1));

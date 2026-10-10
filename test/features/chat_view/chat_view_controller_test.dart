@@ -401,10 +401,8 @@ void main() {
         ok(page([userLine('u1', 'hi')], offset: 50, state: 'working')),
         ok(page([], offset: 50, state: 'working')),
       ]);
-      final controller = ChatViewController(
-        runner: runner,
-        sessionId: 's-1',
-      )..setVisible(true);
+      final controller = ChatViewController(runner: runner, sessionId: 's-1')
+        ..setVisible(true);
       async.elapse(const Duration(seconds: 2));
       final start = runner.commands.length;
       // 10 polls at 1 s, 10 at 2 s, then every 4 s: not 60.
