@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../voice/fake_speech_recognizer.dart';
 
-/// André could not find the mic: it and Talk hid while the chat could not
-/// send, and the mic hid on phones without a recognizer.
+/// André could not find the mic: it hid while the chat could not send,
+/// and on phones without a recognizer. Since CON-107 the composer has at
+/// most four controls: Stop (only while the agent works), the field, the
+/// mic (tap dictates, long-press talks) and Send.
 void main() {
   late FakeSpeechRecognizer recognizer;
   late DictationController dictation;
@@ -20,7 +22,11 @@ void main() {
 
   tearDown(() => dictation.dispose());
 
-  Future<void> pump(WidgetTester tester, {bool enabled = true}) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    bool enabled = true,
+    bool working = false,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -31,6 +37,8 @@ void main() {
             disabledHint: 'No Claude session yet',
             dictation: dictation,
             onTalk: () => talks += 1,
+            showInterrupt: working,
+            onAttachImage: (_) {},
           ),
         ),
       ),
@@ -42,29 +50,40 @@ void main() {
   IconButton button(WidgetTester tester, String key) =>
       tester.widget<IconButton>(find.byKey(ValueKey(key)));
 
-  testWidgets('a disabled composer keeps Talk and the mic, disabled', (
-    tester,
-  ) async {
+  /// The row's own buttons, not the attach icon inside the field.
+  int rowButtons(WidgetTester tester) =>
+      find.byType(IconButton).evaluate().length -
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('chat-composer-field')),
+            matching: find.byType(IconButton),
+          )
+          .evaluate()
+          .length;
+
+  testWidgets('a disabled composer keeps the mic, disabled', (tester) async {
     await pump(tester, enabled: false);
 
-    expect(find.byKey(const ValueKey('chat-talk')), findsOneWidget);
     expect(find.byKey(const ValueKey('dictation-button')), findsOneWidget);
-    expect(button(tester, 'chat-talk').onPressed, isNull);
     expect(button(tester, 'dictation-button').onPressed, isNull);
-    expect(find.byTooltip('No Claude session yet'), findsNWidgets(2));
+    expect(button(tester, 'dictation-button').onLongPress, isNull);
+    expect(find.byTooltip('No Claude session yet'), findsOneWidget);
   });
 
-  testWidgets('an enabled composer offers Talk and the mic', (tester) async {
+  testWidgets('the mic: tap dictates, long-press starts Talk', (tester) async {
     await pump(tester);
 
-    await tester.tap(find.byKey(const ValueKey('chat-talk')));
+    expect(find.byKey(const ValueKey('chat-talk')), findsNothing);
+    await tester.longPress(find.byKey(const ValueKey('dictation-button')));
     expect(talks, 1);
-    expect(button(tester, 'dictation-button').onPressed, isNotNull);
+    expect(recognizer.starts, isEmpty);
+    await tester.tap(find.byKey(const ValueKey('dictation-button')));
+    await tester.pump();
+    expect(recognizer.starts, hasLength(1));
+    expect(talks, 1);
   });
 
-  testWidgets('without a recognizer Talk and the mic explain themselves', (
-    tester,
-  ) async {
+  testWidgets('without a recognizer the mic explains itself', (tester) async {
     recognizer.available = false;
     await pump(tester);
 
@@ -75,16 +94,38 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(const ValueKey('chat-talk')));
-    await tester.pumpAndSettle();
-    expect(talks, 0);
-    expect(find.text('No speech recognizer'), findsOneWidget);
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
-
     await tester.tap(find.byKey(const ValueKey('dictation-button')));
     await tester.pumpAndSettle();
     expect(find.text('No speech recognizer'), findsOneWidget);
     expect(recognizer.starts, isEmpty);
+    expect(talks, 0);
+  });
+
+  testWidgets('idle: no Stop, and only the mic and Send beside the field '
+      '(no Talk, no expand)', (tester) async {
+    await pump(tester);
+
+    expect(find.byKey(const ValueKey('chat-interrupt')), findsNothing);
+    expect(find.byTooltip('Interrupt (Esc)'), findsNothing);
+    expect(find.byTooltip('Open composer'), findsNothing);
+    expect(rowButtons(tester), 2);
+    // The image button sits inside the field.
+    expect(find.byKey(const ValueKey('chat-attach-image')), findsOneWidget);
+  });
+
+  testWidgets('working: Stop shows, four controls in all', (tester) async {
+    await pump(tester, working: true);
+
+    expect(find.byKey(const ValueKey('chat-interrupt')), findsOneWidget);
+    expect(rowButtons(tester), 3);
+  });
+
+  testWidgets('the field grows with the message', (tester) async {
+    await pump(tester);
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('chat-composer-field')),
+    );
+    expect(field.minLines, 1);
+    expect(field.maxLines, greaterThan(4));
   });
 }
