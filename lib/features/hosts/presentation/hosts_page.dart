@@ -35,6 +35,7 @@ import 'package:conduit/features/desktop_shell/presentation/project_layout_contr
 import 'package:conduit/features/home_widget/presentation/home_launch_requests.dart';
 import 'package:conduit/features/hosts/data/secure_home_preferences_repository.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
+import 'package:conduit/features/hosts/domain/home_search.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
@@ -43,6 +44,7 @@ import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_projects.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/hosts/presentation/widgets/host_card.dart';
+import 'package:conduit/features/hosts/presentation/widgets/host_search_field.dart';
 import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:conduit/features/hosts/presentation/widgets/message_state.dart';
 import 'package:conduit/features/local_shell/domain/local_shell_instance.dart';
@@ -249,6 +251,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   bool _routeVisible = true;
   HomePreferences _preferences = const HomePreferences();
 
+  /// The workspace search above the list (CON-105).
+  final _searchText = TextEditingController();
+  HomeSearch _search = HomeSearch.none;
+
   /// `host:port` of every trusted host key: machines reached before list
   /// their workspaces without asking.
   Set<String> _trustedEndpoints = const {};
@@ -354,6 +360,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     _previewTimer?.cancel();
     _previewTicks.dispose();
     _refocusTimer?.cancel();
+    _searchText.dispose();
     widget.homeBoards?.setVisible(false);
     _ownedBoards?.dispose();
     _ownedShell?.dispose();
@@ -364,7 +371,22 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final loaded = await widget.homePreferences.load();
     if (!mounted) return;
     setState(() => _preferences = loaded);
+    // The old "group by project" toggle (CON-065) becomes Projects mode.
+    if (loaded.mode == null &&
+        (ProjectLayoutController.instance?.groupByProject ?? false)) {
+      _savePreferences(loaded.copyWith(mode: HomeMode.projects));
+    }
     _syncBoards();
+  }
+
+  /// The mode the home shows (CON-105): the one picked, else Projects when
+  /// there is a project layout, else Open / Closed. Without the project
+  /// view (tests, builds without it) only Open / Closed.
+  HomeMode get _homeMode {
+    final projects = ProjectLayoutController.instance;
+    if (projects == null) return HomeMode.openClosed;
+    if (_preferences.mode case final mode?) return mode;
+    return projects.layout.isEmpty ? HomeMode.openClosed : HomeMode.projects;
   }
 
   void _savePreferences(HomePreferences next) {
@@ -616,8 +638,13 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                     widget.themeController,
                     widget.agentAttention,
                     ?boards,
+                    ?ProjectLayoutController.instance,
                   ]),
                   builder: (context, _) {
+                    // Until a mode is picked, the machines' layout decides.
+                    if (_preferences.mode == null) {
+                      unawaited(ProjectLayoutController.instance?.refresh());
+                    }
                     return CustomScrollView(
                       key: const ValueKey('home-scroll'),
                       physics: const AlwaysScrollableScrollPhysics(),
@@ -1094,12 +1121,129 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         !widget.workspaceController.hasSessions) {
       return [_buildNoMachines(context)];
     }
+    if (_homeMode == HomeMode.projects) {
+      return [
+        _buildListBar(context),
+        ..._buildProjects(context, ProjectLayoutController.instance!),
+      ];
+    }
     return [
+      _buildListBar(context),
       ..._buildSessions(context),
-      ...(ProjectLayoutController.instance?.groupByProject ?? false)
-          ? _buildProjects(context, ProjectLayoutController.instance!)
-          : _buildOtherWorkspaces(context),
+      ..._buildOtherWorkspaces(context),
     ];
+  }
+
+  /// The top of the list: the workspace search, and the switch between
+  /// Projects and Open / Closed ("Projects | Open"; CON-105, not in the
+  /// top bar, which is full).
+  Widget _buildListBar(BuildContext context) {
+    final mode = ProjectLayoutController.instance == null ? null : _homeMode;
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(
+        HomeGridMetrics.horizontalPadding,
+        4,
+        HomeGridMetrics.horizontalPadding,
+        2,
+      ),
+      sliver: SliverToBoxAdapter(
+        child: Row(
+          children: [
+            Expanded(
+              child: HostSearchField(
+                key: const ValueKey('home-workspace-search'),
+                controller: _searchText,
+                hintText: 'Search workspaces',
+                hasContent: !_search.isEmpty,
+                onChanged: (query) =>
+                    setState(() => _search = HomeSearch(query)),
+                onClear: () => setState(() => _search = HomeSearch.none),
+              ),
+            ),
+            if (mode != null) ...[
+              const SizedBox(width: 8),
+              SegmentedButton<HomeMode>(
+                key: const ValueKey('home-mode-switch'),
+                segments: const [
+                  ButtonSegment(
+                    value: HomeMode.projects,
+                    tooltip: 'Everything by project',
+                    label: Text(
+                      'Projects',
+                      key: ValueKey('home-mode-projects'),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: HomeMode.openClosed,
+                    tooltip: 'Open sessions, then the rest by machine',
+                    label: Text('Open', key: ValueKey('home-mode-open')),
+                  ),
+                ],
+                selected: {mode},
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
+                onSelectionChanged: (picked) => _savePreferences(
+                  _preferences.copyWith(mode: picked.single),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The project of every workspace and open session shown, by sidebar
+  /// key, for Open / Closed mode's search; empty without the project view
+  /// or a search.
+  Map<String, String> _projectNames() {
+    final projects = ProjectLayoutController.instance;
+    if (projects == null || _search.isEmpty) return const {};
+    return {
+      for (final group in _projectsList(projects).projectGroups())
+        for (final entry in group.entries) entry.node.key: group.name,
+    };
+  }
+
+  HomeProjectsList _projectsList(ProjectLayoutController projects) =>
+      HomeProjectsList(
+        controller: projects,
+        hosts: _shownHosts,
+        sessions: _shownSessions,
+        attention: widget.agentAttention,
+        boards: _boards,
+        herdrWorkspaceOf: widget.connectFlow?.herdr.workspaceOf,
+        search: _search,
+        onOpen: (target) => unawaited(_openSidebarTarget(target)),
+      );
+
+  /// A Herdr workspace's names for the search: its label, tabs and
+  /// agents' pane titles.
+  static List<String> _herdrFields(HomeBoardWorkspace workspace) => [
+    workspace.label,
+    for (final tab in workspace.workspace.tabs) tab.label,
+    for (final pane in workspace.panes) ...[pane.title, pane.tabLabel],
+  ];
+
+  /// The sidebar key of what [session] shows: its Herdr workspace or tmux
+  /// session, else the session itself.
+  String _sessionKey(TerminalSessionController session) {
+    final hostId = baseHostId(session.host.id);
+    final target = ConnectTarget.fromSessionHostId(session.host.id);
+    if (target?.kind == ConnectTargetKind.herdr) {
+      final id = widget.connectFlow?.herdr.workspaceOf(session) ?? target!.name;
+      if (id.isNotEmpty) return SidebarKeys.herdrWorkspace(hostId, id);
+    }
+    if (HomeSessionInfo.tmuxSessionOf(session) case final tmux?) {
+      return SidebarKeys.tmuxSession(hostId, tmux);
+    }
+    return SidebarKeys.openSession(hostId, session.host.id);
   }
 
   /// The proot local-shell section ("This device"): Android only, and
@@ -1148,7 +1292,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       width,
       large: view == HomeSessionsView.large,
     );
-    final sessions = _shownSessions;
+    final projectNames = _projectNames();
+    final sessions = [
+      for (final session in _shownSessions)
+        if (_search.isEmpty || _sessionMatches(session, projectNames)) session,
+    ];
     final active = widget.workspaceController.activeSession;
     const gutter = HomeGridMetrics.horizontalPadding;
 
@@ -1260,6 +1408,34 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     ];
   }
 
+  bool _sessionMatches(
+    TerminalSessionController session,
+    Map<String, String> projectNames,
+  ) {
+    final hostId = baseHostId(session.host.id);
+    final info = HomeSessionInfo.of(
+      session,
+      workspaces: _boards?[hostId]?.state.workspaces ?? const [],
+      machineName: session.host.isLocal
+          ? 'This device'
+          : _hostById(hostId)?.name ?? '',
+    );
+    final key = _sessionKey(session);
+    final workspace = _boards?[hostId]?.state.workspaces
+        .where(
+          (workspace) =>
+              SidebarKeys.herdrWorkspace(hostId, workspace.id) == key,
+        )
+        .firstOrNull;
+    return _search.matches([
+      info.titleOr(session),
+      info.targetLabel,
+      info.machineName,
+      projectNames[key],
+      if (workspace != null) ..._herdrFields(workspace),
+    ]);
+  }
+
   /// Per shown machine: the tmux sessions and Herdr workspaces that are
   /// not open in the app, and the notice explaining what cannot be listed.
   List<_MachineGroup> _otherWorkspaceGroups() {
@@ -1311,7 +1487,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   List<Widget> _buildOtherWorkspaces(BuildContext context) {
-    final groups = _otherWorkspaceGroups();
+    final groups = _search.isEmpty
+        ? _otherWorkspaceGroups()
+        : _searchedGroups(_otherWorkspaceGroups(), _projectNames());
     if (groups.isEmpty) return const [];
     final palette = widget.themeController.palette;
     final brightness = Theme.of(context).brightness;
@@ -1380,8 +1558,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (ProjectLayoutController.instance case final projects?)
-                _groupByToggle(projects),
               IconButton(
                 key: const ValueKey('workspaces-view-toggle'),
                 tooltip: view == HomeWorkspacesView.list
@@ -1456,20 +1632,37 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     ];
   }
 
-  /// Group by project or by machine (CON-065), next to the view toggle.
-  Widget _groupByToggle(ProjectLayoutController projects) => IconButton(
-    key: const ValueKey('home-group-by-toggle'),
-    tooltip: projects.groupByProject ? 'Group by machine' : 'Group by project',
-    icon: Icon(
-      projects.groupByProject ? Icons.dns_outlined : Icons.folder_copy_outlined,
-    ),
-    onPressed: () async {
-      await projects.setGroupByProject(!projects.groupByProject);
-      if (mounted) setState(() {});
-    },
-  );
+  /// [groups] with only what the search matches; a machine whose name
+  /// matches keeps everything, its notice included.
+  List<_MachineGroup> _searchedGroups(
+    List<_MachineGroup> groups,
+    Map<String, String> projectNames,
+  ) => [
+    for (final group in groups)
+      if (_search.matches([group.host.name]))
+        group
+      else if ([
+            for (final item in group.items)
+              if (_otherMatches(item, projectNames)) item,
+          ]
+          case final items when items.isNotEmpty)
+        _MachineGroup(group.host, items, null),
+  ];
 
-  /// The workspaces of the shown machines by project, sheprd's way.
+  bool _otherMatches(_OtherItem item, Map<String, String> projectNames) =>
+      switch (item) {
+        _OtherHerdr(:final host, :final workspace) => _search.matches([
+          ..._herdrFields(workspace),
+          projectNames[SidebarKeys.herdrWorkspace(host.id, workspace.id)],
+        ]),
+        _OtherTmux(:final host, :final session) => _search.matches([
+          session.name,
+          projectNames[SidebarKeys.tmuxSession(host.id, session.name)],
+        ]),
+      };
+
+  /// Projects mode (CON-105): the workspaces and open sessions of the
+  /// shown machines by project, sheprd's way, one box per project.
   List<Widget> _buildProjects(
     BuildContext context,
     ProjectLayoutController projects,
@@ -1477,12 +1670,18 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     SliverToBoxAdapter(
       child: _SectionHeader(
         label: 'PROJECTS',
-        trailing: _groupByToggle(projects),
+        trailing: IconButton(
+          tooltip: 'New session',
+          icon: const Icon(Icons.add_rounded),
+          onPressed: _newSession,
+        ),
       ),
     ),
-    // Machines that cannot be listed keep their notice, as one line each.
+    // Machines that cannot be listed keep their notice, as one line each
+    // (while searching, only those whose name matches).
     for (final group in _otherWorkspaceGroups())
-      if (group.notice case final notice?)
+      if (group.notice case final notice?
+          when _search.matches([group.host.name]))
         SliverToBoxAdapter(
           child: HomeNoticeLine(
             key: ValueKey('home-notice-line-${group.host.id}'),
@@ -1494,17 +1693,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 : () => _handleNoticeAction(group.host, notice.action!),
           ),
         ),
-    SliverToBoxAdapter(
-      child: HomeProjectsList(
-        controller: projects,
-        hosts: _shownHosts,
-        sessions: widget.workspaceController.sessions,
-        attention: widget.agentAttention,
-        boards: _boards,
-        herdrWorkspaceOf: widget.connectFlow?.herdr.workspaceOf,
-        onOpen: (target) => unawaited(_openSidebarTarget(target)),
-      ),
-    ),
+    SliverToBoxAdapter(child: _projectsList(projects)),
   ];
 
   void _handleNoticeAction(SavedHost host, HomeBoardNoticeAction action) {

@@ -416,7 +416,8 @@ void main() {
     expect(find.text('Close session'), findsOneWidget);
     await tester.tap(find.text('Rename'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Deploys');
+    // The rename dialog's field (the home's search field is below it).
+    await tester.enterText(find.byType(TextField).last, 'Deploys');
     await tester.tap(find.widgetWithText(FilledButton, 'Rename'));
     await tester.pumpAndSettle();
     expect(session.title, 'Deploys');

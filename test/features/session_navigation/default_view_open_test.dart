@@ -42,6 +42,14 @@ class _NoopWakelock extends WakelockPlusPlatformInterface {
 /// connect and report its agents), the quick switcher, a notification
 /// tap. Chat View opens for the Claude session of that place, never
 /// another one, and the terminal stays when there is none.
+/// The home list's scrollable (the search field has one of its own).
+final homeScrollable = find
+    .descendant(
+      of: find.byKey(const ValueKey('home-scroll')),
+      matching: find.byType(Scrollable),
+    )
+    .first;
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   WakelockPlusPlatformInterface.instance = _NoopWakelock();
@@ -242,7 +250,7 @@ void main() {
     await pumpHome(tester);
     expect(workspace.sessions, isEmpty);
     final tile = find.byKey(const ValueKey('other-herdr-a-w2'));
-    await tester.scrollUntilVisible(tile, 200);
+    await tester.scrollUntilVisible(tile, 200, scrollable: homeScrollable);
 
     await tester.tap(tile);
     await tester.pump();
@@ -268,7 +276,7 @@ void main() {
       'it', (tester) async {
     await pumpHome(tester);
     final tile = find.byKey(const ValueKey('other-tmux-a-main'));
-    await tester.scrollUntilVisible(tile, 200);
+    await tester.scrollUntilVisible(tile, 200, scrollable: homeScrollable);
 
     await tester.tap(tile);
     await settle(tester);
@@ -282,7 +290,7 @@ void main() {
       'session', (tester) async {
     await pumpHome(tester);
     final tile = find.byKey(const ValueKey('other-herdr-a-w1'));
-    await tester.scrollUntilVisible(tile, 200);
+    await tester.scrollUntilVisible(tile, 200, scrollable: homeScrollable);
 
     await tester.longPress(tile);
     await tester.pumpAndSettle();
@@ -352,7 +360,7 @@ void main() {
       ],
     );
     final tile = find.byKey(const ValueKey('other-herdr-a-w2'));
-    await tester.scrollUntilVisible(tile, 200);
+    await tester.scrollUntilVisible(tile, 200, scrollable: homeScrollable);
 
     await tester.tap(tile);
     await settle(tester);
@@ -371,7 +379,7 @@ void main() {
       host: machine.copyWith(agentAttentionEnabled: false),
     );
     final tile = find.byKey(const ValueKey('other-herdr-a-w2'));
-    await tester.scrollUntilVisible(tile, 200);
+    await tester.scrollUntilVisible(tile, 200, scrollable: homeScrollable);
 
     await tester.tap(tile);
     await settle(tester);
@@ -387,7 +395,7 @@ void main() {
     // The first poll fails; the agent only shows on the next one.
     await pumpHome(tester, script: [StateError('not yet'), ok(everywhere)]);
     final tile = find.byKey(const ValueKey('other-herdr-a-w2'));
-    await tester.scrollUntilVisible(tile, 200);
+    await tester.scrollUntilVisible(tile, 200, scrollable: homeScrollable);
     await tester.tap(tile);
     await settle(tester);
     final session = workspace.activeSession!;
@@ -409,7 +417,7 @@ void main() {
   ) async {
     await pumpHome(tester, defaultView: SessionView.terminal);
     final tile = find.byKey(const ValueKey('other-herdr-a-w2'));
-    await tester.scrollUntilVisible(tile, 200);
+    await tester.scrollUntilVisible(tile, 200, scrollable: homeScrollable);
 
     await tester.tap(tile);
     await settle(tester);

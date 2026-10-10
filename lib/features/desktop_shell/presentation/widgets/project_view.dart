@@ -64,58 +64,63 @@ class ProjectViewBar extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(dense ? 6 : 0, 0, 0, dense ? 2 : 4),
       child: Row(
         children: [
-          Icon(
-            active ? Icons.radio_button_checked : Icons.radio_button_off,
-            size: 13,
-            color: active ? palette.accent : palette.mutedForeground,
-          ),
-          Flexible(
-            child: label(
-              active ? 'active' : 'all agents',
-              active
-                  ? 'Showing what is working, needs you, or changed in the '
-                        'last ${controller.recentHours} h. Tap for all.'
-                  : 'Showing everything. Tap for active only.',
-              () => controller.setActiveOnly(!active),
-              const ValueKey('project-filter-toggle'),
-            ),
-          ),
-          if (needsYou > 0)
-            Tooltip(
-              message: '$needsYou need you',
-              child: InkWell(
-                key: const ValueKey('project-needs-you'),
-                borderRadius: BorderRadius.circular(6),
-                onTap: onNeedsYou,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const ShellStateDot(dot: SidebarDot.needsYou),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$needsYou',
-                        style: style.copyWith(color: palette.foreground),
-                      ),
-                    ],
+          // The filter and counter take the room left, so the view and the
+          // menu sit at the right edge.
+          Expanded(
+            child: Row(
+              children: [
+                Icon(
+                  active ? Icons.radio_button_checked : Icons.radio_button_off,
+                  size: 13,
+                  color: active ? palette.accent : palette.mutedForeground,
+                ),
+                Flexible(
+                  child: label(
+                    active ? 'active' : 'all agents',
+                    active
+                        ? 'Showing what is working, needs you, or changed in the '
+                              'last ${controller.recentHours} h. Tap for all.'
+                        : 'Showing everything. Tap for active only.',
+                    () => controller.setActiveOnly(!active),
+                    const ValueKey('project-filter-toggle'),
                   ),
                 ),
-              ),
+                if (needsYou > 0)
+                  Tooltip(
+                    message: '$needsYou need you',
+                    child: InkWell(
+                      key: const ValueKey('project-needs-you'),
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: onNeedsYou,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 4,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const ShellStateDot(dot: SidebarDot.needsYou),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$needsYou',
+                              style: style.copyWith(color: palette.foreground),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          const Spacer(),
-          Flexible(
-            child: label(
-              controller.compact ? 'compact' : 'detailed',
-              controller.compact
-                  ? 'One line per workspace. Tap for one row per agent.'
-                  : 'One row per agent. Tap for one line per workspace.',
-              () => controller.setCompact(!controller.compact),
-              const ValueKey('project-view-toggle'),
-            ),
+          ),
+          label(
+            controller.compact ? 'compact' : 'detailed',
+            controller.compact
+                ? 'One line per workspace. Tap for one row per agent.'
+                : 'One row per agent. Tap for one line per workspace.',
+            () => controller.setCompact(!controller.compact),
+            const ValueKey('project-view-toggle'),
           ),
           _ViewMenu(controller: controller, hiddenCount: hiddenCount),
         ],
