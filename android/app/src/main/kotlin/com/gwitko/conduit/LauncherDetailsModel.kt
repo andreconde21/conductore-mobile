@@ -107,7 +107,7 @@ object LauncherDetailsModel {
                     updatedAt,
                     token?.let { deepLink(packageName, activityClass, it) },
                 ).plus(elements = answerColumns(agent, prompt))
-                    .plus(arrayOf<Any?>(agent.project, active(agent, snapshot.recentHours, nowMillis)))
+                    .plus(elements = arrayOf<Any?>(agent.project, active(agent, snapshot.recentHours, nowMillis)))
             }
     }
 

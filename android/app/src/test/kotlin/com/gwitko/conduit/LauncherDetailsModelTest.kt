@@ -79,7 +79,7 @@ class LauncherDetailsModelTest {
     @Test
     fun noSnapshotMeansNoItemsAndNotMonitoring() {
         assertTrue(LauncherDetailsModel.items(null, tokens, pkg, activity).isEmpty())
-        assertArrayEquals(arrayOf<Any?>(0, 0, 0L, -1, -1, 2), LauncherDetailsModel.summary(null, 0L))
+        assertArrayEquals(arrayOf<Any?>(0, 0, 0L, -1, -1, 3), LauncherDetailsModel.summary(null, 0L))
     }
 
     @Test
