@@ -189,6 +189,13 @@ class AgentAttentionController extends ChangeNotifier {
   /// after its Herdr workspace or tmux session too ("dev: lf-seguros-web").
   String? Function(String savedHostId)? machineName;
 
+  /// The label of a Herdr workspace (host id, Herdr server, workspace id)
+  /// as the app's live view knows it. Agents of a companion that does not
+  /// report labels itself take it as their name (CON-116); the app wires
+  /// it to the live hub.
+  String? Function(String hostId, String server, String workspaceId)?
+  workspaceLabelFor;
+
   final AgentStatusThrottle _statusThrottle;
   final DateTime Function() _clock;
   Timer? _statusTimer;
@@ -1627,8 +1634,9 @@ class AgentAttentionController extends ChangeNotifier {
 
   Future<void> _applySnapshot(
     _HostMonitor monitor,
-    AgentAttentionSnapshot snapshot,
+    AgentAttentionSnapshot raw,
   ) async {
+    final snapshot = _withWorkspaceLabels(monitor.host.id, raw);
     monitor.lastSequence = snapshot.sequence ?? monitor.lastSequence;
     final previousStates = monitor.lastStates;
     final notify = monitor.sawInitialSnapshot;
@@ -1668,6 +1676,43 @@ class AgentAttentionController extends ChangeNotifier {
       },
     );
     _syncStatus();
+  }
+
+  /// [snapshot] with each Herdr agent its companion left unlabelled named
+  /// after its workspace, when [workspaceLabelFor] knows the label.
+  AgentAttentionSnapshot _withWorkspaceLabels(
+    String hostId,
+    AgentAttentionSnapshot snapshot,
+  ) {
+    final labelFor = workspaceLabelFor;
+    if (labelFor == null) return snapshot;
+    var changed = false;
+    final agents = <AgentInfo>[];
+    for (final agent in snapshot.agents) {
+      final label = _labelOf(labelFor, hostId, agent);
+      changed |= label != null;
+      agents.add(label == null ? agent : agent.withWorkspaceLabel(label));
+    }
+    if (!changed) return snapshot;
+    return AgentAttentionSnapshot(
+      agents: agents,
+      sequence: snapshot.sequence,
+      capabilities: snapshot.capabilities,
+      kinds: snapshot.kinds,
+    );
+  }
+
+  static String? _labelOf(
+    String? Function(String, String, String) labelFor,
+    String hostId,
+    AgentInfo agent,
+  ) {
+    final server = agent.herdrServer;
+    final workspace = agent.workspace;
+    if (agent.workspaceLabel != null || server == null || workspace == null) {
+      return null;
+    }
+    return labelFor(hostId, server, workspace);
   }
 
   /// Brings the host's agent notifications in line with its agents: one

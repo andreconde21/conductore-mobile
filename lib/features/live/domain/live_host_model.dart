@@ -116,6 +116,13 @@ class LiveHostModel {
   /// Whether the companion reported [serverId] at all yet.
   bool knowsServer(String serverId) => entities.containsKey('srv:$serverId');
 
+  /// The label of Herdr workspace [workspaceId] on [serverId], when one
+  /// was pushed (an empty label is none).
+  String? workspaceLabel(String serverId, String workspaceId) {
+    final label = _s(entities['ws:$serverId:$workspaceId']?['label']).trim();
+    return label.isEmpty ? null : label;
+  }
+
   Iterable<Map<String, Object?>> _ofKind(String kind, String server) =>
       entities.values.where((e) => e['kind'] == kind && e['server'] == server);
 

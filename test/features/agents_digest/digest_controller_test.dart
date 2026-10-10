@@ -72,6 +72,36 @@ void main() {
     detach();
   });
 
+  testWidgets("an older companion's digest takes the agent's Herdr "
+      'workspace label from the monitor (CON-116)', (tester) async {
+    runner = FakeDigestRunner(
+      facts: digestReplyJson([
+        digestAgentJson('api', name: 'root'),
+        digestAgentJson('web', name: 'web'),
+      ]),
+    );
+    source = FakeDigestSource([digestHost('box')], {'box': runner});
+    source.live['box'] = const [
+      AgentInfo(
+        id: 'api',
+        name: 'Infrastructure',
+        state: AgentAttentionState.needsInput,
+        workspace: 'w4',
+        workspaceLabel: 'Infrastructure',
+      ),
+      AgentInfo(id: 'web', name: 'web', state: AgentAttentionState.idle),
+    ];
+    final controller = build();
+    final detach = controller.attachView();
+    await tester.pump();
+    await tester.pump();
+    expect(controller.overview.agents.map((a) => a.name).toSet(), {
+      'Infrastructure',
+      'web',
+    });
+    detach();
+  });
+
   testWidgets('keeps the facts fresh with no view while asked, for the '
       'stuck alerts', (tester) async {
     runner = FakeDigestRunner(

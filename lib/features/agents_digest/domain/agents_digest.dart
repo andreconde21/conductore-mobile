@@ -255,6 +255,29 @@ class DigestAgent {
 
   String get key => '$hostId/$sessionId';
 
+  /// This agent called [name] (its Herdr workspace's label, CON-116).
+  DigestAgent named(String name) => DigestAgent(
+    hostId: hostId,
+    hostName: hostName,
+    sessionId: sessionId,
+    name: name,
+    state: state,
+    attention: attention,
+    project: project,
+    live: live,
+    lastActivityAt: lastActivityAt,
+    headline: headline,
+    stuck: stuck,
+    pending: pending,
+    facts: facts,
+    summary: summary,
+    summaryFresh: summaryFresh,
+    summaryPending: summaryPending,
+    lastError: lastError,
+    fromStatus: fromStatus,
+    kind: kind,
+  );
+
   bool get working => state == 'working';
   bool get ended => state == 'ended';
 
@@ -488,7 +511,7 @@ DigestReport digestFromStatus({
           sessionId: agent.id,
           name: agent.name,
           kind: agent.kind.isEmpty ? defaultAgentKind : agent.kind,
-          project: agent.projectLabel,
+          project: agent.repoLabel,
           fromStatus: true,
           state: switch (agent.state) {
             AgentAttentionState.working => 'working',

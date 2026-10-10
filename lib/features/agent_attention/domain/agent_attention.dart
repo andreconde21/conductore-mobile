@@ -415,6 +415,8 @@ class AgentInfo {
     this.lastEvent,
     this.lastToolName,
     this.lastError,
+    this.workspaceLabel,
+    this.herdrServer,
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -478,11 +480,29 @@ class AgentInfo {
   /// the companion reports it until the next prompt.
   final String? lastError;
 
-  /// The project the inbox groups this agent under: the provider's
-  /// [project], else the basename of a path-like [workspace] (the
-  /// companion puts the agent's cwd there). Herdr's opaque workspace ids
-  /// are not projects, so those agents have none.
+  /// The label of the agent's Herdr workspace (what Herdr and sheprd call
+  /// it, CON-116), when the companion or the app's live view knows it.
+  final String? workspaceLabel;
+
+  /// The Herdr server whose workspace [workspace] is (`herdr`,
+  /// `herdr@<session>`), when the provider can tell.
+  final String? herdrServer;
+
+  /// What the app calls this agent's project: its Herdr [workspaceLabel],
+  /// else its [repoLabel]. The inbox groups by it.
   String? get projectLabel {
+    final label = workspaceLabel?.trim();
+    if (label != null && label.isNotEmpty) {
+      return label;
+    }
+    return repoLabel;
+  }
+
+  /// The repository the agent works in: the provider's [project], else
+  /// the basename of a path-like [workspace] (the companion puts the
+  /// agent's cwd there). Herdr's opaque workspace ids are not projects, so
+  /// those agents have none. Usage rows and layout rules match on it.
+  String? get repoLabel {
     final explicit = project?.trim();
     if (explicit != null && explicit.isNotEmpty) {
       return explicit;
@@ -518,6 +538,35 @@ class AgentInfo {
       lastEvent: lastEvent,
       lastToolName: lastToolName,
       lastError: lastError,
+      workspaceLabel: workspaceLabel,
+      herdrServer: herdrServer,
+    );
+  }
+
+  /// A copy named after its Herdr workspace [label] (CON-116), name
+  /// included: what newer companions send, for the older ones.
+  AgentInfo withWorkspaceLabel(String label) {
+    return AgentInfo(
+      id: id,
+      name: label,
+      state: state,
+      kind: kind,
+      workspace: workspace,
+      tab: tab,
+      pane: pane,
+      stateChangedAt: stateChangedAt,
+      stateSequence: stateSequence,
+      pendingRequests: pendingRequests,
+      lastMessage: lastMessage,
+      project: project,
+      usage: usage,
+      lastAutoApprovedAt: lastAutoApprovedAt,
+      permissionMode: permissionMode,
+      lastEvent: lastEvent,
+      lastToolName: lastToolName,
+      lastError: lastError,
+      workspaceLabel: label,
+      herdrServer: herdrServer,
     );
   }
 
@@ -541,6 +590,8 @@ class AgentInfo {
         other.lastEvent == lastEvent &&
         other.lastToolName == lastToolName &&
         other.lastError == lastError &&
+        other.workspaceLabel == workspaceLabel &&
+        other.herdrServer == herdrServer &&
         _sameRequests(other.pendingRequests, pendingRequests);
   }
 
@@ -575,7 +626,13 @@ class AgentInfo {
     usage,
     lastAutoApprovedAt,
     permissionMode,
-    Object.hash(lastEvent, lastToolName, lastError),
+    Object.hash(
+      lastEvent,
+      lastToolName,
+      lastError,
+      workspaceLabel,
+      herdrServer,
+    ),
     Object.hashAll(pendingRequests),
   );
 }

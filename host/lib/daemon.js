@@ -878,6 +878,7 @@ class Daemon {
       case 'digest':
         // Everything `digest` needs in one answer: the agents and their activity.
         await this.drain()
+        this.syncHerdrLabels()
         this.expireAgents()
         this.commit(state.prune(this.state))
         this.activity.prune()

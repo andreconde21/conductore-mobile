@@ -211,7 +211,7 @@ abstract final class ProjectTreeBuilder {
           node.label,
           for (final agent in nodeAgents) ...[
             ?_pathOf(agent),
-            ?agent.projectLabel,
+            ?agent.repoLabel,
           ],
         ];
         final _Group group;
@@ -444,7 +444,7 @@ abstract final class ProjectTreeBuilder {
   static String? _projectName(List<AgentInfo> agents) {
     final votes = <String, int>{};
     for (final agent in agents) {
-      final project = agent.projectLabel?.trim();
+      final project = agent.repoLabel?.trim();
       if (project == null || project.isEmpty) continue;
       votes[project] = (votes[project] ?? 0) + 1;
     }

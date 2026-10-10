@@ -266,6 +266,10 @@ void main() {
     // Previews of Herdr sessions the shared focus is not on.
     herdrRefreshInterval: const Duration(seconds: 15),
   );
+  // Agents of older companions take their Herdr workspace's label from
+  // the live view when it has one (CON-116).
+  agentAttention.workspaceLabelFor = (hostId, server, workspaceId) =>
+      connectFlow.live[hostId]?.model.workspaceLabel(server, workspaceId);
   // Collects recent directories (OSC 7, tmux on detach, companion agents)
   // for the app's whole lifetime, like the widget pusher below.
   RecentDirectoryTracker(

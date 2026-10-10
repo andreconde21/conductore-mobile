@@ -25,9 +25,12 @@ docs · Idle · Rewrote the intro.
 ```
 
 - Agents are named as the session tiles name them (CON-079,
-  `agent_naming.dart`): the project, never a folder hash. A Claude Code
-  worktree (`<repo>/.claude/worktrees/agent-<hex>`) or a Herdr one
-  (`~/.herdr/worktrees/<repo>/<branch>`) is named after its repository.
+  `agent_naming.dart`): an agent in a Herdr pane by its Herdr workspace,
+  the name Herdr and sheprd show (CON-116; with an older companion, once
+  the app's live view has seen the workspace), else the project, never a
+  folder hash. A Claude Code worktree (`<repo>/.claude/worktrees/agent-<hex>`)
+  or a Herdr one (`~/.herdr/worktrees/<repo>/<branch>`) is named after its
+  repository.
   Agents that are not Claude Code add their kind, for example "(Codex)".
 - The text after the state is the pending request, the dashboard's summary
   line or the agent's last message (never its generic "is waiting for your

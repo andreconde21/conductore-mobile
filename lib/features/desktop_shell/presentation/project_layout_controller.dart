@@ -545,7 +545,7 @@ class ProjectLayoutController extends ChangeNotifier {
   /// [ProjectGroup.otherKey].
   String projectOfAgent(SavedHost host, {AgentInfo? live, String? project}) {
     final layout = this.layout;
-    final repo = project ?? live?.projectLabel;
+    final repo = project ?? live?.repoLabel;
     final names = aliasesOf([host]).values.single;
     final workspace = live?.workspace?.trim() ?? '';
     final tab = live?.tab?.trim() ?? '';
@@ -1004,7 +1004,7 @@ class ProjectLayoutController extends ChangeNotifier {
     final byRepo = <String, String>{};
     for (final group in groups) {
       for (final (_, agent) in group.agents) {
-        final repo = agent.projectLabel?.toLowerCase();
+        final repo = agent.repoLabel?.toLowerCase();
         if (repo != null) byRepo.putIfAbsent(repo, () => group.key);
       }
     }
