@@ -187,6 +187,24 @@ class HomeProjectsList extends StatelessWidget {
                     controller.sheprdEditsPaused == null)
             ? null
             : (position) => _projectMenu(context, project, position),
+        trailing:
+            project.isOther ||
+                (!controller.canEditLayout &&
+                    controller.sheprdEditsPaused == null)
+            ? null
+            : IconButton(
+                key: ValueKey('home-project-menu-${project.key}'),
+                tooltip: 'Quick actions and more',
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                color: AppPalette.of(context).mutedForeground,
+                onPressed: () => _projectMenu(context, project, null),
+                icon: const Icon(Icons.more_horiz_rounded),
+              ),
       ),
       if (!collapsed)
         for (final entry in entries)
@@ -196,7 +214,8 @@ class HomeProjectsList extends StatelessWidget {
               node: entry.node,
               dot: entry.dot,
               sheprd: entry.sheprdOf(entry.node),
-              detail: names[entry.node.machineId] ?? '',
+              title: _entryText(entry, project, names).title,
+              detail: _entryText(entry, project, names).subtitle,
               faded: !entry.active || entry.hidden,
               onTap: () => _open(entry, entry.node),
               onLongPress: () => showProjectEntrySheet(
@@ -214,12 +233,8 @@ class HomeProjectsList extends StatelessWidget {
                   node: agent,
                   dot: entry.dotOf(agent),
                   sheprd: entry.sheprdOf(agent),
-                  detail: [
-                    if (entry.node.label.toLowerCase() !=
-                        project.name.toLowerCase())
-                      entry.node.label,
-                    names[entry.node.machineId] ?? '',
-                  ].where((part) => part.isNotEmpty).join(' · '),
+                  title: _agentText(entry, agent, project, names).title,
+                  detail: _agentText(entry, agent, project, names).subtitle,
                   faded:
                       !entry.active ||
                       entry.hidden ||
@@ -235,6 +250,28 @@ class HomeProjectsList extends StatelessWidget {
                 ),
     ];
   }
+
+  static AgentRowText _entryText(
+    ProjectEntry entry,
+    ProjectGroup project,
+    Map<String, String> names,
+  ) => AgentRowText.ofEntry(
+    entry,
+    projectName: project.name,
+    machine: names[entry.node.machineId] ?? '',
+  );
+
+  static AgentRowText _agentText(
+    ProjectEntry entry,
+    SidebarNode agent,
+    ProjectGroup project,
+    Map<String, String> names,
+  ) => AgentRowText.of(
+    agent,
+    workspace: entry.node.label,
+    projectName: project.name,
+    machine: names[entry.node.machineId] ?? '',
+  );
 
   /// Opens [row]; with sheprd synced, an unread agent is read from then on
   /// (sheprd does the same when an agent gets focus).
@@ -279,12 +316,16 @@ class _HomeProjectRow extends StatelessWidget {
     required this.faded,
     required this.onTap,
     required this.onLongPress,
+    this.title,
     this.dot,
     this.sheprd,
     super.key,
   });
 
   final SidebarNode node;
+
+  /// The prominent text; null uses [node]'s label.
+  final String? title;
 
   /// The dot to show: sheprd's presence when synced; null uses [node]'s.
   final SidebarDot? dot;
@@ -330,7 +371,7 @@ class _HomeProjectRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    node.label,
+                    title ?? node.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
