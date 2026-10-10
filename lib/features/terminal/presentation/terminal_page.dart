@@ -2696,7 +2696,6 @@ class _TerminalPageState extends State<TerminalPage>
                                       await activeSession.connect();
                                       _focusNode.requestFocus();
                                     },
-                              onToggleFullscreen: _toggleFullscreen,
                               onNewSession: connectFlow == null
                                   ? null
                                   : () => _openNewSession(connectFlow),
@@ -2704,13 +2703,6 @@ class _TerminalPageState extends State<TerminalPage>
                                   ? () => unawaited(_showDesktopShortcuts())
                                   : null,
                               onQuickActions: _quickActionsFor(activeSession),
-                              onComposePrompt:
-                                  PlatformFeatures.isDesktop &&
-                                      activeSession != null
-                                  ? () => unawaited(
-                                      _openPromptComposer(activeSession),
-                                    )
-                                  : null,
                               onRecentDirectories:
                                   PlatformFeatures.isDesktop &&
                                       activeSession != null
@@ -2718,32 +2710,6 @@ class _TerminalPageState extends State<TerminalPage>
                                       _openRecentDirectories(activeSession),
                                     )
                                   : null,
-                              onOpenChatView:
-                                  attention == null ||
-                                      activeSession == null ||
-                                      activeSession.host.isLocal
-                                  ? null
-                                  : () => openChatViewForHost(
-                                      context: context,
-                                      attention: attention,
-                                      host: activeSession.host,
-                                      dictation: _dictation,
-                                      accessoryBuilder: _chatPreviewChip(
-                                        activeSession.host,
-                                      ),
-                                      imageAttacher: _promptImageAttacher(
-                                        activeSession.host,
-                                      ),
-                                      pasteImages: widget
-                                          .themeController
-                                          .pasteImagesAsFiles,
-                                      onOpenTerminal: (agent) =>
-                                          _showAgentTerminal(
-                                            attention,
-                                            activeSession.host,
-                                            agent,
-                                          ),
-                                    ),
                               attentionCount: attention?.attentionCount ?? 0,
                               onOpenAgentAttention: !showAgents
                                   ? null

@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
@@ -12,7 +11,6 @@ import 'package:conduit/features/companion_setup/presentation/companion_setup_co
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
-import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -107,41 +105,6 @@ void main() {
     await tester.pump();
     expect(find.widgetWithText(TextButton, 'Chat'), findsNothing);
     expect(chatViewAvailable(controller, companionHost()), isTrue);
-  });
-
-  testWidgets('the overflow menu has "Open chat view" when wired', (
-    tester,
-  ) async {
-    final workspace = TerminalWorkspaceController(
-      ImmediateTerminalRepository(TrackableTerminalSession()),
-    );
-    addTearDown(workspace.dispose);
-    final session = workspace.open(buildHost('a'));
-    var opened = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: TerminalHeader(
-            workspace: workspace,
-            activeSession: session,
-            palette: AppPalette.everforest,
-            brightness: Brightness.dark,
-            onBack: () {},
-            onTabsChanged: () {},
-            fileTabs: const [],
-            activeFileTab: null,
-            onFileTabSelected: (_) {},
-            onFileTabClosed: (_) {},
-            onOpenChatView: () => opened += 1,
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.byTooltip('More'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Open chat view'));
-    await tester.pumpAndSettle();
-    expect(opened, 1);
   });
 
   testWidgets('a host without the companion gets install instructions', (

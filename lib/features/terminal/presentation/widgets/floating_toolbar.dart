@@ -21,9 +21,6 @@ import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Minimum upward travel of a drag on the pill before it opens the palette.
-const floatingToolbarSwipeThreshold = 32.0;
-
 /// Height of the pill itself, buttons included.
 const floatingToolbarPillHeight = 40.0;
 
@@ -57,10 +54,14 @@ const floatingToolbarSubmitDelay = Duration(milliseconds: 120);
 /// * Esc: tap sends Escape; long-press sends Ctrl+C.
 /// * Tab: tap sends Tab; long-press sends Shift+Tab (Claude Code cycles its
 ///   permission mode with it).
-/// * ↻: tap redraws the screen (Ctrl+L); long-press reconnects the session.
+/// * ^L: tap redraws the screen (Ctrl+L); long-press reconnects the
+///   session. The ↻ glyph is kept for Reconnect, as everywhere else.
 /// * Herdr: opens the pane switcher and Herdr shortcuts.
-/// * Swipe up anywhere on the pill: opens the quick prompt / snippet palette.
 /// * Long-press the pill (or ⋯): choose and order the buttons.
+///
+/// There is no swipe on the pill (CON-106): the quick prompt and snippet
+/// palette opens from the Snippets button, and the mic is in the chat
+/// line.
 class FloatingTerminalToolbar extends StatefulWidget {
   const FloatingTerminalToolbar({
     required this.keyRows,
@@ -75,7 +76,7 @@ class FloatingTerminalToolbar extends StatefulWidget {
   /// The classic key-row bar for this session, shown behind the ⋯ button.
   final TerminalKeyboardBar keyRows;
 
-  /// Long-press on the ↻ button. When null the button only redraws.
+  /// Long-press on the ^L button. When null the button only redraws.
   final Future<void> Function()? onReconnect;
 
   /// The buttons to show, in order; the ⋯ button always follows.
@@ -105,7 +106,6 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
   /// Set when the user hid the soft keyboard from the pill: key presses then
   /// stop re-requesting focus, which would pop the keyboard straight back.
   bool _keyboardHidden = false;
-  double _swipeDistance = 0;
 
   TerminalSessionController get _controller => widget.keyRows.controller;
   FocusNode get _focusNode => widget.keyRows.focusNode;
@@ -162,10 +162,6 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
                   ),
                 GestureDetector(
                   behavior: HitTestBehavior.translucent,
-                  onVerticalDragStart: (_) => _swipeDistance = 0,
-                  onVerticalDragUpdate: (details) =>
-                      _swipeDistance += details.delta.dy,
-                  onVerticalDragEnd: _handleSwipeEnd,
                   onLongPress: widget.onItemsChanged == null
                       ? null
                       : _openConfigurator,
@@ -319,7 +315,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       ),
       TerminalPillButton.reconnect => _PillButton(
         key: const ValueKey('toolbar-redraw'),
-        icon: Icons.refresh_rounded,
+        label: '^L',
         tooltip: widget.onReconnect == null
             ? 'Redraw screen (Ctrl+L)'
             : 'Redraw screen (Ctrl+L). Long-press to reconnect',
@@ -455,17 +451,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
   @override
   void focusTerminalAfterMultiplexer() => _focusTerminal();
 
-  void _handleSwipeEnd(DragEndDetails details) {
-    final flungUp = (details.primaryVelocity ?? 0) < -600;
-    if (_swipeDistance <= -floatingToolbarSwipeThreshold || flungUp) {
-      unawaited(_openPalette());
-    }
-    _swipeDistance = 0;
-  }
-
   Future<void> _openPalette() async {
-    final onDictate = widget.keyRows.onDictate;
-    var dictate = false;
     await showToolbarSnippetPalette(
       context: context,
       palette: _palette,
@@ -476,15 +462,8 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       onQuickPrompt: _runQuickPrompt,
       onSnippet: _sendSnippet,
       onPassword: _sendText,
-      onDictate: onDictate == null ? null : () => dictate = true,
     );
-    if (!mounted) return;
-    if (dictate) {
-      // The chat line takes the focus itself.
-      onDictate!();
-    } else {
-      _focusTerminal();
-    }
+    if (mounted) _focusTerminal();
   }
 
   void _runQuickPrompt(ToolbarQuickPrompt prompt) {

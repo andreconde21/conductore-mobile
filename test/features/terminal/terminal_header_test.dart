@@ -3,6 +3,7 @@ import 'package:conduit/features/quick_actions/domain/quick_action.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
+import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
@@ -83,16 +84,15 @@ void main() {
     expect(workspace.activeSession!.host.id, 'a#herdr:w1');
   });
 
-  testWidgets('overflow keeps reconnect and close; fullscreen hides row', (
-    tester,
-  ) async {
+  testWidgets('overflow keeps reconnect and close; the Full key behind ⋯ '
+      'hides the row', (tester) async {
     final workspace = await pumpTerminal(tester);
 
     await tester.tap(find.byTooltip('More'));
     await tester.pumpAndSettle();
     expect(find.text('Host a: TheCalendar'), findsOneWidget);
     expect(find.text('Reconnect'), findsOneWidget);
-    expect(find.text('Fullscreen'), findsOneWidget);
+    expect(find.text('Fullscreen'), findsNothing);
     expect(find.text('Close session'), findsOneWidget);
     // No connect flow here, so no "New session".
     expect(find.text('New session'), findsNothing);
@@ -101,9 +101,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(workspace.sessions, hasLength(1));
 
-    await tester.tap(find.byTooltip('More'));
+    await tester.tap(find.byKey(const ValueKey('toolbar-more')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Fullscreen'));
+    await tester.dragUntilVisible(
+      find.byIcon(Icons.fullscreen_rounded),
+      find
+          .descendant(
+            of: find.byType(TerminalKeyboardBar),
+            matching: find.byType(ListView),
+          )
+          .first,
+      const Offset(-200, 0),
+    );
+    await tester.tap(find.byIcon(Icons.fullscreen_rounded));
     await tester.pumpAndSettle();
     expect(find.byType(TerminalHeader), findsNothing);
   });
@@ -226,6 +236,39 @@ void main() {
     expect(find.byType(PopupMenuDivider), findsNWidgets(3));
   });
 
+  testWidgets('phones: the ⋮ menu keeps only what has no button elsewhere '
+      '(CON-106)', (tester) async {
+    await pumpTerminal(tester, withVerifier: true);
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+
+    final entries = tester
+        .widgetList<PopupMenuItem<TerminalHeaderAction>>(
+          find.byType(PopupMenuItem<TerminalHeaderAction>),
+        )
+        .where((item) => item.value != null)
+        .map((item) => item.value)
+        .toList();
+    expect(entries, [
+      TerminalHeaderAction.gitDiff,
+      TerminalHeaderAction.livePreview,
+      TerminalHeaderAction.reconnect,
+      // New session needs a connect flow, which this page has none of.
+      TerminalHeaderAction.settings,
+      TerminalHeaderAction.closeSession,
+    ]);
+    // Chat View is the Chat key, fullscreen the Full key, the composer is
+    // in the chat line, and shortcuts are for desktops.
+    for (final gone in [
+      'Open chat view',
+      'Fullscreen',
+      'Compose a prompt…',
+      'Keyboard shortcuts',
+    ]) {
+      expect(find.text(gone), findsNothing, reason: gone);
+    }
+  });
+
   testWidgets('overflow entries call back with the chosen tool', (
     tester,
   ) async {
@@ -235,7 +278,6 @@ void main() {
     addTearDown(workspace.dispose);
     final session = workspace.open(buildHost('a'));
     final tools = <SessionTool>[];
-    var chats = 0;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -251,7 +293,6 @@ void main() {
             activeFileTab: null,
             onFileTabSelected: (_) {},
             onFileTabClosed: (_) {},
-            onOpenChatView: () => chats += 1,
             onOpenSessionTool: tools.add,
           ),
         ),
@@ -267,10 +308,8 @@ void main() {
 
     await choose('Git diff');
     await choose('Live preview');
-    await choose('Open chat view');
 
     expect(tools, [SessionTool.gitDiff, SessionTool.livePreview]);
-    expect(chats, 1);
     expect(find.byIcon(Icons.more_vert_rounded), findsOneWidget);
   });
 
@@ -283,8 +322,7 @@ void main() {
       find.byKey(const ValueKey('terminal-menu-quick-actions')),
       findsNothing,
     );
-    // The desktop-only entries stay off phones.
-    expect(find.byKey(const ValueKey('terminal-menu-compose')), findsNothing);
+    // The desktop-only entry stays off phones.
     expect(
       find.byKey(const ValueKey('terminal-menu-recent-dirs')),
       findsNothing,
