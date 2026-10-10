@@ -133,7 +133,10 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('settings-section-terminal')));
     await tester.pumpAndSettle();
-    expect(find.text('Send mouse taps'), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-body-terminal')), findsOne);
+    expect(find.byKey(const ValueKey('herdr-may-move-focus')), findsOneWidget);
+    // Under Advanced (CON-108).
+    expect(find.text('Send mouse taps'), findsNothing);
   });
 
   testWidgets('swiping down on the row opens the switcher, which leads to '
