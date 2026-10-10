@@ -89,8 +89,8 @@ Future<bool> openPreferredChatView(
       !attention.monitoringEnabled(session.host)) {
     return false;
   }
-  ChatSessionLocation location() =>
-      ChatSessionLocation(herdrWorkspaceId: herdr?.workspaceOf(session) ?? '');
+  final location = await preferredChatLocation(session, herdr);
+  if (!context.mounted) return false;
   // Cheap test first: a session that opens in the terminal anyway needs
   // no agent lookup.
   final viewHostId = _viewHostId(session.host, location());
@@ -158,6 +158,23 @@ Future<bool> openPreferredChatView(
   } finally {
     if (identical(_waiting[attention], pending)) _waiting[attention] = null;
   }
+}
+
+/// Where [openPreferredChatView] looks for [session]'s Claude session, as
+/// a reader called on each step: a restored session learns its workspace
+/// as it reconnects. A session whose Herdr workspace was closed is read
+/// once with [chatSessionLocation]: the pane Herdr shows, as the
+/// terminal's Chat button opens (CON-103).
+Future<ChatSessionLocation Function()> preferredChatLocation(
+  TerminalSessionController session,
+  HerdrSessionFocus? herdr,
+) async {
+  if (herdr != null && herdr.isUnpinned(session)) {
+    final shown = await chatSessionLocation(session, herdr);
+    return () => shown;
+  }
+  return () =>
+      ChatSessionLocation(herdrWorkspaceId: herdr?.workspaceOf(session) ?? '');
 }
 
 /// Where Chat View looks for the Claude session [session] shows: the
