@@ -570,6 +570,40 @@ class ProjectLayoutController extends ChangeNotifier {
     return index == null ? ProjectGroup.otherKey : layout.groups[index].name;
   }
 
+  /// [agent] on [host] as the launcher's `project` and `active` columns
+  /// read it (CON-119): its project as [projectOfAgent] places it (null
+  /// for Other), and whether the "active" filter keeps it whatever its
+  /// last change: with "Sync with sheprd", what sheprd's active view says
+  /// of its pane; else busy, the dots the filter keeps (working, needing
+  /// you, finished). A change within [recentHours] keeps it too; the
+  /// launcher's side judges that when asked.
+  ({String? project, bool busy}) launcherFacts(
+    SavedHost host,
+    AgentInfo agent,
+  ) {
+    final project = projectOfAgent(host, live: agent);
+    final view = sheprdView;
+    SheprdAgentView? synced;
+    if (view != null) {
+      final pane = agent.pane ?? agent.id;
+      for (final name in aliasesOf([host]).values.single) {
+        synced = view.agents['$name/$pane'];
+        if (synced != null) break;
+      }
+    }
+    return (
+      project: project == ProjectGroup.otherKey ? null : project,
+      busy:
+          synced?.active ??
+          switch (SidebarDot.of(agent.state)) {
+            SidebarDot.needsYou ||
+            SidebarDot.working ||
+            SidebarDot.done => true,
+            _ => false,
+          },
+    );
+  }
+
   // sidebar.toml from the machines.
 
   /// Asks every machine whose companion can tell for its sidebar.toml,

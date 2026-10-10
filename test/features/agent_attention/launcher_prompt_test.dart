@@ -559,5 +559,202 @@ void main() {
         'Conductore is not monitoring that machine',
       );
     });
+
+    // Contract 3 (CON-119): answers held while Conductore was locked.
+
+    QueuedLauncherAnswer held(
+      String verdict, {
+      String requestId = 'r1',
+      String text = '',
+      DateTime? since,
+      DateTime? queuedAt,
+    }) => QueuedLauncherAnswer(
+      action: action(verdict, requestId: requestId, text: text),
+      title: 'api',
+      host: 'Host h',
+      since: since,
+      queuedAt: queuedAt ?? DateTime.now(),
+    );
+
+    AgentCommandResult waiting(int updatedAt) => ok(
+      jsonEncode({
+        'version': 1,
+        'seq': 1,
+        'agents': [
+          {
+            'sessionId': 's-1',
+            'cwd': '/w/api',
+            'state': 'waiting_input',
+            'lastMessage': 'Which branch?',
+            'updatedAt': updatedAt,
+            'pending': <Object>[],
+          },
+        ],
+      }),
+    );
+
+    test('a held answer is sent after a fresh look at the agent', () async {
+      final (controller, _, runner) = await run([
+        version,
+        permission,
+        permission,
+        ok('{"ok":true}'),
+        status('working'),
+      ]);
+      expect(
+        await controller.deliverQueuedLauncherAnswer(held('allow'), host),
+        isNull,
+      );
+      // version, the first status, the status read again, then the answer.
+      expect(runner.commands[2], isNot(contains('decide')));
+      expect(runner.commands[3], contains('decide r1 allow'));
+    });
+
+    test('a held answer to a request answered elsewhere is dropped', () async {
+      final (controller, _, runner) = await run([
+        version,
+        permission,
+        // Answered in the terminal while Conductore was locked.
+        status('working'),
+      ]);
+      expect(
+        await controller.deliverQueuedLauncherAnswer(held('allow'), host),
+        LauncherPrompt.staleError,
+      );
+      expect(runner.commands, hasLength(3));
+      expect(
+        runner.commands.where((command) => command.contains('decide')),
+        isEmpty,
+      );
+    });
+
+    test('a held answer to another request of the agent is dropped', () async {
+      final (controller, _, runner) = await run([
+        version,
+        permission,
+        status(
+          'needs_permission',
+          pending: {'id': 'r2', 'toolName': 'Bash', 'summary': 'rm -rf build'},
+        ),
+      ]);
+      expect(
+        await controller.deliverQueuedLauncherAnswer(held('allow'), host),
+        LauncherPrompt.staleError,
+      );
+      expect(runner.commands, hasLength(3));
+    });
+
+    test('a held reply goes only into the wait it answered', () async {
+      final since = DateTime.fromMillisecondsSinceEpoch(1790000000000);
+      final (controller, _, runner) = await run([
+        version,
+        waiting(1790000000000),
+        // The agent moved on and waits again: another wait.
+        waiting(1790000600000),
+      ]);
+      expect(
+        await controller.deliverQueuedLauncherAnswer(
+          held('reply', requestId: 'reply', text: 'Use main', since: since),
+          host,
+        ),
+        LauncherPrompt.staleError,
+      );
+      expect(runner.commands, hasLength(3));
+
+      final (same, _, sameRunner) = await run([
+        version,
+        waiting(1790000000000),
+        waiting(1790000000000),
+        ok('{"ok":true}'),
+        status('working'),
+      ]);
+      expect(
+        await same.deliverQueuedLauncherAnswer(
+          held('reply', requestId: 'reply', text: 'Use main', since: since),
+          host,
+        ),
+        isNull,
+      );
+      expect(sameRunner.commands[3], contains('send s-1 --text-b64 '));
+    });
+
+    test('a held answer expires after 15 minutes', () async {
+      final (controller, _, runner) = await run([version, permission]);
+      final queuedAt = DateTime(2026, 10, 10, 12);
+      final answer = held('allow', queuedAt: queuedAt);
+      expect(
+        await controller.deliverQueuedLauncherAnswer(
+          answer,
+          host,
+          now: () => queuedAt.add(QueuedLauncherAnswer.expiry),
+        ),
+        QueuedLauncherAnswer.expiredError,
+      );
+      expect(runner.commands, hasLength(2));
+      expect(
+        answer.expiredAt(
+          queuedAt.add(
+            QueuedLauncherAnswer.expiry - const Duration(seconds: 1),
+          ),
+        ),
+        isFalse,
+      );
+    });
+
+    test('a held answer for a machine not monitored in time says so', () async {
+      final (controller, _, _) = await run([version, permission]);
+      expect(
+        await controller.deliverQueuedLauncherAnswer(
+          held('allow'),
+          buildHost('other'),
+          wait: Duration.zero,
+        ),
+        'Conductore is not monitoring that machine',
+      );
+      expect(
+        await controller.deliverQueuedLauncherAnswer(held('allow'), null),
+        'The machine is no longer saved',
+      );
+    });
+
+    test('held answers parse from the platform', () {
+      final answers = PlatformLauncherActions.parseQueued([
+        {
+          'hostId': 'h',
+          'agentId': 's-1',
+          'requestId': 'reply',
+          'verdict': 'reply',
+          'text': 'Use main',
+          'key': 'h/s-1@1790000060000',
+          'title': 'api',
+          'host': 'dev',
+          'since': 1790000000000,
+          'queuedAt': 1790000060000,
+        },
+        // No time it was held, or no agent: unreadable.
+        {'hostId': 'h', 'agentId': 's-1', 'verdict': 'allow'},
+        {'hostId': 'h', 'verdict': 'allow', 'queuedAt': 1},
+        'junk',
+      ]);
+      expect(answers, [
+        QueuedLauncherAnswer(
+          action: const AgentPermissionAction(
+            notificationId: '',
+            hostId: 'h',
+            agentId: 's-1',
+            requestId: 'reply',
+            verdict: 'reply',
+            text: 'Use main',
+          ),
+          key: 'h/s-1@1790000060000',
+          title: 'api',
+          host: 'dev',
+          since: DateTime.fromMillisecondsSinceEpoch(1790000000000),
+          queuedAt: DateTime.fromMillisecondsSinceEpoch(1790000060000),
+        ),
+      ]);
+      expect(answers.single.label, 'api on dev');
+      expect(PlatformLauncherActions.parseQueued(null), isEmpty);
+    });
   });
 }

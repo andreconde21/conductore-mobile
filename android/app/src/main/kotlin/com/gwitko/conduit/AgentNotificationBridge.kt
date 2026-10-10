@@ -41,8 +41,12 @@ import java.security.SecureRandom
  * - `consumeOpenAgent()` -> `Map?`: the agent a tapped notification points
  *   at (`hostId`, `agentId`, `workspaceId`, `tabId`, `paneId`), cleared.
  * - `appLockState(locked, relockAtMillis)`: the app lock ([AppLockGuard]);
- *   while it is closed, button taps wait for the app and the launcher is
- *   refused.
+ *   while it is closed, button taps wait for the app and launcher answers
+ *   are held.
+ * - `takeLauncherAnswers()` -> `List<Map>`: the launcher answers held for
+ *   the unlock ([LauncherAnswerStore], CON-119), marked in flight; they
+ *   stay stored until `resolveLauncherAnswer(key)` (sent, or dropped on
+ *   purpose). `releaseLauncherAnswers(keys)` makes them takeable again.
  *
  * Plain and agent notifications take the same optional `open*` arguments;
  * tapping the notification body then opens the app at that agent (its
@@ -57,6 +61,8 @@ import java.security.SecureRandom
  *   runs; Dart calls `consumeOpenAgent`.
  * - `launcherAction(action)` -> `{ok, error}`: an answer from the launcher
  *   ([LauncherDetailsProvider.call]); null when Dart cannot take it now.
+ * - `launcherAnswersAvailable()`: a launcher answer was held; Dart takes
+ *   the held ones if the app lock lets it.
  *
  * Besides Allow / Deny / Always, an agent notification may carry answer
  * buttons (a single-choice question), a Reply with an inline text field
@@ -90,6 +96,8 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
             active = null
             // Nobody reports the app lock any more: count it as locked.
             AppLockGuard.current = null
+            // Held launcher answers it took but did not resolve stay held.
+            LauncherAnswerStore.releaseAll()
         }
         channel?.setMethodCallHandler(null)
         channel = null
@@ -209,6 +217,11 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         )
     }
 
+    /** Tells Dart that launcher answers wait (main thread). */
+    fun notifyLauncherAnswers() {
+        channel?.invokeMethod("launcherAnswersAvailable", null)
+    }
+
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
         val ctx = context
         if (ctx == null) {
@@ -256,6 +269,15 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                 result.success(null)
             }
             "consumePermissionActions" -> result.success(AgentNotificationStore.consumeActions(ctx))
+            "takeLauncherAnswers" -> result.success(LauncherAnswerStore.take(ctx).map { it.toMap() })
+            "resolveLauncherAnswer" -> {
+                call.argument<String>("key")?.let { LauncherAnswerStore.resolve(ctx, it) }
+                result.success(null)
+            }
+            "releaseLauncherAnswers" -> {
+                LauncherAnswerStore.release(call.argument<List<String>>("keys").orEmpty())
+                result.success(null)
+            }
             "appLockState" -> {
                 // Unreadable: locked, never a guess towards unlocked.
                 AppLockGuard.current = AppLockGuard.fromMap(call.arguments as? Map<*, *>) ?: AppLockGuard.State(locked = true, relockAtMillis = null)
@@ -529,7 +551,15 @@ object AgentNotificationStore {
         )
     }
 
-    fun showPlain(context: Context, id: String, title: String, body: String, open: OpenTarget? = null) {
+    /** A plain notification; with [timeoutAfterMillis] it goes by itself then (API 26+). */
+    fun showPlain(
+        context: Context,
+        id: String,
+        title: String,
+        body: String,
+        open: OpenTarget? = null,
+        timeoutAfterMillis: Long? = null,
+    ) {
         val manager = manager(context) ?: return
         val notification = builder(context)
             .setContentTitle(title)
@@ -538,6 +568,11 @@ object AgentNotificationStore {
             .lockScreenSafe(context, title)
             .setContentIntent(contentIntent(context, id, open))
             .setAutoCancel(true)
+            .apply {
+                if (timeoutAfterMillis != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    setTimeoutAfter(timeoutAfterMillis.coerceAtLeast(1L))
+                }
+            }
             .build()
         manager.notify(AgentNotificationModel.PLAIN_TAG, id.hashCode(), notification)
     }

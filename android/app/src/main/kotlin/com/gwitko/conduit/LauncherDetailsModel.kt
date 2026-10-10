@@ -42,13 +42,18 @@ object LauncherDetailsModel {
         "id", "title", "subtitle", "state", "progress", "updated_at", "deep_link",
         // Contract 2 (CON-082): only for agents needing the user.
         "question", "options", "answerable", "answer_note",
+        // Contract 3 (CON-119): the project view's grouping and filter.
+        "project", "active",
     )
     val SUMMARY_COLUMNS = arrayOf(
         "monitoring", "attention_count", "updated_at", "limit_5h_pct", "limit_7d_pct", "contract_version",
     )
 
     /** The contract version `/summary` reports (docs/launcher-details-provider.md). */
-    const val CONTRACT_VERSION = 2
+    const val CONTRACT_VERSION = 3
+
+    /** States the project view's "active" filter always keeps (busy dots). */
+    private val ACTIVE_STATES = setOf("working", "needsInput", "blocked", "finished")
 
     /** The Omarchy roles of a theme row, each `#RRGGBB`. */
     val THEME_ROLES = listOf(
@@ -73,6 +78,9 @@ object LauncherDetailsModel {
      * `answer_note` of an agent needing the user; every other agent has
      * them null. One needing the user without a prompt (an older payload,
      * or an agent the prompts have not caught up with) is not answerable.
+     *
+     * `project` is the agent's project as Conductore's project view groups
+     * it (null: Other); `active` ([active]) is judged at [nowMillis].
      */
     fun items(
         snapshot: AgentStatusSnapshot?,
@@ -80,6 +88,7 @@ object LauncherDetailsModel {
         packageName: String,
         activityClass: String,
         prompts: Map<String, LauncherPrompt> = emptyMap(),
+        nowMillis: Long = System.currentTimeMillis(),
     ): List<Array<Any?>> {
         if (snapshot == null) return emptyList()
         return snapshot.agents
@@ -98,7 +107,21 @@ object LauncherDetailsModel {
                     updatedAt,
                     token?.let { deepLink(packageName, activityClass, it) },
                 ).plus(elements = answerColumns(agent, prompt))
+                    .plus(elements = arrayOf<Any?>(agent.project, active(agent, snapshot.recentHours, nowMillis)))
             }
+    }
+
+    /**
+     * 1 when Conductore's project view keeps [agent] under its "active"
+     * filter at [nowMillis], else 0: busy (working, needing the user or
+     * finished; with "Sync with sheprd", what sheprd's active view says,
+     * as Dart wrote it in `busy`), or a state change within the view's
+     * [recentHours].
+     */
+    fun active(agent: AgentStatusLine, recentHours: Int, nowMillis: Long): Int {
+        val busy = agent.busy ?: (agent.state in ACTIVE_STATES)
+        val recent = agent.changedAtMillis > 0 && nowMillis - agent.changedAtMillis < recentHours * 3_600_000L
+        return if (busy || recent) 1 else 0
     }
 
     /** `question`, `options`, `answerable` and `answer_note` of one agent. */

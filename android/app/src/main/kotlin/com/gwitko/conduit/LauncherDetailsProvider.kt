@@ -48,8 +48,10 @@ import android.os.Process
  *
  * [call] (`reply`, `choose`) checks the caller's permission itself (the
  * manifest's read and write permissions do not cover it), refuses while
- * the device or the app lock is locked, and hands the answer to the running app
- * ([LauncherActions]); it never opens SSH or starts an engine.
+ * the device is locked, and hands the answer to the running app
+ * ([LauncherActions]); while the app lock is up or the engine is not
+ * running it holds the answer for the next unlock ([LauncherAnswerStore],
+ * contract 3). It never opens SSH or starts an engine.
  */
 class LauncherDetailsProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
@@ -70,6 +72,7 @@ class LauncherDetailsProvider : ContentProvider() {
                 ctx.packageName,
                 MainActivity::class.java.name,
                 LauncherPromptStore.load(ctx),
+                System.currentTimeMillis(),
             )
             PATH_SUMMARY -> LauncherDetailsModel.SUMMARY_COLUMNS to
                 listOf(LauncherDetailsModel.summary(snapshot, System.currentTimeMillis()))
@@ -95,7 +98,8 @@ class LauncherDetailsProvider : ContentProvider() {
     /**
      * `reply` (extras `text`) or `choose` (extras `index`, an Int) on the
      * item [arg]: a Bundle with `ok`, `error` and, when the app is still
-     * sending it after [LauncherActions.WAIT_MILLIS], `queued`.
+     * sending it after [LauncherActions.WAIT_MILLIS] or holds it for the
+     * unlock, `queued`; `pending_unlock` when held.
      */
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val ctx = context ?: throw IllegalStateException("Not attached")
@@ -117,6 +121,7 @@ class LauncherDetailsProvider : ContentProvider() {
             putBoolean(LauncherActions.RESULT_OK, outcome.ok)
             putString(LauncherActions.RESULT_ERROR, outcome.error)
             if (outcome.queued) putBoolean(LauncherActions.RESULT_QUEUED, true)
+            if (outcome.pendingUnlock) putBoolean(LauncherActions.RESULT_PENDING_UNLOCK, true)
         }
     }
 
@@ -157,6 +162,17 @@ class LauncherDetailsProvider : ContentProvider() {
         }
 
         override fun itemsChanged() = notifyItemsChanged(ctx)
+
+        override fun hold(prompt: LauncherPrompt, action: Map<String, String>): Boolean {
+            val agent = AgentStatusStore.load(ctx)?.agents?.firstOrNull { it.asDashboardLine().key == prompt.id }
+            val held = LauncherAnswerStore.hold(
+                ctx,
+                LauncherAnswerQueue.answerOf(prompt, action, agent, System.currentTimeMillis()),
+            )
+            // Unlocked meanwhile: the app takes it now.
+            if (held) Handler(Looper.getMainLooper()).post { AgentNotificationBridge.active?.notifyLauncherAnswers() }
+            return held
+        }
     }
 
     @Volatile

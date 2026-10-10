@@ -10,7 +10,8 @@ import 'package:conduit/features/sessions/domain/connect_target.dart';
 /// it: display label, machine name and state only (the same lock-screen
 /// safe subset the notifications use), plus where the agent lives so the
 /// launcher details provider (CON-075) can open it and order it by its
-/// last state change.
+/// last state change, and the project view's grouping and filter for the
+/// launcher's `project` and `active` columns (CON-119).
 class AgentStatusEntry {
   const AgentStatusEntry({
     required this.name,
@@ -22,6 +23,8 @@ class AgentStatusEntry {
     this.tab,
     this.pane,
     this.changedAt,
+    this.project,
+    this.busy,
   });
 
   final String name;
@@ -38,6 +41,16 @@ class AgentStatusEntry {
   /// When the agent entered [state], if its provider reports it.
   final DateTime? changedAt;
 
+  /// Its project as the project view groups it; null for Other (or when
+  /// the app has no project view).
+  final String? project;
+
+  /// Whether the project view's "active" filter keeps it whatever its
+  /// last change ([ProjectTreeBuilder.agentBusy]); null when unknown (the
+  /// native side then judges by [state]). A change within the view's
+  /// recent hours keeps it too: the native side judges that when asked.
+  final bool? busy;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'host': host,
@@ -50,6 +63,8 @@ class AgentStatusEntry {
     'pane': ?pane,
     if (changedAt case final at?)
       'changedAt': at.toUtc().millisecondsSinceEpoch,
+    'project': ?project,
+    'busy': ?busy,
   };
 
   static AgentStatusEntry fromJson(Map<String, Object?> json) {
@@ -75,6 +90,8 @@ class AgentStatusEntry {
       changedAt: changedAt is int
           ? DateTime.fromMillisecondsSinceEpoch(changedAt, isUtc: true)
           : null,
+      project: optional('project'),
+      busy: json['busy'] as bool?,
     );
   }
 
@@ -89,7 +106,9 @@ class AgentStatusEntry {
       other.workspace == workspace &&
       other.tab == tab &&
       other.pane == pane &&
-      other.changedAt == changedAt;
+      other.changedAt == changedAt &&
+      other.project == project &&
+      other.busy == busy;
 
   @override
   int get hashCode => Object.hash(
@@ -102,6 +121,8 @@ class AgentStatusEntry {
     tab,
     pane,
     changedAt,
+    project,
+    busy,
   );
 }
 
@@ -160,6 +181,11 @@ class AgentStatusLimit {
   int get hashCode => Object.hash(label, usedPct, resetsAt);
 }
 
+/// An agent's place in the project view, for the launcher (CON-119): its
+/// project's name (null: Other) and whether the "active" filter keeps it
+/// whatever its last change.
+typedef AgentProjectFacts = ({String? project, bool busy});
+
 /// What the native widget and tile render, pushed from Dart whenever the
 /// agent dashboard changes.
 ///
@@ -175,6 +201,7 @@ class AgentStatusSnapshot {
     this.dashboard,
     this.theme,
     this.pcTheme,
+    this.recentHours,
   });
 
   /// Payload format version; bump when the shape changes. 2: [limits].
@@ -216,6 +243,10 @@ class AgentStatusSnapshot {
   /// app follows none or has not read it yet.
   final AgentStatusPcTheme? pcTheme;
 
+  /// The project view's "active" window in hours (an optional addition to
+  /// 3, CON-119); null leaves the native default (24).
+  final int? recentHours;
+
   /// Builds the snapshot for every monitored host, sorting agents so the
   /// ones a human should look at come first.
   factory AgentStatusSnapshot.build({
@@ -229,21 +260,26 @@ class AgentStatusSnapshot {
     AgentStatusDashboard? dashboard,
     AgentStatusTheme? theme,
     AgentStatusPcTheme? pcTheme,
+    AgentProjectFacts? Function(String hostId, AgentInfo agent)? projectOf,
+    int? recentHours,
   }) {
     final entries = <AgentStatusEntry>[
       for (final host in hosts)
         for (final agent in host.agents)
-          AgentStatusEntry(
-            name: agent.name,
-            host: host.hostName,
-            state: agent.state,
-            hostId: host.hostId,
-            agentId: agent.id,
-            workspace: agent.workspace,
-            tab: agent.tab,
-            pane: agent.pane,
-            changedAt: agent.stateChangedAt,
-          ),
+          if (projectOf?.call(host.hostId, agent) case final facts)
+            AgentStatusEntry(
+              name: agent.name,
+              host: host.hostName,
+              state: agent.state,
+              hostId: host.hostId,
+              agentId: agent.id,
+              workspace: agent.workspace,
+              tab: agent.tab,
+              pane: agent.pane,
+              changedAt: agent.stateChangedAt,
+              project: facts?.project,
+              busy: facts?.busy,
+            ),
     ];
     // Stable sort by urgency only, so the provider's own ordering breaks
     // ties (the list does not jump around between polls).
@@ -263,6 +299,7 @@ class AgentStatusSnapshot {
       dashboard: monitoring ? dashboard : null,
       theme: theme,
       pcTheme: pcTheme,
+      recentHours: recentHours,
     );
   }
 
@@ -294,6 +331,7 @@ class AgentStatusSnapshot {
     if (dashboard case final dashboard?) 'dashboard': dashboard.toJson(),
     if (theme case final theme?) 'theme': theme.toJson(),
     if (pcTheme case final pcTheme?) 'pcTheme': pcTheme.toJson(),
+    'recentHours': ?recentHours,
   };
 
   String encode() => jsonEncode(toJson());
@@ -323,6 +361,7 @@ class AgentStatusSnapshot {
       dashboard: v3 ? AgentStatusDashboard.fromJson(json['dashboard']) : null,
       theme: v3 ? AgentStatusTheme.fromJson(json['theme']) : null,
       pcTheme: AgentStatusPcTheme.fromJson(json['pcTheme']),
+      recentHours: json['recentHours'] as int?,
     );
   }
 
@@ -339,7 +378,8 @@ class AgentStatusSnapshot {
       _listEquals(other.limits, limits) &&
       other.dashboard == dashboard &&
       other.theme == theme &&
-      other.pcTheme == pcTheme;
+      other.pcTheme == pcTheme &&
+      other.recentHours == recentHours;
 
   @override
   int get hashCode => Object.hash(
@@ -351,6 +391,7 @@ class AgentStatusSnapshot {
     dashboard,
     theme,
     pcTheme,
+    recentHours,
   );
 
   static bool _listEquals<T>(List<T> a, List<T> b) {

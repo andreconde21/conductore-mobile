@@ -373,6 +373,7 @@ void main() {
       );
     },
     themeChanges: themeController,
+    projects: ProjectLayoutController.instance,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();
   // Talkbawt (CON-050): handoffs and threads between agents through a
@@ -1204,6 +1205,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
                     mayAct: widget.lockController.admitsActions,
+                    lockChanges: widget.lockController.actionState,
                     launcherActions: PlatformLauncherActions.instance,
                     agentAttention: widget.agentAttention,
                     findHost: (hostId) async {

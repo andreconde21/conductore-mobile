@@ -4,8 +4,10 @@ import 'package:conduit/features/agent_attention/data/conductore_host_attention_
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,11 +31,39 @@ class _QueueSource implements AgentPermissionActionSource {
 
 class _LauncherSource implements LauncherActionSource {
   Future<String?> Function(AgentPermissionAction action)? listener;
+  void Function()? queuedListener;
+
+  /// Held on the platform; [taken] are in flight (still held).
+  final List<QueuedLauncherAnswer> held = [];
+  final Set<String> taken = {};
 
   @override
   void setListener(
     Future<String?> Function(AgentPermissionAction action)? listener,
   ) => this.listener = listener;
+
+  @override
+  void setQueuedListener(void Function()? listener) =>
+      queuedListener = listener;
+
+  @override
+  Future<List<QueuedLauncherAnswer>> takeQueued() async {
+    final out = [
+      for (final answer in held)
+        if (!taken.contains(answer.key)) answer,
+    ];
+    taken.addAll(out.map((answer) => answer.key));
+    return out;
+  }
+
+  @override
+  Future<void> resolveQueued(String key) async {
+    held.removeWhere((answer) => answer.key == key);
+    taken.remove(key);
+  }
+
+  @override
+  Future<void> releaseQueued(List<String> keys) async => taken.removeAll(keys);
 }
 
 void main() {
@@ -239,5 +269,207 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     expect(launcher.listener, isNull);
+  });
+
+  group('answers held while locked (CON-119)', () {
+    QueuedLauncherAnswer held({
+      String hostId = 'h',
+      DateTime? queuedAt,
+      String key = 'h/s-1@1',
+    }) => QueuedLauncherAnswer(
+      key: key,
+      action: AgentPermissionAction(
+        notificationId: '',
+        hostId: hostId,
+        agentId: 's-1',
+        requestId: 'req-1',
+        verdict: 'allow',
+      ),
+      title: 'api',
+      host: 'dev',
+      queuedAt: queuedAt ?? DateTime.now(),
+    );
+
+    Future<(_LauncherSource, ValueNotifier<bool>)> pumpHeld(
+      WidgetTester tester, {
+      List<QueuedLauncherAnswer> queued = const [],
+      bool unlocked = true,
+      Future<SavedHost?> Function(String hostId)? findHost,
+    }) async {
+      final launcher = _LauncherSource()..held.addAll(queued);
+      final lock = ValueNotifier(unlocked);
+      addTearDown(lock.dispose);
+      final workspace = TerminalWorkspaceController(FreshTerminalRepository());
+      final controller = AgentAttentionController(
+        workspace: workspace,
+        runnerFactory: (_) => ScriptedAgentCommandRunner(const []),
+        provider: const HerdrAttentionProvider(),
+        companionProvider: const ConductoreHostAttentionProvider(),
+        pollInterval: const Duration(days: 1),
+      );
+      addTearDown(controller.dispose);
+      addTearDown(workspace.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AgentPermissionActionListener(
+              source: _QueueSource(),
+              launcherActions: launcher,
+              agentAttention: controller,
+              mayAct: () => lock.value,
+              lockChanges: lock,
+              // Only "h" is saved.
+              findHost:
+                  findHost ??
+                  (hostId) async => hostId == 'h' ? buildHost('h') : null,
+              child: const SizedBox(),
+            ),
+          ),
+        ),
+      );
+      return (launcher, lock);
+    }
+
+    testWidgets('they wait for the unlock, then say how they went', (
+      tester,
+    ) async {
+      final (launcher, lock) = await pumpHeld(
+        tester,
+        unlocked: false,
+        queued: [held(hostId: 'gone')],
+      );
+      await tester.runAsync(pumpEventQueue);
+      // Locked: still held on the platform.
+      expect(launcher.held, hasLength(1));
+
+      lock.value = true;
+      await tester.runAsync(pumpEventQueue);
+      await tester.pump();
+      expect(launcher.held, isEmpty);
+      expect(
+        find.text(
+          "Your answer to api on dev wasn't sent: "
+          'The machine is no longer saved.',
+        ),
+        findsOne,
+      );
+    });
+
+    testWidgets('an expired one is dropped and the user told', (tester) async {
+      await pumpHeld(
+        tester,
+        queued: [
+          held(queuedAt: DateTime.now().subtract(const Duration(minutes: 16))),
+        ],
+      );
+      await tester.runAsync(pumpEventQueue);
+      await tester.pump();
+      expect(
+        find.text(
+          "Your answer to api on dev wasn't sent: "
+          'it waited more than 15 minutes.',
+        ),
+        findsOne,
+      );
+    });
+
+    testWidgets("the platform's ping sends one held while unlocked", (
+      tester,
+    ) async {
+      final (launcher, _) = await pumpHeld(tester);
+      await tester.runAsync(pumpEventQueue);
+      launcher.held.add(held(hostId: 'gone'));
+      launcher.queuedListener!();
+      await tester.runAsync(pumpEventQueue);
+      await tester.pump();
+      expect(launcher.held, isEmpty);
+      expect(
+        find.textContaining("Your answer to api on dev wasn't sent"),
+        findsOne,
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      expect(launcher.queuedListener, isNull);
+    });
+
+    testWidgets('locked again before sending: still held, sent after the '
+        'next unlock', (tester) async {
+      final hostsLoaded = Completer<void>();
+      final (launcher, lock) = await pumpHeld(
+        tester,
+        queued: [
+          held(hostId: 'gone', key: 'a'),
+          held(hostId: 'gone', key: 'b'),
+        ],
+        findHost: (hostId) async {
+          await hostsLoaded.future;
+          return null;
+        },
+      );
+      await tester.runAsync(pumpEventQueue);
+      // Taken (in flight) but not sent yet.
+      expect(launcher.taken, {'a', 'b'});
+      lock.value = false;
+      hostsLoaded.complete();
+      await tester.runAsync(pumpEventQueue);
+      await tester.pump();
+      // Nothing sent and nothing lost: both held, takeable again.
+      expect(launcher.held.map((answer) => answer.key), ['a', 'b']);
+      expect(launcher.taken, isEmpty);
+      expect(find.byType(SnackBar), findsNothing);
+
+      lock.value = true;
+      await tester.runAsync(pumpEventQueue);
+      await tester.pump();
+      // Its machine is gone: dropped on purpose, and the user told.
+      expect(launcher.held, isEmpty);
+      expect(launcher.taken, isEmpty);
+      expect(
+        find.textContaining("Your answer to api on dev wasn't sent"),
+        findsOne,
+      );
+    });
+
+    test('which outcomes drop a held answer', () {
+      expect(heldAnswerSettled(null), isTrue);
+      expect(heldAnswerSettled(QueuedLauncherAnswer.expiredError), isTrue);
+      expect(heldAnswerSettled(LauncherPrompt.staleError), isTrue);
+      expect(heldAnswerSettled(LauncherPrompt.highRiskNote), isTrue);
+      expect(
+        heldAnswerSettled(AgentAttentionController.machineGoneError),
+        isTrue,
+      );
+      // Not monitored yet, or the send failed: kept for the next unlock.
+      expect(
+        heldAnswerSettled(AgentAttentionController.notMonitoringError),
+        isFalse,
+      );
+      expect(heldAnswerSettled('Connection reset'), isFalse);
+      expect(
+        heldAnswerMessage(held(), AgentAttentionController.notMonitoringError),
+        'Your answer to api on dev is still waiting: Conductore is not '
+        'monitoring that machine. Conductore tries again after the next '
+        'unlock.',
+      );
+    });
+
+    test('the messages', () {
+      final answer = held();
+      expect(
+        heldAnswerMessage(answer, null),
+        'Sent your answer to api on dev.',
+      );
+      expect(
+        heldAnswerMessage(answer, LauncherPrompt.staleError),
+        "Your answer to api on dev wasn't sent: it was answered elsewhere.",
+      );
+      expect(
+        heldAnswerMessage(
+          QueuedLauncherAnswer(action: answer.action, queuedAt: DateTime(2026)),
+          LauncherPrompt.terminalNote,
+        ),
+        "Your answer to an agent wasn't sent: Answer it in the terminal.",
+      );
+    });
   });
 }
