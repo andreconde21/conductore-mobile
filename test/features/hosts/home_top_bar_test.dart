@@ -1,5 +1,6 @@
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
+import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -25,7 +26,12 @@ void main() {
               agentsBadge: 3,
               mode: HomeMode.projects,
               onMode: (mode) => picked = mode,
-              machine: const Text('All machines · a long name'),
+              machine: MachineChip(
+                label: 'All machines · a long name',
+                live: true,
+                otherAttentionCount: 2,
+                onTap: () {},
+              ),
             ),
           ),
         ),

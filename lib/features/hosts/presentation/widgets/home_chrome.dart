@@ -48,9 +48,36 @@ class HomeTopBar extends StatelessWidget {
   /// Switches to the other mode.
   final ValueChanged<HomeMode>? onMode;
 
+  /// The width the machine chip needs next to the buttons; below it the
+  /// buttons go compact (a phone with every button shown).
+  static const _chipRoom = 96.0;
+
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final buttons = [
+      true,
+      mode != null && onMode != null,
+      onAgents != null,
+      onGuide != null,
+      onSearch != null,
+      onSwitcher != null,
+      true,
+    ].where((shown) => shown).length;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tight = constraints.maxWidth - 20 - buttons * 48 < _chipRoom;
+        return Theme(
+          data: tight
+              ? theme.copyWith(visualDensity: VisualDensity.compact)
+              : theme,
+          child: _bar(theme.colorScheme),
+        );
+      },
+    );
+  }
+
+  Widget _bar(ColorScheme colorScheme) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
       child: Row(
