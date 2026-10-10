@@ -55,6 +55,14 @@ void main() {
     await tester.scrollUntilVisible(ops, 200);
     await tester.ensureVisible(ops);
     await tester.pumpAndSettle();
+    // The header's ⋯ button sits at its right edge and is enabled.
+    final menu = find.byKey(const ValueKey('home-project-menu-ops'));
+    expect(menu, findsOneWidget);
+    expect(
+      tester.getRect(ops).right - tester.getRect(menu).right,
+      lessThanOrEqualTo(4),
+    );
+    expect(tester.widget<IconButton>(menu).onPressed, isNotNull);
     await tester.tap(ops);
     await settleShell(tester);
     expect(
