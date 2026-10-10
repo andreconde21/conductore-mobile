@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
+import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,11 @@ import 'package:flutter/material.dart';
 /// platform reports a new one while the app runs. Each tap is answered on
 /// its host through [AgentAttentionController.completePermissionAction],
 /// which also dismisses or rewrites the notification.
+///
+/// Launcher answers held while the app was locked or not running
+/// (contract 3, CON-119) are sent once the app lock lets actions run: on
+/// mount, whenever [lockChanges] notifies and when the platform says one
+/// was held. Each says in a snack bar whether it was sent.
 class AgentPermissionActionListener extends StatefulWidget {
   const AgentPermissionActionListener({
     required this.source,
@@ -21,6 +27,7 @@ class AgentPermissionActionListener extends StatefulWidget {
     required this.child,
     this.launcherActions,
     this.mayAct = _always,
+    this.lockChanges,
     super.key,
   });
 
@@ -35,6 +42,10 @@ class AgentPermissionActionListener extends StatefulWidget {
 
   /// The launcher's message while the app lock refuses actions.
   static const unlockFirst = 'Unlock Conductore first';
+
+  /// Notifies when [mayAct] may have changed (the app lock's action
+  /// state): held launcher answers go out after the unlock.
+  final Listenable? lockChanges;
 
   final AgentPermissionActionSource source;
 
@@ -59,13 +70,18 @@ class _AgentPermissionActionListenerState
     extends State<AgentPermissionActionListener> {
   bool _draining = false;
   bool _drainAgain = false;
+  bool _sendingHeld = false;
+  bool _sendHeldAgain = false;
 
   @override
   void initState() {
     super.initState();
     widget.source.setListener(_onAction);
     widget.launcherActions?.setListener(_onLauncherAction);
+    widget.launcherActions?.setQueuedListener(_sendHeld);
+    widget.lockChanges?.addListener(_sendHeld);
     _drain();
+    _sendHeld();
   }
 
   /// One launcher answer; resolves with why it failed, null once done.
@@ -98,7 +114,13 @@ class _AgentPermissionActionListenerState
     }
     if (oldWidget.launcherActions != widget.launcherActions) {
       oldWidget.launcherActions?.setListener(null);
+      oldWidget.launcherActions?.setQueuedListener(null);
       widget.launcherActions?.setListener(_onLauncherAction);
+      widget.launcherActions?.setQueuedListener(_sendHeld);
+    }
+    if (oldWidget.lockChanges != widget.lockChanges) {
+      oldWidget.lockChanges?.removeListener(_sendHeld);
+      widget.lockChanges?.addListener(_sendHeld);
     }
   }
 
@@ -106,7 +128,62 @@ class _AgentPermissionActionListenerState
   void dispose() {
     widget.source.setListener(null);
     widget.launcherActions?.setListener(null);
+    widget.launcherActions?.setQueuedListener(null);
+    widget.lockChanges?.removeListener(_sendHeld);
     super.dispose();
+  }
+
+  /// Sends the launcher answers held for the unlock, in order, and says
+  /// how each went; held ones that arrive meanwhile get one more pass.
+  void _sendHeld() {
+    final source = widget.launcherActions;
+    if (source == null) {
+      return;
+    }
+    if (_sendingHeld) {
+      _sendHeldAgain = true;
+      return;
+    }
+    _sendingHeld = true;
+    unawaited(() async {
+      try {
+        do {
+          _sendHeldAgain = false;
+          // Left held while the app lock refuses: sent after unlock.
+          if (!mounted || !widget.mayAct()) {
+            return;
+          }
+          for (final answer in await source.consumeQueued()) {
+            if (!mounted) {
+              return;
+            }
+            final host = await widget.findHost(answer.action.hostId);
+            // Re-checked at the moment of sending: locked again, it is
+            // not sent (and the user is told).
+            final error = !mounted
+                ? null
+                : !widget.mayAct()
+                ? 'Conductore locked again'
+                : await widget.agentAttention.deliverQueuedLauncherAnswer(
+                    answer,
+                    host,
+                  );
+            _reportHeld(answer, error);
+          }
+        } while (_sendHeldAgain && mounted);
+      } finally {
+        _sendingHeld = false;
+      }
+    }());
+  }
+
+  void _reportHeld(QueuedLauncherAnswer answer, String? error) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(SnackBar(content: Text(heldAnswerMessage(answer, error))));
   }
 
   /// Answers every queued tap in order; taps that arrive meanwhile are
@@ -166,4 +243,17 @@ class _AgentPermissionActionListenerState
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+/// What the app says about a held launcher answer: sent ([error] null),
+/// or why not.
+String heldAnswerMessage(QueuedLauncherAnswer answer, String? error) {
+  if (error == null) {
+    return 'Sent your answer to ${answer.label}.';
+  }
+  final reason = switch (error) {
+    LauncherPrompt.staleError => 'it was answered elsewhere',
+    _ => error.endsWith('.') ? error.substring(0, error.length - 1) : error,
+  };
+  return "Your answer to ${answer.label} wasn't sent: $reason.";
 }

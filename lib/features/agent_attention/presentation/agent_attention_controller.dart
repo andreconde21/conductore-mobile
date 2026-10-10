@@ -680,6 +680,67 @@ class AgentAttentionController extends ChangeNotifier {
     );
   }
 
+  /// Sends an answer the launcher left while the app was locked or not
+  /// running (contract 3, CON-119), right after the unlock. An expired one
+  /// ([QueuedLauncherAnswer.expiredAt]) is dropped. Otherwise, once
+  /// [host] is monitored and its first status is in (up to [wait]), its
+  /// status is read again and the answer goes through
+  /// [completeLauncherAction], which fails with
+  /// [LauncherPrompt.staleError] unless the agent still waits on the same
+  /// request. A reply also needs the agent still in the wait it was
+  /// answered in (the same state change). Returns null once sent, else
+  /// why not. Never throws.
+  Future<String?> deliverQueuedLauncherAnswer(
+    QueuedLauncherAnswer answer,
+    SavedHost? host, {
+    Duration wait = const Duration(seconds: 20),
+    DateTime Function() now = DateTime.now,
+  }) async {
+    if (answer.expiredAt(now())) {
+      return QueuedLauncherAnswer.expiredError;
+    }
+    if (host == null) {
+      return 'The machine is no longer saved';
+    }
+    final monitor = await _monitorReady(host.id, wait);
+    if (monitor == null) {
+      return 'Conductore is not monitoring that machine';
+    }
+    await _poll(monitor);
+    final action = answer.action;
+    if (action.requestId == LauncherPrompt.replyRequest &&
+        answer.since != null) {
+      final agent = monitor.status.agents
+          .where((agent) => agent.id == action.agentId)
+          .firstOrNull;
+      final since = agent?.stateChangedAt;
+      if (since != null && !since.isAtSameMomentAs(answer.since!)) {
+        return LauncherPrompt.staleError;
+      }
+    }
+    return completeLauncherAction(action, host);
+  }
+
+  /// [hostId]'s monitor once it has a status and no poll in flight; null
+  /// when that takes longer than [wait] (or it cannot poll).
+  Future<_HostMonitor?> _monitorReady(String hostId, Duration wait) async {
+    final deadline = DateTime.now().add(wait);
+    while (!_disposed) {
+      final monitor = _monitorFor(hostId);
+      if (monitor != null &&
+          monitor.pollable &&
+          !monitor.fetching &&
+          !monitor.status.loading) {
+        return monitor;
+      }
+      if (!DateTime.now().isBefore(deadline)) {
+        return null;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return null;
+  }
+
   /// The question an answer button answers: as the notification carried
   /// it, else the one the monitor still lists for the request.
   String _questionOf(String hostId, AgentPermissionAction action) {

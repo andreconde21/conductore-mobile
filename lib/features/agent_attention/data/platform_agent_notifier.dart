@@ -77,6 +77,9 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
           return null;
         case 'launcherAction':
           return PlatformLauncherActions.instance.handle(call.arguments);
+        case 'launcherAnswersAvailable':
+          PlatformLauncherActions.instance._queuedListener?.call();
+          return null;
       }
       return null;
     });
@@ -184,13 +187,16 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
 /// Answers from the launcher's details sheet (CON-082), over the same
 /// channel: the native provider calls `launcherAction` with the action and
 /// waits for `{ok, error}`; null means nobody can take it now (no
-/// listener: the app is locked or not on its home page).
+/// listener: the app is locked or not on its home page), and the native
+/// side then holds it (contract 3): `consumeLauncherAnswers` takes the
+/// held ones, `launcherAnswersAvailable` says one was held.
 class PlatformLauncherActions implements LauncherActionSource {
   PlatformLauncherActions._();
 
   static final instance = PlatformLauncherActions._();
 
   Future<String?> Function(AgentPermissionAction action)? _listener;
+  void Function()? _queuedListener;
 
   @override
   void setListener(
@@ -199,6 +205,34 @@ class PlatformLauncherActions implements LauncherActionSource {
     _listener = listener;
     PlatformAgentAttentionNotifier._installHandler();
   }
+
+  @override
+  void setQueuedListener(void Function()? listener) {
+    _queuedListener = listener;
+    PlatformAgentAttentionNotifier._installHandler();
+  }
+
+  @override
+  Future<List<QueuedLauncherAnswer>> consumeQueued() async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return const [];
+    }
+    try {
+      final raw = await PlatformAgentAttentionNotifier.channel
+          .invokeMethod<List<Object?>>('consumeLauncherAnswers');
+      return parseQueued(raw);
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException {
+      return const [];
+    }
+  }
+
+  @visibleForTesting
+  static List<QueuedLauncherAnswer> parseQueued(List<Object?>? raw) => [
+    for (final item in raw ?? const <Object?>[])
+      ?QueuedLauncherAnswer.fromMap(item),
+  ];
 
   /// The channel call: [arguments] as the native side sends them.
   @visibleForTesting

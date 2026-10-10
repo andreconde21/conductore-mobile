@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/domain/launcher_prompt.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/domain/launcher_themes.dart';
@@ -46,7 +47,8 @@ class AgentStatusWidgetPusher {
   /// fetch, let alone summarise). [theme] gives the app's colours and
   /// [themeChanges] tells when they may have changed. [pcTheme] gives the
   /// followed Omarchy machine's theme for the launcher (CON-075); it
-  /// changes with [themeChanges] too.
+  /// changes with [themeChanges] too. With [projects], each agent carries
+  /// its project and "active" standing for the launcher (CON-119).
   factory AgentStatusWidgetPusher.forController(
     AgentAttentionController controller, {
     required AgentStatusWidgetChannel channel,
@@ -55,16 +57,24 @@ class AgentStatusWidgetPusher {
     AgentStatusTheme Function()? theme,
     AgentStatusPcTheme? Function()? pcTheme,
     Listenable? themeChanges,
+    ProjectLayoutController? projects,
     Duration debounce = const Duration(milliseconds: 500),
   }) {
     return AgentStatusWidgetPusher(
-      source: Listenable.merge([controller, ?usage, ?digest, ?themeChanges]),
+      source: Listenable.merge([
+        controller,
+        ?usage,
+        ?digest,
+        ?themeChanges,
+        ?projects,
+      ]),
       snapshot: () => snapshotOf(
         controller,
         usage: usage,
         digest: digest,
         theme: theme?.call(),
         pcTheme: pcTheme?.call(),
+        projects: projects,
       ),
       launcherPrompts: () => controller.launcherPrompts,
       channel: channel,
@@ -97,8 +107,10 @@ class AgentStatusWidgetPusher {
     DigestController? digest,
     AgentStatusTheme? theme,
     AgentStatusPcTheme? pcTheme,
+    ProjectLayoutController? projects,
     DateTime? now,
   }) {
+    final saved = {for (final host in controller.monitoredHosts) host.id: host};
     final hosts = [
       for (final host in controller.monitoredHosts)
         (
@@ -123,6 +135,13 @@ class AgentStatusWidgetPusher {
       ),
       theme: theme,
       pcTheme: pcTheme,
+      projectOf: projects == null
+          ? null
+          : (hostId, agent) => switch (saved[hostId]) {
+              final host? => projects.launcherFacts(host, agent),
+              null => null,
+            },
+      recentHours: projects?.recentHours,
     );
   }
 
