@@ -43,8 +43,10 @@ import java.security.SecureRandom
  * - `appLockState(locked, relockAtMillis)`: the app lock ([AppLockGuard]);
  *   while it is closed, button taps wait for the app and launcher answers
  *   are held.
- * - `consumeLauncherAnswers()` -> `List<Map>`: the launcher answers held
- *   for the unlock ([LauncherAnswerStore], CON-119), cleared.
+ * - `takeLauncherAnswers()` -> `List<Map>`: the launcher answers held for
+ *   the unlock ([LauncherAnswerStore], CON-119), marked in flight; they
+ *   stay stored until `resolveLauncherAnswer(key)` (sent, or dropped on
+ *   purpose). `releaseLauncherAnswers(keys)` makes them takeable again.
  *
  * Plain and agent notifications take the same optional `open*` arguments;
  * tapping the notification body then opens the app at that agent (its
@@ -94,6 +96,8 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
             active = null
             // Nobody reports the app lock any more: count it as locked.
             AppLockGuard.current = null
+            // Held launcher answers it took but did not resolve stay held.
+            LauncherAnswerStore.releaseAll()
         }
         channel?.setMethodCallHandler(null)
         channel = null
@@ -265,7 +269,15 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                 result.success(null)
             }
             "consumePermissionActions" -> result.success(AgentNotificationStore.consumeActions(ctx))
-            "consumeLauncherAnswers" -> result.success(LauncherAnswerStore.consume(ctx).map { it.toMap() })
+            "takeLauncherAnswers" -> result.success(LauncherAnswerStore.take(ctx).map { it.toMap() })
+            "resolveLauncherAnswer" -> {
+                call.argument<String>("key")?.let { LauncherAnswerStore.resolve(ctx, it) }
+                result.success(null)
+            }
+            "releaseLauncherAnswers" -> {
+                LauncherAnswerStore.release(call.argument<List<String>>("keys").orEmpty())
+                result.success(null)
+            }
             "appLockState" -> {
                 // Unreadable: locked, never a guess towards unlocked.
                 AppLockGuard.current = AppLockGuard.fromMap(call.arguments as? Map<*, *>) ?: AppLockGuard.State(locked = true, relockAtMillis = null)

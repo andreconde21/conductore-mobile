@@ -153,21 +153,24 @@ class _AgentPermissionActionListenerState
           if (!mounted || !widget.mayAct()) {
             return;
           }
-          for (final answer in await source.consumeQueued()) {
-            if (!mounted) {
+          final answers = await source.takeQueued();
+          for (final (index, answer) in answers.indexed) {
+            final host = await widget.findHost(answer.action.hostId);
+            // Re-checked at the moment of sending: gone or locked again,
+            // this one and the rest stay held for the next unlock.
+            if (!mounted || !widget.mayAct()) {
+              await source.releaseQueued([
+                for (final left in answers.skip(index)) left.key,
+              ]);
               return;
             }
-            final host = await widget.findHost(answer.action.hostId);
-            // Re-checked at the moment of sending: locked again, it is
-            // not sent (and the user is told).
-            final error = !mounted
-                ? null
-                : !widget.mayAct()
-                ? 'Conductore locked again'
-                : await widget.agentAttention.deliverQueuedLauncherAnswer(
-                    answer,
-                    host,
-                  );
+            final error = await widget.agentAttention
+                .deliverQueuedLauncherAnswer(answer, host);
+            if (heldAnswerSettled(error)) {
+              await source.resolveQueued(answer.key);
+            } else {
+              await source.releaseQueued([answer.key]);
+            }
             _reportHeld(answer, error);
           }
         } while (_sendHeldAgain && mounted);
@@ -245,11 +248,34 @@ class _AgentPermissionActionListenerState
   Widget build(BuildContext context) => widget.child;
 }
 
+/// Whether a held launcher answer is done with after [error]: sent
+/// (null), or dropped on purpose (expired, stale or answered elsewhere,
+/// no longer answerable from the launcher, its machine deleted). Anything
+/// else (the machine not monitored yet, a failed send) leaves it held, to
+/// be tried after the next unlock until it expires.
+bool heldAnswerSettled(String? error) => switch (error) {
+  null ||
+  QueuedLauncherAnswer.expiredError ||
+  LauncherPrompt.staleError ||
+  LauncherPrompt.highRiskNote ||
+  LauncherPrompt.terminalNote ||
+  LauncherPrompt.openNote ||
+  LauncherPrompt.severalQuestionsNote ||
+  LauncherPrompt.multiSelectNote ||
+  AgentAttentionController.machineGoneError => true,
+  _ => false,
+};
+
 /// What the app says about a held launcher answer: sent ([error] null),
-/// or why not.
+/// dropped and why, or still held and why.
 String heldAnswerMessage(QueuedLauncherAnswer answer, String? error) {
   if (error == null) {
     return 'Sent your answer to ${answer.label}.';
+  }
+  if (!heldAnswerSettled(error)) {
+    return 'Your answer to ${answer.label} is still waiting: '
+        '${error.endsWith('.') ? error.substring(0, error.length - 1) : error}. '
+        'Conductore tries again after the next unlock.';
   }
   final reason = switch (error) {
     LauncherPrompt.staleError => 'it was answered elsewhere',

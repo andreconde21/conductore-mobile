@@ -86,14 +86,23 @@ abstract class AgentPermissionActionSource {
 /// Contract 3 (CON-119): while the app lock is up, or the app is not
 /// running (or not on its home page yet), the platform holds the answer
 /// instead, encrypted, for [QueuedLauncherAnswer.expiry]; the app takes
-/// the held ones with [consumeQueued] after the next unlock.
+/// the held ones with [takeQueued] after the next unlock. Taken ones stay
+/// held until [resolveQueued] (sent, or dropped on purpose); released
+/// ([releaseQueued]), or never resolved because the app went away, they
+/// are taken again later.
 abstract class LauncherActionSource {
   void setListener(
     Future<String?> Function(AgentPermissionAction action)? listener,
   );
 
-  /// Takes every held answer (expired ones too), clearing them.
-  Future<List<QueuedLauncherAnswer>> consumeQueued();
+  /// Every held answer not already taken (expired ones too), now taken.
+  Future<List<QueuedLauncherAnswer>> takeQueued();
+
+  /// The answer [key] was sent, or dropped on purpose: no longer held.
+  Future<void> resolveQueued(String key);
+
+  /// [keys] were taken but not sent: held, taken again next time.
+  Future<void> releaseQueued(List<String> keys);
 
   /// Called when an answer was held while the app runs (it may have been
   /// unlocked meanwhile).
@@ -109,6 +118,7 @@ class QueuedLauncherAnswer {
   const QueuedLauncherAnswer({
     required this.action,
     required this.queuedAt,
+    this.key = '',
     this.title = '',
     this.host = '',
     this.since,
@@ -122,6 +132,9 @@ class QueuedLauncherAnswer {
   static const expiredError = 'it waited more than 15 minutes';
 
   final AgentPermissionAction action;
+
+  /// Names it to the platform when resolved or released.
+  final String key;
   final String title;
   final String host;
   final DateTime? since;
@@ -161,6 +174,7 @@ class QueuedLauncherAnswer {
         verdict: text('verdict'),
         text: text('text'),
       ),
+      key: text('key'),
       title: text('title'),
       host: text('host'),
       since: time('since'),
@@ -172,11 +186,12 @@ class QueuedLauncherAnswer {
   bool operator ==(Object other) =>
       other is QueuedLauncherAnswer &&
       other.action == action &&
+      other.key == key &&
       other.title == title &&
       other.host == host &&
       other.since == since &&
       other.queuedAt == queuedAt;
 
   @override
-  int get hashCode => Object.hash(action, title, host, since, queuedAt);
+  int get hashCode => Object.hash(action, key, title, host, since, queuedAt);
 }

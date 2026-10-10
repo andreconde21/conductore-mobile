@@ -195,11 +195,9 @@ snapshot:
 - `project` is placed the way the agents dashboard places an agent
   (`ProjectLayoutController.projectOfAgent`): the layout's explicit member
   or rule, else Other; with no layout projects, the repo the agent
-  reports. The phone home's Projects mode groups whole
-  workspaces from the machines' live boards, which the provider never
-  has; both read the same layout, so the names match.
-- A workspace open in the app keeps all its rows in the view's "active"
-  filter; the provider judges each agent on its own.
+  reports.
+- Differs from the home Projects view: it places each agent with the agents dashboard's rule on the same layout, not by whole workspaces from live boards, so with no layout projects a name can be the repo rather than the workspace.
+- Differs from the home Projects view: `active` is judged per agent and counts `finished` as busy, so an idle agent sharing a workspace with a busy one (or open in the app) is 0 here.
 
 ## Contract 2: questions and answers (CON-082)
 
@@ -336,10 +334,17 @@ unlocks Conductore.
   the order held. For each, Conductore waits for that machine's monitor
   (up to 20 seconds), reads its status again, and sends the answer only
   when the agent still waits on the same request (a reply: the same wait,
-  i.e. the agent has not changed state since). Otherwise it is dropped and
-  Conductore says so in the app: `Your answer to api on dev wasn't sent: it
-  was answered elsewhere.` (or `it waited more than 15 minutes`, or the
-  reason it failed). A sent one says `Sent your answer to api on dev.`
+  i.e. the agent has not changed state since). A sent one says `Sent your
+  answer to api on dev.`
+- An answer stays stored until it is sent or dropped on purpose: expired,
+  stale or answered elsewhere, no longer answerable from the launcher, or
+  its machine deleted. Conductore then says so: `Your answer to api on dev
+  wasn't sent: it was answered elsewhere.` Taking it to send only marks it
+  in flight; if the app locks again, its engine stops or the process dies
+  before the outcome, it stays held and goes after the next unlock. A
+  machine not monitored in time, or a failed send, also leaves it held
+  (`... is still waiting: <reason>. Conductore tries again after the next
+  unlock.`) until it expires.
 - If the store fails, the call fails as contract 2 did
   (`Unlock Conductore first` / `Open Conductore first`).
 - A held answer changes nothing in `/items` until it is sent; the next

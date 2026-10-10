@@ -26,7 +26,7 @@ class LauncherAnswerQueueTest {
         val held = LauncherAnswerQueue.answerOf(prompt, action, agent, 1_000L)
         assertEquals(QueuedLauncherAnswer("h/s3", action, "api", "dev", 900L, 1_000L), held)
         // Dart reads the action's fields plus the names and times.
-        assertEquals(action + mapOf("title" to "api", "host" to "dev", "since" to 900L, "queuedAt" to 1_000L), held.toMap())
+        assertEquals(action + mapOf("key" to "h/s3@1000", "title" to "api", "host" to "dev", "since" to 900L, "queuedAt" to 1_000L), held.toMap())
         // Without the snapshot's line: empty names, no start time.
         assertEquals(QueuedLauncherAnswer("h/s3", action, "", "", 0L, 1_000L), LauncherAnswerQueue.answerOf(prompt, action, null, 1_000L))
     }
@@ -89,5 +89,33 @@ class LauncherAnswerQueueTest {
         assertNull(sealer.open(sealed.copyOf(8)))
         val other = AnswerSealer { KeyGenerator.getInstance("AES").apply { init(256) }.generateKey() }
         assertNull(other.open(sealed))
+    }
+
+    @Test
+    fun aTakenAnswerStaysStoredUntilResolved() {
+        val first = answer("h/s1", at = 1_000L)
+        val second = answer("h/s3", at = 1_000L)
+        var stored = listOf(first, second)
+        val inFlight = mutableSetOf<String>()
+        // Taking marks them in flight; storage is untouched.
+        val taken = LauncherAnswerQueue.takeable(stored, inFlight)
+        assertEquals(listOf(first, second), taken)
+        inFlight.addAll(taken.map { it.key })
+        assertTrue(LauncherAnswerQueue.takeable(stored, inFlight).isEmpty())
+        assertEquals(2, stored.size)
+        // The first was sent: resolved, gone.
+        stored = LauncherAnswerQueue.remove(stored, first.key)
+        inFlight.remove(first.key)
+        // The app locked (or died) before the second: released, takeable again.
+        inFlight.remove(second.key)
+        assertEquals(listOf(second), LauncherAnswerQueue.takeable(stored, inFlight))
+    }
+
+    @Test
+    fun resolvingAReplacedAnswerKeepsTheNewerOne() {
+        val older = answer(at = 1_000L, text = "first")
+        val newer = answer(at = 2_000L, text = "second")
+        val stored = LauncherAnswerQueue.add(listOf(older), newer, 2_000L)
+        assertEquals(listOf(newer), LauncherAnswerQueue.remove(stored, older.key))
     }
 }

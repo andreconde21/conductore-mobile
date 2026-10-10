@@ -188,8 +188,10 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
 /// channel: the native provider calls `launcherAction` with the action and
 /// waits for `{ok, error}`; null means nobody can take it now (no
 /// listener: the app is locked or not on its home page), and the native
-/// side then holds it (contract 3): `consumeLauncherAnswers` takes the
-/// held ones, `launcherAnswersAvailable` says one was held.
+/// side then holds it (contract 3): `takeLauncherAnswers` takes the held
+/// ones (they stay held until `resolveLauncherAnswer`, or
+/// `releaseLauncherAnswers` gives them back), `launcherAnswersAvailable`
+/// says one was held.
 class PlatformLauncherActions implements LauncherActionSource {
   PlatformLauncherActions._();
 
@@ -213,18 +215,42 @@ class PlatformLauncherActions implements LauncherActionSource {
   }
 
   @override
-  Future<List<QueuedLauncherAnswer>> consumeQueued() async {
+  Future<List<QueuedLauncherAnswer>> takeQueued() async {
     if (defaultTargetPlatform != TargetPlatform.android) {
       return const [];
     }
     try {
       final raw = await PlatformAgentAttentionNotifier.channel
-          .invokeMethod<List<Object?>>('consumeLauncherAnswers');
+          .invokeMethod<List<Object?>>('takeLauncherAnswers');
       return parseQueued(raw);
     } on MissingPluginException {
       return const [];
     } on PlatformException {
       return const [];
+    }
+  }
+
+  @override
+  Future<void> resolveQueued(String key) =>
+      _invokeQueued('resolveLauncherAnswer', {'key': key});
+
+  @override
+  Future<void> releaseQueued(List<String> keys) =>
+      _invokeQueued('releaseLauncherAnswers', {'keys': keys});
+
+  Future<void> _invokeQueued(String method, Map<String, Object?> args) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+    try {
+      await PlatformAgentAttentionNotifier.channel.invokeMethod<void>(
+        method,
+        args,
+      );
+    } on MissingPluginException {
+      // No native handler (tests).
+    } on PlatformException {
+      // Left held: taken again after the next unlock, until it expires.
     }
   }
 

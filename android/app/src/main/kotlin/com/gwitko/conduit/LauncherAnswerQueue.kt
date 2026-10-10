@@ -27,6 +27,9 @@ data class QueuedLauncherAnswer(
     val sinceMillis: Long,
     val queuedAtMillis: Long,
 ) {
+    /** Names this answer when Dart resolves or releases it; a newer answer to the item has another. */
+    val key: String get() = "$itemId@$queuedAtMillis"
+
     fun expired(nowMillis: Long): Boolean = nowMillis - queuedAtMillis >= LauncherAnswerQueue.EXPIRY_MILLIS
 
     fun toJson(): JSONObject = JSONObject()
@@ -39,6 +42,7 @@ data class QueuedLauncherAnswer(
 
     /** What Dart's `consumeLauncherAnswers` gets. */
     fun toMap(): Map<String, Any> = action + mapOf(
+        "key" to key,
         "title" to title,
         "host" to host,
         "since" to sinceMillis,
@@ -94,6 +98,14 @@ object LauncherAnswerQueue {
 
     fun live(queue: List<QueuedLauncherAnswer>, nowMillis: Long): List<QueuedLauncherAnswer> =
         queue.filterNot { it.expired(nowMillis) }
+
+    /** What Dart may take now: every answer (expired ones too) not already in flight. */
+    fun takeable(queue: List<QueuedLauncherAnswer>, inFlight: Set<String>): List<QueuedLauncherAnswer> =
+        queue.filter { it.key !in inFlight }
+
+    /** [queue] without the answer [key] names (sent, or dropped on purpose). */
+    fun remove(queue: List<QueuedLauncherAnswer>, key: String): List<QueuedLauncherAnswer> =
+        queue.filter { it.key != key }
 
     /**
      * The held answer for [action] on [prompt]'s item, named after [agent]
@@ -156,8 +168,13 @@ class AnswerSealer(private val key: () -> SecretKey) {
  * ([AnswerSealer]) in their own preferences file: they carry the typed
  * text. They survive process death and are dropped after
  * [LauncherAnswerQueue.EXPIRY_MILLIS]. While any wait, a notification
- * says so (no answer text in it). Dart takes them after the next unlock
- * ([consume]).
+ * says so (no answer text in it).
+ *
+ * Dart [take]s them after the next unlock: taking only marks them in
+ * flight (in memory). Each stays stored until Dart [resolve]s it (sent,
+ * or dropped on purpose: expired, stale); one Dart [release]s (locked
+ * again, the machine not monitored yet) or never resolves because the
+ * engine or the process went away is taken again later.
  */
 object LauncherAnswerStore {
     private const val PREFS = "launcher_answers"
@@ -167,6 +184,9 @@ object LauncherAnswerStore {
     private const val KEYSTORE = "AndroidKeyStore"
 
     private val sealer = AnswerSealer(::keystoreKey)
+
+    /** Keys Dart has taken and not resolved or released; gone with the process. */
+    private val inFlight = mutableSetOf<String>()
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -221,13 +241,36 @@ object LauncherAnswerStore {
         return true
     }
 
-    /** Every held answer (expired ones too, so the app can say so), cleared. */
+    /**
+     * Every held answer not in flight (expired ones too, so the app can
+     * say so), now in flight. They stay stored.
+     */
     @Synchronized
-    fun consume(context: Context): List<QueuedLauncherAnswer> {
-        val queue = read(context)
-        prefs(context).edit().remove(KEY_QUEUE).commit()
-        AgentNotificationStore.cancel(context, NOTIFICATION_ID)
-        return queue
+    fun take(context: Context): List<QueuedLauncherAnswer> {
+        val taken = LauncherAnswerQueue.takeable(read(context), inFlight)
+        inFlight.addAll(taken.map { it.key })
+        return taken
+    }
+
+    /** The answer [key] was sent or dropped on purpose: no longer stored. */
+    @Synchronized
+    fun resolve(context: Context, key: String, nowMillis: Long = System.currentTimeMillis()) {
+        inFlight.remove(key)
+        val queue = LauncherAnswerQueue.remove(read(context), key)
+        write(context, queue)
+        showWaiting(context, queue, nowMillis)
+    }
+
+    /** [keys] were taken but not sent: taken again next time. */
+    @Synchronized
+    fun release(keys: Collection<String>) {
+        inFlight.removeAll(keys.toSet())
+    }
+
+    /** The engine went away: whatever it had taken is takeable again. */
+    @Synchronized
+    fun releaseAll() {
+        inFlight.clear()
     }
 
     private fun showWaiting(context: Context, queue: List<QueuedLauncherAnswer>, nowMillis: Long) {

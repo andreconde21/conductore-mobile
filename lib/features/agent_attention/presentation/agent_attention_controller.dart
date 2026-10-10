@@ -637,7 +637,7 @@ class AgentAttentionController extends ChangeNotifier {
   ) async {
     final monitor = host == null ? null : _monitorFor(host.id);
     if (host == null || monitor == null) {
-      return 'Conductore is not monitoring that machine';
+      return notMonitoringError;
     }
     final agent = monitor.status.agents
         .where((agent) => agent.id == action.agentId)
@@ -684,6 +684,12 @@ class AgentAttentionController extends ChangeNotifier {
     );
   }
 
+  /// A launcher answer for a machine Conductore does not monitor (now).
+  static const notMonitoringError = 'Conductore is not monitoring that machine';
+
+  /// A held launcher answer for a machine deleted meanwhile.
+  static const machineGoneError = 'The machine is no longer saved';
+
   /// Sends an answer the launcher left while the app was locked or not
   /// running (contract 3, CON-119), right after the unlock. An expired one
   /// ([QueuedLauncherAnswer.expiredAt]) is dropped. Otherwise, once
@@ -704,11 +710,11 @@ class AgentAttentionController extends ChangeNotifier {
       return QueuedLauncherAnswer.expiredError;
     }
     if (host == null) {
-      return 'The machine is no longer saved';
+      return machineGoneError;
     }
     final monitor = await _monitorReady(host.id, wait);
     if (monitor == null) {
-      return 'Conductore is not monitoring that machine';
+      return notMonitoringError;
     }
     await _poll(monitor);
     final action = answer.action;
