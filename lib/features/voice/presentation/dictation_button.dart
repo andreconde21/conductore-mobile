@@ -255,9 +255,11 @@ class _DictationButtonState extends State<DictationButton> {
           tooltip = 'Microphone access denied';
           icon = Icons.mic_off_rounded;
         } else {
-          tooltip = widget.enabled
+          tooltip = !widget.enabled
+              ? widget.disabledTooltip ?? 'Dictate'
+              : widget.onLongPress == null
               ? 'Dictate'
-              : widget.disabledTooltip ?? 'Dictate';
+              : 'Dictate. Long-press to talk';
           icon = Icons.mic_none_rounded;
         }
         final Widget child = busy && _mine

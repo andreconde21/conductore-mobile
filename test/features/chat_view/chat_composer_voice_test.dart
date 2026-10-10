@@ -74,6 +74,7 @@ void main() {
     await pump(tester);
 
     expect(find.byKey(const ValueKey('chat-talk')), findsNothing);
+    expect(find.byTooltip('Dictate. Long-press to talk'), findsOneWidget);
     await tester.longPress(find.byKey(const ValueKey('dictation-button')));
     expect(talks, 1);
     expect(recognizer.starts, isEmpty);
