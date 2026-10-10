@@ -156,7 +156,7 @@ void main() {
       'Keyboard shortcuts',
       'Global snippets',
       'Toolbar style',
-      'Pill buttons',
+      customizeKeysTitle,
       'Key rows',
       'Swipe switches window',
       'Drag scrolls the remote app (mouse wheel)',
@@ -181,6 +181,47 @@ void main() {
       'Recent errors',
     ]) {
       expect(titles, contains(title));
+    }
+    // Chat View's ⋮ has these; voice entry points were simplified
+    // (CON-106/107).
+    for (final title in [
+      'Tool activity',
+      'How much to read',
+      'Where to find voice',
+    ]) {
+      expect(titles, isNot(contains(title)));
+    }
+  });
+
+  test('about 40 settings on the section pages, the rest one tap deeper '
+      '(CON-108)', () {
+    final top = settingsCatalog.where((entry) => entry.isTopLevel).toList();
+    expect(top, hasLength(39));
+    int count(SettingsSection section) =>
+        top.where((entry) => entry.section == section).length;
+    expect(
+      {for (final section in SettingsSection.values) section: count(section)},
+      {
+        SettingsSection.appearance: 4,
+        SettingsSection.terminal: 6,
+        SettingsSection.input: 2,
+        SettingsSection.chatVoice: 4,
+        SettingsSection.agents: 8,
+        SettingsSection.syncBackup: 6,
+        SettingsSection.security: 3,
+        SettingsSection.privacy: 2,
+        SettingsSection.about: 4,
+      },
+    );
+    // A row's page is named after a top-level row of the same section.
+    for (final entry in settingsCatalog) {
+      final under = entry.under;
+      if (under == null || under == settingsAdvanced) continue;
+      expect(
+        top.where((row) => row.section == entry.section && row.title == under),
+        hasLength(1),
+        reason: entry.title,
+      );
     }
   });
 
@@ -226,21 +267,51 @@ void main() {
             matching: find.byType(Scrollable),
           )
           .first;
-      for (final entry in settingsCatalog) {
-        if (entry.section != section || !entry.isAvailable(full)) continue;
-        final finder = find.textContaining(entry.title, findRichText: true);
-        // Lists build lazily: from the top, scroll until it is built.
+      final advanced = find.byKey(
+        ValueKey('settings-advanced-${section.name}'),
+      );
+      // Lists build lazily: from the top, scroll until it is built.
+      Future<void> scrollTo(Finder finder) async {
         await tester.drag(scrollable, const Offset(0, 20000));
         await tester.pumpAndSettle();
         for (var i = 0; i < 80 && finder.evaluate().isEmpty; i++) {
           await tester.drag(scrollable, const Offset(0, -150));
           await tester.pumpAndSettle();
         }
-        expect(
-          finder,
-          findsWidgets,
-          reason: '${section.title}: ${entry.title}',
-        );
+      }
+
+      var unfolded = false;
+      for (final entry in settingsCatalog) {
+        if (entry.section != section || !entry.isAvailable(full)) continue;
+        final reason = '${entry.place}: ${entry.title}';
+        final finder = find.textContaining(entry.title, findRichText: true);
+        final under = entry.under;
+        if (under == settingsAdvanced && !unfolded) {
+          // Folded until tapped.
+          await scrollTo(advanced);
+          expect(advanced, findsOneWidget, reason: reason);
+          await tester.ensureVisible(advanced);
+          await tester.pumpAndSettle();
+          await tester.tap(advanced);
+          await tester.pumpAndSettle();
+          unfolded = true;
+        }
+        if (under == null || under == settingsAdvanced) {
+          await scrollTo(finder);
+          expect(finder, findsWidgets, reason: reason);
+          continue;
+        }
+        // On its row's own page.
+        final row = find.text(under);
+        await scrollTo(row);
+        expect(row, findsOneWidget, reason: reason);
+        await tester.ensureVisible(row);
+        await tester.pumpAndSettle();
+        await tester.tap(row);
+        await tester.pumpAndSettle();
+        expect(finder, findsWidgets, reason: reason);
+        await tester.tap(find.byTooltip('Back'));
+        await tester.pumpAndSettle();
       }
     }
   });
@@ -259,7 +330,23 @@ void main() {
 
     await tester.tap(sectionTile(SettingsSection.terminal));
     await tester.pumpAndSettle();
-    expect(find.text('Send mouse taps'), findsOneWidget);
+    // Under Advanced, folded until tapped.
+    expect(find.text('Send mouse taps'), findsNothing);
+    final advanced = find.byKey(const ValueKey('settings-advanced-terminal'));
+    await tester.scrollUntilVisible(
+      advanced,
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('settings-body-terminal')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(advanced);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Send mouse taps'));
+    await tester.pumpAndSettle();
     final before = theme.terminalMouseInput;
     await tester.tap(find.text('Send mouse taps'));
     await tester.pumpAndSettle();
@@ -309,6 +396,49 @@ void main() {
       findsOneWidget,
     );
     expect(sectionTile(SettingsSection.terminal), findsNothing);
+    // It says where: under Terminal's Advanced, which opens unfolded.
+    expect(find.text('Terminal › Advanced'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('settings-result-Remote clipboard')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('settings-body-terminal')), findsOne);
+    await tester.scrollUntilVisible(
+      find.text('Remote clipboard'),
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('settings-body-terminal')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.text('Remote clipboard'), findsOneWidget);
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+
+    // A row's own page.
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-search')),
+      'headset',
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('settings-result-Wake with headset button')),
+      findsOneWidget,
+    );
+    expect(find.text('Chat & Voice › Voice guide'), findsOneWidget);
+
+    // A notification detail, by its old name.
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-search')),
+      'ongoing + urgent',
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('settings-result-Ongoing notification')),
+      findsOneWidget,
+    );
 
     await tester.enterText(
       find.byKey(const ValueKey('settings-search')),

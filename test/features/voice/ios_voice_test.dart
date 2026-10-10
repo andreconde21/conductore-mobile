@@ -79,17 +79,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('Dictation and read aloud'),
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const ValueKey('settings-body-chatVoice')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
+      expect(find.text('Keep listening until I tap stop'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('settings-voice-commands')),
+        findsOneWidget,
       );
-      expect(find.text('Dictation and read aloud'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('settings-voice-guide')),
+        findsOneWidget,
+      );
       expect(find.textContaining('not available on this device'), findsNothing);
       debugDefaultTargetPlatformOverride = null;
     });
@@ -112,9 +110,18 @@ void main() {
             MaterialApp(
               home: Scaffold(
                 body: SingleChildScrollView(
-                  child: SpeechSettingsControls(
-                    controller: theme,
-                    textToSpeech: FakeTts(),
+                  child: Column(
+                    children: [
+                      SpeechSettingsControls(
+                        controller: theme,
+                        part: SpeechSettingsPart.dictation,
+                      ),
+                      SpeechSettingsControls(
+                        controller: theme,
+                        part: SpeechSettingsPart.advanced,
+                        textToSpeech: FakeTts(),
+                      ),
+                    ],
                   ),
                 ),
               ),

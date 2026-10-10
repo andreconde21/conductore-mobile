@@ -11,17 +11,32 @@ import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-/// Settings → Speech: dictation (language, continuous listening and its
-/// limits) and Chat View's "Read replies aloud" (default, language, voice,
-/// speed, pitch).
+/// Which part of the speech settings a [SpeechSettingsControls] shows.
+enum SpeechSettingsPart {
+  /// Settings › Chat & Voice: language, continuous listening and its limits.
+  dictation,
+
+  /// The Voice commands page: the switch and the send and cancel words.
+  voiceCommands,
+
+  /// Chat & Voice › Advanced: quiet restarts and reading aloud (default,
+  /// language, voice, Talk's pause, speed, pitch). How much to read is in
+  /// Chat View's ⋮ (CON-108).
+  advanced,
+}
+
+/// Settings › Chat & Voice: dictation, voice commands and reading aloud,
+/// one [part] at a time.
 class SpeechSettingsControls extends StatefulWidget {
   const SpeechSettingsControls({
     required this.controller,
+    required this.part,
     this.textToSpeech,
     super.key,
   });
 
   final ThemeController controller;
+  final SpeechSettingsPart part;
 
   /// Lists voices and plays the sample; defaults to the on-device engine
   /// on Android and iOS. Without one the read-aloud settings are hidden.
@@ -39,6 +54,7 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
   @override
   void initState() {
     super.initState();
+    if (widget.part != SpeechSettingsPart.advanced) return;
     _tts =
         widget.textToSpeech ??
         VoiceServicesScope.maybeOf(context)?.tts ??
@@ -156,67 +172,115 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
           clipBehavior: Clip.antiAlias,
           child: Column(mainAxisSize: MainAxisSize.min, children: children),
         );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            card([
+        return switch (widget.part) {
+          SpeechSettingsPart.dictation => card([
+            ListTile(
+              leading: const Icon(Icons.mic_none_rounded),
+              title: const Text('Language'),
+              subtitle: Text(
+                'Dictation in Chat mode uses on-device recognition.',
+                style: muted,
+              ),
+              trailing: _Value(
+                describeSpeechLanguage(_settings.speechLanguage),
+              ),
+              onTap: () => showSpeechLanguageDialog(
+                context: context,
+                current: _settings.speechLanguage,
+                onChanged: _settings.setSpeechLanguage,
+              ),
+            ),
+            SwitchListTile(
+              key: const ValueKey('speech-continuous'),
+              secondary: const Icon(Icons.all_inclusive_rounded),
+              title: const Text('Keep listening until I tap stop'),
+              subtitle: Text(
+                'Dictation carries on across pauses instead of stopping '
+                'after the first one.',
+                style: muted,
+              ),
+              value: voice.continuousDictation,
+              onChanged: (value) =>
+                  _update((v) => v.copyWith(continuousDictation: value)),
+            ),
+            if (voice.continuousDictation) ...[
+              _SliderTile(
+                key: const ValueKey('speech-silence'),
+                icon: Icons.hourglass_bottom_rounded,
+                title: 'Pause after silence',
+                value: voice.dictationSilenceSeconds.toDouble(),
+                min: VoicePreferences.minSilenceSeconds.toDouble(),
+                max: 30,
+                divisions: 27,
+                label: '${voice.dictationSilenceSeconds} s',
+                onChanged: (value) => _update(
+                  (v) => v.copyWith(dictationSilenceSeconds: value.round()),
+                ),
+              ),
+              _SliderTile(
+                key: const ValueKey('speech-max-session'),
+                icon: Icons.timer_outlined,
+                title: 'Longest session',
+                value: voice.dictationMaxMinutes.toDouble(),
+                min: VoicePreferences.minMaxMinutes.toDouble(),
+                max: 15,
+                divisions: 14,
+                label: '${voice.dictationMaxMinutes} min',
+                onChanged: (value) => _update(
+                  (v) => v.copyWith(dictationMaxMinutes: value.round()),
+                ),
+              ),
+            ],
+          ]),
+          SpeechSettingsPart.voiceCommands => card([
+            SwitchListTile(
+              key: const ValueKey('speech-voice-commands'),
+              secondary: const Icon(Icons.keyboard_voice_outlined),
+              title: const Text(voiceCommandsTitle),
+              subtitle: Text(
+                'End a dictation with a short pause, then "send" to send '
+                'it or "cancel" to discard it. Only the last words count.',
+                style: muted,
+              ),
+              value: voice.voiceCommands,
+              onChanged: (value) =>
+                  _update((v) => v.copyWith(voiceCommands: value)),
+            ),
+            if (voice.voiceCommands) ...[
               ListTile(
-                leading: const Icon(Icons.mic_none_rounded),
-                title: const Text('Language'),
-                subtitle: Text(
-                  'Dictation in Chat mode uses on-device recognition.',
-                  style: muted,
-                ),
-                trailing: _Value(
-                  describeSpeechLanguage(_settings.speechLanguage),
-                ),
-                onTap: () => showSpeechLanguageDialog(
-                  context: context,
-                  current: _settings.speechLanguage,
-                  onChanged: _settings.setSpeechLanguage,
+                key: const ValueKey('speech-send-words'),
+                leading: const Icon(Icons.send_rounded),
+                title: const Text('Send words'),
+                trailing: _Value(voice.voiceSendWords),
+                onTap: () => _editWords(
+                  title: 'Send words',
+                  current: voice.voiceSendWords,
+                  fallback: VoiceCommandWords.defaultSend,
+                  save: (words) =>
+                      _update((v) => v.copyWith(voiceSendWords: words)),
                 ),
               ),
-              SwitchListTile(
-                key: const ValueKey('speech-continuous'),
-                secondary: const Icon(Icons.all_inclusive_rounded),
-                title: const Text('Keep listening until I tap stop'),
-                subtitle: Text(
-                  'Dictation carries on across pauses instead of stopping '
-                  'after the first one.',
-                  style: muted,
+              ListTile(
+                key: const ValueKey('speech-cancel-words'),
+                leading: const Icon(Icons.cancel_outlined),
+                title: const Text('Cancel words'),
+                trailing: _Value(voice.voiceCancelWords),
+                onTap: () => _editWords(
+                  title: 'Cancel words',
+                  current: voice.voiceCancelWords,
+                  fallback: VoiceCommandWords.defaultCancel,
+                  save: (words) =>
+                      _update((v) => v.copyWith(voiceCancelWords: words)),
                 ),
-                value: voice.continuousDictation,
-                onChanged: (value) =>
-                    _update((v) => v.copyWith(continuousDictation: value)),
               ),
-              if (voice.continuousDictation) ...[
-                _SliderTile(
-                  key: const ValueKey('speech-silence'),
-                  icon: Icons.hourglass_bottom_rounded,
-                  title: 'Pause after silence',
-                  value: voice.dictationSilenceSeconds.toDouble(),
-                  min: VoicePreferences.minSilenceSeconds.toDouble(),
-                  max: 30,
-                  divisions: 27,
-                  label: '${voice.dictationSilenceSeconds} s',
-                  onChanged: (value) => _update(
-                    (v) => v.copyWith(dictationSilenceSeconds: value.round()),
-                  ),
-                ),
-                _SliderTile(
-                  key: const ValueKey('speech-max-session'),
-                  icon: Icons.timer_outlined,
-                  title: 'Longest session',
-                  value: voice.dictationMaxMinutes.toDouble(),
-                  min: VoicePreferences.minMaxMinutes.toDouble(),
-                  max: 15,
-                  divisions: 14,
-                  label: '${voice.dictationMaxMinutes} min',
-                  onChanged: (value) => _update(
-                    (v) => v.copyWith(dictationMaxMinutes: value.round()),
-                  ),
-                ),
-                if (PlatformFeatures.muteRestartBeeps)
+            ],
+          ]),
+          SpeechSettingsPart.advanced => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (PlatformFeatures.muteRestartBeeps &&
+                  voice.continuousDictation)
+                card([
                   SwitchListTile(
                     secondary: const Icon(Icons.notifications_off_outlined),
                     title: const Text('Silence beeps between phrases'),
@@ -231,194 +295,110 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                     onChanged: (value) =>
                         _update((v) => v.copyWith(muteRestartBeeps: value)),
                   ),
-              ],
-              SwitchListTile(
-                key: const ValueKey('speech-voice-commands'),
-                secondary: const Icon(Icons.keyboard_voice_outlined),
-                title: const Text(voiceCommandsTitle),
-                subtitle: Text(
-                  'End a dictation with a short pause, then "send" to send '
-                  'it or "cancel" to discard it. Only the last words count.',
-                  style: muted,
-                ),
-                value: voice.voiceCommands,
-                onChanged: (value) =>
-                    _update((v) => v.copyWith(voiceCommands: value)),
-              ),
-              if (voice.voiceCommands) ...[
-                ListTile(
-                  key: const ValueKey('speech-send-words'),
-                  leading: const Icon(Icons.send_rounded),
-                  title: const Text('Send words'),
-                  trailing: _Value(voice.voiceSendWords),
-                  onTap: () => _editWords(
-                    title: 'Send words',
-                    current: voice.voiceSendWords,
-                    fallback: VoiceCommandWords.defaultSend,
-                    save: (words) =>
-                        _update((v) => v.copyWith(voiceSendWords: words)),
+                ]),
+              if (_tts != null) ...[
+                if (PlatformFeatures.muteRestartBeeps &&
+                    voice.continuousDictation)
+                  const SizedBox(height: 10),
+                card([
+                  SwitchListTile(
+                    key: const ValueKey('speech-read-aloud-default'),
+                    secondary: const Icon(Icons.record_voice_over_outlined),
+                    title: const Text('Read replies aloud by default'),
+                    subtitle: Text(
+                      "Chat View speaks the agent's final answer of each turn, "
+                      'approvals and questions, never tool output. "Read replies '
+                      'aloud" in its ⋮ changes it per session.',
+                      style: muted,
+                    ),
+                    value: voice.readAloudByDefault,
+                    onChanged: (value) =>
+                        _update((v) => v.copyWith(readAloudByDefault: value)),
                   ),
-                ),
-                ListTile(
-                  key: const ValueKey('speech-cancel-words'),
-                  leading: const Icon(Icons.cancel_outlined),
-                  title: const Text('Cancel words'),
-                  trailing: _Value(voice.voiceCancelWords),
-                  onTap: () => _editWords(
-                    title: 'Cancel words',
-                    current: voice.voiceCancelWords,
-                    fallback: VoiceCommandWords.defaultCancel,
-                    save: (words) =>
-                        _update((v) => v.copyWith(voiceCancelWords: words)),
-                  ),
-                ),
-              ],
-            ]),
-            if (_tts != null) ...[
-              const SizedBox(height: 10),
-              card([
-                SwitchListTile(
-                  key: const ValueKey('speech-read-aloud-default'),
-                  secondary: const Icon(Icons.record_voice_over_outlined),
-                  title: const Text('Read replies aloud by default'),
-                  subtitle: Text(
-                    "Chat View speaks the agent's final answer of each turn, "
-                    'approvals and questions, never tool output. The speaker '
-                    'in its header turns it off per session.',
-                    style: muted,
-                  ),
-                  value: voice.readAloudByDefault,
-                  onChanged: (value) =>
-                      _update((v) => v.copyWith(readAloudByDefault: value)),
-                ),
-                Padding(
-                  key: const ValueKey('speech-read-aloud-length'),
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'How much to read',
-                        style: theme.textTheme.titleSmall,
+                  ListTile(
+                    key: const ValueKey('speech-tts-language'),
+                    leading: const Icon(Icons.translate_rounded),
+                    title: const Text('Reading language'),
+                    trailing: _Value(
+                      voice.ttsLanguage.isEmpty
+                          ? 'Same as dictation'
+                          : describeSpeechLanguage(voice.ttsLanguage),
+                    ),
+                    onTap: () => showSpeechLanguageDialog(
+                      context: context,
+                      current: voice.ttsLanguage,
+                      title: 'Reading language',
+                      defaultLabel: 'Same as dictation',
+                      onChanged: (tag) => _update(
+                        // A voice belongs to one language.
+                        (v) => v.copyWith(ttsLanguage: tag, ttsVoice: ''),
                       ),
-                      const SizedBox(height: 4),
-                      Text(switch (voice.readAloudLength) {
-                        ReadAloudLength.brief =>
-                          'The first two or three sentences, then "More on '
-                              'screen". In Talk, say "more" for the rest.',
-                        ReadAloudLength.full =>
-                          'The whole answer. Code blocks and tables become a '
-                              'short cue.',
-                        ReadAloudLength.summary =>
-                          'A short summary written by a coding agent on the '
-                              'machine '
-                              '(companion 0.7.0 or later), else the brief '
-                              'version.',
-                      }, style: muted),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: SegmentedButton<ReadAloudLength>(
-                          segments: [
-                            for (final length in ReadAloudLength.values)
-                              ButtonSegment(
-                                value: length,
-                                label: Text(length.label),
-                              ),
-                          ],
-                          selected: {voice.readAloudLength},
-                          onSelectionChanged: (selection) => _update(
-                            (v) =>
-                                v.copyWith(readAloudLength: selection.single),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                ListTile(
-                  key: const ValueKey('speech-tts-language'),
-                  leading: const Icon(Icons.translate_rounded),
-                  title: const Text('Reading language'),
-                  trailing: _Value(
-                    voice.ttsLanguage.isEmpty
-                        ? 'Same as dictation'
-                        : describeSpeechLanguage(voice.ttsLanguage),
-                  ),
-                  onTap: () => showSpeechLanguageDialog(
-                    context: context,
-                    current: voice.ttsLanguage,
-                    title: 'Reading language',
-                    defaultLabel: 'Same as dictation',
-                    onChanged: (tag) => _update(
-                      // A voice belongs to one language.
-                      (v) => v.copyWith(ttsLanguage: tag, ttsVoice: ''),
                     ),
                   ),
-                ),
-                ListTile(
-                  key: const ValueKey('speech-tts-voice'),
-                  leading: const Icon(Icons.graphic_eq_rounded),
-                  title: const Text('Voice'),
-                  subtitle: Text('Offline voices only.', style: muted),
-                  trailing: _Value(
-                    voice.ttsVoice.isEmpty ? 'Automatic' : voice.ttsVoice,
+                  ListTile(
+                    key: const ValueKey('speech-tts-voice'),
+                    leading: const Icon(Icons.graphic_eq_rounded),
+                    title: const Text('Voice'),
+                    subtitle: Text('Offline voices only.', style: muted),
+                    trailing: _Value(
+                      voice.ttsVoice.isEmpty ? 'Automatic' : voice.ttsVoice,
+                    ),
+                    onTap: _pickVoice,
                   ),
-                  onTap: _pickVoice,
-                ),
-                _SliderTile(
-                  key: const ValueKey('speech-talk-send'),
-                  icon: Icons.send_rounded,
-                  title: 'Talk: send after a pause of',
-                  value: voice.talkSendSilenceSeconds.toDouble(),
-                  min: VoicePreferences.minTalkSendSeconds.toDouble(),
-                  max: VoicePreferences.maxTalkSendSeconds.toDouble(),
-                  divisions: 9,
-                  label: '${voice.talkSendSilenceSeconds} s',
-                  onChanged: (value) => _update(
-                    (v) => v.copyWith(talkSendSilenceSeconds: value.round()),
-                  ),
-                ),
-                _SliderTile(
-                  key: const ValueKey('speech-rate'),
-                  icon: Icons.speed_rounded,
-                  title: 'Speed',
-                  value: voice.ttsRate,
-                  min: VoicePreferences.minRate,
-                  max: VoicePreferences.maxRate,
-                  divisions: 15,
-                  label: '${voice.ttsRate.toStringAsFixed(1)}×',
-                  onChanged: (value) =>
-                      _update((v) => v.copyWith(ttsRate: value)),
-                ),
-                _SliderTile(
-                  key: const ValueKey('speech-pitch'),
-                  icon: Icons.tune_rounded,
-                  title: 'Pitch',
-                  value: voice.ttsPitch,
-                  min: VoicePreferences.minPitch,
-                  max: VoicePreferences.maxPitch,
-                  divisions: 15,
-                  label: voice.ttsPitch.toStringAsFixed(1),
-                  onChanged: (value) =>
-                      _update((v) => v.copyWith(ttsPitch: value)),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      key: const ValueKey('speech-test'),
-                      onPressed: _playSample,
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      label: const Text('Test voice'),
+                  _SliderTile(
+                    key: const ValueKey('speech-talk-send'),
+                    icon: Icons.send_rounded,
+                    title: 'Talk: send after a pause of',
+                    value: voice.talkSendSilenceSeconds.toDouble(),
+                    min: VoicePreferences.minTalkSendSeconds.toDouble(),
+                    max: VoicePreferences.maxTalkSendSeconds.toDouble(),
+                    divisions: 9,
+                    label: '${voice.talkSendSilenceSeconds} s',
+                    onChanged: (value) => _update(
+                      (v) => v.copyWith(talkSendSilenceSeconds: value.round()),
                     ),
                   ),
-                ),
-              ]),
+                  _SliderTile(
+                    key: const ValueKey('speech-rate'),
+                    icon: Icons.speed_rounded,
+                    title: 'Speed',
+                    value: voice.ttsRate,
+                    min: VoicePreferences.minRate,
+                    max: VoicePreferences.maxRate,
+                    divisions: 15,
+                    label: '${voice.ttsRate.toStringAsFixed(1)}×',
+                    onChanged: (value) =>
+                        _update((v) => v.copyWith(ttsRate: value)),
+                  ),
+                  _SliderTile(
+                    key: const ValueKey('speech-pitch'),
+                    icon: Icons.tune_rounded,
+                    title: 'Pitch',
+                    value: voice.ttsPitch,
+                    min: VoicePreferences.minPitch,
+                    max: VoicePreferences.maxPitch,
+                    divisions: 15,
+                    label: voice.ttsPitch.toStringAsFixed(1),
+                    onChanged: (value) =>
+                        _update((v) => v.copyWith(ttsPitch: value)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        key: const ValueKey('speech-test'),
+                        onPressed: _playSample,
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text('Test voice'),
+                      ),
+                    ),
+                  ),
+                ]),
+              ],
             ],
-          ],
-        );
+          ),
+        };
       },
     );
   }

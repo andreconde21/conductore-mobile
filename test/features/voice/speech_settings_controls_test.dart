@@ -24,7 +24,7 @@ void main() {
       ];
   });
 
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(WidgetTester tester, SpeechSettingsPart part) async {
     tester.view.physicalSize = const Size(800, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -34,6 +34,7 @@ void main() {
           body: SingleChildScrollView(
             child: SpeechSettingsControls(
               controller: settings,
+              part: part,
               textToSpeech: tts,
             ),
           ),
@@ -43,7 +44,10 @@ void main() {
   }
 
   testWidgets('continuous dictation settings persist', (tester) async {
-    await pump(tester);
+    await pump(tester, SpeechSettingsPart.dictation);
+    // Reading aloud is under Advanced, voice commands on their own page.
+    expect(find.text('Read replies aloud by default'), findsNothing);
+    expect(find.byKey(const ValueKey('speech-voice-commands')), findsNothing);
     expect(find.text('Keep listening until I tap stop'), findsOneWidget);
     expect(find.text('8 s'), findsOneWidget);
     expect(find.text('5 min'), findsOneWidget);
@@ -70,7 +74,10 @@ void main() {
   testWidgets('read-aloud default, voice, speed and the sample', (
     tester,
   ) async {
-    await pump(tester);
+    await pump(tester, SpeechSettingsPart.advanced);
+    // Chat View's ⋮ has How much to read (CON-108).
+    expect(find.text('How much to read'), findsNothing);
+    expect(find.text('Keep listening until I tap stop'), findsNothing);
     await tester.tap(find.text('Read replies aloud by default'));
     await tester.pumpAndSettle();
     expect(settings.voice.readAloudByDefault, isTrue);

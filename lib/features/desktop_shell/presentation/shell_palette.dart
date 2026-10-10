@@ -311,7 +311,7 @@ List<PaletteEntry> buildShellPaletteEntries({
       PaletteEntry(
         id: 'setting:${setting.section.name}/${setting.title}',
         title: setting.title,
-        subtitle: 'Settings › ${setting.section.title}',
+        subtitle: 'Settings › ${setting.place}',
         kind: PaletteKind.settings,
         icon: Icons.tune_rounded,
         keywords: setting.keywords,

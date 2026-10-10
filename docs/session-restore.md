@@ -1,6 +1,7 @@
 # Restoring sessions after an app restart
 
-Setting: **Settings › Restore sessions on launch** (on by default).
+Setting: **Settings › Terminal › Advanced › Restore sessions on launch**
+(on by default).
 
 ## What is kept
 

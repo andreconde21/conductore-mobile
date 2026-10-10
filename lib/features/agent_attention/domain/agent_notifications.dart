@@ -71,6 +71,28 @@ enum AgentNotificationMode {
       );
 }
 
+/// "Notify me" in Settings › Agents › Notifications: the one choice most
+/// people make (CON-108). It is read from, and written to, the detailed
+/// [AgentNotificationPreferences] under Advanced; a mix none of these
+/// describes shows as Custom.
+enum AgentNotifyChoice {
+  urgentOnly('Urgent only', 'When an agent needs you, fails or looks stuck.'),
+  urgentAndFinished(
+    'Urgent + finished',
+    'Also when an agent finishes its turn.',
+  ),
+  everything(
+    'Everything',
+    'A notification for each agent that needs you or finishes, without '
+        'the ongoing summary.',
+  );
+
+  const AgentNotifyChoice(this.label, this.description);
+
+  final String label;
+  final String description;
+}
+
 /// The key a mute is kept under: the agent on its machine (any session of
 /// the machine).
 String agentMuteKey(String hostId, String agentId) =>
@@ -153,6 +175,41 @@ class AgentNotificationPreferences {
     AgentNeed.stuck => stuck && mode.urgentOnlyAlerts,
     AgentNeed.finished => mode.urgentOnlyAlerts ? finishedAlerts : finished,
   };
+
+  /// The "Notify me" choice these preferences are, or null (Custom) when
+  /// a need is switched off or the mix matches none of them. Whether the
+  /// ongoing notification shows is a detail of the urgent choices.
+  AgentNotifyChoice? get choice {
+    if (!approvals || !questions || !errors) return null;
+    if (mode == AgentNotificationMode.everything) {
+      return finished ? AgentNotifyChoice.everything : null;
+    }
+    if (!stuck) return null;
+    return finishedAlerts
+        ? AgentNotifyChoice.urgentAndFinished
+        : AgentNotifyChoice.urgentOnly;
+  }
+
+  /// These preferences set to [choice]: every need back on, the urgent
+  /// choices keeping whether the ongoing notification shows. Muting,
+  /// summary-only and quiet updates stay as they are.
+  AgentNotificationPreferences withChoice(AgentNotifyChoice choice) {
+    final base = copyWith(approvals: true, questions: true, errors: true);
+    return switch (choice) {
+      AgentNotifyChoice.everything => base.copyWith(
+        mode: AgentNotificationMode.everything,
+        finished: true,
+      ),
+      AgentNotifyChoice.urgentOnly ||
+      AgentNotifyChoice.urgentAndFinished => base.copyWith(
+        mode: mode == AgentNotificationMode.everything
+            ? AgentNotificationMode.ongoingAndUrgent
+            : mode,
+        stuck: true,
+        finishedAlerts: choice == AgentNotifyChoice.urgentAndFinished,
+      ),
+    };
+  }
 
   AgentNotificationPreferences copyWith({
     bool? approvals,

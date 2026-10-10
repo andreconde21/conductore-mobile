@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_page.dart';
+import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
@@ -47,18 +49,23 @@ import 'package:conduit/features/voice_guide/presentation/guide_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-/// The settings of one [section], as a scrolling column of cards.
+/// The settings of one [section], as a scrolling column of cards, with
+/// the ones most people never change under Advanced at the end.
 class SettingsSectionBody extends StatelessWidget {
   const SettingsSectionBody({
     required this.section,
     required this.services,
     this.padding = const EdgeInsets.fromLTRB(18, 4, 18, 28),
+    this.expandAdvanced = false,
     super.key,
   });
 
   final SettingsSection section;
   final SettingsServices services;
   final EdgeInsets padding;
+
+  /// Opens with Advanced unfolded (a search result that lives there).
+  final bool expandAdvanced;
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +85,7 @@ class SettingsSectionBody extends StatelessWidget {
       SettingsSection.appearance => _appearance(theme),
       SettingsSection.terminal => _terminal(theme),
       SettingsSection.input => _input(context, theme),
-      SettingsSection.chatVoice => _chatVoice(theme),
+      SettingsSection.chatVoice => _chatVoice(context, theme),
       SettingsSection.agents => _agents(context),
       SettingsSection.syncBackup => _syncBackup(context),
       SettingsSection.security => _security(context),
@@ -88,6 +95,18 @@ class SettingsSectionBody extends StatelessWidget {
       SettingsSection.about => const [AboutControls()],
     };
   }
+
+  /// Advanced, folded, after the rest; nothing when [children] is empty.
+  List<Widget> _advanced(List<Widget> children) => [
+    if (children.isNotEmpty) ...[
+      _gap,
+      SettingsAdvanced(
+        key: ValueKey('settings-advanced-${section.name}'),
+        initiallyExpanded: expandAdvanced,
+        children: children,
+      ),
+    ],
+  ];
 
   List<Widget> _appearance(ThemeController theme) => [
     if (theme.omarchySync case final sync?) ...[
@@ -104,16 +123,17 @@ class SettingsSectionBody extends StatelessWidget {
     _gap,
     const SettingsHeading('Terminal font'),
     TerminalFontControls(controller: theme),
-    _gap,
-    // The proot local shell is Android's; desktops have This computer.
-    if (PlatformFeatures.prootLocalShell)
-      SettingsSwitchCard(
-        icon: Icons.terminal_rounded,
-        title: 'Show local shell',
-        subtitle: 'Show the local terminal shortcut on the home screen.',
-        value: theme.showLocalShell,
-        onChanged: theme.setShowLocalShell,
-      ),
+    ..._advanced([
+      // The proot local shell is Android's; desktops have This computer.
+      if (PlatformFeatures.prootLocalShell)
+        SettingsSwitchCard(
+          icon: Icons.terminal_rounded,
+          title: 'Show local shell',
+          subtitle: 'Show the local terminal shortcut on the home screen.',
+          value: theme.showLocalShell,
+          onChanged: theme.setShowLocalShell,
+        ),
+    ]),
   ];
 
   List<Widget> _terminal(ThemeController theme) => [
@@ -136,95 +156,6 @@ class SettingsSectionBody extends StatelessWidget {
       ),
       _gap,
     ],
-    SettingsSegmentCard<TerminalEnterSequence>(
-      icon: Icons.keyboard_return_rounded,
-      title: 'Enter sends',
-      description: theme.terminalEnterSequence.description,
-      values: TerminalEnterSequence.values,
-      label: (value) => value.label,
-      selected: theme.terminalEnterSequence,
-      onChanged: theme.setTerminalEnterSequence,
-    ),
-    _gap,
-    SettingsSwitchCard(
-      icon: Icons.mouse_rounded,
-      title: 'Send mouse taps',
-      subtitle:
-          'Forward terminal taps as mouse clicks when apps enable mouse '
-          'tracking.',
-      value: theme.terminalMouseInput,
-      onChanged: theme.setTerminalMouseInput,
-    ),
-    _gap,
-    SettingsSwitchCard(
-      icon: Icons.content_paste_go_rounded,
-      title: 'Remote clipboard',
-      subtitle:
-          'Let programs on the host copy to this device (OSC 52: vim, '
-          'tmux with set-clipboard on). The host can never read it.',
-      value: theme.remoteClipboardEnabled,
-      onChanged: theme.setRemoteClipboardEnabled,
-    ),
-    _gap,
-    SettingsSwitchCard(
-      icon: Icons.smart_button_rounded,
-      title: 'Menu buttons',
-      subtitle:
-          'Answer numbered menus and y/n prompts (Claude Code, installers) '
-          'with buttons above the keyboard bar.',
-      value: theme.menuButtonsEnabled,
-      onChanged: theme.setMenuButtonsEnabled,
-    ),
-    _gap,
-    SettingsSwitchCard(
-      switchKey: const ValueKey('paste-images-as-files'),
-      icon: Icons.image_outlined,
-      title: 'Paste images as uploaded files',
-      subtitle:
-          "Pasting an image uploads it to the machine's share inbox and "
-          'pastes its path, which Claude Code reads as an image. Off: '
-          'paste text only.',
-      value: theme.pasteImagesAsFiles,
-      onChanged: theme.setPasteImagesAsFiles,
-    ),
-    _gap,
-    SettingsSwitchCard(
-      switchKey: const ValueKey('restore-sessions-switch'),
-      icon: Icons.restore_page_rounded,
-      title: 'Restore sessions on launch',
-      subtitle:
-          'Bring back the open sessions after the app restarts. tmux and '
-          'Herdr sessions reattach; plain shells start fresh.',
-      value: theme.restoreSessionsOnLaunch,
-      onChanged: theme.setRestoreSessionsOnLaunch,
-    ),
-    _gap,
-    SettingsSwitchCard(
-      switchKey: const ValueKey('keep-screen-on'),
-      icon: Icons.light_mode_outlined,
-      title: keepScreenOnTitle,
-      subtitle:
-          'Only while a connected terminal is on screen and the app is in '
-          'front. Off: the screen sleeps and locks as usual.',
-      value: theme.keepScreenOn,
-      onChanged: theme.setKeepScreenOn,
-    ),
-    _gap,
-    SettingsSegmentCard<int>(
-      key: const ValueKey('ssh-keepalive-setting'),
-      icon: Icons.network_ping_rounded,
-      title: sshKeepaliveTitle,
-      description:
-          'How often SSH connections check the link while the app is in '
-          'front. Longer saves battery and data; in the background '
-          'terminals check every 2 minutes and other connections not at '
-          'all. Off: a dropped network is noticed only on the next use.',
-      values: SshKeepalivePolicy.choices,
-      label: (seconds) => seconds == 0 ? 'Off' : '$seconds s',
-      selected: theme.sshKeepaliveSeconds,
-      onChanged: theme.setSshKeepaliveSeconds,
-    ),
-    _gap,
     // Brings its own bottom gap (and nothing without a SessionViewScope).
     const SessionViewSettingsTile(),
     SettingsSwitchCard(
@@ -237,20 +168,6 @@ class SettingsSectionBody extends StatelessWidget {
           'right pane instead.',
       value: theme.herdrMayMoveFocus,
       onChanged: theme.setHerdrMayMoveFocus,
-    ),
-    _gap,
-    SettingsSegmentCard<MultiplexerTabsMode>(
-      key: const ValueKey('multiplexer-tabs-setting'),
-      icon: Icons.tab_rounded,
-      title: 'Multiplexer tabs on phone',
-      description:
-          'Herdr tabs and tmux windows. Compact names the current one in the '
-          'session tab (tap it for the list) and costs no screen space; '
-          'Strip adds a row, for tablets. A computer always shows the strip.',
-      values: MultiplexerTabsMode.values,
-      label: (value) => value.label,
-      selected: theme.multiplexerTabs,
-      onChanged: theme.setMultiplexerTabs,
     ),
     _gap,
     SettingsCard(
@@ -266,53 +183,168 @@ class SettingsSectionBody extends StatelessWidget {
     ),
     _gap,
     SettingsCard(child: PersonalQuickActionsCard(theme: theme)),
-  ];
-
-  List<Widget> _input(BuildContext context, ThemeController theme) => [
-    SettingsSegmentCard<TerminalToolbarStyle>(
-      icon: Icons.space_bar_rounded,
-      title: 'Toolbar style',
-      description: theme.terminalToolbarStyle.description,
-      values: TerminalToolbarStyle.values,
-      label: (value) => value.label,
-      selected: theme.terminalToolbarStyle,
-      onChanged: theme.setTerminalToolbarStyle,
-    ),
-    _gap,
-    SettingsCard(
-      child: ListTile(
-        key: const ValueKey('settings-pill-buttons'),
-        leading: const Icon(Icons.view_week_outlined),
-        title: const Text('Pill buttons'),
-        subtitle: Text(
-          '${theme.terminalPillItems.length} buttons on the floating pill. '
-          'Long-press the pill in a session to change them there too.',
-        ),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => _configurePill(context, theme),
-      ),
-    ),
-    _gap,
-    KeyRowsTile(controller: theme),
-    _gap,
-    if (PlatformFeatures.isDesktop) ...[
-      SettingsCard(
-        child: ListTile(
-          key: const ValueKey('settings-keyboard-shortcuts'),
-          leading: const Icon(Icons.keyboard_outlined),
-          title: const Text('Keyboard shortcuts'),
-          subtitle: const Text(
-            'Every desktop shortcut: tabs, panes, zoom, the quick switcher.',
-          ),
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () => showDesktopShortcutsSheet(context),
-        ),
+    ..._advanced([
+      SettingsSegmentCard<TerminalEnterSequence>(
+        icon: Icons.keyboard_return_rounded,
+        title: 'Enter sends',
+        description: theme.terminalEnterSequence.description,
+        values: TerminalEnterSequence.values,
+        label: (value) => value.label,
+        selected: theme.terminalEnterSequence,
+        onChanged: theme.setTerminalEnterSequence,
       ),
       _gap,
-    ],
-    const SettingsHeading('Gestures'),
-    TerminalGesturesSettings(controller: theme),
+      SettingsSwitchCard(
+        icon: Icons.mouse_rounded,
+        title: 'Send mouse taps',
+        subtitle:
+            'Forward terminal taps as mouse clicks when apps enable mouse '
+            'tracking.',
+        value: theme.terminalMouseInput,
+        onChanged: theme.setTerminalMouseInput,
+      ),
+      _gap,
+      SettingsSwitchCard(
+        icon: Icons.content_paste_go_rounded,
+        title: 'Remote clipboard',
+        subtitle:
+            'Let programs on the host copy to this device (OSC 52: vim, '
+            'tmux with set-clipboard on). The host can never read it.',
+        value: theme.remoteClipboardEnabled,
+        onChanged: theme.setRemoteClipboardEnabled,
+      ),
+      _gap,
+      SettingsSwitchCard(
+        icon: Icons.smart_button_rounded,
+        title: 'Menu buttons',
+        subtitle:
+            'Answer numbered menus and y/n prompts (Claude Code, installers) '
+            'with buttons above the keyboard bar.',
+        value: theme.menuButtonsEnabled,
+        onChanged: theme.setMenuButtonsEnabled,
+      ),
+      _gap,
+      SettingsSwitchCard(
+        switchKey: const ValueKey('paste-images-as-files'),
+        icon: Icons.image_outlined,
+        title: 'Paste images as uploaded files',
+        subtitle:
+            "Pasting an image uploads it to the machine's share inbox and "
+            'pastes its path, which Claude Code reads as an image. Off: '
+            'paste text only.',
+        value: theme.pasteImagesAsFiles,
+        onChanged: theme.setPasteImagesAsFiles,
+      ),
+      _gap,
+      SettingsSwitchCard(
+        switchKey: const ValueKey('restore-sessions-switch'),
+        icon: Icons.restore_page_rounded,
+        title: 'Restore sessions on launch',
+        subtitle:
+            'Bring back the open sessions after the app restarts. tmux and '
+            'Herdr sessions reattach; plain shells start fresh.',
+        value: theme.restoreSessionsOnLaunch,
+        onChanged: theme.setRestoreSessionsOnLaunch,
+      ),
+      _gap,
+      SettingsSwitchCard(
+        switchKey: const ValueKey('keep-screen-on'),
+        icon: Icons.light_mode_outlined,
+        title: keepScreenOnTitle,
+        subtitle:
+            'Only while a connected terminal is on screen and the app is in '
+            'front. Off: the screen sleeps and locks as usual.',
+        value: theme.keepScreenOn,
+        onChanged: theme.setKeepScreenOn,
+      ),
+      _gap,
+      SettingsSegmentCard<int>(
+        key: const ValueKey('ssh-keepalive-setting'),
+        icon: Icons.network_ping_rounded,
+        title: sshKeepaliveTitle,
+        description:
+            'How often SSH connections check the link while the app is in '
+            'front. Longer saves battery and data; in the background '
+            'terminals check every 2 minutes and other connections not at '
+            'all. Off: a dropped network is noticed only on the next use.',
+        values: SshKeepalivePolicy.choices,
+        label: (seconds) => seconds == 0 ? 'Off' : '$seconds s',
+        selected: theme.sshKeepaliveSeconds,
+        onChanged: theme.setSshKeepaliveSeconds,
+      ),
+      _gap,
+      SettingsSegmentCard<MultiplexerTabsMode>(
+        key: const ValueKey('multiplexer-tabs-setting'),
+        icon: Icons.tab_rounded,
+        title: 'Multiplexer tabs on phone',
+        description:
+            'Herdr tabs and tmux windows. Compact names the current one in the '
+            'session tab (tap it for the list) and costs no screen space; '
+            'Strip adds a row, for tablets. A computer always shows the strip.',
+        values: MultiplexerTabsMode.values,
+        label: (value) => value.label,
+        selected: theme.multiplexerTabs,
+        onChanged: theme.setMultiplexerTabs,
+      ),
+    ]),
   ];
+
+  List<Widget> _input(BuildContext context, ThemeController theme) {
+    final pill =
+        theme.terminalToolbarStyle == TerminalToolbarStyle.floatingPill;
+    return [
+      SettingsCard(
+        child: ListTile(
+          key: const ValueKey('settings-customize-keys'),
+          leading: const Icon(Icons.view_week_outlined),
+          title: const Text(customizeKeysTitle),
+          subtitle: Text(
+            pill
+                ? '${theme.terminalPillItems.length} buttons on the floating '
+                      'pill. Long-press the pill in a session to change them '
+                      'there too.'
+                : '${theme.terminalKeyboardRows.length} key rows above the '
+                      'keyboard.',
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => pill
+              ? _configurePill(context, theme)
+              : showKeyboardRowsEditor(context, theme),
+        ),
+      ),
+      if (PlatformFeatures.isDesktop) ...[
+        _gap,
+        SettingsCard(
+          child: ListTile(
+            key: const ValueKey('settings-keyboard-shortcuts'),
+            leading: const Icon(Icons.keyboard_outlined),
+            title: const Text('Keyboard shortcuts'),
+            subtitle: const Text(
+              'Every desktop shortcut: tabs, panes, zoom, the quick switcher.',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showDesktopShortcutsSheet(context),
+          ),
+        ),
+      ],
+      ..._advanced([
+        SettingsSegmentCard<TerminalToolbarStyle>(
+          icon: Icons.space_bar_rounded,
+          title: 'Toolbar style',
+          description: theme.terminalToolbarStyle.description,
+          values: TerminalToolbarStyle.values,
+          label: (value) => value.label,
+          selected: theme.terminalToolbarStyle,
+          onChanged: theme.setTerminalToolbarStyle,
+        ),
+        _gap,
+        KeyRowsTile(controller: theme),
+        _gap,
+        const SettingsHeading('Gestures'),
+        TerminalGesturesSettings(controller: theme),
+      ]),
+    ];
+  }
 
   static Future<void> _configurePill(
     BuildContext context,
@@ -330,84 +362,125 @@ class SettingsSectionBody extends StatelessWidget {
     if (items != null) await theme.setTerminalPillItems(items);
   }
 
-  List<Widget> _chatVoice(ThemeController theme) => [
-    SettingsSwitchCard(
-      switchKey: const ValueKey('compose-submit-enter'),
-      icon: Icons.keyboard_return_rounded,
-      title: 'Press Enter after inserting',
-      subtitle:
-          'The prompt composer inserts your text and presses Enter, so the '
-          'agent gets it right away. Off: the text is only inserted.',
-      value: theme.composeSubmitEnter,
-      onChanged: theme.setComposeSubmitEnter,
-    ),
-    _gap,
-    SettingsSegmentCard<ToolActivity>(
-      key: const ValueKey('chat-tool-activity'),
-      icon: Icons.handyman_outlined,
-      title: 'Tool activity',
-      description: switch (theme.voice.toolActivity) {
-        ToolActivity.all => 'Chat mode shows every tool call as its own card.',
-        ToolActivity.collapsed =>
-          'Tool calls in a row fold into one line, like "Ran 4 commands, '
-              'edited 2 files". Tap it to see them.',
-        ToolActivity.hidden =>
-          'Tool calls are not shown. Approvals, questions and errors always '
-              'are.',
-      },
-      values: ToolActivity.values,
-      label: (mode) => mode.label,
-      selected: theme.voice.toolActivity,
-      onChanged: (mode) =>
-          theme.setVoice(theme.voice.copyWith(toolActivity: mode)),
-    ),
-    _gap,
-    SettingsSegmentCard<ReviewOpens>(
-      key: const ValueKey('chat-review-opens'),
-      icon: Icons.rate_review_outlined,
-      title: 'Review changes',
-      description: switch (theme.voice.reviewOpens) {
-        ReviewOpens.onDemand =>
-          'Review opens from its button in Chat View, the Agents dashboard '
-              'and the inbox, or when you tell the voice guide "review".',
-        ReviewOpens.afterEachTurn =>
-          'When a turn ends in Chat View, Review opens with a card per '
-              'changed file: accept, reject, comment, or undo the turn.',
-      },
-      values: ReviewOpens.values,
-      label: (mode) => mode.label,
-      selected: theme.voice.reviewOpens,
-      onChanged: (mode) =>
-          theme.setVoice(theme.voice.copyWith(reviewOpens: mode)),
-    ),
-    _gap,
-    if (PlatformFeatures.dictation || PlatformFeatures.textToSpeech) ...[
-      const SettingsHeading('Where to find voice'),
-      const SettingsNote(
-        'Dictate: tap the mic next to any chat field (the terminal chat '
-        'line from the pill\'s Chat button, Chat View). Add a Dictate '
-        'button to the pill (long-press the pill).\n'
-        'Talk: long-press the mic in Chat View for a hands-free '
-        'conversation with the agent. The voice guide, which talks to all '
-        'your agents, is the headset-mic button at the top of home and the '
-        'Voice guide quick-settings tile.\n'
-        'A crossed-out mic means this phone has no speech recognizer yet; '
-        'tap it to see how to get one.',
-      ),
-      _gap,
-      const SettingsHeading('Dictation and read aloud'),
-      SpeechSettingsControls(controller: theme),
-      if (PlatformFeatures.dictation && PlatformFeatures.textToSpeech) ...[
+  List<Widget> _chatVoice(BuildContext context, ThemeController theme) {
+    final speech = PlatformFeatures.dictation || PlatformFeatures.textToSpeech;
+    final guide = PlatformFeatures.dictation && PlatformFeatures.textToSpeech;
+    final voice = theme.voice;
+    return [
+      if (speech) ...[
+        SpeechSettingsControls(
+          controller: theme,
+          part: SpeechSettingsPart.dictation,
+        ),
         _gap,
-        const SettingsHeading('Voice guide'),
-        GuideSettingsControls(theme: theme, hosts: services.hostsController),
-      ],
-    ] else
-      const SettingsNote(
-        'Dictation, read aloud and Talk use the phone\'s speech services, '
-        'so they are not available on this device.',
+        SettingsCard(
+          child: ListTile(
+            key: const ValueKey('settings-voice-commands'),
+            leading: const Icon(Icons.keyboard_voice_outlined),
+            title: const Text(voiceCommandsTitle),
+            subtitle: Text(voice.voiceCommands ? 'On' : 'Off'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _openPage(
+              context,
+              title: 'Voice commands',
+              children: () => [
+                SpeechSettingsControls(
+                  controller: theme,
+                  part: SpeechSettingsPart.voiceCommands,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (guide) ...[
+          _gap,
+          SettingsCard(
+            child: ListTile(
+              key: const ValueKey('settings-voice-guide'),
+              leading: const Icon(Icons.headset_mic_outlined),
+              title: const Text(voiceGuideTitle),
+              subtitle: Text(
+                voice.guide.enabled
+                    ? 'On. Talk to all your agents hands-free.'
+                    : 'Off',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openPage(
+                context,
+                title: voiceGuideTitle,
+                children: () => [
+                  GuideSettingsControls(
+                    theme: theme,
+                    hosts: services.hostsController,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ] else
+        const SettingsNote(
+          'Dictation, read aloud and Talk use the phone\'s speech services, '
+          'so they are not available on this device.',
+        ),
+      ..._advanced([
+        SettingsSwitchCard(
+          switchKey: const ValueKey('compose-submit-enter'),
+          icon: Icons.keyboard_return_rounded,
+          title: 'Press Enter after inserting',
+          subtitle:
+              'The prompt composer inserts your text and presses Enter, so '
+              'the agent gets it right away. Off: the text is only inserted.',
+          value: theme.composeSubmitEnter,
+          onChanged: theme.setComposeSubmitEnter,
+        ),
+        _gap,
+        SettingsSegmentCard<ReviewOpens>(
+          key: const ValueKey('chat-review-opens'),
+          icon: Icons.rate_review_outlined,
+          title: 'Review changes',
+          description: switch (voice.reviewOpens) {
+            ReviewOpens.onDemand =>
+              'Review opens from its button in Chat View, the Agents '
+                  'dashboard and the inbox, or when you tell the voice guide '
+                  '"review".',
+            ReviewOpens.afterEachTurn =>
+              'When a turn ends in Chat View, Review opens with a card per '
+                  'changed file: accept, reject, comment, or undo the turn.',
+          },
+          values: ReviewOpens.values,
+          label: (mode) => mode.label,
+          selected: voice.reviewOpens,
+          onChanged: (mode) =>
+              theme.setVoice(voice.copyWith(reviewOpens: mode)),
+        ),
+        if (speech) ...[
+          _gap,
+          SpeechSettingsControls(
+            controller: theme,
+            part: SpeechSettingsPart.advanced,
+          ),
+        ],
+      ]),
+    ];
+  }
+
+  /// A row's own page (Voice commands, Voice guide), over Settings.
+  void _openPage(
+    BuildContext context, {
+    required String title,
+    required List<Widget> Function() children,
+  }) => unawaited(
+    pushAdaptivePage<void>(
+      context,
+      desktopMaxWidth: 760,
+      builder: (_) => SettingsSubPage(
+        title: title,
+        theme: services.theme,
+        children: children,
       ),
-  ];
+    ),
+  );
 
   List<Widget> _agents(BuildContext context) {
     final hosts = services.hostsController;
@@ -516,14 +589,9 @@ class SettingsSectionBody extends StatelessWidget {
                 if (attention != null &&
                     PlatformFeatures.agentNotifications) ...[
                   const SizedBox(height: 10),
-                  const SettingsNote(
-                    'One notification per agent, updated in place with '
-                    'what it needs now. It alerts only when an agent newly '
-                    'needs you, and goes away once everything is answered. '
-                    'This device only.',
-                  ),
+                  const SettingsNote('Notify me on this device about:'),
                   const SizedBox(height: 6),
-                  AgentNotificationSettingsCard(controller: attention),
+                  AgentNotifyChoiceCard(controller: attention),
                 ],
               ],
             );
@@ -621,6 +689,20 @@ class SettingsSectionBody extends StatelessWidget {
           channel: PlatformAgentStatusWidgetChannel.instance,
         ),
       ],
+      ..._advanced([
+        if (hosts != null &&
+            attention != null &&
+            PlatformFeatures.agentNotifications) ...[
+          const SettingsHeading('Notification details'),
+          const SettingsNote(
+            'One notification per agent, updated in place with what it '
+            'needs now. It alerts only when an agent newly needs you, and '
+            'goes away once everything is answered. This device only.',
+          ),
+          const SizedBox(height: 6),
+          AgentNotificationDetailsCard(controller: attention),
+        ],
+      ]),
     ];
   }
 
@@ -791,6 +873,116 @@ class SelfMachineCard extends StatelessWidget {
           onChanged: onChanged,
         ),
       ],
+    );
+  }
+}
+
+/// "Advanced" at the end of a section: the settings most people never
+/// change, folded until tapped (CON-108). Kept alive in the lazy list, so
+/// scrolling away does not fold it again.
+class SettingsAdvanced extends StatefulWidget {
+  const SettingsAdvanced({
+    required this.children,
+    this.initiallyExpanded = false,
+    super.key,
+  });
+
+  final List<Widget> children;
+  final bool initiallyExpanded;
+
+  @override
+  State<SettingsAdvanced> createState() => _SettingsAdvancedState();
+}
+
+class _SettingsAdvancedState extends State<SettingsAdvanced>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final theme = Theme.of(context);
+    return ExpansionTile(
+      initiallyExpanded: widget.initiallyExpanded,
+      tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+      childrenPadding: const EdgeInsets.only(top: 4),
+      shape: const Border(),
+      collapsedShape: const Border(),
+      leading: const Icon(Icons.tune_rounded),
+      title: Text(
+        settingsAdvanced,
+        style: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      subtitle: const Text('Settings most people never change'),
+      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+      children: widget.children,
+    );
+  }
+}
+
+/// A settings row's own page (Voice commands, Voice guide): a flat header
+/// with back, then [children], built again as [theme] changes.
+class SettingsSubPage extends StatelessWidget {
+  const SettingsSubPage({
+    required this.title,
+    required this.theme,
+    required this.children,
+    super.key,
+  });
+
+  final String title;
+  final ThemeController theme;
+  final List<Widget> Function() children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: ConduitBackdrop(
+        palette: theme.palette,
+        child: Material(
+          type: MaterialType.transparency,
+          child: SafeArea(
+            bottom: shouldApplyBottomSafeArea(context),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Back',
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListenableBuilder(
+                    listenable: theme,
+                    builder: (context, _) => ListView(
+                      key: ValueKey('settings-page-$title'),
+                      padding: const EdgeInsets.fromLTRB(18, 4, 18, 28),
+                      children: children(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
