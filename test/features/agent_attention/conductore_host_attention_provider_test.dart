@@ -92,6 +92,76 @@ void main() {
       expect(snapshot.agents[3].state, AgentAttentionState.finished);
     });
 
+    test('an agent in a Herdr pane is named after its workspace (CON-116)', () {
+      final snapshot = ConductoreHostAttentionProvider.parseSnapshot('''
+{"version":1,"seq":3,"agents":[
+  {"sessionId":"a","name":"Infrastructure","cwd":"/root",
+   "herdr":{"workspaceId":"w4","tabId":"w4:t4","paneId":"w4:p4","name":null,
+     "socket":"/root/.config/herdr/herdr.sock","workspaceLabel":"Infrastructure"},
+   "state":"working","pending":[]},
+  {"sessionId":"b","name":"root","cwd":"/root",
+   "herdr":{"workspaceId":"wS","tabId":"wS:t1","paneId":"wS:p1","name":null,
+     "workspaceLabel":"Vaultwarden"},
+   "state":"working","pending":[]},
+  {"sessionId":"c","name":"reviewer","cwd":"/root/Projects",
+   "herdr":{"workspaceId":"wW","tabId":"wW:t1","paneId":"wW:p1",
+     "name":"reviewer","socket":"/root/.config/herdr/sessions/ops/herdr.sock",
+     "workspaceLabel":"Improvise"},
+   "state":"working","pending":[]},
+  {"sessionId":"d","name":"Projects","cwd":"/root/Projects",
+   "herdr":{"workspaceId":"w1H","tabId":"w1H:t1","paneId":"w1H:p1","name":null,
+     "socket":"/root/.config/herdr/herdr.sock"},
+   "state":"working","pending":[]}
+]}
+''');
+      final [a, b, c, d] = snapshot.agents;
+      expect(a.name, 'Infrastructure');
+      expect(a.workspaceLabel, 'Infrastructure');
+      // Every surface that groups or titles by project reads the label;
+      // usage rows and layout rules still match the repository.
+      expect(a.projectLabel, 'Infrastructure');
+      expect(a.repoLabel, 'root');
+      expect(a.herdrServer, 'herdr');
+      // The label wins over a folder name the companion still sent.
+      expect(b.name, 'Vaultwarden');
+      expect(b.projectLabel, 'Vaultwarden');
+      expect(b.herdrServer, 'herdr');
+      // A live pane name stays the name; the workspace is the project.
+      expect(c.name, 'reviewer');
+      expect(c.projectLabel, 'Improvise');
+      expect(c.herdrServer, 'herdr@ops');
+      // An older companion: no label yet (the monitor may know it).
+      expect(d.name, 'Projects');
+      expect(d.workspaceLabel, isNull);
+      expect(d.projectLabel, 'Projects');
+    });
+
+    test('herdrServerOf reads the server from the socket', () {
+      expect(ConductoreHostAttentionProvider.herdrServerOf({}), 'herdr');
+      expect(
+        ConductoreHostAttentionProvider.herdrServerOf({'server': 'herdr@x'}),
+        'herdr@x',
+      );
+      expect(
+        ConductoreHostAttentionProvider.herdrServerOf({
+          'socket': '/home/u/.config/herdr/herdr.sock',
+        }),
+        'herdr',
+      );
+      expect(
+        ConductoreHostAttentionProvider.herdrServerOf({
+          'socket': '/home/u/.config/herdr/sessions/shtest/herdr.sock',
+        }),
+        'herdr@shtest',
+      );
+      expect(
+        ConductoreHostAttentionProvider.herdrServerOf({
+          'socket': '/tmp/other.sock',
+        }),
+        isNull,
+      );
+    });
+
     test('maps every documented state', () {
       expect(
         ConductoreHostAttentionProvider.parseState('working'),

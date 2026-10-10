@@ -10,6 +10,8 @@
 //   lastError = { type, at }: the last turn ended on an API error (StopFailure),
 //   until the next prompt
 //   process = { pid, startTime } of Claude Code when the daemon could identify it
+//   herdr = { workspaceId, tabId, paneId, name, socket, workspaceLabel? }: the
+//   label once the live bridge saw the workspace (syncHerdrLabels)
 //   PendingRequest = { id, toolName, summary, toolInput, createdAt,
 //                      risk: { level, reason }, batchable, suggestedRules, repo,
 //                      questions? }
@@ -104,9 +106,14 @@ function cleanName (name) {
   return cleaned || null
 }
 
-function pickName (event, cwd) {
+// An agent in a Herdr pane is named after the pane (a live name someone
+// gave it), else its workspace (the label Herdr and sheprd show, set by
+// syncHerdrLabels); in tmux after a telling window name; else its cwd.
+function pickName (event, cwd, workspaceLabel = null) {
   const herdrName = event.herdr && cleanName(event.herdr.name)
   if (herdrName) return herdrName
+  const label = event.herdr && cleanName(workspaceLabel)
+  if (label) return label
   const win = event.tmux && cleanName(event.tmux.windowName)
   if (win && !GENERIC_WINDOW_NAMES.has(win.toLowerCase())) return win
   if (cwd) return path.basename(cwd) || cwd
@@ -122,14 +129,44 @@ function applyContext (agent, event) {
     if (event.tmux.socket) agent.tmux.socket = event.tmux.socket
     if (event.tmux.panePid) agent.tmux.panePid = event.tmux.panePid
   }
-  if (event.herdr) agent.herdr = event.herdr
+  if (event.herdr) {
+    // Hooks know the workspace, not its label: keep the label while the
+    // agent stays in the same workspace of the same server.
+    const before = agent.herdr
+    const label = before && before.workspaceLabel && before.workspaceId === event.herdr.workspaceId &&
+      (before.socket || null) === (event.herdr.socket || null) ? before.workspaceLabel : null
+    agent.herdr = label ? { ...event.herdr, workspaceLabel: label } : event.herdr
+  }
   if (event.process) agent.process = event.process
   // Claude Code's current mode (default, plan, acceptEdits, auto,
   // bypassPermissions…), carried by every hook event: Talkbawt refuses to
   // type into an agent that acts without asking.
   if (typeof event.permission_mode === 'string' && event.permission_mode) agent.permissionMode = event.permission_mode
-  const name = pickName(event, agent.cwd)
+  const name = pickName(event, agent.cwd, agent.herdr && agent.herdr.workspaceLabel)
   if (name) agent.name = name
+}
+
+// Herdr workspace labels onto the agents in Herdr panes (CON-116).
+// labelOf(agent) is the label of the agent's workspace, '' for a
+// workspace Herdr no longer lists, or undefined when unknown (the live
+// bridge is not running): a known label is kept until Herdr says
+// otherwise. Returns the change records.
+function syncHerdrLabels (state, labelOf) {
+  const changes = []
+  for (const agent of Object.values(state.agents)) {
+    if (agent.state === 'ended' || !agent.herdr || !agent.herdr.workspaceId) continue
+    const found = labelOf(agent)
+    if (found === undefined) continue
+    const label = cleanName(found)
+    if ((agent.herdr.workspaceLabel || null) === label) continue
+    agent.herdr = { ...agent.herdr }
+    if (label) agent.herdr.workspaceLabel = label
+    else delete agent.herdr.workspaceLabel
+    const name = pickName({ herdr: agent.herdr, tmux: agent.tmux }, agent.cwd, label)
+    if (name) agent.name = name
+    changes.push(record(state, 'change', agent, 'herdr-label'))
+  }
+  return changes
 }
 
 function reduce (state, event, now = Date.now()) {
@@ -495,6 +532,7 @@ module.exports = {
   findPending,
   setUsage,
   usageChange,
+  syncHerdrLabels,
   prune,
   expire,
   snapshot,

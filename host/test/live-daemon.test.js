@@ -9,6 +9,7 @@ for (const k of Object.keys(process.env)) if (k.startsWith('HERDR_') || k.starts
 
 const test = require('node:test')
 const assert = require('node:assert')
+const fs = require('fs')
 const path = require('path')
 const { execFile, spawn } = require('child_process')
 const { tempDir, cleanup } = require('./helpers/cleanup')
@@ -18,8 +19,13 @@ const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
 const home = tempDir('hl-ld-')
 const fake = new FakeHerdr(path.join(home, 'h.sock'))
+// The daemon's `herdr pane list` (hook enrichment) never reaches a real
+// Herdr: this one knows nothing.
+const fakeBin = tempDir('hl-ld-bin-')
+fs.writeFileSync(path.join(fakeBin, 'herdr'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
 const env = {
   ...process.env,
+  PATH: `${fakeBin}:${process.env.PATH}`,
   CONDUCTORE_HOME: home,
   CONDUCTORE_SOCKET: path.join(home, 'd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json'),
@@ -40,9 +46,9 @@ async function until (fn, ms = 10000) {
   }
   return fn()
 }
-function hook (event) {
+function hook (event, extra = {}) {
   return new Promise(resolve => {
-    const child = spawn(HOOK, [event.hook_event_name], { env, stdio: ['pipe', 'ignore', 'ignore'] })
+    const child = spawn(HOOK, [event.hook_event_name], { env: { ...env, ...extra }, stdio: ['pipe', 'ignore', 'ignore'] })
     child.on('exit', resolve)
     child.stdin.end(JSON.stringify(event))
   })
@@ -108,6 +114,34 @@ test('a Herdr-only agent appears with --herdr-agents, and hides once its hooks r
     return s.agents.some(a => a.sessionId === 'herdr/w1:p1') ? null : s
   })
   assert.ok(gone.agents.some(a => a.sessionId === 'claude-7'))
+})
+
+test('an agent in a Herdr pane is named after its workspace, and follows a rename (CON-116)', async () => {
+  const where = { HERDR_WORKSPACE_ID: 'w1', HERDR_TAB_ID: 'w1:t1', HERDR_PANE_ID: 'w1:p1', HERDR_SOCKET_PATH: fake.socket }
+  await hook({ session_id: 'ws-1', cwd: '/root', hook_event_name: 'SessionStart' }, where)
+  const named = await until(async () => {
+    const [s] = (await cli('status', '--herdr-agents')).lines
+    const a = s.agents.find(a => a.sessionId === 'ws-1')
+    return a && a.name === 'alpha' ? a : null
+  })
+  assert.ok(named, 'named after the workspace')
+  assert.equal(named.herdr.workspaceLabel, 'alpha')
+  assert.equal(named.cwd, '/root')
+  const [now] = (await cli('status', '--herdr-agents')).lines
+  const poll = cli('events', '--since', String(now.seq), '--timeout', '10', '--herdr-agents')
+  await sleep(500)
+  fake.state.workspaces[0].label = 'Infrastructure'
+  fake.emit('workspace.renamed', { workspace_id: 'w1', label: 'Infrastructure' })
+  const lines = (await poll).lines
+  const renamed = lines.find(l => l.sessionId === 'ws-1')
+  assert.ok(renamed, JSON.stringify(lines))
+  assert.equal(renamed.agent.name, 'Infrastructure')
+  // The next hook event knows only the workspace id: the name stays.
+  await hook({ session_id: 'ws-1', cwd: '/root', hook_event_name: 'UserPromptSubmit', prompt: 'hi' }, where)
+  const [plain] = (await cli('status')).lines
+  const after = plain.agents.find(a => a.sessionId === 'ws-1')
+  assert.equal(after.state, 'working')
+  assert.equal(after.name, 'Infrastructure')
 })
 
 test('tmux-live on starts the tmux watch (no server here: none); off again stops it', async () => {

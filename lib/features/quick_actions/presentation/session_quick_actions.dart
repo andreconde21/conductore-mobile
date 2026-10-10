@@ -24,7 +24,7 @@ SessionProject? sessionProjectOf({
 }) {
   for (final agent
       in attention?.statusFor(sessionHostId)?.agents ?? const <AgentInfo>[]) {
-    final name = agent.projectLabel;
+    final name = agent.repoLabel;
     if (name == null || name.isEmpty) continue;
     final raw = agent.workspace?.trim() ?? '';
     final path = raw.startsWith('/') || raw.startsWith('~') ? raw : null;

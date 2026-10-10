@@ -289,8 +289,23 @@ class DigestController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   DigestOverview get overview => DigestOverview([
-    for (final machine in machines) ...?machine.report?.agents,
+    for (final machine in machines)
+      for (final agent in machine.report?.agents ?? const <DigestAgent>[])
+        _labelled(agent),
   ], since: since);
+
+  /// [agent] named after its Herdr workspace when the monitor knows the
+  /// label and an older companion's digest named it after its folder
+  /// (CON-116).
+  DigestAgent _labelled(DigestAgent agent) {
+    if (agent.fromStatus) return agent;
+    for (final live in _source.liveAgentsFor(agent.hostId)) {
+      if (live.id != agent.sessionId) continue;
+      final label = live.workspaceLabel;
+      return label == null || label == agent.name ? agent : agent.named(label);
+    }
+    return agent;
+  }
 
   /// Tokens and estimated cost of today's summary calls, every machine.
   ({int tokens, double costUsd}) get summaryUsageToday {

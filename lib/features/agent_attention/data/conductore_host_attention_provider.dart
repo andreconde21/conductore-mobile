@@ -429,15 +429,22 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
       return null;
     }
     final cwd = _string(item['cwd']);
+    final tmux = item['tmux'];
+    final herdr = item['herdr'];
+    // An agent in a Herdr pane is its workspace (CON-116), unless the pane
+    // has a live name (the companion's own pick, which it then reports).
+    final workspaceLabel = herdr is Map
+        ? _string(herdr['workspaceLabel'])
+        : null;
+    final paneNamed = herdr is Map && _string(herdr['name']) != null;
     // Never the session UUID, nor a worktree's `agent-<hex>` folder.
     final reported = _string(item['name']);
     final name =
+        (paneNamed ? null : workspaceLabel) ??
         (reported == null || isOpaqueName(reported) ? null : reported) ??
         projectFromPath(cwd) ??
         // Companions with agent adapters send `kind: "claude"` too.
         '${agentKindLabel(_string(item['kind']) ?? defaultAgentKind)} session';
-    final tmux = item['tmux'];
-    final herdr = item['herdr'];
     // `workspace` is a Herdr workspace id (the home board and deep links
     // match it against Herdr's); the cwd is never one.
     String? workspace;
@@ -485,7 +492,25 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider
           _string(error['type']) ?? 'unknown',
         _ => null,
       },
+      workspaceLabel: workspaceLabel,
+      herdrServer: herdr is Map ? herdrServerOf(herdr) : null,
     );
+  }
+
+  /// The Herdr server of an agent's `herdr` record: the `server` Herdr-only
+  /// agents carry, else the one its socket names (none: the default
+  /// server, `<config>/herdr/sessions/<name>/herdr.sock`: that session's).
+  /// Null for a socket of no known shape.
+  static String? herdrServerOf(Map<Object?, Object?> herdr) {
+    final server = _string(herdr['server']);
+    if (server != null) return server;
+    final socket = _string(herdr['socket']);
+    if (socket == null) return 'herdr';
+    final session = RegExp(
+      r'/herdr/sessions/([^/]+)/herdr\.sock$',
+    ).firstMatch(socket);
+    if (session != null) return 'herdr@${session.group(1)}';
+    return socket.endsWith('/herdr/herdr.sock') ? 'herdr' : null;
   }
 
   /// Parses the optional `usage` record; anything malformed is dropped

@@ -525,6 +525,40 @@ void main() {
   });
 
   group('status polls', () {
+    test("an older companion's Herdr agent takes the label the app knows "
+        '(CON-116)', () async {
+      final (workspace, controller, _, notifier) = build([
+        version,
+        ok(
+          '{"version":1,"seq":2,"agents":[{"sessionId":"s-1","name":"root",'
+          '"cwd":"/root","herdr":{"workspaceId":"w4","tabId":"w4:t4",'
+          '"paneId":"w4:p4","name":null,'
+          '"socket":"/root/.config/herdr/herdr.sock"},'
+          '"state":"needs_permission","pending":[{"id":"req-1",'
+          '"toolName":"Bash","summary":"ls"}]},'
+          '{"sessionId":"s-2","name":"fixer","cwd":"/root",'
+          '"tmux":{"session":"main","window":1,"paneId":"%1"},'
+          '"state":"working","pending":[]}]}',
+        ),
+      ]);
+      final asked = <String>[];
+      controller.workspaceLabelFor = (hostId, server, workspaceId) {
+        asked.add('$hostId $server $workspaceId');
+        return workspaceId == 'w4' ? 'Infrastructure' : null;
+      };
+      await workspace.open(monitoredHost('h')).connect();
+      await pumpEventQueue();
+
+      final [herdr, tmux] = controller.statusFor('h')!.agents;
+      expect(herdr.name, 'Infrastructure');
+      expect(herdr.projectLabel, 'Infrastructure');
+      expect(herdr.repoLabel, 'root');
+      // tmux agents keep their window name.
+      expect(tmux.name, 'fixer');
+      expect(asked, ['h herdr w4']);
+      expect(notifier.agentPosts.single.title, startsWith('Infrastructure'));
+    });
+
     test('a lower sequence after a host reset still applies', () async {
       final (workspace, controller, _, _) = build([
         version,
