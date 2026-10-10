@@ -43,7 +43,6 @@ import 'package:conduit/features/terminal/data/keyboard_image_file.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
-import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
 import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
@@ -54,7 +53,6 @@ import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
 import 'package:conduit/features/voice/presentation/talk_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_services.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
-import 'package:conduit/features/voice_guide/presentation/app_guide.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -614,17 +612,6 @@ class _ChatViewPageState extends State<ChatViewPage>
     _talk?.start();
   }
 
-  /// Long press on Talk: the voice guide, which talks to every agent.
-  /// This chat's own Talk and reading stop so only the guide listens.
-  void _startGuide() {
-    final guide = GuideScope.maybeOf(context);
-    if (guide == null) return;
-    FocusManager.instance.primaryFocus?.unfocus();
-    if (_talk?.active ?? false) _stopTalk();
-    _readAloud?.stop();
-    guide.start();
-  }
-
   /// Another chat took the speaker: a Talk loop here would listen and
   /// answer for the wrong agent.
   void _onSpeakerChanged() {
@@ -1045,27 +1032,6 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
   }
 
-  Future<void> _openComposer(String text, ValueChanged<String> setDraft) {
-    var draft = text;
-    return showPromptComposerSheet(
-      context: context,
-      initialText: text,
-      onDraftChanged: (value) => draft = value,
-      onSend: (value, {required submit}) async {
-        await _send(value, enter: submit);
-        draft = '';
-      },
-      submitEnter: true,
-      onSubmitEnterChanged: (_) {},
-      isConnected: () => _chat.canSend,
-      // `send` pastes multiline text as one bracketed paste on the host.
-      bracketedPasteSupported: () => true,
-      dictation: _dictation,
-      imageAttacher: widget.imageAttacher,
-      pasteImages: widget.pasteImages,
-    ).whenComplete(() => setDraft(draft));
-  }
-
   /// The inline field's "Paste image": uploads the clipboard image and puts
   /// its path at the cursor, like the terminal's paste.
   Future<void> _pasteImage() async {
@@ -1268,26 +1234,10 @@ class _ChatViewPageState extends State<ChatViewPage>
                 ),
               ],
             ),
+            // Back, title, Review (with changes), Terminal and ⋮: at most
+            // four icons (CON-107). Search and read-aloud are in ⋮; Talk
+            // ends from its own panel.
             actions: [
-              searchButton(),
-              if (_talk case final talk?)
-                ListenableBuilder(
-                  listenable: talk,
-                  builder: (context, _) => talk.active
-                      ? IconButton.filled(
-                          key: const ValueKey('chat-talk-toggle'),
-                          tooltip: 'End Talk mode',
-                          isSelected: true,
-                          onPressed: _stopTalk,
-                          icon: const Icon(Icons.record_voice_over_rounded),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              if (_readAloud case final readAloud?)
-                _ReadAloudToggle(
-                  controller: readAloud,
-                  onPressed: _toggleReadAloud,
-                ),
               if (_canReview)
                 IconButton(
                   key: const ValueKey('chat-review'),
@@ -1295,15 +1245,6 @@ class _ChatViewPageState extends State<ChatViewPage>
                   onPressed: _openReview,
                   icon: const Icon(Icons.rate_review_outlined),
                 ),
-              _ChatMenu(
-                readAloudLength: _readAloud == null ? null : _readAloudLength,
-                toolActivity: _toolActivity,
-                onReadAloudLength: (length) =>
-                    _setVoice((v) => v.copyWith(readAloudLength: length)),
-                onToolActivity: (mode) =>
-                    _setVoice((v) => v.copyWith(toolActivity: mode)),
-                onHandOff: _handOffAction(),
-              ),
               // Narrow phones: the icon alone keeps room for the title.
               if (MediaQuery.sizeOf(context).width < 400)
                 IconButton(
@@ -1317,6 +1258,18 @@ class _ChatViewPageState extends State<ChatViewPage>
                   icon: const Icon(Icons.terminal_rounded),
                   label: const Text('Terminal'),
                 ),
+              _ChatMenu(
+                onSearch: openSearch,
+                readAloud: _readAloud,
+                onReadAloud: _toggleReadAloud,
+                readAloudLength: _readAloud == null ? null : _readAloudLength,
+                toolActivity: _toolActivity,
+                onReadAloudLength: (length) =>
+                    _setVoice((v) => v.copyWith(readAloudLength: length)),
+                onToolActivity: (mode) =>
+                    _setVoice((v) => v.copyWith(toolActivity: mode)),
+                onHandOff: _handOffAction(),
+              ),
             ],
           ),
           body: SafeArea(
@@ -1392,7 +1345,6 @@ class _ChatViewPageState extends State<ChatViewPage>
     textController: _composerText,
     focusNode: composerFocus,
     onTalk: _talk == null ? null : _startTalk,
-    onGuide: GuideScope.maybeOf(context) == null ? null : _startGuide,
     enabled: _chat.canSend,
     agentName: _agentName,
     disabledHint: _chat.unsupported != null
@@ -1407,7 +1359,6 @@ class _ChatViewPageState extends State<ChatViewPage>
         activity == ChatActivity.working || activity == ChatActivity.thinking,
     onSend: _send,
     onInterrupt: _chat.interrupt,
-    onExpand: _openComposer,
     dictation: _dictation,
     onPasteImage: widget.imageAttacher != null && widget.pasteImages
         ? () => unawaited(_withAttaching(_pasteImage))
@@ -1819,81 +1770,14 @@ class _Centered extends StatelessWidget {
   }
 }
 
-/// The header's speaker: on/off for "Read replies aloud", filled while
-/// on, a sound wave while speaking. Turning it off stops speech at once.
-/// Without a text-to-speech engine it shows muted and explains on tap.
-class _ReadAloudToggle extends StatelessWidget {
-  const _ReadAloudToggle({required this.controller, required this.onPressed});
-
-  final ReadAloudController controller;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final colors = Theme.of(context).colorScheme;
-        if (!controller.isAvailable) {
-          return IconButton(
-            key: const ValueKey('chat-read-aloud'),
-            tooltip: 'Read aloud unavailable',
-            onPressed: onPressed,
-            icon: Icon(
-              Icons.volume_off_outlined,
-              color: colors.onSurface.withValues(alpha: 0.38),
-            ),
-          );
-        }
-        final on = controller.enabled;
-        if (controller.summarizing) {
-          // Waiting for Claude's summary: a quiet ring, nothing spoken.
-          return IconButton(
-            key: const ValueKey('chat-read-aloud'),
-            tooltip: 'Summarizing…',
-            onPressed: onPressed,
-            style: IconButton.styleFrom(
-              backgroundColor: colors.primaryContainer,
-              foregroundColor: colors.onPrimaryContainer,
-            ),
-            icon: const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                key: ValueKey('chat-summarizing'),
-                strokeWidth: 2,
-              ),
-            ),
-          );
-        }
-        return IconButton(
-          key: const ValueKey('chat-read-aloud'),
-          tooltip: on ? 'Stop reading replies aloud' : 'Read replies aloud',
-          isSelected: on,
-          onPressed: onPressed,
-          style: on
-              ? IconButton.styleFrom(
-                  backgroundColor: colors.primaryContainer,
-                  foregroundColor: colors.onPrimaryContainer,
-                )
-              : null,
-          icon: const Icon(Icons.volume_off_outlined),
-          selectedIcon: Icon(
-            controller.speaking
-                ? Icons.graphic_eq_rounded
-                : Icons.volume_up_rounded,
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// The header menu: quick switches for the read-aloud length and Tool
-/// activity (the same settings as Settings › Chat & Voice), and "Hand
-/// off…" (Talkbawt) when this machine's companion can.
+/// The header menu: Find in conversation, the read-aloud switch and
+/// length, Tool activity (the same settings as Settings › Chat & Voice),
+/// and "Hand off…" (Talkbawt) when this machine's companion can.
 class _ChatMenu extends StatelessWidget {
   const _ChatMenu({
+    required this.onSearch,
+    required this.readAloud,
+    required this.onReadAloud,
     required this.readAloudLength,
     required this.toolActivity,
     required this.onReadAloudLength,
@@ -1901,9 +1785,15 @@ class _ChatMenu extends StatelessWidget {
     this.onHandOff,
   });
 
+  final VoidCallback onSearch;
   final VoidCallback? onHandOff;
 
-  /// Null hides the read-aloud choices (no speech on this device).
+  /// Null hides the read-aloud items (no speech on this device).
+  final ReadAloudController? readAloud;
+
+  /// Turns reading replies aloud on or off; without a text-to-speech
+  /// engine it explains how to get one.
+  final VoidCallback onReadAloud;
   final ReadAloudLength? readAloudLength;
   final ToolActivity toolActivity;
   final ValueChanged<ReadAloudLength> onReadAloudLength;
@@ -1912,17 +1802,29 @@ class _ChatMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final length = readAloudLength;
+    final readAloud = this.readAloud;
     return PopupMenuButton<Object>(
       key: const ValueKey('chat-menu'),
       tooltip: 'Chat options',
       onSelected: (value) => switch (value) {
         final ReadAloudLength length => onReadAloudLength(length),
         final ToolActivity mode => onToolActivity(mode),
+        'search' => onSearch(),
+        'read-aloud' => onReadAloud(),
         'handoff' => onHandOff?.call(),
         _ => null,
       },
       itemBuilder: (context) => [
-        if (onHandOff != null) ...[
+        const PopupMenuItem<Object>(
+          key: ValueKey('chat-search'),
+          value: 'search',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.search_rounded),
+            title: Text('Find in conversation'),
+          ),
+        ),
+        if (onHandOff != null)
           const PopupMenuItem<Object>(
             key: ValueKey('chat-menu-handoff'),
             value: 'handoff',
@@ -1932,21 +1834,31 @@ class _ChatMenu extends StatelessWidget {
               title: Text('Hand off…'),
             ),
           ),
-          const PopupMenuDivider(),
-        ],
-        if (length != null) ...[
+        const PopupMenuDivider(),
+        if (readAloud != null) ...[
           const PopupMenuItem<Object>(
             enabled: false,
             height: 32,
             child: Text('Read aloud'),
           ),
-          for (final option in ReadAloudLength.values)
-            CheckedPopupMenuItem<Object>(
-              key: ValueKey('chat-menu-length-${option.name}'),
-              value: option,
-              checked: option == length,
-              child: Text(option.label),
+          CheckedPopupMenuItem<Object>(
+            key: const ValueKey('chat-read-aloud'),
+            value: 'read-aloud',
+            checked: readAloud.isAvailable && readAloud.enabled,
+            child: Text(
+              readAloud.isAvailable
+                  ? 'Read replies aloud'
+                  : 'Read aloud unavailable',
             ),
+          ),
+          if (length != null)
+            for (final option in ReadAloudLength.values)
+              CheckedPopupMenuItem<Object>(
+                key: ValueKey('chat-menu-length-${option.name}'),
+                value: option,
+                checked: option == length,
+                child: Text(option.label),
+              ),
           const PopupMenuDivider(),
         ],
         const PopupMenuItem<Object>(

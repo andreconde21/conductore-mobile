@@ -11,11 +11,12 @@ import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
 
-/// The chat view's input row: a field where Enter sends, voice dictation,
-/// the full composer for multiline prompts, and Esc to interrupt. Images
-/// come in through the attach icon in the field, "Paste image" in its
-/// menu, and a keyboard's image insertion (its clipboard panel, GIFs).
-/// Once the message runs past one line a small × clears it, with Undo.
+/// The chat view's input row, at most four controls (CON-107): Stop
+/// while the agent works, a field that grows with its text (Enter sends),
+/// the mic (tap dictates, long-press starts Talk) and Send. Images come in
+/// through the attach icon in the field, "Paste image" in its menu, and a
+/// keyboard's image insertion (its clipboard panel, GIFs). Once the
+/// message runs past one line a small × clears it, with Undo.
 class ChatComposer extends StatefulWidget {
   const ChatComposer({
     required this.onSend,
@@ -25,10 +26,8 @@ class ChatComposer extends StatefulWidget {
     this.agentName,
     this.sending = false,
     this.showInterrupt = false,
-    this.onExpand,
     this.dictation,
     this.onTalk,
-    this.onGuide,
     this.textController,
     this.focusNode,
     this.initialText = '',
@@ -53,19 +52,13 @@ class ChatComposer extends StatefulWidget {
   final String? agentName;
   final bool sending;
 
-  /// Emphasizes the Esc button (the agent is working).
+  /// Shows Stop (Esc): only while the agent is working.
   final bool showInterrupt;
-
-  /// Opens the full-screen composer seeded with the field's text; it gets
-  /// the current text and a setter for the draft.
-  final void Function(String text, ValueChanged<String> setDraft)? onExpand;
   final DictationController? dictation;
 
-  /// Starts the hands-free Talk loop; null hides the button.
+  /// Starts the hands-free Talk loop, on a long press of the mic; null
+  /// leaves the long press off.
   final VoidCallback? onTalk;
-
-  /// A long press on Talk starts the voice guide instead.
-  final VoidCallback? onGuide;
 
   /// The field's text, when the page needs it (Talk puts unsent speech
   /// back here); otherwise the composer owns one.
@@ -314,39 +307,9 @@ class _ChatComposerState extends State<ChatComposer> {
       );
   }
 
-  /// Why Talk and the mic are disabled: the composer's own reason.
+  /// Why the mic is disabled: the composer's own reason.
   String get _disabledVoiceTooltip =>
       widget.disabledHint ?? 'Voice input works once you can send';
-
-  /// Talk (the hands-free loop). Without a speech recognizer it explains
-  /// why instead of starting a loop that cannot hear.
-  Widget _talkButton() {
-    final dictation = widget.dictation;
-    Widget button() {
-      final unavailable = dictation != null && !dictation.isAvailable;
-      return IconButton(
-        key: const ValueKey('chat-talk'),
-        tooltip: widget.enabled ? 'Talk' : _disabledVoiceTooltip,
-        icon: Icon(
-          Icons.record_voice_over_outlined,
-          color: unavailable ? Theme.of(context).disabledColor : null,
-        ),
-        onPressed: !widget.enabled
-            ? null
-            : unavailable
-            ? () => unawaited(showSpeechUnavailableDialog(context, dictation))
-            : widget.onTalk,
-        onLongPress: unavailable ? null : widget.onGuide,
-      );
-    }
-
-    return dictation == null
-        ? button()
-        : ListenableBuilder(
-            listenable: dictation,
-            builder: (context, _) => button(),
-          );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -357,14 +320,16 @@ class _ChatComposerState extends State<ChatComposer> {
         padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
         child: Row(
           children: [
-            IconButton(
-              tooltip: 'Interrupt (Esc)',
-              onPressed: _interrupt,
-              icon: Icon(
-                Icons.stop_circle_outlined,
-                color: widget.showInterrupt ? theme.colorScheme.error : null,
+            if (widget.showInterrupt)
+              IconButton(
+                key: const ValueKey('chat-interrupt'),
+                tooltip: 'Interrupt (Esc)',
+                onPressed: _interrupt,
+                icon: Icon(
+                  Icons.stop_circle_outlined,
+                  color: theme.colorScheme.error,
+                ),
               ),
-            ),
             Expanded(
               child: Stack(
                 clipBehavior: Clip.none,
@@ -374,9 +339,8 @@ class _ChatComposerState extends State<ChatComposer> {
                 ],
               ),
             ),
-            // Talk and the mic stay visible (disabled) while the chat
-            // cannot send, so voice is always where the user expects it.
-            if (widget.onTalk != null) _talkButton(),
+            // The mic stays visible (disabled) while the chat cannot
+            // send, so voice is always where the user expects it.
             if (widget.dictation != null)
               DictationButton(
                 controller: widget.dictation!,
@@ -385,18 +349,10 @@ class _ChatComposerState extends State<ChatComposer> {
                 enabled: widget.enabled,
                 disabledTooltip: _disabledVoiceTooltip,
                 onVoiceCommand: _voiceCommand,
+                onLongPress: widget.onTalk,
                 onMessage: (message) => ScaffoldMessenger.maybeOf(context)
                   ?..hideCurrentSnackBar()
                   ..showSnackBar(SnackBar(content: Text(message))),
-              ),
-            if (widget.onExpand != null && widget.enabled)
-              IconButton(
-                tooltip: 'Open composer',
-                icon: const Icon(Icons.open_in_full_rounded),
-                onPressed: () => widget.onExpand!(
-                  _controller.text,
-                  (draft) => _controller.text = draft,
-                ),
               ),
             widget.sending
                 ? const Padding(
@@ -424,8 +380,10 @@ class _ChatComposerState extends State<ChatComposer> {
       controller: _controller,
       focusNode: _focusNode,
       enabled: widget.enabled,
+      // Grows with the message up to about half a phone screen, then
+      // scrolls: no separate full-screen composer.
       minLines: 1,
-      maxLines: 4,
+      maxLines: 10,
       keyboardType: TextInputType.text,
       textInputAction: TextInputAction.send,
       onSubmitted: (_) => _send(),
