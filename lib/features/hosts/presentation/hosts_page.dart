@@ -1169,7 +1169,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 icon: Icon(
                   mode == HomeMode.projects
                       ? Icons.folder_copy_outlined
-                      : Icons.grid_view_rounded,
+                      : Icons.view_agenda_outlined,
                 ),
                 onPressed: () => _savePreferences(
                   _preferences.copyWith(
