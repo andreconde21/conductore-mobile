@@ -164,11 +164,19 @@ void main() {
           name: 'ci',
           state: AgentAttentionState.working,
         ),
+        const AgentInfo(
+          id: 's5',
+          name: 'lint',
+          state: AgentAttentionState.finished,
+        ),
       ],
     );
     expect(report.fromStatus, isTrue);
+    // Finished but still listed: "Done", and so still openable.
+    expect(report.agents.last.state, 'done');
+    expect(report.agents.last.ended, isFalse);
     expect(report.activity, isFalse);
-    final [api, web, docs, ci] = report.agents;
+    final [api, web, docs, ci, _] = report.agents;
     expect(api.attention, DigestAttention.permission);
     expect(api.state, 'needs_permission');
     expect(web.attention, DigestAttention.question);

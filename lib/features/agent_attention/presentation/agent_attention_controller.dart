@@ -298,12 +298,16 @@ class AgentAttentionController extends ChangeNotifier {
   @visibleForTesting
   bool isWatching(String hostId) => _monitorFor(hostId)?.watching ?? false;
 
-  /// Agents needing attention across every monitored host.
+  /// Agents that need the user across every monitored host: the Agents
+  /// button's badge, the same count as the Agents screen's "Needs you"
+  /// ([AgentNeedsYou]). On a machine the companion monitors, an agent that
+  /// only finished its turn does not count; Herdr's waits all do.
   int get attentionCount {
     var count = 0;
     for (final monitor in _monitors.values) {
+      final herdr = monitor.provider?.id != companionProviderId;
       for (final agent in monitor.status.agents) {
-        if (agent.state.needsAttention) {
+        if (agent.needsYou(waitingNeedsYou: herdr)) {
           count += 1;
         }
       }

@@ -493,12 +493,16 @@ DigestAgent? _parseAgent(
 }
 
 /// A digest from the agent monitor's status alone, for a companion
-/// without `digest`: states, approvals and last messages; no counts, no
-/// stuck flags, no summaries.
+/// without `digest` (or a machine Herdr monitors): states, approvals and
+/// last messages; no counts, no stuck flags, no summaries. With
+/// [waitingNeedsYou] (Herdr: it saw a question or approval on screen),
+/// every agent waiting for input needs the user, not only one whose last
+/// message asks something.
 DigestReport digestFromStatus({
   required String hostId,
   required String hostName,
   required List<AgentInfo> agents,
+  bool waitingNeedsYou = false,
 }) {
   return DigestReport(
     fromStatus: true,
@@ -515,13 +519,18 @@ DigestReport digestFromStatus({
           fromStatus: true,
           state: switch (agent.state) {
             AgentAttentionState.working => 'working',
-            AgentAttentionState.finished => 'ended',
-            _ when agent.pendingRequests.isNotEmpty => 'needs_permission',
+            // Done with its turn (Herdr's "done") or ended; the monitor
+            // still lists it, so it can still be opened.
+            AgentAttentionState.finished => 'done',
+            _ when agent.pendingRequests.isNotEmpty || agent.awaitsApproval =>
+              'needs_permission',
             _ => 'waiting_input',
           },
-          attention: agent.pendingRequests.isNotEmpty
+          attention:
+              agent.pendingRequests.isNotEmpty ||
+                  (agent.awaitsApproval && agent.state.needsAttention)
               ? DigestAttention.permission
-              : agent.state.needsAttention && _asks(agent.lastMessage)
+              : agent.needsYou(waitingNeedsYou: waitingNeedsYou)
               ? DigestAttention.question
               : null,
           lastActivityAt: agent.stateChangedAt,
@@ -538,14 +547,6 @@ DigestReport digestFromStatus({
         ),
     ],
   );
-}
-
-bool _asks(String? message) {
-  final lines = (message ?? '')
-      .split('\n')
-      .map((line) => line.trim())
-      .where((line) => line.isNotEmpty);
-  return lines.isNotEmpty && RegExp(r'''\?[\s*_)"'`]*$''').hasMatch(lines.last);
 }
 
 String? _firstLine(String? message) {

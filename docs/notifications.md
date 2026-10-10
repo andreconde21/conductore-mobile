@@ -125,7 +125,9 @@ anywhere, the agent moved on, or it ended).
 
 ### Mute
 
-Long-press an agent in the Agents panel and choose **Mute notifications**.
+Swipe an agent's card to the right on the Agents screen (on a desktop,
+right-click it and choose **Mute notifications**); swipe again to unmute.
+A small bell-off icon marks a muted card.
 A muted agent gets no alerts on this device, though the ongoing status
 still lists it. Settings shows how many agents are muted and has an
 **Unmute all** button. Mutes are keyed by machine and agent session, and

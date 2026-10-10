@@ -15,7 +15,7 @@ import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.d
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/chat_view/data/attention_host_runner.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
@@ -1730,15 +1730,14 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   Future<void> _openAgentAttention(AgentAttentionController attention) async {
-    await showAgentAttentionSheet(
+    await showAgentsSheet(
       context: context,
-      controller: attention,
-      onOpenAgent: (host, agent) {
+      attention: attention,
+      onOpenTerminal: (host, agent) {
         final flow = widget.connectFlow;
         if (flow != null) {
           // The agent's exact workspace, tab and pane, in the right tab.
           unawaited(flow.openAgent(host, agent));
-          Navigator.of(context).pop();
           _focusNode.requestFocus();
           return;
         }
@@ -1751,13 +1750,10 @@ class _TerminalPageState extends State<TerminalPage>
           widget.workspace.activate(session);
         }
         unawaited(attention.focusAgent(host.id, agent));
-        Navigator.of(context).pop();
         _focusNode.requestFocus();
       },
-      onOpenChat: (host, agent) {
-        Navigator.of(context).pop();
-        unawaited(_openChatForAgent(attention, host, agent));
-      },
+      onOpenChat: (host, agent) =>
+          unawaited(_openChatForAgent(attention, host, agent)),
     );
     if (mounted) {
       _focusNode.requestFocus();

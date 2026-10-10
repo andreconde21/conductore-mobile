@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agents_icon.dart';
 import 'package:conduit/features/agents_digest/data/digest_preferences.dart';
 import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
@@ -547,7 +548,7 @@ void main() {
     );
   });
 
-  testWidgets('the home bar button opens the dashboard, with a badge', (
+  testWidgets('the home bar button opens the Agents screen, with a badge', (
     tester,
   ) async {
     var opened = 0;
@@ -563,6 +564,10 @@ void main() {
       ),
     );
     expect(find.text('2'), findsOneWidget);
+    // The terminal's and the desktop's icon and badge (CON-109).
+    final icon = tester.widget<AgentsIcon>(find.byType(AgentsIcon));
+    expect(icon.count, 2);
+    expect(find.byIcon(Icons.monitor_heart_outlined), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('home-agents-dashboard')));
     expect(opened, 1);
     await tester.pumpWidget(

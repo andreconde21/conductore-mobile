@@ -15,7 +15,6 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/agent_attention/presentation/approval_rules_page.dart';
 import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
@@ -855,18 +854,22 @@ void main() {
 
     if (inbox) {
       final context = tester.element(find.byType(TerminalPage));
+      // The demo machines answer `status` only: cards from the monitor.
+      final digest = monitorOnlyDigest();
+      addTearDown(digest.dispose);
       unawaited(
-        showAgentAttentionSheet(
+        showAgentsSheet(
           context: context,
-          controller: agentAttention,
-          onOpenAgent: (_, _) {},
+          controller: digest,
+          attention: agentAttention,
+          onOpenTerminal: (_, _) {},
           onOpenChat: (_, _) {},
         ),
       );
       await pumpFrames(tester, 8);
       // Pull the sheet up to its full height.
       await tester.dragFrom(
-        tester.getTopLeft(find.byType(AgentAttentionSheet)) +
+        tester.getTopLeft(find.byType(AgentsDashboardView)) +
             const Offset(200, 12),
         const Offset(0, -600),
       );

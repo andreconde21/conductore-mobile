@@ -1,15 +1,17 @@
 import 'dart:async';
 
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
 
 /// Opens what the home-screen widget or the quick-settings tile asked for
 /// when the app is launched (or brought back) from it: the agents
-/// dashboard, usage, or the agent attention sheet.
+/// dashboard, usage, or the Agents sheet.
 ///
 /// Mount it around the unlocked home page: the pending target is consumed
 /// when this widget mounts, so a launch while the app is locked waits for
@@ -102,27 +104,29 @@ class _AgentStatusLaunchListenerState extends State<AgentStatusLaunchListener> {
     }
     _sheetOpen = true;
     try {
-      await showAgentAttentionSheet(
+      void openTerminal(SavedHost host, AgentInfo agent) {
+        final flow = widget.connectFlow;
+        if (flow != null) {
+          unawaited(flow.openAgent(host, agent));
+          return;
+        }
+        // The terminal page (if open) shows the activated tab; from the
+        // hosts page the user opens the workspace with it preselected.
+        final session = widget.workspace.sessions
+            .where((session) => session.host.id == host.id)
+            .firstOrNull;
+        if (session != null) {
+          widget.workspace.activate(session);
+        }
+        unawaited(widget.agentAttention.focusAgent(host.id, agent));
+      }
+
+      await showAgentsSheet(
         context: context,
-        controller: widget.agentAttention,
-        onOpenAgent: (host, agent) {
-          final flow = widget.connectFlow;
-          if (flow != null) {
-            unawaited(flow.openAgent(host, agent));
-            Navigator.of(context).pop();
-            return;
-          }
-          // The terminal page (if open) shows the activated tab; from the
-          // hosts page the user opens the workspace with it preselected.
-          final session = widget.workspace.sessions
-              .where((session) => session.host.id == host.id)
-              .firstOrNull;
-          if (session != null) {
-            widget.workspace.activate(session);
-          }
-          unawaited(widget.agentAttention.focusAgent(host.id, agent));
-          Navigator.of(context).pop();
-        },
+        attention: widget.agentAttention,
+        onOpenTerminal: openTerminal,
+        // No chat from up here: its agent opens in the terminal.
+        onOpenChat: openTerminal,
       );
     } finally {
       _sheetOpen = false;

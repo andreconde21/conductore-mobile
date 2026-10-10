@@ -33,7 +33,7 @@ void main() {
     expect(find.byTooltip('Switch sessions'), findsNothing);
     expect(find.byTooltip('Voice guide'), findsNothing);
     await tester.tap(find.byTooltip('Switch to…'));
-    await tester.tap(find.byTooltip('Agents dashboard'));
+    await tester.tap(find.byTooltip('Agents'));
     await tester.tap(find.byTooltip('Settings'));
     expect([searches, agents, settings], [1, 1, 1]);
   });

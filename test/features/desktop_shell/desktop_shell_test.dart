@@ -6,7 +6,6 @@ import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_config.dart';
 import 'package:conduit/core/telemetry/telemetry_preferences.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
@@ -614,17 +613,23 @@ void main() {
     await tearDownShell(tester);
   }, variant: _linux);
 
-  testWidgets('the right panel toggles the agents inbox and the preview', (
+  testWidgets('the right panel toggles the Agents screen and the preview', (
     tester,
   ) async {
     final h = await pumpShell(tester);
     await tester.tap(find.byKey(const ValueKey('shell-toggle-agents')));
     await tester.pump();
     expect(h.shell.rightPanel, ShellRightPanel.agents);
-    expect(find.byType(AgentAttentionSheet), findsOneWidget);
+    final panel = find.byKey(const ValueKey('shell-agents-panel'));
+    expect(panel, findsOneWidget);
+    // The same Agents screen as the phone's, with its Usage tab.
+    expect(
+      find.descendant(of: panel, matching: find.text('Usage')),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const ValueKey('shell-toggle-preview')));
     await tester.pump();
-    expect(find.byType(AgentAttentionSheet), findsNothing);
+    expect(panel, findsNothing);
     expect(find.text('Open a session to preview its web app.'), findsOneWidget);
     await tester.tap(find.byTooltip('Close the panel'));
     await tester.pump();

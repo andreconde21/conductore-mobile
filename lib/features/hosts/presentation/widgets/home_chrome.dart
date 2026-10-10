@@ -1,4 +1,5 @@
 import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agents_icon.dart';
 import 'package:flutter/material.dart';
 
 /// Slim bar of the home page, four controls at most: the machine chip,
@@ -19,7 +20,7 @@ class HomeTopBar extends StatelessWidget {
   /// button.
   final VoidCallback? onSearch;
 
-  /// Opens the agents dashboard; null hides its button.
+  /// Opens the Agents screen; null hides its button.
   final VoidCallback? onAgents;
 
   /// Agents waiting on the user, shown on the dashboard button.
@@ -43,14 +44,10 @@ class HomeTopBar extends StatelessWidget {
           if (onAgents != null)
             IconButton(
               key: const ValueKey('home-agents-dashboard'),
-              tooltip: 'Agents dashboard',
+              tooltip: 'Agents',
               iconSize: 24,
               color: colorScheme.onSurface,
-              icon: Badge(
-                isLabelVisible: agentsBadge > 0,
-                label: Text('$agentsBadge'),
-                child: const Icon(Icons.space_dashboard_outlined),
-              ),
+              icon: AgentsIcon(count: agentsBadge),
               onPressed: onAgents,
             ),
           if (onSearch != null)

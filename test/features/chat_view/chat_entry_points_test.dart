@@ -4,7 +4,7 @@ import 'package:conduit/features/agent_attention/data/conductore_host_attention_
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
@@ -54,57 +54,35 @@ void main() {
     agentMonitor: AgentMonitorKind.companion,
   );
 
-  testWidgets('the Agents sheet row opens the chat for its agent', (
-    tester,
-  ) async {
+  testWidgets('an Agents card opens the chat for its agent, its long-press '
+      'the terminal', (tester) async {
     final (controller, _) = await monitor(tester, companionHost());
+    final digest = monitorOnlyDigest();
+    addTearDown(digest.dispose);
     final opened = <String>[];
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: AgentAttentionSheet(
-            controller: controller,
-            onOpenAgent: (host, agent) {},
-            onOpenChat: (host, agent) => opened.add('${host.id}/${agent.id}'),
+          body: AgentsDashboardView(
+            controller: digest,
+            attention: controller,
+            tabs: true,
+            onOpenTerminal: (host, agent) =>
+                opened.add('terminal ${host.id}/${agent.id}'),
+            onOpenChat: (host, agent) =>
+                opened.add('chat ${host.id}/${agent.id}'),
           ),
         ),
       ),
     );
     await tester.pump();
-    final apiRow = find.ancestor(
-      of: find.text('api'),
-      matching: find.byWidgetPredicate(
-        (widget) =>
-            widget.key is ValueKey<String> &&
-            (widget.key! as ValueKey<String>).value.startsWith('agent-row-'),
-      ),
-    );
-    final chat = find.descendant(
-      of: apiRow,
-      matching: find.widgetWithText(TextButton, 'Chat'),
-    );
-    expect(chat, findsOneWidget);
-    await tester.tap(chat);
-    expect(opened, ['h/s-1']);
-  });
-
-  testWidgets('without onOpenChat the sheet shows no Chat button', (
-    tester,
-  ) async {
-    final (controller, _) = await monitor(tester, companionHost());
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: AgentAttentionSheet(
-            controller: controller,
-            onOpenAgent: (host, agent) {},
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-    expect(find.widgetWithText(TextButton, 'Chat'), findsNothing);
     expect(chatViewAvailable(controller, companionHost()), isTrue);
+    final card = find.byKey(const ValueKey('digest-card-s-1'));
+    await tester.tap(card);
+    await tester.longPress(card);
+    expect(opened, ['chat h/s-1', 'terminal h/s-1']);
+    // No Chat button: the card itself is the way in (CON-107).
+    expect(find.widgetWithText(TextButton, 'Chat'), findsNothing);
   });
 
   testWidgets('a host without the companion gets install instructions', (

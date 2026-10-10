@@ -1,7 +1,7 @@
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
@@ -49,12 +49,17 @@ void main() {
     final session = workspace.open(monitoredHost('h'));
     await tester.runAsync(session.connect);
     await tester.runAsync(pumpEventQueue);
+    final digest = monitorOnlyDigest();
+    addTearDown(digest.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: AgentAttentionSheet(
-            controller: controller,
-            onOpenAgent: (host, agent) {},
+          body: AgentsDashboardView(
+            controller: digest,
+            attention: controller,
+            tabs: true,
+            onOpenTerminal: (host, agent) {},
+            onOpenChat: (host, agent) {},
           ),
         ),
       ),
@@ -66,8 +71,8 @@ void main() {
   testWidgets('shows the pending request with its buttons', (tester) async {
     await pumpSheet(tester, [pending]);
 
-    expect(find.text('Approval'), findsOneWidget);
-    expect(find.text('NEEDS APPROVAL  1'), findsOneWidget);
+    expect(find.text('NEEDS YOU'), findsOneWidget);
+    expect(find.text('Needs approval'), findsOneWidget);
     expect(find.textContaining('Conductore companion'), findsOneWidget);
     expect(find.text('Bash'), findsOneWidget);
     expect(find.text('rm -rf build'), findsOneWidget);
@@ -129,12 +134,16 @@ void main() {
     '"Permission prompt is waiting in the terminal","pending":[]}]}',
   );
 
-  testWidgets('a prompt the phone missed shows needs input without buttons', (
+  testWidgets('a prompt the phone missed still needs you, without buttons', (
     tester,
   ) async {
-    await pumpSheet(tester, [inTerminal]);
+    final (controller, _) = await pumpSheet(tester, [inTerminal]);
+    // Still a prompt: it needs the user, and the badge counts it.
+    expect(controller.attentionCount, 1);
+    expect(find.text('NEEDS YOU'), findsOneWidget);
+    expect(find.text('Needs approval'), findsOneWidget);
+    expect(find.text('Answer'), findsNothing);
 
-    expect(find.text('Needs input'), findsOneWidget);
     expect(
       find.text('Permission prompt is waiting in the terminal'),
       findsOneWidget,
@@ -161,6 +170,7 @@ void main() {
 
     expect(find.textContaining('answer it in the terminal'), findsWidgets);
     expect(find.text('Allow'), findsNothing);
-    expect(find.text('Needs input'), findsOneWidget);
+    // Still at the prompt in the terminal.
+    expect(find.text('Needs approval'), findsOneWidget);
   });
 }
