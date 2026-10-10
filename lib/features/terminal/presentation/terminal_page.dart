@@ -2486,6 +2486,29 @@ class _TerminalPageState extends State<TerminalPage>
     );
   }
 
+  /// The notice's actions on a tab whose Herdr workspace was closed
+  /// (CON-103): keep what Herdr shows, or close the tab.
+  HerdrClosedWorkspaceActions? _closedWorkspaceActionsFor(
+    TerminalSessionController session,
+  ) {
+    final herdr = widget.connectFlow?.herdr;
+    if (herdr == null) return null;
+    return HerdrClosedWorkspaceActions(
+      label: widget.workspace.targetOf(session).title,
+      useShownWorkspace: () async {
+        if (!await herdr.useShownWorkspace(session) && mounted) {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(content: Text("Couldn't read what Herdr shows.")),
+            );
+        }
+        _focusNode.requestFocus();
+      },
+      closeTab: () => unawaited(_closeSessionFromKeyboard(session)),
+    );
+  }
+
   /// One session's terminal (gestures, surface), as a tab's content or a
   /// pane of the desktop shell.
   Widget _sessionView(
@@ -2548,7 +2571,7 @@ class _TerminalPageState extends State<TerminalPage>
         onPasteImage: () => _pasteImageInto(session),
       ),
     );
-    Widget frame(bool agentView) => SessionFocusFrame(
+    Widget frame(bool agentView, {bool closed = false}) => SessionFocusFrame(
       key: ValueKey('focus-frame-${session.host.id}'),
       session: session,
       palette: palette,
@@ -2558,13 +2581,22 @@ class _TerminalPageState extends State<TerminalPage>
       showSharedView: widget.shell != null && session != activeSession,
       showAgentView: agentView,
       herdrActions: _herdrFocusActionsFor(session),
+      closedWorkspace: closed ? _closedWorkspaceActionsFor(session) : null,
       child: terminal,
     );
-    if (agentViews == null) return frame(false);
+    final herdr = widget.connectFlow?.herdr;
+    if (agentViews == null || herdr == null) return frame(false);
     return ValueListenableBuilder<Set<TerminalSessionController>>(
       key: ValueKey('agent-view-${session.host.id}'),
       valueListenable: agentViews,
-      builder: (context, views, _) => frame(views.contains(session)),
+      builder: (context, views, _) =>
+          ValueListenableBuilder<Set<TerminalSessionController>>(
+            valueListenable: herdr.closedWorkspaces,
+            builder: (context, closed, _) => frame(
+              views.contains(session),
+              closed: closed.contains(session),
+            ),
+          ),
     );
   }
 

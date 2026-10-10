@@ -25,7 +25,10 @@ import 'package:flutter/material.dart';
 /// * with [showAgentView] (an agent opened here while this device may not
 ///   move Herdr's focus), the session's own screen over the live one,
 ///   which mirrors another workspace, with "Show here" (the focus moves
-///   once, to the agent's pane) and the banner above it.
+///   once, to the agent's pane) and the banner above it;
+/// * with [closedWorkspace] (the session's Herdr workspace was closed), a
+///   notice that it shows whatever Herdr focuses, with Keep what Herdr
+///   shows and Close tab, in place of the other-workspace banner.
 class SessionFocusFrame extends StatelessWidget {
   const SessionFocusFrame({
     required this.session,
@@ -36,6 +39,7 @@ class SessionFocusFrame extends StatelessWidget {
     this.showSharedView = false,
     this.showAgentView = false,
     this.herdrActions,
+    this.closedWorkspace,
     super.key,
   });
 
@@ -46,6 +50,7 @@ class SessionFocusFrame extends StatelessWidget {
   final bool showSharedView;
   final bool showAgentView;
   final HerdrFocusActions? herdrActions;
+  final HerdrClosedWorkspaceActions? closedWorkspace;
   final Widget child;
 
   @override
@@ -72,7 +77,18 @@ class SessionFocusFrame extends StatelessWidget {
                     ),
             ),
           ),
-        if (!showSharedView && herdrActions != null)
+        if (!showSharedView && closedWorkspace != null)
+          Positioned(
+            top: 8,
+            left: 8,
+            right: 8,
+            child: _ClosedWorkspaceBanner(
+              actions: closedWorkspace!,
+              palette: palette,
+              brightness: brightness,
+            ),
+          )
+        else if (!showSharedView && herdrActions != null)
           Positioned(
             top: 8,
             left: 8,
@@ -412,6 +428,85 @@ class _FocusElsewhereBanner extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// What the notice on a tab whose Herdr workspace was closed offers.
+class HerdrClosedWorkspaceActions {
+  const HerdrClosedWorkspaceActions({
+    required this.label,
+    required this.useShownWorkspace,
+    required this.closeTab,
+  });
+
+  /// What the tab was opened on (the workspace's label then, or its id).
+  final String label;
+
+  /// Keeps the tab on the workspace Herdr shows now.
+  final Future<void> Function() useShownWorkspace;
+  final VoidCallback closeTab;
+}
+
+/// "<label> was closed in Herdr…", with Keep what Herdr shows and Close
+/// tab (CON-103).
+class _ClosedWorkspaceBanner extends StatelessWidget {
+  const _ClosedWorkspaceBanner({
+    required this.actions,
+    required this.palette,
+    required this.brightness,
+  });
+
+  final HerdrClosedWorkspaceActions actions;
+  final AppPalette palette;
+  final Brightness brightness;
+
+  @override
+  Widget build(BuildContext context) {
+    final place = actions.label.isEmpty ? 'Its workspace' : actions.label;
+    final named = actions.label.isEmpty ? 'its workspace' : actions.label;
+    return Semantics(
+      liveRegion: true,
+      child: DecoratedBox(
+        key: const ValueKey('herdr-workspace-closed'),
+        decoration: BoxDecoration(
+          color: palette.panelElevatedFor(brightness).withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: palette.hairlineFor(brightness)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$place was closed in Herdr. This tab shows whatever Herdr '
+                'has focused, not $named.',
+                style: TextStyle(
+                  color: palette.foregroundFor(brightness),
+                  fontSize: 12.5,
+                ),
+              ),
+              Wrap(
+                spacing: 2,
+                children: [
+                  TextButton(
+                    key: const ValueKey('herdr-closed-keep'),
+                    onPressed: () => unawaited(actions.useShownWorkspace()),
+                    child: const Text('Keep what Herdr shows'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('herdr-closed-close'),
+                    onPressed: actions.closeTab,
+                    child: const Text('Close tab'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
