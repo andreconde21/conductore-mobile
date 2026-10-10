@@ -13,7 +13,7 @@ shell. It is a fork of
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/01-home.png" width="200" alt="Home screen with live session previews"><br><sub>Home: live sessions and other workspaces</sub></td>
+    <td align="center"><img src="docs/screenshots/01-home.png" width="200" alt="Home in Open / Closed mode: workspace search, live session previews, other workspaces by machine"><br><sub>Home, Open / Closed: search, live sessions, other workspaces</sub></td>
     <td align="center"><img src="docs/screenshots/10-chat-working.png" width="200" alt="Chat View with a table, an agent card and the working indicator"><br><sub>Chat View while Claude works</sub></td>
     <td align="center"><img src="docs/screenshots/09-quick-switcher.png" width="200" alt="Quick switcher with a waiting agent and open sessions"><br><sub>Quick switcher</sub></td>
     <td align="center"><img src="docs/screenshots/02-terminal.png" width="200" alt="Terminal on a Herdr session running Claude Code"><br><sub>Terminal on a Herdr session</sub></td>
