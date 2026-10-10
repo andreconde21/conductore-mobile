@@ -273,7 +273,10 @@ void main() {
         closeTab: () => calls.add('close'),
       ),
     );
-    expect(find.byKey(const ValueKey('herdr-workspace-closed')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('herdr-workspace-closed')),
+      findsOneWidget,
+    );
     expect(
       find.text(
         'DTech was closed in Herdr. This tab shows whatever Herdr has '

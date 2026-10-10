@@ -187,10 +187,7 @@ void main() {
       server.commands.clear();
       workspace.activate(stale);
       await settle();
-      expect(
-        server.herdrArgs.where((args) => args.contains('focus')),
-        isEmpty,
-      );
+      expect(server.herdrArgs.where((args) => args.contains('focus')), isEmpty);
     });
 
     test('is noticed while this device may not move the focus', () async {

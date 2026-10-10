@@ -15,6 +15,16 @@ enum HomeSessionsView {
 /// How the home page lays out the other (not open) workspaces.
 enum HomeWorkspacesView { grid, list }
 
+/// What the home page shows (CON-105), switched in its top bar.
+enum HomeMode {
+  /// Everything by project: one box per project group, open and closed
+  /// workspaces together, the open ones marked in place.
+  projects,
+
+  /// Open sessions first, then the other workspaces by machine.
+  openClosed,
+}
+
 /// The home page's remembered choices.
 @immutable
 class HomePreferences {
@@ -22,6 +32,7 @@ class HomePreferences {
     this.machineFilter = const {},
     this.sessionsView = HomeSessionsView.grid,
     this.workspacesView = HomeWorkspacesView.grid,
+    this.mode,
   });
 
   factory HomePreferences.fromJson(Object? json) {
@@ -39,6 +50,9 @@ class HomePreferences {
               .where((value) => value.name == json['workspacesView'])
               .firstOrNull ??
           HomeWorkspacesView.grid,
+      mode: HomeMode.values
+          .where((value) => value.name == json['mode'])
+          .firstOrNull,
     );
   }
 
@@ -48,15 +62,21 @@ class HomePreferences {
   final HomeSessionsView sessionsView;
   final HomeWorkspacesView workspacesView;
 
+  /// The mode last picked; null until the user picks one, when the page
+  /// chooses (Projects with a project layout, else Open / Closed).
+  final HomeMode? mode;
+
   HomePreferences copyWith({
     Set<String>? machineFilter,
     HomeSessionsView? sessionsView,
     HomeWorkspacesView? workspacesView,
+    HomeMode? mode,
   }) {
     return HomePreferences(
       machineFilter: machineFilter ?? this.machineFilter,
       sessionsView: sessionsView ?? this.sessionsView,
       workspacesView: workspacesView ?? this.workspacesView,
+      mode: mode ?? this.mode,
     );
   }
 
@@ -64,6 +84,7 @@ class HomePreferences {
     'machineFilter': machineFilter.toList()..sort(),
     'sessionsView': sessionsView.name,
     'workspacesView': workspacesView.name,
+    if (mode != null) 'mode': mode!.name,
   };
 
   @override
@@ -71,13 +92,15 @@ class HomePreferences {
       other is HomePreferences &&
       setEquals(other.machineFilter, machineFilter) &&
       other.sessionsView == sessionsView &&
-      other.workspacesView == workspacesView;
+      other.workspacesView == workspacesView &&
+      other.mode == mode;
 
   @override
   int get hashCode => Object.hash(
     Object.hashAllUnordered(machineFilter),
     sessionsView,
     workspacesView,
+    mode,
   );
 }
 

@@ -1,8 +1,9 @@
 import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:flutter/material.dart';
 
-/// Slim Moshi-style bar of the home page: lock on the left, the machine
-/// chip in the middle, the settings gear on the right.
+/// Slim Moshi-style bar of the home page: lock and the mode switch on the
+/// left, the machine chip in the middle, the settings gear on the right.
 class HomeTopBar extends StatelessWidget {
   const HomeTopBar({
     required this.onLock,
@@ -13,6 +14,8 @@ class HomeTopBar extends StatelessWidget {
     this.onGuide,
     this.onAgents,
     this.agentsBadge = 0,
+    this.mode,
+    this.onMode,
     super.key,
   });
 
@@ -38,6 +41,13 @@ class HomeTopBar extends StatelessWidget {
   /// The machine chip (absent before any machine is saved).
   final Widget? machine;
 
+  /// The home mode shown (CON-105); null, or no [onMode], hides the
+  /// switch.
+  final HomeMode? mode;
+
+  /// Switches to the other mode.
+  final ValueChanged<HomeMode>? onMode;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -52,6 +62,25 @@ class HomeTopBar extends StatelessWidget {
             icon: const Icon(Icons.lock_outline_rounded),
             onPressed: onLock,
           ),
+          if (mode case final mode? when onMode != null)
+            IconButton(
+              key: const ValueKey('home-mode-switch'),
+              tooltip: mode == HomeMode.projects
+                  ? 'Projects: switch to Open / Closed'
+                  : 'Open / Closed: switch to Projects',
+              iconSize: 24,
+              color: colorScheme.onSurface,
+              icon: Icon(
+                mode == HomeMode.projects
+                    ? Icons.folder_copy_outlined
+                    : Icons.grid_view_rounded,
+              ),
+              onPressed: () => onMode!(
+                mode == HomeMode.projects
+                    ? HomeMode.openClosed
+                    : HomeMode.projects,
+              ),
+            ),
           const SizedBox(width: 4),
           Expanded(
             child: Center(child: machine ?? const ConduitGlyph(size: 24)),

@@ -364,7 +364,22 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final loaded = await widget.homePreferences.load();
     if (!mounted) return;
     setState(() => _preferences = loaded);
+    // The old "group by project" toggle (CON-065) becomes Projects mode.
+    if (loaded.mode == null &&
+        (ProjectLayoutController.instance?.groupByProject ?? false)) {
+      _savePreferences(loaded.copyWith(mode: HomeMode.projects));
+    }
     _syncBoards();
+  }
+
+  /// The mode the home shows (CON-105): the one picked, else Projects when
+  /// there is a project layout, else Open / Closed. Without the project
+  /// view (tests, builds without it) only Open / Closed.
+  HomeMode get _homeMode {
+    final projects = ProjectLayoutController.instance;
+    if (projects == null) return HomeMode.openClosed;
+    if (_preferences.mode case final mode?) return mode;
+    return projects.layout.isEmpty ? HomeMode.openClosed : HomeMode.projects;
   }
 
   void _savePreferences(HomePreferences next) {
@@ -616,8 +631,13 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                     widget.themeController,
                     widget.agentAttention,
                     ?boards,
+                    ?ProjectLayoutController.instance,
                   ]),
                   builder: (context, _) {
+                    // Until a mode is picked, the machines' layout decides.
+                    if (_preferences.mode == null) {
+                      unawaited(ProjectLayoutController.instance?.refresh());
+                    }
                     return CustomScrollView(
                       key: const ValueKey('home-scroll'),
                       physics: const AlwaysScrollableScrollPhysics(),
@@ -635,6 +655,12 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                                 : _openAgentsDashboard,
                             agentsBadge: widget.agentAttention.attentionCount,
                             machine: _machineChip(),
+                            mode: ProjectLayoutController.instance == null
+                                ? null
+                                : _homeMode,
+                            onMode: (mode) => _savePreferences(
+                              _preferences.copyWith(mode: mode),
+                            ),
                           ),
                         ),
                         // Limit rings and today's tokens (companion usage).
@@ -1094,12 +1120,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         !widget.workspaceController.hasSessions) {
       return [_buildNoMachines(context)];
     }
-    return [
-      ..._buildSessions(context),
-      ...(ProjectLayoutController.instance?.groupByProject ?? false)
-          ? _buildProjects(context, ProjectLayoutController.instance!)
-          : _buildOtherWorkspaces(context),
-    ];
+    if (_homeMode == HomeMode.projects) {
+      return _buildProjects(context, ProjectLayoutController.instance!);
+    }
+    return [..._buildSessions(context), ..._buildOtherWorkspaces(context)];
   }
 
   /// The proot local-shell section ("This device"): Android only, and
@@ -1380,8 +1404,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (ProjectLayoutController.instance case final projects?)
-                _groupByToggle(projects),
               IconButton(
                 key: const ValueKey('workspaces-view-toggle'),
                 tooltip: view == HomeWorkspacesView.list
@@ -1456,20 +1478,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     ];
   }
 
-  /// Group by project or by machine (CON-065), next to the view toggle.
-  Widget _groupByToggle(ProjectLayoutController projects) => IconButton(
-    key: const ValueKey('home-group-by-toggle'),
-    tooltip: projects.groupByProject ? 'Group by machine' : 'Group by project',
-    icon: Icon(
-      projects.groupByProject ? Icons.dns_outlined : Icons.folder_copy_outlined,
-    ),
-    onPressed: () async {
-      await projects.setGroupByProject(!projects.groupByProject);
-      if (mounted) setState(() {});
-    },
-  );
-
-  /// The workspaces of the shown machines by project, sheprd's way.
+  /// Projects mode (CON-105): the workspaces and open sessions of the
+  /// shown machines by project, sheprd's way, one box per project.
   List<Widget> _buildProjects(
     BuildContext context,
     ProjectLayoutController projects,
@@ -1477,7 +1487,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     SliverToBoxAdapter(
       child: _SectionHeader(
         label: 'PROJECTS',
-        trailing: _groupByToggle(projects),
+        trailing: IconButton(
+          tooltip: 'New session',
+          icon: const Icon(Icons.add_rounded),
+          onPressed: _newSession,
+        ),
       ),
     ),
     // Machines that cannot be listed keep their notice, as one line each.
@@ -1498,7 +1512,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       child: HomeProjectsList(
         controller: projects,
         hosts: _shownHosts,
-        sessions: widget.workspaceController.sessions,
+        sessions: _shownSessions,
         attention: widget.agentAttention,
         boards: _boards,
         herdrWorkspaceOf: widget.connectFlow?.herdr.workspaceOf,

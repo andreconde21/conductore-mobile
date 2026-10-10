@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
@@ -21,12 +22,13 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 
-/// The phone home grouped by project (CON-065): every workspace, tmux
-/// session and open session of the shown machines in its project (the
-/// same layout as the desktop sidebar and sheprd), then Other, under the
-/// project view's header (filter, needs-you counter, view). A row opens on
-/// tap; a long press offers "Move to project…", "Move to Other" and
-/// "Hide".
+/// The phone home's Projects mode (CON-065, CON-105): every workspace,
+/// tmux session and open session of the shown machines in its project
+/// (the same layout as the desktop sidebar and sheprd), then Other, one
+/// box per project, under the project view's header (filter, needs-you
+/// counter, view). A workspace open in the app is its one row, marked
+/// open. A row opens on tap (an open one goes to its session); a long
+/// press offers "Move to project…", "Move to Other" and "Hide".
 class HomeProjectsList extends StatelessWidget {
   const HomeProjectsList({
     required this.controller,
@@ -41,7 +43,8 @@ class HomeProjectsList extends StatelessWidget {
 
   final ProjectLayoutController controller;
 
-  /// The machines shown (the home's machine filter).
+  /// The machines shown (the home's machine filter). On-device shells
+  /// among [sessions] join as machines of their own.
   final List<SavedHost> hosts;
   final List<TerminalSessionController> sessions;
   final AgentAttentionController attention;
@@ -53,35 +56,48 @@ class HomeProjectsList extends StatelessWidget {
 
   /// Every shown machine as the sidebar's tree.
   List<SidebarNode> _tree() => SidebarTreeBuilder.build([
-    for (final host in hosts)
-      if (!host.isLocal)
-        SidebarMachineInput(
-          host: host,
-          board: boards?[host.id]?.state,
-          openSessions: [
-            for (final session in sessions)
-              if (baseHostId(session.host.id) == host.id)
-                SidebarOpenSession(
-                  sessionHostId: session.host.id,
-                  title: session.title,
-                  herdrWorkspaceId:
-                      ConnectTarget.fromSessionHostId(session.host.id)?.kind ==
-                          ConnectTargetKind.herdr
-                      ? (herdrWorkspaceOf?.call(session) ??
-                            ConnectTarget.fromSessionHostId(
-                              session.host.id,
-                            )!.name)
-                      : null,
-                  tmuxSession: HomeSessionInfo.tmuxSessionOf(session),
-                  agentState: summarizeAgentState(
-                    attention.statusFor(session.host.id),
-                    session.host.id,
-                  ),
+    for (final host in [
+      for (final host in hosts)
+        if (!host.isLocal) host,
+      ..._localHosts(),
+    ])
+      SidebarMachineInput(
+        host: host,
+        board: boards?[host.id]?.state,
+        openSessions: [
+          for (final session in sessions)
+            if (baseHostId(session.host.id) == host.id)
+              SidebarOpenSession(
+                sessionHostId: session.host.id,
+                title: session.title,
+                herdrWorkspaceId:
+                    ConnectTarget.fromSessionHostId(session.host.id)?.kind ==
+                        ConnectTargetKind.herdr
+                    ? (herdrWorkspaceOf?.call(session) ??
+                          ConnectTarget.fromSessionHostId(
+                            session.host.id,
+                          )!.name)
+                    : null,
+                tmuxSession: HomeSessionInfo.tmuxSessionOf(session),
+                agentState: summarizeAgentState(
+                  attention.statusFor(session.host.id),
+                  session.host.id,
                 ),
-          ],
-          agents: _agentsOf(host),
-        ),
+              ),
+        ],
+        agents: _agentsOf(host),
+      ),
   ], const SidebarPrefs());
+
+  /// The on-device shells open now, once each.
+  List<SavedHost> _localHosts() {
+    final seen = <String>{};
+    return [
+      for (final session in sessions)
+        if (session.host.isLocal && seen.add(baseHostId(session.host.id)))
+          session.host.copyWith(id: baseHostId(session.host.id)),
+    ];
+  }
 
   List<AgentInfo> _agentsOf(SavedHost host) {
     final agents = <String, AgentInfo>{};
@@ -143,7 +159,15 @@ class HomeProjectsList extends StatelessWidget {
                   ),
                 ),
               for (final project in shown)
-                ..._projectRows(context, project, names, tokens[project.key]),
+                _ProjectBox(
+                  key: ValueKey('home-project-box-${project.key}'),
+                  children: _projectRows(
+                    context,
+                    project,
+                    names,
+                    tokens[project.key],
+                  ),
+                ),
             ],
           ),
         );
@@ -346,7 +370,7 @@ class _HomeProjectRow extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(26, 9, 8, 9),
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
         child: Row(
           children: [
             SizedBox(
@@ -396,7 +420,10 @@ class _HomeProjectRow extends StatelessWidget {
             if (node.openInApp)
               Padding(
                 padding: const EdgeInsets.only(left: 6),
-                child: Icon(Icons.tab_rounded, size: 14, color: palette.accent),
+                child: _OpenMark(
+                  key: ValueKey('home-project-open-${node.key}'),
+                  palette: palette,
+                ),
               ),
             if (sheprd?.pending != null)
               const Padding(
@@ -422,6 +449,74 @@ class _HomeProjectRow extends StatelessWidget {
       ),
     );
     return faded ? Opacity(opacity: 0.5, child: row) : row;
+  }
+}
+
+/// A project's box in Projects mode: its header and rows on the session
+/// tiles' panel, radius and hairline.
+class _ProjectBox extends StatelessWidget {
+  const _ProjectBox({required this.children, super.key});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final brightness = Theme.of(context).brightness;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: palette.panelFor(brightness),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radius),
+          side: BorderSide(color: palette.hairlineFor(brightness)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "open": the row's workspace or session is open in the app; a tap goes
+/// to it.
+class _OpenMark extends StatelessWidget {
+  const _OpenMark({required this.palette, super.key});
+
+  final AppPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(5, 1, 7, 1),
+      decoration: BoxDecoration(
+        color: palette.accent.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: palette.accent.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.tab_rounded, size: 12, color: palette.accent),
+          const SizedBox(width: 3),
+          Text(
+            'open',
+            style: TextStyle(
+              color: palette.accent,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
