@@ -118,9 +118,9 @@ narrower than 900 dp, keep the phone layout.
   focus* on, the focused pane owns it)
   ([herdr-shared-focus.md](herdr-shared-focus.md)).
 - **Dashboard.** With no view open, or after the home button at the left
-  of the tabs, the main area shows columns: *Needs you* cards (with
-  Allow / Deny for approvals the companion relays), a usage slot, the
-  open sessions as live previews, and the other workspaces per machine.
+  of the tabs, the main area shows the agents dashboard, the open
+  sessions as live previews, and the other workspaces per machine. *Needs
+  you* and the usage summary live in the sidebar only.
 - **Layouts, with the mouse.** The layout button in the toolbar (the
   dashboard icon) lays the panes out as *Single*, *Two side by side*,
   *Two stacked*, *One and two*, *2 × 2* or *3 × 2*: what is on screen
@@ -170,8 +170,10 @@ narrower than 900 dp, keep the phone layout.
   the app does not create worktrees yet, so it never fires. The
   terminal's menu offers *Quick actions* on phones too, when the session's
   project has some.
-- **Right panel.** The Agents button (the pulse icon) opens the agent
-  inbox with approvals on the right; the globe opens the live preview of
+- **Right panel.** The Agents button (the heart monitor, with the count
+  of agents waiting on you) opens the Agents screen on the right, the same
+  one phones open from home and the terminal, with its Agents and Usage
+  tabs; the globe opens the live preview of
   the focused session. Drag its edge to resize it.
 - Sidebar width, collapsed state, groups, pins, order, the split layout
   and the unread markers are kept per device (secure storage, key
@@ -241,7 +243,7 @@ narrower than 900 dp, keep the phone layout.
 - **Menus and sheets.** Nothing slides up from the bottom on desktop.
   Action menus open as popovers at the click. Pickers and forms, such as
   the connect picker, open as centred dialogs. The Herdr and tmux
-  navigators slide in from the right; the agent inbox opens in the
+  navigators slide in from the right; the Agents screen opens in the
   shell's right panel. The quick switcher
   and snippets open as a command palette at the top. Esc closes any of
   them, and the first field has the focus. Phones keep the bottom sheets.
@@ -313,7 +315,7 @@ saved machine over SSH, as before.
 | Feature | Linux | Windows | macOS | Why |
 |---|---|---|---|---|
 | SSH, Mosh, SFTP, tmux / Herdr | yes | yes | yes | Pure Dart (dartssh2, dart_mosh over UDP) |
-| Chat View, agent inbox, themes | yes | yes | yes | Flutter UI |
+| Chat View, Agents screen, themes | yes | yes | yes | Flutter UI |
 | Live preview (port forward) | browser | browser | embedded | webview_flutter has no official Linux/Windows implementation. The forward runs and *Open in browser* opens it |
 | HTML files in the SFTP viewer | source | source | rendered | Same web view gap |
 | PDF viewer | yes | yes | yes | pdfrx (PDFium, fetched at build time) |
@@ -363,8 +365,8 @@ Gating lives in `lib/core/platform_features.dart`. Every flag reads
   (`pushAdaptivePage`, `lib/core/presentation/adaptive_page.dart`);
   phones push them full screen as before.
 - Right-click opens a row's actions everywhere: sidebar rows and groups,
-  the collapsed rail, tabs, dashboard tiles, agent cards, inbox rows,
-  files, multiplexer tabs and the terminal (Copy, Paste, Select all).
+  the collapsed rail, tabs, dashboard tiles, agent cards (Chat, Terminal,
+  Review, Mute, Hide), files, multiplexer tabs and the terminal (Copy, Paste, Select all).
 - Hover is visible, clicks show no ripple and scrollbars are wide enough
   to grab (desktop theme only).
 - The window title follows the focused session ("api · omarchy —

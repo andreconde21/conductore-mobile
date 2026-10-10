@@ -3,23 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('every top-bar button fits a 360 dp phone, search included', (
+  testWidgets('the top bar has four controls and fits a 360 dp phone', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     var searches = 0;
+    var agents = 0;
+    var settings = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: HomeTopBar(
-            onLock: () {},
-            onSettings: () {},
-            onSwitcher: () {},
+            onSettings: () => settings += 1,
             onSearch: () => searches += 1,
-            onGuide: () {},
-            onAgents: () {},
+            onAgents: () => agents += 1,
             agentsBadge: 3,
             machine: const Text('All machines · a long name'),
           ),
@@ -27,7 +26,15 @@ void main() {
       ),
     );
     expect(tester.takeException(), isNull);
-    await tester.tap(find.byKey(const ValueKey('home-search')));
-    expect(searches, 1);
+    // The machine chip plus three icons: Agents, Search, Settings.
+    expect(find.byType(IconButton), findsNWidgets(3));
+    expect(find.text('All machines · a long name'), findsOneWidget);
+    expect(find.byTooltip('Lock'), findsNothing);
+    expect(find.byTooltip('Switch sessions'), findsNothing);
+    expect(find.byTooltip('Voice guide'), findsNothing);
+    await tester.tap(find.byTooltip('Switch to…'));
+    await tester.tap(find.byTooltip('Agents'));
+    await tester.tap(find.byTooltip('Settings'));
+    expect([searches, agents, settings], [1, 1, 1]);
   });
 }

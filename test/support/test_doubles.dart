@@ -5,10 +5,12 @@ import 'package:cbor/cbor.dart';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_notifications.dart';
 import 'package:conduit/features/agent_attention/domain/agent_urgent_notifications.dart';
+import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/app_lock/domain/app_authenticator.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
@@ -893,4 +895,27 @@ class InMemorySecureStorage extends FlutterSecureStorage {
       _store[key] = value;
     }
   }
+}
+
+/// A digest that asks no machine: the Agents screen then builds every card
+/// from the agent monitor's status alone, and scripted runners see only
+/// the monitor's commands. [clock] sets the window ("Done since" two hours
+/// back). Dispose it in a tear-down.
+DigestController monitorOnlyDigest({DateTime Function()? clock}) =>
+    DigestController(
+      source: _NoDigestHosts(),
+      clock: clock,
+      observeLifecycle: false,
+    );
+
+class _NoDigestHosts extends ChangeNotifier implements DigestHostSource {
+  @override
+  List<SavedHost> get digestHosts => const [];
+
+  @override
+  List<AgentInfo> liveAgentsFor(String hostId) => const [];
+
+  @override
+  (AgentCommandRunner, {bool owned}) runnerFor(SavedHost host) =>
+      throw UnsupportedError('no digest');
 }

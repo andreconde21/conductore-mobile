@@ -2,12 +2,20 @@ import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/domain/agent_kinds.dart';
+import 'package:conduit/features/agent_attention/domain/approval_rules.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/approval_sheets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agent_machines_section.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/approval_widgets.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/usage_update_hint.dart';
 import 'package:conduit/features/agents_digest/domain/agents_digest.dart';
 import 'package:conduit/features/agents_digest/presentation/digest_controller.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
@@ -17,6 +25,7 @@ import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live/domain/live_host_model.dart';
 import 'package:conduit/features/review/presentation/review_launcher.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
@@ -26,6 +35,7 @@ import 'package:conduit/features/talkbawt/presentation/talkbawt_entry.dart';
 import 'package:conduit/features/talkbawt/presentation/talkbawt_scope.dart';
 import 'package:conduit/features/tasks/presentation/task_runs_controller.dart';
 import 'package:conduit/features/tasks/presentation/task_runs_panel.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -38,7 +48,7 @@ typedef DigestOpenAgent = void Function(SavedHost host, AgentInfo agent);
 typedef DigestSendText =
     Future<void> Function(SavedHost host, String sessionId, String text);
 
-/// Shows the agents dashboard as its own screen (the phone).
+/// Shows the Agents screen as its own page (from home, on the phone).
 Future<void> showAgentsDashboard(
   BuildContext context, {
   required DigestController controller,
@@ -58,7 +68,58 @@ Future<void> showAgentsDashboard(
   );
 }
 
-/// The phone's Agents screen: the dashboard under an app bar.
+/// Shows the same Agents screen as a sheet (from the terminal, and the
+/// home-screen widget's status tap). [controller] defaults to the app's
+/// [DigestScope]. The sheet closes before an agent opens.
+Future<void> showAgentsSheet({
+  required BuildContext context,
+  required AgentAttentionController attention,
+  required DigestOpenAgent onOpenChat,
+  required DigestOpenAgent onOpenTerminal,
+  DigestController? controller,
+}) {
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.sidePanel,
+    desktopFill: true,
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (context) {
+      // The sheet extends under the system navigation bar; keep the last
+      // card above three-button navigation (Samsung One UI reports gesture
+      // insets there too, see shouldApplyBottomSafeArea).
+      final bottomInset = shouldApplyBottomSafeArea(context)
+          ? MediaQuery.viewPaddingOf(context).bottom
+          : 0.0;
+      void close(DigestOpenAgent open, SavedHost host, AgentInfo agent) {
+        Navigator.of(context).pop();
+        open(host, agent);
+      }
+
+      return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: adaptiveSheetFraction(context, 0.6),
+          minChildSize: adaptiveSheetFraction(context, 0.3),
+          maxChildSize: adaptiveSheetFraction(context, 0.92),
+          builder: (context, scrollController) => AgentsDashboardView(
+            controller: controller,
+            attention: attention,
+            scrollController: scrollController,
+            tabs: true,
+            inlineMenu: true,
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + bottomInset),
+            onOpenChat: (host, agent) => close(onOpenChat, host, agent),
+            onOpenTerminal: (host, agent) => close(onOpenTerminal, host, agent),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// The phone's Agents page: the Agents screen under an app bar.
 class AgentsDashboardPage extends StatelessWidget {
   const AgentsDashboardPage({
     required this.controller,
@@ -85,6 +146,7 @@ class AgentsDashboardPage extends StatelessWidget {
         child: AgentsDashboardView(
           controller: controller,
           attention: attention,
+          tabs: true,
           onOpenChat: (host, agent) {
             Navigator.of(context).pop();
             onOpenChat(host, agent);
@@ -137,19 +199,28 @@ class DigestWindowMenu extends StatelessWidget {
   }
 }
 
-/// The dashboard: a header line with the counts, then Needs you, Stuck,
-/// Working and Done since, one card per agent. Shown while mounted: it
+/// The Agents screen, the one place agents are listed: a header line with
+/// the counts, then Needs you, Stuck, Working and Done since, one card per
+/// agent, with the approvals (one by one, or the safe ones at once) and
+/// the auto-approved rules. With [tabs], a Usage tab (tokens, limits and
+/// each session's context) and the machines' monitor status follow.
+///
+/// Opened as a page from home ([showAgentsDashboard]), as a sheet from the
+/// terminal ([showAgentsSheet]), in the desktop's right panel, and
+/// (agents only) on the desktop dashboard. Shown while mounted: it
 /// attaches to the [DigestController], which polls only then.
 class AgentsDashboardView extends StatefulWidget {
   const AgentsDashboardView({
-    required this.controller,
     required this.attention,
     required this.onOpenChat,
     required this.onOpenTerminal,
+    this.controller,
     this.sendText,
     this.padding = const EdgeInsets.fromLTRB(16, 8, 16, 24),
     this.shrinkWrap = false,
     this.inlineMenu = false,
+    this.tabs = false,
+    this.scrollController,
     this.now,
     this.projects,
     super.key,
@@ -160,7 +231,9 @@ class AgentsDashboardView extends StatefulWidget {
   /// groups by state only.
   final ProjectLayoutController? projects;
 
-  final DigestController controller;
+  /// The digest; null uses the app's ([DigestScope]), and without one the
+  /// view keeps its own.
+  final DigestController? controller;
   final AgentAttentionController attention;
   final DigestOpenAgent onOpenChat;
   final DigestOpenAgent onOpenTerminal;
@@ -170,8 +243,15 @@ class AgentsDashboardView extends StatefulWidget {
   /// Inside another scroll view (the desktop dashboard).
   final bool shrinkWrap;
 
-  /// The window menu next to the header (no app bar to hold it).
+  /// The window menu next to the header, or the tabs (no app bar to hold
+  /// it).
   final bool inlineMenu;
+
+  /// The Agents and Usage tabs, and the machines at the end.
+  final bool tabs;
+
+  /// The sheet's scroll controller.
+  final ScrollController? scrollController;
 
   /// For tests: the clock used for relative times.
   final DateTime Function()? now;
@@ -180,9 +260,47 @@ class AgentsDashboardView extends StatefulWidget {
   State<AgentsDashboardView> createState() => _AgentsDashboardViewState();
 }
 
-class _AgentsDashboardViewState extends State<AgentsDashboardView> {
+class _AgentsDashboardViewState extends State<AgentsDashboardView>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
   VoidCallback? _detach;
+  DigestController? _attachedTo;
+  DigestController? _owned;
   bool _quietOpen = false;
+
+  /// The pending ids the user chose to review one by one: the batch card
+  /// stays hidden until that set changes.
+  Set<String>? _reviewing;
+  bool _batching = false;
+
+  AgentAttentionController get _attention => widget.attention;
+
+  DigestController get _digest =>
+      widget.controller ??
+      DigestScope.maybeOf(context) ??
+      (_owned ??= DigestController(
+        source: AttentionDigestHostSource(attention: widget.attention),
+      ));
+
+  // Swap the content as soon as a tab is picked, not after the indicator
+  // animation.
+  void _onTab() => setState(() {});
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 2, vsync: this)..addListener(_onTab);
+    // The auto-approved list: once per opening, then kept fresh by the
+    // controller whenever a rule answers something.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final host in _attention.monitoredHosts) {
+        if (_attention.supportsSmartApprovals(host.id)) {
+          unawaited(_attention.loadApprovals(host).catchError((_) => null));
+        }
+      }
+    });
+  }
 
   // Attached (and so polling) only while visible: a route on top or the
   // desktop showing a terminal instead disables tickers here.
@@ -195,7 +313,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
   @override
   void didUpdateWidget(AgentsDashboardView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.controller, widget.controller)) {
+    if (!identical(_attachedTo, _digest)) {
       _syncAttached(false);
       _syncAttached(TickerMode.valuesOf(context).enabled);
     }
@@ -203,43 +321,95 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
 
   void _syncAttached(bool visible) {
     if (visible && _detach == null) {
-      _detach = widget.controller.attachView();
+      _attachedTo = _digest;
+      _detach = _attachedTo!.attachView();
     } else if (!visible && _detach != null) {
       _detach!();
       _detach = null;
+      _attachedTo = null;
     }
   }
 
   @override
   void dispose() {
     _detach?.call();
+    _owned?.dispose();
+    _tabs
+      ..removeListener(_onTab)
+      ..dispose();
     super.dispose();
   }
 
   String _hostName(String hostId) => _host(hostId)?.name ?? hostId;
 
-  SavedHost? _host(String hostId) => widget.attention.monitoredHosts
+  SavedHost? _host(String hostId) => _attention.monitoredHosts
       .where((host) => host.id == baseHostId(hostId))
       .firstOrNull;
 
-  AgentInfo? _live(DigestAgent agent) => widget.attention
+  AgentInfo? _live(DigestAgent agent) => _attention
       .statusFor(agent.hostId)
       ?.agents
       .where((live) => live.id == agent.sessionId)
       .firstOrNull;
 
+  /// The digest's agents, plus the monitor's for every machine the digest
+  /// has no report from (Herdr monitoring, a companion that has not
+  /// answered yet or failed): every monitored agent gets a card. Agents
+  /// the user hid are left out until they change; the second value counts
+  /// them.
+  (DigestOverview, int) _overview(DigestController controller) {
+    final digest = controller.overview;
+    final reported = {
+      for (final machine in controller.machines)
+        if (machine.report != null) baseHostId(machine.hostId),
+    };
+    final agents = [
+      ...digest.agents,
+      for (final host in _attention.monitoredHosts)
+        if (reported.add(baseHostId(host.id)))
+          ...digestFromStatus(
+            hostId: host.id,
+            hostName: host.name,
+            agents: _attention.statusFor(host.id)?.agents ?? const [],
+            waitingNeedsYou: !chatViewAvailable(_attention, host),
+          ).agents,
+    ];
+    final dismissals = _attention.inboxDismissals;
+    final shown = <DigestAgent>[];
+    var hidden = 0;
+    for (final agent in agents) {
+      final live = _live(agent);
+      if (live != null &&
+          _hideable(agent, digest.since) &&
+          dismissals.isHidden(agent.hostId, live)) {
+        hidden++;
+      } else {
+        shown.add(agent);
+      }
+    }
+    return (DigestOverview(shown, since: digest.since), hidden);
+  }
+
+  /// Cards that can be swiped away (hidden until they change): the ones
+  /// that need nothing.
+  static bool _hideable(DigestAgent agent, DateTime since) =>
+      switch (agent.sectionSince(since)) {
+        DigestSection.done || DigestSection.quiet => true,
+        _ => false,
+      };
+
   /// A card's tap: the agent's effective view (Open sessions in, or the
   /// session's own choice); [other] (the long-press) the other one. An
-  /// agent with no Chat View always gets its terminal (CON-107). [chat]
-  /// forces one.
+  /// agent with no Chat View always gets its terminal (CON-107); on a
+  /// machine Herdr monitors, the long-press still tries its chat (the
+  /// companion may be there too). [chat] forces one.
   void _open(DigestAgent agent, {bool? chat, bool other = false}) {
     final host = _host(agent.hostId);
     final live = _live(agent);
     if (host == null || live == null) return;
-    final attention = widget.attention;
-    final hasChat =
-        supportsChatView(live, attention.agentKinds(host.id)) &&
-        chatViewAvailable(attention, host);
+    final attention = _attention;
+    final canChat = supportsChatView(live, attention.agentKinds(host.id));
+    final hasChat = canChat && chatViewAvailable(attention, host);
     final views = SessionViewScope.maybeOf(context);
     // Without the app's view settings (tests, embeds), Chat View.
     final inChat =
@@ -250,7 +420,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
           monitoredHost: host,
           agent: live,
         );
-    final preferChat = chat ?? (hasChat && inChat != other);
+    final preferChat = chat ?? (hasChat ? inChat != other : canChat && other);
     if (preferChat) {
       widget.onOpenChat(host, live);
     } else {
@@ -259,21 +429,24 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
   }
 
   /// Review of the agent's last turn, when its machine can show one and it
-  /// is not in the middle of a turn.
+  /// is not in the middle of a turn (nor gone).
   VoidCallback? _reviewAction(DigestAgent agent) {
     final host = _host(agent.hostId);
     final live = _live(agent);
     if (host == null ||
         live == null ||
         !agentCanBeReviewed(live) ||
-        !reviewAvailable(widget.attention, host) ||
-        (agent.facts.filesEdited == 0 && agent.facts.turns == 0)) {
+        live.state == AgentAttentionState.finished ||
+        !reviewAvailable(_attention, host) ||
+        (!agent.fromStatus &&
+            agent.facts.filesEdited == 0 &&
+            agent.facts.turns == 0)) {
       return null;
     }
     return () => unawaited(
       openReview(
         context: context,
-        attention: widget.attention,
+        attention: _attention,
         host: host,
         agent: live,
       ),
@@ -289,7 +462,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     return handOffAction(
       context,
       TalkbawtScope.maybeOf(context),
-      widget.attention,
+      _attention,
       host,
       live,
     );
@@ -320,7 +493,7 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     String sessionId,
     String text,
   ) async {
-    final (runner, :owned) = widget.attention.runnerFor(host);
+    final (runner, :owned) = _attention.runnerFor(host);
     try {
       await ConductoreChatClient(runner).send(sessionId, text);
     } finally {
@@ -328,19 +501,89 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     }
   }
 
+  /// An approval's answer: Always goes through the trust sheet where the
+  /// machine keeps rules; errors show as a snack bar.
   Future<void> _decide(
     DigestAgent agent,
+    AgentInfo live,
     PendingPermissionRequest request,
     PermissionVerdict verdict,
   ) async {
+    await answerPermissionRequest(
+      context,
+      controller: _attention,
+      hostId: agent.hostId,
+      request: request,
+      verdict: verdict,
+      nativeAlways: _attention.agentKinds(agent.hostId).of(live.kind).always,
+    );
+    unawaited(_digest.refresh());
+  }
+
+  Future<void> _approveSafe(List<PendingApproval> safe) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (!await showBatchApproveSheet(context, safe) || !mounted) {
+      return;
+    }
+    setState(() => _batching = true);
+    try {
+      final result = await _attention.approveAllLowRisk(only: safe);
+      final skipped = result.skipped.length;
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Approved ${result.approved.length}'
+            '${skipped > 0 ? '; $skipped left to review' : ''}.',
+          ),
+        ),
+      );
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Could not approve: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _batching = false);
+    }
+  }
+
+  Future<void> _revoke(SavedHost host, ApprovalRule rule) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
     try {
-      await widget.attention.decide(agent.hostId, request, verdict);
-      unawaited(widget.controller.refresh());
-    } on Object catch (error) {
+      await _attention.removeRule(host, rule.id);
       messenger?.showSnackBar(
-        SnackBar(content: Text('Could not answer: $error')),
+        SnackBar(content: Text('Revoked ${rule.rule}. It asks again.')),
       );
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Could not revoke ${rule.rule}: $error')),
+      );
+    }
+  }
+
+  /// Mutes (or unmutes) the agent's notifications on this device.
+  Future<void> _toggleMute(DigestAgent agent) async {
+    final muted = _attention.isAgentMuted(agent.hostId, agent.sessionId);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    await _attention.setAgentMuted(
+      agent.hostId,
+      agent.sessionId,
+      muted: !muted,
+    );
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(
+          muted
+              ? 'Alerts for ${agent.name} are back.'
+              : 'No alerts for ${agent.name} on this device. The ongoing '
+                    'notification still lists it.',
+        ),
+      ),
+    );
+  }
+
+  void _hide(DigestAgent agent) {
+    if (_live(agent) case final live?) {
+      _attention.inboxDismissals.dismiss(agent.hostId, live);
     }
   }
 
@@ -418,123 +661,347 @@ class _AgentsDashboardViewState extends State<AgentsDashboardView> {
     ];
   }
 
+  /// One card, swipeable: to the right mutes or unmutes its alerts, to the
+  /// left hides it (only when it needs nothing).
+  Widget _card(
+    DigestController controller,
+    DigestAgent agent,
+    DateTime now, {
+    required bool hideable,
+  }) {
+    final host = _host(agent.hostId);
+    final live = _live(agent);
+    final muted = _attention.isAgentMuted(agent.hostId, agent.sessionId);
+    final smart =
+        host != null && _attention.supportsSmartApprovals(agent.hostId);
+    final card = DigestAgentCard(
+      key: ValueKey('digest-card-${agent.sessionId}'),
+      agent: agent,
+      live: live,
+      canAct: host != null,
+      muted: muted,
+      canTell: host != null && chatViewAvailable(_attention, host),
+      kinds: host == null ? null : _attention.agentKinds(host.id),
+      summarizing: controller.isSummarizing && agent.summaryPending,
+      isDeciding: _attention.isDeciding,
+      now: now,
+      onOpen: () => _open(agent),
+      onOpenOther: () => _open(agent, other: true),
+      onChat: () => _open(agent, chat: true),
+      onTerminal: () => _open(agent, chat: false),
+      onReview: _reviewAction(agent),
+      onHandOff: _handOffAction(agent),
+      onTell: (answer) => unawaited(_tell(agent, answer: answer)),
+      onDecide: (request, verdict) {
+        if (live != null) unawaited(_decide(agent, live, request, verdict));
+      },
+      onTrust: smart
+          ? (request) => unawaited(
+              trustPermissionRequest(
+                context,
+                controller: _attention,
+                hostId: agent.hostId,
+                request: request,
+              ),
+            )
+          : null,
+      onToggleMute: live == null ? null : () => unawaited(_toggleMute(agent)),
+      onHide: hideable && live != null ? () => _hide(agent) : null,
+    );
+    if (live == null) {
+      return Padding(padding: const EdgeInsets.only(bottom: 8), child: card);
+    }
+    final theme = Theme.of(context);
+    Widget background(AlignmentGeometry alignment, String label) => Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      alignment: alignment,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+      ),
+      child: Text(label, style: theme.textTheme.labelLarge),
+    );
+    return Dismissible(
+      key: ValueKey('dismiss-${agent.key}'),
+      direction: hideable
+          ? DismissDirection.horizontal
+          : DismissDirection.startToEnd,
+      background: background(
+        AlignmentDirectional.centerStart,
+        muted ? 'Unmute' : 'Mute',
+      ),
+      secondaryBackground: background(AlignmentDirectional.centerEnd, 'Hide'),
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.startToEnd) {
+          unawaited(_toggleMute(agent));
+          return false;
+        }
+        return true;
+      },
+      onDismissed: (_) => _hide(agent),
+      child: Padding(padding: const EdgeInsets.only(bottom: 8), child: card),
+    );
+  }
+
+  List<Widget> _agentsChildren(
+    BuildContext context,
+    DigestController controller,
+    DigestOverview overview,
+    int hidden,
+    DateTime now,
+  ) {
+    final projects = _projects;
+    final attention = _attention;
+    final hosts = attention.monitoredHosts;
+    Widget card(DigestAgent agent) => _card(
+      controller,
+      agent,
+      now,
+      hideable: _hideable(agent, overview.since),
+    );
+    final byProject = projects != null && projects.groupByProject;
+    // The machines' sidebar.toml, at most every few minutes.
+    if (byProject) unawaited(projects.refresh());
+    final waiting = attention.pendingApprovals;
+    final safe = attention.lowRiskPending;
+    final waitingIds = {for (final p in waiting) p.request.id};
+    final reviewing = _reviewing;
+    final showBatch =
+        waiting.length >= 2 &&
+        safe.isNotEmpty &&
+        (reviewing == null ||
+            !(reviewing.length == waitingIds.length &&
+                reviewing.containsAll(waitingIds)));
+    return [
+      _Header(
+        controller: controller,
+        overview: overview,
+        now: now,
+        menu: widget.inlineMenu && !widget.tabs
+            ? DigestWindowMenu(controller: controller)
+            : null,
+      ),
+      if (hidden > 0)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            key: const ValueKey('agents-show-hidden'),
+            onPressed: attention.inboxDismissals.restoreAll,
+            child: Text('Show $hidden hidden'),
+          ),
+        ),
+      for (final host in attention.unmonitoredHosts)
+        Card(
+          key: ValueKey('agents-monitoring-off-${host.id}'),
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ListTile(
+            leading: const Icon(Icons.monitor_heart_outlined),
+            title: Text(
+              host.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: const Text('Agent monitoring is off'),
+            trailing: TextButton(
+              onPressed: () => attention.enableMonitoring(host),
+              child: const Text('Turn on'),
+            ),
+          ),
+        ),
+      for (final machine in controller.outdated)
+        _UpdateHint(
+          key: ValueKey('digest-update-hint-${machine.hostId}'),
+          machine: machine,
+          host: _host(machine.hostId),
+        ),
+      for (final machine in controller.machines)
+        if (machine.error case final error?)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              '${machine.hostName}: $error',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ),
+      // Started tasks (CON-037), by batch with their progress.
+      if (TaskRunsController.instance case final runs?)
+        TaskBatchesPanel(controller: runs, hostName: _hostName),
+      if (overview.isEmpty)
+        _Empty(
+          loading: controller.isLoading,
+          machines: hosts.isNotEmpty || controller.machines.isNotEmpty,
+          hidden: hidden > 0,
+        ),
+      if (projects != null && !overview.isEmpty)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const ValueKey('digest-group-by-toggle'),
+            onPressed: () => projects.setGroupByProject(!byProject),
+            icon: Icon(
+              byProject
+                  ? Icons.label_important_outline_rounded
+                  : Icons.folder_copy_outlined,
+              size: 18,
+            ),
+            label: Text(byProject ? 'Group by state' : 'Group by project'),
+          ),
+        ),
+      if (showBatch)
+        BatchApprovalCard(
+          waiting: waiting.length,
+          safe: safe.length,
+          busy: _batching,
+          onReviewEach: () => setState(() => _reviewing = waitingIds),
+          onApproveSafe: () => unawaited(_approveSafe(safe)),
+        ),
+      if (byProject)
+        for (final (project, agents) in _byProject(projects, overview)) ...[
+          ProjectHeaderTile(
+            key: ValueKey('digest-project-${project.key}'),
+            project: project,
+            collapsed: projects.isCollapsed(project),
+            count: agents.length,
+            onToggle: () => projects.toggleCollapsed(project),
+          ),
+          if (!projects.isCollapsed(project))
+            for (final agent in agents) card(agent),
+        ]
+      else
+        for (final section in DigestSection.values)
+          if (overview.section(section) case final agents
+              when agents.isNotEmpty) ...[
+            _SectionTitle(
+              key: ValueKey('digest-section-${section.name}'),
+              section: section,
+              count: agents.length,
+              open: section != DigestSection.quiet || _quietOpen,
+              onToggle: section == DigestSection.quiet
+                  ? () => setState(() => _quietOpen = !_quietOpen)
+                  : null,
+            ),
+            if (section != DigestSection.quiet || _quietOpen)
+              for (final agent in agents) card(agent),
+          ],
+      // What the machines' rules answered on their own, revocable.
+      for (final host in hosts)
+        if (attention.approvalsFor(host.id) case final approvals?)
+          AutoApprovedSection(
+            key: ValueKey('auto-approved-${host.id}'),
+            hostName: host.name,
+            showHost: hosts.length > 1,
+            approvals: approvals,
+            onRevoke: (rule) => _revoke(host, rule),
+          ),
+    ];
+  }
+
+  /// Tokens, cost and limits per machine (companion 0.6+), then each
+  /// session's context.
+  List<Widget> _usageChildren(BuildContext context) {
+    final hosts = _attention.monitoredHosts;
+    final usage = UsageScope.maybeOf(context);
+    return [
+      if (usage != null) ...[
+        UsageBreakdown(
+          controller: usage,
+          onUpdateCompanion: (hostId) {
+            final host = usage.hostFor(hostId);
+            if (host != null) {
+              unawaited(showCompanionSetup(context, host));
+            }
+          },
+        ),
+        const Divider(height: 24),
+      ],
+      ...buildAgentUsageChildren(
+        context,
+        _inputs(),
+        showRateLimits: usage == null,
+        hostNotice: (hostId) => UsageUpdateHint(
+          host: hosts.firstWhere((host) => host.id == hostId),
+        ),
+      ),
+    ];
+  }
+
+  List<AgentInboxHostInput> _inputs() => [
+    for (final host in _attention.monitoredHosts)
+      (
+        hostId: host.id,
+        hostName: host.name,
+        agents: _attention.statusFor(host.id)?.agents ?? const [],
+      ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final projects = _projects;
+    final controller = _digest;
+    final attention = _attention;
     return ListenableBuilder(
       listenable: Listenable.merge([
-        widget.controller,
-        widget.attention,
+        controller,
+        attention,
+        attention.inboxDismissals,
         ?projects,
       ]),
       builder: (context, _) {
-        final controller = widget.controller;
-        final overview = controller.overview;
+        final (overview, hidden) = _overview(controller);
         final now = (widget.now ?? DateTime.now)();
-        Widget card(DigestAgent agent) => Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: DigestAgentCard(
-            key: ValueKey('digest-card-${agent.sessionId}'),
-            agent: agent,
-            live: _live(agent),
-            canAct: _host(agent.hostId) != null,
-            summarizing: controller.isSummarizing && agent.summaryPending,
-            isDeciding: widget.attention.isDeciding,
-            now: now,
-            onOpen: () => _open(agent),
-            onOpenOther: () => _open(agent, other: true),
-            onChat: () => _open(agent, chat: true),
-            onTerminal: () => _open(agent, chat: false),
-            onReview: _reviewAction(agent),
-            onHandOff: _handOffAction(agent),
-            onTell: (answer) => unawaited(_tell(agent, answer: answer)),
-            onDecide: (request, verdict) =>
-                unawaited(_decide(agent, request, verdict)),
-          ),
+        final hosts = attention.monitoredHosts;
+        final tabBar = TabBar(
+          key: const ValueKey('agents-tabs'),
+          controller: _tabs,
+          tabs: [
+            Tab(
+              height: 40,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Agents'),
+                  if (attention.attentionCount case final count
+                      when count > 0) ...[
+                    const SizedBox(width: 6),
+                    Badge.count(count: count),
+                  ],
+                ],
+              ),
+            ),
+            const Tab(height: 40, text: 'Usage'),
+          ],
         );
-        final byProject = projects != null && projects.groupByProject;
-        // The machines' sidebar.toml, at most every few minutes.
-        if (byProject) unawaited(projects.refresh());
         final children = <Widget>[
-          _Header(
-            controller: controller,
-            overview: overview,
-            now: now,
-            menu: widget.inlineMenu
-                ? DigestWindowMenu(controller: controller)
-                : null,
-          ),
-          for (final machine in controller.outdated)
-            _UpdateHint(
-              key: ValueKey('digest-update-hint-${machine.hostId}'),
-              machine: machine,
-              host: _host(machine.hostId),
-            ),
-          for (final machine in controller.machines)
-            if (machine.error case final error?)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '${machine.hostName}: $error',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                ),
-              ),
-          // Started tasks (CON-037), by batch with their progress.
-          if (TaskRunsController.instance case final runs?)
-            TaskBatchesPanel(controller: runs, hostName: _hostName),
-          if (overview.isEmpty)
-            _Empty(
-              loading: controller.isLoading,
-              machines: controller.machines,
-            ),
-          if (projects != null && !overview.isEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                key: const ValueKey('digest-group-by-toggle'),
-                onPressed: () => projects.setGroupByProject(!byProject),
-                icon: Icon(
-                  byProject
-                      ? Icons.label_important_outline_rounded
-                      : Icons.folder_copy_outlined,
-                  size: 18,
-                ),
-                label: Text(byProject ? 'Group by state' : 'Group by project'),
-              ),
-            ),
-          if (byProject)
-            for (final (project, agents) in _byProject(projects, overview)) ...[
-              ProjectHeaderTile(
-                key: ValueKey('digest-project-${project.key}'),
-                project: project,
-                collapsed: projects.isCollapsed(project),
-                count: agents.length,
-                onToggle: () => projects.toggleCollapsed(project),
-              ),
-              if (!projects.isCollapsed(project))
-                for (final agent in agents) card(agent),
-            ]
+          if (widget.tabs) ...[
+            if (widget.inlineMenu)
+              Row(
+                children: [
+                  Expanded(child: tabBar),
+                  DigestWindowMenu(controller: controller),
+                ],
+              )
+            else
+              tabBar,
+            const SizedBox(height: 8),
+          ],
+          if (widget.tabs && _tabs.index == 1)
+            ..._usageChildren(context)
           else
-            for (final section in DigestSection.values)
-              if (overview.section(section) case final agents
-                  when agents.isNotEmpty) ...[
-                _SectionTitle(
-                  key: ValueKey('digest-section-${section.name}'),
-                  section: section,
-                  count: agents.length,
-                  open: section != DigestSection.quiet || _quietOpen,
-                  onToggle: section == DigestSection.quiet
-                      ? () => setState(() => _quietOpen = !_quietOpen)
-                      : null,
-                ),
-                if (section != DigestSection.quiet || _quietOpen)
-                  for (final agent in agents) card(agent),
-              ],
+            ..._agentsChildren(context, controller, overview, hidden, now),
+          // Each machine's monitor: provider, problems, refresh.
+          if (widget.tabs && hosts.isNotEmpty)
+            AgentMachinesSection(
+              hosts: hosts,
+              controller: attention,
+              hasAgents: !overview.isEmpty,
+            ),
         ];
         final list = ListView(
           key: const ValueKey('agents-dashboard'),
+          controller: widget.scrollController,
           shrinkWrap: widget.shrinkWrap,
           physics: widget.shrinkWrap
               ? const NeverScrollableScrollPhysics()
@@ -718,19 +1185,30 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _Empty extends StatelessWidget {
-  const _Empty({required this.loading, required this.machines});
+  const _Empty({
+    required this.loading,
+    required this.machines,
+    this.hidden = false,
+  });
 
   final bool loading;
-  final List<MachineDigest> machines;
+
+  /// Some machine is monitored.
+  final bool machines;
+
+  /// Every agent left is one the user hid.
+  final bool hidden;
 
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
-    final text = machines.isEmpty
-        ? 'No machine reports agents yet. Turn on agent monitoring for a '
-              'machine with the Conductore companion.'
+    final text = !machines
+        ? 'No machine reports agents yet. Turn on agent monitoring in a '
+              "machine's settings, then connect to it."
         : loading
         ? 'Asking your machines…'
+        : hidden
+        ? 'Nothing new. Hidden agents come back when they change.'
         : 'No agents in this window.';
     return Padding(
       key: const ValueKey('digest-empty'),
@@ -796,10 +1274,37 @@ class DigestAgentCard extends StatelessWidget {
     this.now,
     this.onReview,
     this.onHandOff,
+    this.onTrust,
+    this.onToggleMute,
+    this.onHide,
+    this.muted = false,
+    this.canTell = true,
+    this.kinds,
     super.key,
   });
 
   final DigestAgent agent;
+
+  /// "Trust…" on an approval (a machine that keeps rules); null hides it.
+  final void Function(PendingPermissionRequest request)? onTrust;
+
+  /// Mutes or unmutes its alerts (desktop right-click menu; phones swipe
+  /// the card to the right).
+  final VoidCallback? onToggleMute;
+
+  /// Hides it until it changes (desktop right-click menu; phones swipe the
+  /// card to the left); null when it needs something.
+  final VoidCallback? onHide;
+
+  /// Its notifications are muted on this device.
+  final bool muted;
+
+  /// Prompts can be sent to it (the companion's `send`): Answer and
+  /// "Tell it…".
+  final bool canTell;
+
+  /// The machine's agent kinds, for the agent's name on approvals.
+  final AgentKindCatalog? kinds;
 
   /// Opens Review of its last turn; null hides the button.
   final VoidCallback? onReview;
@@ -854,7 +1359,7 @@ class DigestAgentCard extends StatelessWidget {
     final live = this.live;
     final interactive = canAct && live != null && agent.live && !agent.ended;
     final requests = live?.pendingRequests ?? const [];
-    final facts = _factsRow(palette);
+    final facts = _factsRow(palette, live);
     final at = agent.lastActivityAt;
     return Material(
       color: palette.panel,
@@ -902,7 +1407,11 @@ class DigestAgentCard extends StatelessWidget {
                             style: const TextStyle(fontWeight: FontWeight.w800),
                           ),
                           TextSpan(
-                            text: ' · ${agent.hostName}',
+                            text:
+                                ' · ${agent.hostName}'
+                                // Status from Herdr's detection: no
+                                // approvals, chat or usage.
+                                '${live != null && isHerdrOnlyAgent(live) ? ' · ${agentKindLabel(live.kind, kinds)} via Herdr' : ''}',
                             style: TextStyle(color: palette.mutedForeground),
                           ),
                         ],
@@ -911,6 +1420,19 @@ class DigestAgentCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  if (muted)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Tooltip(
+                        message: 'Muted',
+                        child: Icon(
+                          Icons.notifications_off_outlined,
+                          key: ValueKey('digest-muted-${agent.sessionId}'),
+                          size: 14,
+                          color: palette.mutedForeground,
+                        ),
+                      ),
+                    ),
                   if (at != null)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
@@ -991,14 +1513,19 @@ class DigestAgentCard extends StatelessWidget {
                 for (final request in requests) ...[
                   const SizedBox(height: 8),
                   PendingRequestCard(
+                    key: ValueKey('request-${request.id}'),
                     request: request,
-                    agentName: agentKindLabel(agent.kind),
+                    agentName: agentKindLabel(agent.kind, kinds),
                     busy: isDeciding?.call(request.id) ?? false,
                     onDecide: (verdict) => onDecide(request, verdict),
                     onAnswer: (answers) => onDecide(
                       request.withAnswers(answers),
                       PermissionVerdict.allow,
                     ),
+                    onTrust: switch (onTrust) {
+                      final trust? => () => trust(request),
+                      null => null,
+                    },
                   ),
                 ],
               // One secondary action at most; the card's tap opens its
@@ -1017,7 +1544,8 @@ class DigestAgentCard extends StatelessWidget {
   /// review. "Tell it…" and Hand off live in Chat View (and in the
   /// desktop right-click menu).
   Widget? _secondary() {
-    if (agent.attention == DigestAttention.question &&
+    if (canTell &&
+        agent.attention == DigestAttention.question &&
         agent.state != 'needs_permission') {
       return TextButton.icon(
         key: ValueKey('digest-tell-${agent.sessionId}'),
@@ -1048,12 +1576,22 @@ class DigestAgentCard extends StatelessWidget {
         ('Review', Icons.rate_review_outlined, review),
       if (onHandOff case final handOff?)
         ('Hand off…', Icons.outbox_outlined, handOff),
-      if (agent.state != 'needs_permission')
+      if (canTell && agent.state != 'needs_permission')
         (
           question ? 'Answer…' : 'Tell it…',
           Icons.reply_rounded,
           () => onTell(question),
         ),
+      if (onToggleMute case final toggle?)
+        (
+          muted ? 'Unmute notifications' : 'Mute notifications',
+          muted
+              ? Icons.notifications_active_outlined
+              : Icons.notifications_off_outlined,
+          toggle,
+        ),
+      if (onHide case final hide?)
+        ('Hide', Icons.visibility_off_outlined, hide),
     ];
     final picked = await showAdaptiveModal<VoidCallback>(
       context: context,
@@ -1076,7 +1614,7 @@ class DigestAgentCard extends StatelessWidget {
     picked?.call();
   }
 
-  List<Widget> _factsRow(AppPalette palette) {
+  List<Widget> _factsRow(AppPalette palette, AgentInfo? live) {
     final f = agent.facts;
     final muted = TextStyle(color: palette.mutedForeground, fontSize: 12);
     Widget fact(String key, IconData icon, String text, {Color? color}) => Row(
@@ -1117,6 +1655,8 @@ class DigestAgentCard extends StatelessWidget {
           Icons.toll_outlined,
           '${compactTokens(tokens)} tok${_cost(f.costUsd)}',
         ),
+      if (live?.usage?.contextUsedPct case final pct?)
+        fact('context', Icons.data_usage_rounded, 'context ${pct.round()}%'),
       if (f.waitingPermission + f.waitingInput case final waited
           when agent.attention != null && waited.inMinutes >= 1)
         fact(

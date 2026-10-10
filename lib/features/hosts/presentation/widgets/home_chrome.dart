@@ -1,35 +1,26 @@
 import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agents_icon.dart';
 import 'package:flutter/material.dart';
 
-/// Slim Moshi-style bar of the home page: lock on the left, the machine
-/// chip in the middle, the settings gear on the right.
+/// Slim bar of the home page, four controls at most: the machine chip,
+/// the agents dashboard, the switcher's search and the settings gear.
 class HomeTopBar extends StatelessWidget {
   const HomeTopBar({
-    required this.onLock,
     required this.onSettings,
     this.machine,
-    this.onSwitcher,
     this.onSearch,
-    this.onGuide,
     this.onAgents,
     this.agentsBadge = 0,
     super.key,
   });
 
-  final VoidCallback onLock;
   final VoidCallback onSettings;
-
-  /// Opens the quick switcher; null hides its button.
-  final VoidCallback? onSwitcher;
 
   /// Opens the quick switcher to search, keyboard up; null hides its
   /// button.
   final VoidCallback? onSearch;
 
-  /// Starts the voice guide; null hides its button.
-  final VoidCallback? onGuide;
-
-  /// Opens the agents dashboard; null hides its button.
+  /// Opens the Agents screen; null hides its button.
   final VoidCallback? onAgents;
 
   /// Agents waiting on the user, shown on the dashboard button.
@@ -45,14 +36,7 @@ class HomeTopBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
       child: Row(
         children: [
-          IconButton(
-            tooltip: 'Lock',
-            iconSize: 26,
-            color: colorScheme.onSurface,
-            icon: const Icon(Icons.lock_outline_rounded),
-            onPressed: onLock,
-          ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 8),
           Expanded(
             child: Center(child: machine ?? const ConduitGlyph(size: 24)),
           ),
@@ -60,42 +44,20 @@ class HomeTopBar extends StatelessWidget {
           if (onAgents != null)
             IconButton(
               key: const ValueKey('home-agents-dashboard'),
-              tooltip: 'Agents dashboard',
+              tooltip: 'Agents',
               iconSize: 24,
               color: colorScheme.onSurface,
-              icon: Badge(
-                isLabelVisible: agentsBadge > 0,
-                label: Text('$agentsBadge'),
-                child: const Icon(Icons.space_dashboard_outlined),
-              ),
+              icon: AgentsIcon(count: agentsBadge),
               onPressed: onAgents,
-            ),
-          if (onGuide != null)
-            IconButton(
-              key: const ValueKey('home-voice-guide'),
-              tooltip: 'Voice guide',
-              iconSize: 24,
-              color: colorScheme.onSurface,
-              icon: const Icon(Icons.headset_mic_outlined),
-              onPressed: onGuide,
             ),
           if (onSearch != null)
             IconButton(
               key: const ValueKey('home-search'),
-              tooltip: 'Search workspaces, sessions and agents',
+              tooltip: 'Switch to…',
               iconSize: 24,
               color: colorScheme.onSurface,
               icon: const Icon(Icons.search_rounded),
               onPressed: onSearch,
-            ),
-          if (onSwitcher != null)
-            IconButton(
-              key: const ValueKey('home-open-switcher'),
-              tooltip: 'Switch sessions',
-              iconSize: 24,
-              color: colorScheme.onSurface,
-              icon: const Icon(Icons.view_carousel_outlined),
-              onPressed: onSwitcher,
             ),
           IconButton(
             tooltip: 'Settings',

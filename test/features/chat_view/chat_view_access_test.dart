@@ -1,7 +1,7 @@
 import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
-import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/agents_digest/presentation/agents_dashboard.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
@@ -349,12 +349,17 @@ void main() {
       tester,
     ) async {
       final (attention, _) = await start(tester, healthyResponses());
+      final digest = monitorOnlyDigest();
+      addTearDown(digest.dispose);
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: AgentAttentionSheet(
-              controller: attention,
-              onOpenAgent: (host, agent) {},
+            body: AgentsDashboardView(
+              controller: digest,
+              attention: attention,
+              tabs: true,
+              onOpenTerminal: (host, agent) {},
+              onOpenChat: (host, agent) {},
             ),
           ),
         ),
@@ -362,10 +367,6 @@ void main() {
       await tester.pump();
       final card = find.byKey(const ValueKey('agents-monitoring-off-h'));
       expect(card, findsOneWidget);
-      expect(
-        find.textContaining('No machines are being monitored'),
-        findsNothing,
-      );
 
       await tester.tap(
         find.descendant(of: card, matching: find.text('Turn on')),

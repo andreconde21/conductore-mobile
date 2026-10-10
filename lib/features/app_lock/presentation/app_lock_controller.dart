@@ -183,11 +183,7 @@ class AppLockController extends ChangeNotifier {
       final delay = _relockDelay.duration;
       final holds =
           _relockDelay.lastsAcrossRestarts &&
-          stamp.holdsAt(
-            _clock(),
-            delay!,
-            sinceBootNow: await _uptime?.call(),
-          );
+          stamp.holdsAt(_clock(), delay!, sinceBootNow: await _uptime?.call());
       if (!holds) {
         await preferences.saveUnlockStamp(null);
         return false;
