@@ -1036,7 +1036,11 @@ class _TerminalPageState extends State<TerminalPage>
     }
     if (!mounted || widget.workspace.activeSession != session) return false;
 
-    var location = _chatLocationFor(session);
+    var location = await chatSessionLocation(
+      session,
+      widget.connectFlow?.herdr,
+    );
+    if (!mounted || widget.workspace.activeSession != session) return false;
     var match = resolveChatAgent(host, agents, location: location);
     if (match is ChatAgentAmbiguous && !match.elsewhere) {
       // Several Claude sessions in this workspace: the one on screen is
@@ -1099,14 +1103,6 @@ class _TerminalPageState extends State<TerminalPage>
           content: Text(message),
         ),
       );
-  }
-
-  /// Where [session] is in Herdr as far as the app tracks it (the
-  /// workspace it was moved to, else its connect target's).
-  ChatSessionLocation _chatLocationFor(TerminalSessionController session) {
-    final herdr = widget.connectFlow?.herdr;
-    final workspace = herdr?.workspaceOf(session) ?? '';
-    return ChatSessionLocation(herdrWorkspaceId: workspace);
   }
 
   /// The pane Herdr shows in [session] right now, when it is in the

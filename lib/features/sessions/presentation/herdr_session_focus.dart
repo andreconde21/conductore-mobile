@@ -259,6 +259,11 @@ class HerdrSessionFocus implements AppInputRouter {
     return target == null || target.name.isEmpty ? null : target.name;
   }
 
+  /// Whether [session]'s workspace was closed in Herdr: pinned to none, it
+  /// shows whatever Herdr's shared focus is on.
+  bool isUnpinned(TerminalSessionController session) =>
+      _unpinned.contains(session.host.id);
+
   /// Records that [session] now shows [workspaceId] (after a gesture or a
   /// navigator jump moved it).
   void noteWorkspace(TerminalSessionController session, String workspaceId) {
