@@ -201,7 +201,7 @@ class _ViewMenu extends StatelessWidget {
       tooltip: 'Project view',
       padding: EdgeInsets.zero,
       child: const Padding(
-        padding: EdgeInsets.all(4),
+        padding: EdgeInsets.fromLTRB(4, 4, 2, 4),
         child: Icon(Icons.more_vert_rounded, size: 17),
       ),
       onSelected: (choice) async {

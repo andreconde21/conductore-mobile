@@ -511,3 +511,45 @@ class _Group {
     );
   }
 }
+
+/// What an agent row of the project view says (CON-104): the text
+/// Herdr's sidebar shows for the pane as the title, then the tab name,
+/// workspace and machine as the secondary line.
+@immutable
+class AgentRowText {
+  const AgentRowText({required this.title, required this.subtitle});
+
+  /// Prominent: the pane's terminal title, else the row's own name.
+  final String title;
+
+  /// Tab name · workspace · machine; empty parts and repeats dropped.
+  final String subtitle;
+
+  /// [row] is one of [ProjectEntry.agentRows]; [workspace] is the entry's
+  /// workspace row. A workspace named like its [projectName] is not
+  /// repeated; a title equal to the workspace or tab name is not repeated.
+  factory AgentRowText.of(
+    SidebarNode row, {
+    required String workspace,
+    required String projectName,
+    required String machine,
+  }) {
+    final isTab = row.kind == SidebarNodeKind.herdrTab;
+    final sidebarText = isTab ? row.detail.trim() : '';
+    // A tab row's own name is the tab label; a pane row's label already is
+    // the pane title, so it has no tab name to show.
+    final tab = isTab ? row.label.trim() : '';
+    final title = sidebarText.isNotEmpty ? sidebarText : row.label.trim();
+    bool same(String a, String b) => a.toLowerCase() == b.toLowerCase();
+    final parts = <String>[
+      if (tab.isNotEmpty && !same(tab, title))
+        RegExp(r'^\d+$').hasMatch(tab) ? 'tab $tab' : tab,
+      if (workspace.isNotEmpty &&
+          !same(workspace, projectName) &&
+          !same(workspace, title))
+        workspace,
+      if (machine.isNotEmpty) machine,
+    ];
+    return AgentRowText(title: title, subtitle: parts.join(' · '));
+  }
+}

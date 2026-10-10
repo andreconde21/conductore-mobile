@@ -443,6 +443,13 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     final collapsed =
         controller.filter.trim().isEmpty && layout.isCollapsed(project);
     final names = widget.machineNames;
+    AgentRowText agentText(ProjectEntry entry, SidebarNode agent) =>
+        AgentRowText.of(
+          agent,
+          workspace: entry.node.label,
+          projectName: project.name,
+          machine: names[entry.node.machineId] ?? '',
+        );
     return [
       ProjectHeaderTile(
         key: ValueKey('project-row-${project.key}'),
@@ -503,12 +510,8 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
                   node: agent,
                   dot: entry.dotOf(agent),
                   sheprd: entry.sheprdOf(agent),
-                  machineName: [
-                    if (entry.node.label.toLowerCase() !=
-                        project.name.toLowerCase())
-                      entry.node.label,
-                    names[entry.node.machineId] ?? '',
-                  ].where((part) => part.isNotEmpty).join(' · '),
+                  title: agentText(entry, agent).title,
+                  machineName: agentText(entry, agent).subtitle,
                   selected: agent.key == widget.selectedKey,
                   faded:
                       !entry.active ||
@@ -624,12 +627,16 @@ class _MemberRow extends StatelessWidget {
     required this.onOpen,
     required this.onContextMenu,
     this.faded = false,
+    this.title,
     this.dot,
     this.sheprd,
     super.key,
   });
 
   final SidebarNode node;
+
+  /// The prominent text; null uses [node]'s label.
+  final String? title;
 
   /// The dot to show: sheprd's presence when synced; null uses [node]'s.
   final SidebarDot? dot;
@@ -684,7 +691,7 @@ class _MemberRow extends StatelessWidget {
                     TextSpan(
                       children: [
                         TextSpan(
-                          text: node.label,
+                          text: title ?? node.label,
                           style: TextStyle(
                             color: palette.foreground,
                             fontSize: 13,
