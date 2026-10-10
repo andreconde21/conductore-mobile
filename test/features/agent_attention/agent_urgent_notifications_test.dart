@@ -925,9 +925,8 @@ void main() {
     });
   });
 
-  testWidgets('Settings: the mode, its switches and Unmute all', (
-    tester,
-  ) async {
+  testWidgets('Settings: Notify me, Custom, the details and Unmute all '
+      '(CON-108)', (tester) async {
     tester.view.physicalSize = const Size(800, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -948,37 +947,89 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: SingleChildScrollView(
-            child: AgentNotificationSettingsCard(controller: controller),
+            child: Column(
+              children: [
+                AgentNotifyChoiceCard(controller: controller),
+                AgentNotificationDetailsCard(controller: controller),
+              ],
+            ),
           ),
         ),
       ),
     );
     await tester.pump();
-    expect(find.text('Ongoing + urgent'), findsOne);
+    final semantics = tester.ensureSemantics();
+
+    /// Only [selected] is checked (none: Custom).
+    void expectChecked(AgentNotifyChoice? selected) {
+      for (final choice in AgentNotifyChoice.values) {
+        expect(
+          tester.getSemantics(
+            find.byKey(ValueKey('agent-notify-choice-${choice.name}')),
+          ),
+          containsSemantics(isChecked: choice == selected),
+          reason: choice.name,
+        );
+      }
+    }
+
+    final custom = find.byKey(const ValueKey('agent-notify-choice-custom'));
+
+    // The default is Urgent only, with the ongoing notification.
+    expectChecked(AgentNotifyChoice.urgentOnly);
+    expect(custom, findsNothing);
+    expect(find.text('Ongoing notification'), findsOne);
     expect(find.text('Also alert when an agent finishes'), findsOne);
     expect(find.text('Stuck or looping'), findsOne);
     expect(find.text('1 muted agent'), findsOne);
 
+    // A detail that matches a choice selects it.
     await tester.tap(
       find.byKey(const ValueKey('agent-notify-finished-alerts')),
     );
     await tester.pump();
     expect(controller.notificationPreferences.finishedAlerts, isTrue);
+    expectChecked(AgentNotifyChoice.urgentAndFinished);
+
+    // One that matches none is Custom, and stays as set.
+    await tester.tap(find.byKey(const ValueKey('agent-notify-stuck')));
+    await tester.pump();
+    expect(controller.notificationPreferences.stuck, isFalse);
+    expect(custom, findsOne);
+    expectChecked(null);
+
     await tester.tap(find.byKey(const ValueKey('agent-notify-unmute-all')));
     await tester.pump();
     expect(store.value.mutedAgents, isEmpty);
     expect(find.text('1 muted agent'), findsNothing);
 
     await tester.tap(
-      find.byKey(const ValueKey('agent-notify-mode-everything')),
+      find.byKey(const ValueKey('agent-notify-choice-everything')),
     );
     await tester.pump();
     expect(
       controller.notificationPreferences.mode,
       AgentNotificationMode.everything,
     );
-    // "Everything" has its own finished switch and no stuck alerts.
+    expect(custom, findsNothing);
+    expectChecked(AgentNotifyChoice.everything);
+    // "Everything" has its own finished switch, no stuck alerts and no
+    // ongoing notification.
     expect(find.text('Notify when an agent finishes'), findsOne);
     expect(find.text('Stuck or looping'), findsNothing);
+    expect(find.text('Ongoing notification'), findsNothing);
+
+    // Back to urgent: stuck alerts are on again.
+    await tester.tap(
+      find.byKey(const ValueKey('agent-notify-choice-urgentOnly')),
+    );
+    await tester.pump();
+    expect(
+      controller.notificationPreferences.mode,
+      AgentNotificationMode.ongoingAndUrgent,
+    );
+    expect(controller.notificationPreferences.stuck, isTrue);
+    expect(controller.notificationPreferences.finishedAlerts, isFalse);
+    semantics.dispose();
   });
 }

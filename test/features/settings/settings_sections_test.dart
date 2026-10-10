@@ -28,12 +28,19 @@ void main() {
     await controller.load();
   });
 
-  Future<void> openSection(WidgetTester tester, SettingsSection section) async {
+  /// Opens [section]; [advanced] unfolds its Advanced, as a search result
+  /// there does.
+  Future<void> openSection(
+    WidgetTester tester,
+    SettingsSection section, {
+    bool advanced = false,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsSectionPage(
           section: section,
           services: SettingsServices(theme: controller),
+          expandAdvanced: advanced,
         ),
       ),
     );
@@ -143,8 +150,16 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('Appearance toggles local shell visibility', (tester) async {
+  testWidgets('Appearance › Advanced toggles local shell visibility', (
+    tester,
+  ) async {
     await openSection(tester, SettingsSection.appearance);
+    // Folded until Advanced is tapped.
+    expect(find.text('Show local shell'), findsNothing);
+    final advanced = find.byKey(const ValueKey('settings-advanced-appearance'));
+    await reveal(tester, SettingsSection.appearance, advanced);
+    await tester.tap(advanced);
+    await tester.pumpAndSettle();
     await reveal(
       tester,
       SettingsSection.appearance,
@@ -159,8 +174,13 @@ void main() {
   testWidgets('desktops hide the proot local shell toggle', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
-      await openSection(tester, SettingsSection.appearance);
+      await openSection(tester, SettingsSection.appearance, advanced: true);
       expect(find.text('Show local shell'), findsNothing);
+      // Nothing else is advanced there, so there is no Advanced at all.
+      expect(
+        find.byKey(const ValueKey('settings-advanced-appearance')),
+        findsNothing,
+      );
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
@@ -173,8 +193,8 @@ void main() {
     ('Paste images as uploaded files', (c) => c.pasteImagesAsFiles),
     ('Remote clipboard', (c) => c.remoteClipboardEnabled),
   ]) {
-    testWidgets('Terminal toggles "$title"', (tester) async {
-      await openSection(tester, SettingsSection.terminal);
+    testWidgets('Terminal › Advanced toggles "$title"', (tester) async {
+      await openSection(tester, SettingsSection.terminal, advanced: true);
       await reveal(tester, SettingsSection.terminal, find.text(title));
       final before = read(controller);
       await tester.tap(find.text(title));
@@ -183,16 +203,17 @@ void main() {
     });
   }
 
-  testWidgets('Terminal changes the enter sequence', (tester) async {
-    await openSection(tester, SettingsSection.terminal);
+  testWidgets('Terminal › Advanced changes the enter sequence', (tester) async {
+    await openSection(tester, SettingsSection.terminal, advanced: true);
+    await reveal(tester, SettingsSection.terminal, find.text('CRLF'));
     expect(controller.terminalEnterSequence, TerminalEnterSequence.cr);
     await tester.tap(find.text('CRLF'));
     await tester.pumpAndSettle();
     expect(controller.terminalEnterSequence, TerminalEnterSequence.crlf);
   });
 
-  testWidgets('Input switches the toolbar style', (tester) async {
-    await openSection(tester, SettingsSection.input);
+  testWidgets('Input › Advanced switches the toolbar style', (tester) async {
+    await openSection(tester, SettingsSection.input, advanced: true);
     expect(controller.terminalToolbarStyle, TerminalToolbarStyle.floatingPill);
     await tester.tap(
       find.descendant(
@@ -207,7 +228,7 @@ void main() {
   testWidgets('Input shows the gestures and toggles pinch to zoom', (
     tester,
   ) async {
-    await openSection(tester, SettingsSection.input);
+    await openSection(tester, SettingsSection.input, advanced: true);
     await reveal(tester, SettingsSection.input, find.text('Gestures'));
     await reveal(tester, SettingsSection.input, find.text('Pinch to zoom'));
     expect(controller.terminalGestures.pinchZoom, isTrue);
@@ -216,26 +237,106 @@ void main() {
     expect(controller.terminalGestures.pinchZoom, isFalse);
   });
 
-  testWidgets('Chat & Voice toggles pressing Enter after inserting', (
-    tester,
-  ) async {
-    await openSection(tester, SettingsSection.chatVoice);
+  testWidgets('Chat & Voice › Advanced toggles pressing Enter after '
+      'inserting', (tester) async {
+    await openSection(tester, SettingsSection.chatVoice, advanced: true);
     expect(controller.composeSubmitEnter, isFalse);
-    await tester.tap(find.text('Press Enter after inserting'));
-    await tester.pumpAndSettle();
-    expect(controller.composeSubmitEnter, isTrue);
-    // Android (the test platform) has dictation and read aloud.
     await reveal(
       tester,
       SettingsSection.chatVoice,
-      find.text('Keep listening until I tap stop'),
+      find.text('Press Enter after inserting'),
     );
+    await tester.tap(find.text('Press Enter after inserting'));
+    await tester.pumpAndSettle();
+    expect(controller.composeSubmitEnter, isTrue);
+  });
+
+  testWidgets('Chat & Voice: dictation, then one row each for voice '
+      'commands and the voice guide (CON-108)', (tester) async {
+    await openSection(tester, SettingsSection.chatVoice);
+    // Android (the test platform) has dictation and read aloud.
+    expect(find.text('Language'), findsOneWidget);
+    expect(find.text('Keep listening until I tap stop'), findsOneWidget);
+    // In Chat View's ⋮, or gone (CON-106/107 simplified where voice is).
+    for (final gone in [
+      'Tool activity',
+      'How much to read',
+      'Where to find voice',
+      'Send words',
+      'Brain machine',
+    ]) {
+      expect(find.text(gone, skipOffstage: false), findsNothing, reason: gone);
+    }
+
+    final commands = find.byKey(const ValueKey('settings-voice-commands'));
+    await reveal(tester, SettingsSection.chatVoice, commands);
+    expect(
+      find.descendant(of: commands, matching: find.text('On')),
+      findsOneWidget,
+    );
+    await tester.tap(commands);
+    await tester.pumpAndSettle();
+    expect(find.text('Send words'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('speech-voice-commands')));
+    await tester.pumpAndSettle();
+    expect(controller.voice.voiceCommands, isFalse);
+    expect(find.text('Send words'), findsNothing);
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: commands, matching: find.text('Off')),
+      findsOneWidget,
+    );
+
+    final guide = find.byKey(const ValueKey('settings-voice-guide'));
+    await reveal(tester, SettingsSection.chatVoice, guide);
+    await tester.tap(guide);
+    await tester.pumpAndSettle();
+    expect(find.text('Say yes before acting'), findsOneWidget);
+    // It follows Language until set.
+    expect(find.text('Same as dictation'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('guide-enabled')));
+    await tester.pumpAndSettle();
+    expect(controller.voice.guide.enabled, isFalse);
+    expect(find.text('Say yes before acting'), findsNothing);
+  });
+
+  testWidgets('Chat & Voice › Advanced keeps read aloud by default', (
+    tester,
+  ) async {
+    await openSection(tester, SettingsSection.chatVoice, advanced: true);
+    final toggle = find.byKey(const ValueKey('speech-read-aloud-default'));
+    await reveal(tester, SettingsSection.chatVoice, toggle);
+    final before = controller.voice.readAloudByDefault;
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(controller.voice.readAloudByDefault, !before);
+    expect(find.text('Talk: send after a pause of'), findsOneWidget);
+  });
+
+  testWidgets('Input: Customize keys edits the toolbar in use', (tester) async {
+    await openSection(tester, SettingsSection.input);
+    final row = find.byKey(const ValueKey('settings-customize-keys'));
+    expect(find.text('Toolbar style'), findsNothing);
+    expect(find.text('Key rows'), findsNothing);
+    // The pill is the default: its buttons.
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pill-config-save')), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    await controller.setTerminalToolbarStyle(TerminalToolbarStyle.keyRows);
+    await tester.pumpAndSettle();
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(find.text('Key Rows (1)'), findsOneWidget);
   });
 
   testWidgets('Chat & Voice: Review opens on demand or after each turn', (
     tester,
   ) async {
-    await openSection(tester, SettingsSection.chatVoice);
+    await openSection(tester, SettingsSection.chatVoice, advanced: true);
     final card = find.byKey(const ValueKey('chat-review-opens'));
     await reveal(tester, SettingsSection.chatVoice, card);
     expect(controller.voice.reviewOpens, ReviewOpens.onDemand);
@@ -253,7 +354,7 @@ void main() {
   testWidgets('the key row editor adds and saves a custom text key', (
     tester,
   ) async {
-    await openSection(tester, SettingsSection.input);
+    await openSection(tester, SettingsSection.input, advanced: true);
     await reveal(
       tester,
       SettingsSection.input,
@@ -394,7 +495,7 @@ void main() {
     });
 
     Future<int> addCustomKeyWithEnter(WidgetTester tester) async {
-      await openSection(tester, SettingsSection.input);
+      await openSection(tester, SettingsSection.input, advanced: true);
       await reveal(
         tester,
         SettingsSection.input,

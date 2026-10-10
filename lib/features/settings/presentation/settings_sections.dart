@@ -383,7 +383,7 @@ class SettingsSectionBody extends StatelessWidget {
             onTap: () => _openPage(
               context,
               title: 'Voice commands',
-              children: [
+              children: () => [
                 SpeechSettingsControls(
                   controller: theme,
                   part: SpeechSettingsPart.voiceCommands,
@@ -408,7 +408,7 @@ class SettingsSectionBody extends StatelessWidget {
               onTap: () => _openPage(
                 context,
                 title: voiceGuideTitle,
-                children: [
+                children: () => [
                   GuideSettingsControls(
                     theme: theme,
                     hosts: services.hostsController,
@@ -469,7 +469,7 @@ class SettingsSectionBody extends StatelessWidget {
   void _openPage(
     BuildContext context, {
     required String title,
-    required List<Widget> children,
+    required List<Widget> Function() children,
   }) => unawaited(
     pushAdaptivePage<void>(
       context,
@@ -878,8 +878,9 @@ class SelfMachineCard extends StatelessWidget {
 }
 
 /// "Advanced" at the end of a section: the settings most people never
-/// change, folded until tapped (CON-108).
-class SettingsAdvanced extends StatelessWidget {
+/// change, folded until tapped (CON-108). Kept alive in the lazy list, so
+/// scrolling away does not fold it again.
+class SettingsAdvanced extends StatefulWidget {
   const SettingsAdvanced({
     required this.children,
     this.initiallyExpanded = false,
@@ -890,10 +891,20 @@ class SettingsAdvanced extends StatelessWidget {
   final bool initiallyExpanded;
 
   @override
+  State<SettingsAdvanced> createState() => _SettingsAdvancedState();
+}
+
+class _SettingsAdvancedState extends State<SettingsAdvanced>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
     return ExpansionTile(
-      initiallyExpanded: initiallyExpanded,
+      initiallyExpanded: widget.initiallyExpanded,
       tilePadding: const EdgeInsets.symmetric(horizontal: 4),
       childrenPadding: const EdgeInsets.only(top: 4),
       shape: const Border(),
@@ -907,13 +918,13 @@ class SettingsAdvanced extends StatelessWidget {
       ),
       subtitle: const Text('Settings most people never change'),
       expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
-      children: children,
+      children: widget.children,
     );
   }
 }
 
 /// A settings row's own page (Voice commands, Voice guide): a flat header
-/// with back, then [children], rebuilt as [theme] changes.
+/// with back, then [children], built again as [theme] changes.
 class SettingsSubPage extends StatelessWidget {
   const SettingsSubPage({
     required this.title,
@@ -924,7 +935,7 @@ class SettingsSubPage extends StatelessWidget {
 
   final String title;
   final ThemeController theme;
-  final List<Widget> children;
+  final List<Widget> Function() children;
 
   @override
   Widget build(BuildContext context) {
@@ -963,7 +974,7 @@ class SettingsSubPage extends StatelessWidget {
                     builder: (context, _) => ListView(
                       key: ValueKey('settings-page-$title'),
                       padding: const EdgeInsets.fromLTRB(18, 4, 18, 28),
-                      children: children,
+                      children: children(),
                     ),
                   ),
                 ),

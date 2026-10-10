@@ -85,7 +85,9 @@ void main() {
     expect(controller.terminalGestures.pinchZoom, isTrue);
   });
 
-  testWidgets('Settings › Input shows a Gestures section', (tester) async {
+  testWidgets('Settings › Input › Advanced shows a Gestures section', (
+    tester,
+  ) async {
     final controller = ThemeController(InMemoryThemePreferences());
     await controller.load();
 
@@ -94,6 +96,7 @@ void main() {
         home: SettingsSectionPage(
           section: SettingsSection.input,
           services: SettingsServices(theme: controller),
+          expandAdvanced: true,
         ),
       ),
     );

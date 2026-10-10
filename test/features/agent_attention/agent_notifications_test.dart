@@ -627,7 +627,8 @@ void main() {
       expect(carried.alert, isFalse);
     });
 
-    testWidgets('Settings › Agents › Notifications switches', (tester) async {
+    testWidgets('Settings › Agents › Advanced › Notification details '
+        'switches', (tester) async {
       final workspace = TerminalWorkspaceController(FreshTerminalRepository());
       final store = MemoryAgentNotificationPreferencesStore(_everything);
       final controller = AgentAttentionController(
@@ -643,7 +644,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SingleChildScrollView(
-              child: AgentNotificationSettingsCard(controller: controller),
+              child: AgentNotificationDetailsCard(controller: controller),
             ),
           ),
         ),
