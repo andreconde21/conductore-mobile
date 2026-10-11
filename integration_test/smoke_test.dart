@@ -125,10 +125,16 @@ void main() {
     final postgres = find.text('Postgres').hitTestable();
     await steps.waitFor(postgres);
     await tester.tap(postgres.first);
+    // One single-choice question is sent by the tap; otherwise Send.
+    await tester.pump(const Duration(seconds: 2));
     final send = find.text('Send').hitTestable();
-    await steps.waitFor(send);
-    await tester.tap(send.first);
-    await steps.waitFor(find.text('Claude Code asks'), absent: true);
+    if (find.text('Claude Code asks').evaluate().isNotEmpty &&
+        send.evaluate().isNotEmpty) {
+      await tester.tap(send.first);
+    }
+    // Answered: the request is gone and the agent went idle after it.
+    await steps.waitFor(find.textContaining('Not waiting for an answer here'));
+    await steps.waitFor(find.textContaining('Idle'));
     await steps.done('question-answered');
 
     // 9. Settings › Security.

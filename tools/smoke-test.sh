@@ -136,6 +136,10 @@ else
     adb -s "$serial" shell settings put global "$s" 0
   done
   adb -s "$serial" shell svc power stayon true
+  # A fresh device keeps busy for a while after boot (package scans, Play
+  # services, overlays); an app started then can lose its first engine.
+  timeout 120 adb -s "$serial" shell am wait-for-broadcast-idle >/dev/null 2>&1 || true
+  sleep 15
   log "booted"
 fi
 disk_check
