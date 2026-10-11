@@ -43,10 +43,14 @@ function discover (extraSockets = []) {
   const override = process.env.CONDUCTORE_HERDR_SOCKETS
   const list = []
   const seen = new Set()
+  // Deduped by id and by socket: Herdr exports HERDR_SOCKET_PATH in every
+  // pane, so hooks report the default socket (and named sessions') too.
   const add = (socket, session = '', isDefault = false) => {
-    const id = isDefault ? 'herdr' : session ? `herdr@${session}` : `herdr#${crypto.createHash('sha1').update(path.resolve(socket)).digest('hex').slice(0, 8)}`
-    if (seen.has(id)) return
+    const abs = path.resolve(socket)
+    const id = isDefault ? 'herdr' : session ? `herdr@${session}` : `herdr#${crypto.createHash('sha1').update(abs).digest('hex').slice(0, 8)}`
+    if (seen.has(id) || seen.has(abs)) return
     seen.add(id)
+    seen.add(abs)
     list.push({ id, socket, session, isDefault })
   }
   if (override !== undefined) {
