@@ -121,9 +121,13 @@ void main() {
     await tester.tap(find.byTooltip(_chat));
     await steps.waitFor(find.text('Claude Code asks'));
     await steps.done('question');
-    await tester.tap(find.text('Postgres').hitTestable().first);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('Send').hitTestable().first);
+    // The first-run hint may cover the choices for a few seconds.
+    final postgres = find.text('Postgres').hitTestable();
+    await steps.waitFor(postgres);
+    await tester.tap(postgres.first);
+    final send = find.text('Send').hitTestable();
+    await steps.waitFor(send);
+    await tester.tap(send.first);
     await steps.waitFor(find.text('Claude Code asks'), absent: true);
     await steps.done('question-answered');
 

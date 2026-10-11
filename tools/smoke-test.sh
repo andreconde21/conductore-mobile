@@ -144,19 +144,33 @@ disk_check
 adb -s "$serial" logcat -c || true
 adb -s "$serial" logcat -v brief >"$OUT/logcat.txt" 2>&1 &
 logcat_pid=$!
+drive() {
+  (
+    cd "$ROOT"
+    SMOKE_OUT=$OUT flock "$LOCK" flutter drive \
+      --driver=test_driver/integration_test.dart \
+      --target=integration_test/smoke_test.dart \
+      -d "$serial" --flavor play --no-enable-impeller \
+      --dart-define=SMOKE_PORT="$SSH_PORT" \
+      --dart-define=CONDUCTORE_SENTRY_DSN= \
+      --dart-define=CONDUCTORE_PLAUSIBLE_HOST=
+  ) >"$1" 2>&1
+}
 log "running integration_test/smoke_test.dart"
 set +e
-(
-  cd "$ROOT"
-  SMOKE_OUT=$OUT flock "$LOCK" flutter drive \
-    --driver=test_driver/integration_test.dart \
-    --target=integration_test/smoke_test.dart \
-    -d "$serial" --flavor play --no-enable-impeller \
-    --dart-define=SMOKE_PORT="$SSH_PORT" \
-    --dart-define=CONDUCTORE_SENTRY_DSN= \
-    --dart-define=CONDUCTORE_PLAUSIBLE_HOST=
-) >"$OUT/drive.log" 2>&1
+drive "$OUT/drive.log"
 status=$?
+# The driver sometimes attaches to a short-lived isolate and loses it
+# before the first step ("Sentinel kind: Collected"). Nothing ran on the
+# machine yet, so one more try is safe; a failure inside the flows is not
+# retried.
+if [ "$status" -ne 0 ] && ! grep -q 'SMOKE step' "$OUT/drive.log" \
+  && grep -qE 'DriverError|Application failed to start' "$OUT/drive.log"; then
+  log "the driver lost the app before the first step; retrying once"
+  mv "$OUT/drive.log" "$OUT/drive-attempt1.log"
+  drive "$OUT/drive.log"
+  status=$?
+fi
 set -e
 kill "$logcat_pid" 2>/dev/null || true
 logcat_pid=
