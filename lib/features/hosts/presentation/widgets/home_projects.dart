@@ -159,10 +159,12 @@ class HomeProjectsList extends StatelessWidget {
             key: const ValueKey('home-projects'),
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Its ⋮ lines up with the boxes' ⋯ (box border and padding,
-              // then the centre of a 32 dp button).
+              // Its ⋮ sits at the right edge, under the section header's +
+              // (whose 48 dp button ends 6 dp from the screen edge, so its
+              // centre is 18 dp inside this list; the ⋮ glyph's centre is
+              // 10.5 dp inside the bar).
               Padding(
-                padding: const EdgeInsets.only(right: 21.5),
+                padding: const EdgeInsets.only(right: 7.5),
                 child: ProjectViewBar(
                   controller: controller,
                   needsYou: ProjectLayoutController.needsYouCount(projects),
