@@ -507,7 +507,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: timer, matching: find.text('1 minute')),
+      find.descendant(
+        of: timer,
+        matching: find.text('1 minute in the background', findRichText: true),
+      ),
       findsOneWidget,
     );
     final appLock = find.ancestor(

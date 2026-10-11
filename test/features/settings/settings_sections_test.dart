@@ -107,7 +107,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(lock.relockDelay, RelockDelay.eightHours);
     expect(
-      find.text('Counted from the unlock, also across restarts.'),
+      find.text(
+        '8 hours from the unlock, also across restarts',
+        findRichText: true,
+      ),
       findsOneWidget,
     );
 

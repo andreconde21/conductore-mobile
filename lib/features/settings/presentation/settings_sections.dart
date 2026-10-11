@@ -1146,30 +1146,44 @@ class _RelockDelayTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: controller,
-      builder: (context, _) => ListTile(
-        key: const ValueKey('settings-relock'),
-        leading: const Icon(Icons.timer_outlined),
-        title: const Text(relockDelayTitle),
-        subtitle: Text(
-          controller.relockDelay.lastsAcrossRestarts
-              ? 'Counted from the unlock, also across restarts.'
-              : controller.relockDelay.duration == null
-              ? 'Only when Conductore starts, or Lock now.'
-              : 'Time in the background.',
-        ),
-        trailing: DropdownButton<RelockDelay>(
+      builder: (context, _) {
+        final delay = controller.relockDelay;
+        final how = delay.lastsAcrossRestarts
+            ? ' from the unlock, also across restarts'
+            : delay == RelockDelay.never
+            ? ', or Lock now'
+            : delay.duration == Duration.zero
+            ? ''
+            : ' in the background';
+        // The value is the row's second line; a tap picks another.
+        return PopupMenuButton<RelockDelay>(
           key: const ValueKey('settings-relock-delay'),
-          value: controller.relockDelay,
-          underline: const SizedBox.shrink(),
-          items: [
+          tooltip: 'Change',
+          initialValue: delay,
+          onSelected: (delay) => unawaited(_choose(context, delay)),
+          itemBuilder: (context) => [
             for (final delay in RelockDelay.values)
-              DropdownMenuItem(value: delay, child: Text(delay.label)),
+              PopupMenuItem(value: delay, child: Text(delay.label)),
           ],
-          onChanged: (delay) {
-            if (delay != null) unawaited(_choose(context, delay));
-          },
-        ),
-      ),
+          child: ListTile(
+            key: const ValueKey('settings-relock'),
+            leading: const Icon(Icons.timer_outlined),
+            title: const Text(relockDelayTitle),
+            subtitle: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: delay.label,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(text: how),
+                ],
+              ),
+            ),
+            trailing: const Icon(Icons.arrow_drop_down_rounded),
+          ),
+        );
+      },
     );
   }
 }
