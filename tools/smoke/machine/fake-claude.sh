@@ -62,6 +62,12 @@ else
   decision=$(hook PermissionRequest "\"tool_name\":\"AskUserQuestion\",\"tool_input\":$input")
 fi
 printf 'phone answered: %s\n' "${decision:-nothing}"
+# The tool's result, as Claude Code writes it once the tool ran.
+if [ "$kind" = permission ]; then
+  line user r1 '{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_smoke1","content":"12 passing"}]}'
+else
+  line user r1 '{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_smoke2","content":"User has answered your questions: Which database? = Postgres."}]}'
+fi
 line assistant a3 '{"role":"assistant","model":"claude-smoke","content":[{"type":"text","text":"Done."}]}'
 hook Stop '"stop_hook_active":false'
 report idle

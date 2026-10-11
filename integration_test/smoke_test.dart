@@ -135,7 +135,7 @@ void main() {
       await tester.tap(send.first);
     }
     // Answered: the request is gone and the agent went idle after it.
-    await steps.waitFor(find.textContaining('Not waiting for an answer here'));
+    await steps.waitFor(find.text('Claude Code asks'), absent: true);
     await steps.waitFor(find.textContaining('Idle'));
     await steps.done('question-answered');
 
