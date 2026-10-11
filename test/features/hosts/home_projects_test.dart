@@ -89,12 +89,6 @@ void main() {
       lessThanOrEqualTo(4),
     );
     expect(tester.widget<IconButton>(menu).onPressed, isNotNull);
-    // The view bar's ⋮ lines up with the boxes' ⋯ at the right edge.
-    final viewMenu = find.byIcon(Icons.more_vert_rounded);
-    expect(
-      (tester.getCenter(viewMenu).dx - tester.getCenter(menu).dx).abs(),
-      lessThanOrEqualTo(2),
-    );
     await tester.tap(ops);
     await settleShell(tester);
     expect(
@@ -119,6 +113,97 @@ void main() {
     expect(find.text('SESSIONS'), findsOneWidget);
     await tearDownShell(tester);
   });
+
+  // André's phone is 1080 px at 2.625 (411 dp); also a small and a large
+  // phone, his font scale and the default, with and without the needs-you
+  // counter (CON-120). Not 360 dp at ×1.3: the test font's square glyphs
+  // make "Projects | Open" wider than the row there (real fonts fit).
+  for (final width in [360.0, 411.43, 480.0]) {
+    for (final scale in [1.0, 1.3]) {
+      if (width == 360 && scale != 1) continue;
+      for (final needsYou in [true, false]) {
+        testWidgets('at $width dp, text ×$scale, needs-you '
+            '${needsYou ? 'shown' : 'hidden'}: the view bar\'s ⋮ sits at the '
+            'right edge under the header\'s +, and the search field and '
+            'the switch are one height on one line', (tester) async {
+          tester.platformDispatcher.textScaleFactorTestValue = scale;
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          late ProjectLayoutController layout;
+          await pumpShell(
+            tester,
+            size: Size(width, 914),
+            pixelRatio: 2.625,
+            shellMode: false,
+            before: (h) {
+              layout = ProjectLayoutController.instance =
+                  ProjectLayoutController(theme: h.theme, clock: () => h.now);
+              h.homePreferences.stored = const HomePreferences(
+                mode: HomeMode.projects,
+              );
+              if (!needsYou) {
+                final runner = h.runners['workstation']!;
+                runner
+                  ..agents = runner.agents.replaceAll('blocked', 'working')
+                  ..workspaces = runner.workspaces.replaceAll(
+                    'blocked',
+                    'working',
+                  )
+                  ..tabs = runner.tabs.replaceAll('blocked', 'working');
+              }
+            },
+          );
+          addTearDown(() {
+            ProjectLayoutController.instance = null;
+            layout.dispose();
+          });
+          expect(
+            find.byKey(const ValueKey('project-needs-you')),
+            needsYou ? findsOneWidget : findsNothing,
+          );
+          final viewMenu = find.byIcon(Icons.more_vert_rounded);
+          final add = find.byIcon(Icons.add_rounded);
+          expect(add, findsOneWidget);
+          expect(
+            tester.getCenter(viewMenu).dx,
+            moreOrLessEquals(tester.getCenter(add).dx, epsilon: 1),
+          );
+          final box = find.byWidgetPredicate(
+            (widget) =>
+                widget.key is ValueKey<String> &&
+                (widget.key! as ValueKey<String>).value.startsWith(
+                  'home-project-box-',
+                ),
+          );
+          expect(
+            tester.getRect(box.first).right - tester.getRect(viewMenu).right,
+            inInclusiveRange(0, 12),
+          );
+
+          final field = tester.getRect(
+            find.byKey(const ValueKey('home-workspace-search')),
+          );
+          final modes = tester.getRect(
+            find.byKey(const ValueKey('home-mode-switch')),
+          );
+          expect(modes.height, moreOrLessEquals(field.height, epsilon: 0.5));
+          expect(modes.top, moreOrLessEquals(field.top, epsilon: 0.5));
+          // The field's border is drawn to its full height.
+          expect(
+            tester
+                .getRect(
+                  find.descendant(
+                    of: find.byKey(const ValueKey('home-workspace-search')),
+                    matching: find.byType(InputDecorator),
+                  ),
+                )
+                .height,
+            moreOrLessEquals(field.height, epsilon: 0.5),
+          );
+          await tearDownShell(tester);
+        });
+      }
+    }
+  }
 
   testWidgets('who had "group by project" on lands in Projects mode, and it '
       'is saved', (tester) async {

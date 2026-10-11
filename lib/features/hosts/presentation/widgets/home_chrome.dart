@@ -1,5 +1,6 @@
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agents_icon.dart';
+import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:flutter/material.dart';
 
 /// Slim bar of the home page, four controls at most: the machine chip,
@@ -33,12 +34,20 @@ class HomeTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
+      // The chip starts at the list's left gutter; the icons sit right.
+      padding: const EdgeInsets.fromLTRB(
+        HomeGridMetrics.horizontalPadding,
+        6,
+        6,
+        4,
+      ),
       child: Row(
         children: [
-          const SizedBox(width: 8),
           Expanded(
-            child: Center(child: machine ?? const ConduitGlyph(size: 24)),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: machine ?? const ConduitGlyph(size: 24),
+            ),
           ),
           const SizedBox(width: 4),
           if (onAgents != null)

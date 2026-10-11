@@ -1147,6 +1147,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   /// top bar, which is full).
   Widget _buildListBar(BuildContext context) {
     final mode = ProjectLayoutController.instance == null ? null : _homeMode;
+    // The field and the switch share one height, growing with the text.
+    final height = MediaQuery.textScalerOf(context).scale(48);
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(
         HomeGridMetrics.horizontalPadding,
@@ -1163,6 +1165,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 controller: _searchText,
                 hintText: 'Search workspaces',
                 hasContent: !_search.isEmpty,
+                height: height,
                 onChanged: (query) =>
                     setState(() => _search = HomeSearch(query)),
                 onClear: () => setState(() => _search = HomeSearch.none),
@@ -1172,25 +1175,36 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               const SizedBox(width: 8),
               SegmentedButton<HomeMode>(
                 key: const ValueKey('home-mode-switch'),
-                segments: const [
+                // SegmentedButton gives its segments no minimum size, so
+                // the labels carry the height.
+                segments: [
                   ButtonSegment(
                     value: HomeMode.projects,
                     tooltip: 'Everything by project',
-                    label: Text(
-                      'Projects',
-                      key: ValueKey('home-mode-projects'),
+                    label: SizedBox(
+                      height: height,
+                      child: const Center(
+                        child: Text(
+                          'Projects',
+                          key: ValueKey('home-mode-projects'),
+                        ),
+                      ),
                     ),
                   ),
                   ButtonSegment(
                     value: HomeMode.openClosed,
                     tooltip: 'Open sessions, then the rest by machine',
-                    label: Text('Open', key: ValueKey('home-mode-open')),
+                    label: SizedBox(
+                      height: height,
+                      child: const Center(
+                        child: Text('Open', key: ValueKey('home-mode-open')),
+                      ),
+                    ),
                   ),
                 ],
                 selected: {mode},
                 showSelectedIcon: false,
                 style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   padding: WidgetStatePropertyAll(
                     EdgeInsets.symmetric(horizontal: 10),

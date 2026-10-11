@@ -1,4 +1,5 @@
 import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
+import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -29,6 +30,12 @@ void main() {
     // The machine chip plus three icons: Agents, Search, Settings.
     expect(find.byType(IconButton), findsNWidgets(3));
     expect(find.text('All machines · a long name'), findsOneWidget);
+    // The chip starts at the list's left gutter, where Lock used to sit
+    // (CON-120).
+    expect(
+      tester.getRect(find.text('All machines · a long name')).left,
+      HomeGridMetrics.horizontalPadding,
+    );
     expect(find.byTooltip('Lock'), findsNothing);
     expect(find.byTooltip('Switch sessions'), findsNothing);
     expect(find.byTooltip('Voice guide'), findsNothing);

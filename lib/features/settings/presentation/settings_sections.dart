@@ -785,21 +785,25 @@ class SettingsSectionBody extends StatelessWidget {
         _gap,
       ],
       SettingsCard(
-        child: ListTile(
-          leading: const Icon(Icons.fingerprint_rounded),
-          title: const Text('App lock'),
-          subtitle: Text(
-            PlatformFeatures.appLock
-                ? 'On. Conductore asks for your fingerprint, face or device '
-                      'PIN when it opens, and closes sessions while locked.'
-                : 'Not available on this platform.',
-          ),
+        child: Column(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.fingerprint_rounded),
+              title: const Text('App lock'),
+              subtitle: Text(
+                PlatformFeatures.appLock
+                    ? 'On. Conductore asks for your fingerprint, face or '
+                          'device PIN when it opens, and closes sessions '
+                          'while locked.'
+                    : 'Not available on this platform.',
+              ),
+            ),
+            // Its timer, right under it (CON-120).
+            if (services.appLock case final appLock?)
+              _RelockDelayTile(controller: appLock),
+          ],
         ),
       ),
-      if (services.appLock case final appLock?) ...[
-        _gap,
-        SettingsCard(child: _RelockDelayTile(controller: appLock)),
-      ],
       if (verifier != null) ...[
         _gap,
         SettingsCard(
@@ -1100,9 +1104,9 @@ class _AgentMachineCard extends StatelessWidget {
   }
 }
 
-/// "Lock again": how long Conductore may stay in the background before it
-/// asks for the fingerprint, face or PIN again. Above 15 minutes it counts
-/// from the unlock, across restarts, and asks first (CON-118).
+/// "Ask again after": how long Conductore may stay in the background
+/// before it asks for the fingerprint, face or PIN again. Above 15 minutes
+/// it counts from the unlock, across restarts, and asks first (CON-118).
 class _RelockDelayTile extends StatelessWidget {
   const _RelockDelayTile({required this.controller});
 
@@ -1142,34 +1146,44 @@ class _RelockDelayTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: controller,
-      builder: (context, _) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
-        child: Row(
-          children: [
-            const Icon(Icons.timer_outlined, size: 22),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                controller.relockDelay.lastsAcrossRestarts
-                    ? 'Lock again after unlocking'
-                    : 'Lock again in the background',
+      builder: (context, _) {
+        final delay = controller.relockDelay;
+        final how = delay.lastsAcrossRestarts
+            ? ' from the unlock, also across restarts'
+            : delay == RelockDelay.never
+            ? ', or Lock now'
+            : delay.duration == Duration.zero
+            ? ''
+            : ' in the background';
+        // The value is the row's second line; a tap picks another.
+        return PopupMenuButton<RelockDelay>(
+          key: const ValueKey('settings-relock-delay'),
+          tooltip: 'Change',
+          initialValue: delay,
+          onSelected: (delay) => unawaited(_choose(context, delay)),
+          itemBuilder: (context) => [
+            for (final delay in RelockDelay.values)
+              PopupMenuItem(value: delay, child: Text(delay.label)),
+          ],
+          child: ListTile(
+            key: const ValueKey('settings-relock'),
+            leading: const Icon(Icons.timer_outlined),
+            title: const Text(relockDelayTitle),
+            subtitle: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: delay.label,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(text: how),
+                ],
               ),
             ),
-            DropdownButton<RelockDelay>(
-              key: const ValueKey('settings-relock-delay'),
-              value: controller.relockDelay,
-              underline: const SizedBox.shrink(),
-              items: [
-                for (final delay in RelockDelay.values)
-                  DropdownMenuItem(value: delay, child: Text(delay.label)),
-              ],
-              onChanged: (delay) {
-                if (delay != null) unawaited(_choose(context, delay));
-              },
-            ),
-          ],
-        ),
-      ),
+            trailing: const Icon(Icons.arrow_drop_down_rounded),
+          ),
+        );
+      },
     );
   }
 }

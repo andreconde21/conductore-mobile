@@ -1,6 +1,7 @@
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -33,6 +34,8 @@ void main() {
     );
     await hosts.load();
     final verifier = NoopVerifier();
+    final appLock = AppLockController(AlwaysAuthenticates());
+    addTearDown(appLock.dispose);
     locked = 0;
     services = SettingsServices(
       theme: theme,
@@ -44,6 +47,7 @@ void main() {
       hostsController: hosts,
       hostKeyVerifier: verifier,
       onLockNow: () async => locked++,
+      appLock: appLock,
     );
   });
 
@@ -63,6 +67,7 @@ void main() {
   Future<void> pumpLauncher(
     WidgetTester tester, {
     SettingsSection? section,
+    AppLockController? appLock,
   }) async {
     final workspace = TerminalWorkspaceController(
       NoNetworkTerminalRepository(),
@@ -94,6 +99,7 @@ void main() {
                       hostKeyVerifier: services.hostKeyVerifier,
                       agentAttention: attention,
                       onLockNow: services.onLockNow,
+                      appLock: appLock,
                     ),
                     section: section,
                   ),
@@ -174,6 +180,7 @@ void main() {
       'Export backup',
       'Import backup',
       'App lock',
+      'Ask again after',
       'Lock now',
       'Trusted host keys',
       'Based on Conduit by gwitko (Apache-2.0)',
@@ -196,7 +203,7 @@ void main() {
   test('about 40 settings on the section pages, the rest one tap deeper '
       '(CON-108)', () {
     final top = settingsCatalog.where((entry) => entry.isTopLevel).toList();
-    expect(top, hasLength(39));
+    expect(top, hasLength(40));
     int count(SettingsSection section) =>
         top.where((entry) => entry.section == section).length;
     expect(
@@ -208,7 +215,7 @@ void main() {
         SettingsSection.chatVoice: 4,
         SettingsSection.agents: 8,
         SettingsSection.syncBackup: 6,
-        SettingsSection.security: 3,
+        SettingsSection.security: 4,
         SettingsSection.privacy: 2,
         SettingsSection.about: 4,
       },
@@ -246,6 +253,7 @@ void main() {
       hostKeyVerifier: services.hostKeyVerifier,
       agentAttention: attention,
       onLockNow: services.onLockNow,
+      appLock: services.appLock,
       hasSessionViews: true,
     );
     final views = SessionViewController(
@@ -463,6 +471,56 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('No setting matches "zzzz".'), findsOneWidget);
+  });
+
+  testWidgets('the lock timer is found by lock, timeout, time, password or '
+      'PIN, and sits right under App lock (CON-120)', (tester) async {
+    phone(tester);
+    await pumpLauncher(tester, appLock: services.appLock);
+    final result = find.byKey(
+      const ValueKey('settings-result-$relockDelayTitle'),
+    );
+    for (final query in [
+      'lock',
+      'timeout',
+      'time',
+      'auto-lock',
+      'password',
+      'PIN',
+      'relock',
+    ]) {
+      await tester.enterText(
+        find.byKey(const ValueKey('settings-search')),
+        query,
+      );
+      await tester.pumpAndSettle();
+      expect(result, findsOneWidget, reason: query);
+    }
+    await tester.tap(result);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('settings-body-security')), findsOne);
+    // Its name says what it is, its value shows, and it is the row right
+    // under App lock.
+    final timer = find.byKey(const ValueKey('settings-relock'));
+    expect(
+      find.descendant(of: timer, matching: find.text(relockDelayTitle)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: timer,
+        matching: find.text('1 minute in the background', findRichText: true),
+      ),
+      findsOneWidget,
+    );
+    final appLock = find.ancestor(
+      of: find.text('App lock'),
+      matching: find.byType(ListTile),
+    );
+    expect(
+      tester.getRect(timer).top,
+      moreOrLessEquals(tester.getRect(appLock).bottom, epsilon: 0.5),
+    );
   });
 
   testWidgets('Sync with sheprd: found by search, off by default, toggles '
