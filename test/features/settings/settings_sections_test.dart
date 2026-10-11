@@ -88,11 +88,11 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    await choose('After 5 minutes');
+    await choose('5 minutes');
     expect(warning, findsNothing);
     expect(lock.relockDelay, RelockDelay.fiveMinutes);
 
-    await choose('After 8 hours');
+    await choose('8 hours');
     expect(warning, findsOneWidget);
     expect(
       find.textContaining('approve agent actions for up to 8 hours'),
@@ -102,13 +102,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(lock.relockDelay, RelockDelay.fiveMinutes);
 
-    await choose('After 8 hours');
+    await choose('8 hours');
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
     expect(lock.relockDelay, RelockDelay.eightHours);
-    expect(find.text('Lock again after unlocking'), findsOneWidget);
+    expect(
+      find.text('Counted from the unlock, also across restarts.'),
+      findsOneWidget,
+    );
 
-    await choose('After 1 day');
+    await choose('1 day');
     expect(find.textContaining('for up to 1 day'), findsOneWidget);
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();

@@ -3,15 +3,15 @@
 /// The ones above 15 minutes ([lastsAcrossRestarts]) count from the last
 /// unlock instead, and hold across app restarts (CON-118).
 enum RelockDelay {
-  immediately(Duration.zero, 'Immediately'),
-  oneMinute(Duration(minutes: 1), 'After 1 minute'),
-  fiveMinutes(Duration(minutes: 5), 'After 5 minutes'),
-  fifteenMinutes(Duration(minutes: 15), 'After 15 minutes'),
-  oneHour(Duration(hours: 1), 'After 1 hour'),
-  fourHours(Duration(hours: 4), 'After 4 hours'),
-  eightHours(Duration(hours: 8), 'After 8 hours'),
-  oneDay(Duration(days: 1), 'After 1 day'),
-  never(null, 'Only when it starts');
+  immediately(Duration.zero, 'leaving the app'),
+  oneMinute(Duration(minutes: 1), '1 minute'),
+  fiveMinutes(Duration(minutes: 5), '5 minutes'),
+  fifteenMinutes(Duration(minutes: 15), '15 minutes'),
+  oneHour(Duration(hours: 1), '1 hour'),
+  fourHours(Duration(hours: 4), '4 hours'),
+  eightHours(Duration(hours: 8), '8 hours'),
+  oneDay(Duration(days: 1), '1 day'),
+  never(null, 'a restart');
 
   const RelockDelay(this.duration, this.label);
 
@@ -19,6 +19,8 @@ enum RelockDelay {
 
   /// Null: the lock only comes back on the next start (or "Lock now").
   final Duration? duration;
+
+  /// What follows "Ask again after" in Settings.
   final String label;
 
   /// Longer than 15 minutes: the unlock holds for [duration] from the last
@@ -27,7 +29,7 @@ enum RelockDelay {
       duration != null && duration! > const Duration(minutes: 15);
 
   /// "1 hour", "1 day": [duration] for the warning's text.
-  String get spokenDuration => label.replaceFirst('After ', '');
+  String get spokenDuration => label;
 
   static RelockDelay fromName(String? name) => RelockDelay.values.firstWhere(
     (delay) => delay.name == name,

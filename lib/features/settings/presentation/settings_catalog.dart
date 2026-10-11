@@ -125,6 +125,9 @@ const _herdrFocusKeywords = [
   'this device',
 ];
 
+/// The app lock's timer, under App lock (CON-120).
+const relockDelayTitle = 'Ask again after';
+
 /// The wakelock setting (CON-089).
 const keepScreenOnTitle = 'Keep screen on while a terminal is open';
 
@@ -158,6 +161,7 @@ bool _agentNotifications(SettingsServices s) =>
     PlatformFeatures.agentNotifications;
 bool _trustedKeys(SettingsServices s) => s.hostKeyVerifier != null;
 bool _lock(SettingsServices s) => s.onLockNow != null;
+bool _relock(SettingsServices s) => s.appLock != null;
 bool _sessionViews(SettingsServices s) => s.hasSessionViews;
 bool _sync(SettingsServices s) => s.hasSync;
 bool _desktop(SettingsServices _) => PlatformFeatures.isDesktop;
@@ -613,6 +617,22 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.security,
     'App lock',
     keywords: ['biometric', 'fingerprint', 'face', 'pin', 'lock'],
+  ),
+  SettingsEntry(
+    SettingsSection.security,
+    relockDelayTitle,
+    keywords: [
+      'lock',
+      'timeout',
+      'auto-lock',
+      'autolock',
+      'time',
+      'password',
+      'pin',
+      'relock',
+      'background',
+    ],
+    availableWhen: _relock,
   ),
   SettingsEntry(
     SettingsSection.security,
