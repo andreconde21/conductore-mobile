@@ -39,9 +39,67 @@ tool on both stores. Flutter still does the building.
 - The manual run accepts a version and a build number override. It refuses
   build numbers at or below the one in `pubspec.yaml`.
 
+## Smoke test before tagging
+
+Before pushing a tag, run the phone smoke test on development-central:
+
+```sh
+tools/smoke-test.sh            # about 3 to 4 minutes; exit 0 means pass
+```
+
+It boots a headless Android emulator (Pixel 7 profile, 411 dp wide like a
+phone), starts a throwaway machine in Docker and drives the debug app
+through the main flows with `integration_test/smoke_test.dart`:
+
+1. add the machine (password login, trust its host key);
+2. home in Open mode, then Projects mode;
+3. search (no match, then a match);
+4. open an agent: its Herdr workspace in a terminal tab;
+5. Chat View with the transcript and the waiting permission;
+6. approve the permission;
+7. switch to the other Herdr workspace (both are labelled "shop");
+8. answer the question its agent asks;
+9. Settings › Security.
+
+Each step saves a screenshot (`01-home-empty.png` … `15-settings-security.png`)
+to `build/smoke/<time>/` and to
+`/root/conductore-inbox/out/smoke/<time>/`; attach them to the release
+message. A broken flow, any Flutter error and any RenderFlex overflow fail
+the run, with a `NN-FAILED.png` of the screen it stopped on and the logs
+(`drive.log`, `logcat.txt`, `hostd.log`, `machine.log`) in the same folder.
+
+The throwaway machine (`tools/smoke/machine`) is an Alpine container on a
+private Docker network with no host mounts: sshd (user and password
+`smoke`), the Herdr binary of this host, and the companion from this
+checkout's `host/`. Two fake Claude Code agents (`fake-claude.sh`) send
+real hook events through `conductore-hook`: one waits for approval of
+`npm test`, the other asks "Which database?". The emulator reaches it
+only through `10.0.2.2` and a port bound to `127.0.0.1`; it never sees
+this server's own sshd or anyone's sessions.
+
+On exit, whatever the result, the script removes the emulator, the
+container, its network and image, the AVD's disk images and the debug
+APK. What stays: the emulator package and the Android 34 system image in
+the SDK (about 5 GB), and the AVD definition in
+`~/.cache/conductore-smoke` (kilobytes). The first run installs and
+creates both under the build lock.
+
+Notes:
+
+- The app runs on Skia (`--no-enable-impeller`): this emulator's software
+  renderer crashes the whole emulator under Impeller's GLES backend.
+- The emulator has no screen lock, so the test takes the app lock's
+  "Continue without auth".
+- `SMOKE_DEVICE=emulator-5554` reuses a running emulator, and
+  `SMOKE_SHARE_DIR=` skips the copy, for working on the test itself.
+- CI: GitHub's hosted Linux runners have no KVM by default, so this is
+  not a CI job. It could become one on a larger runner with KVM enabled,
+  or on a self-hosted runner.
+
 ## Cutting a release
 
 ```sh
+tools/smoke-test.sh            # see "Smoke test before tagging"
 # optional: release notes for the GitHub prerelease
 $EDITOR docs/release-notes/v0.1.0-conductore.9.md
 git add docs/release-notes && git commit -m "docs: notes for preview 9"

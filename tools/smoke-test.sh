@@ -56,9 +56,15 @@ cleanup() {
     adb -s "$serial" emu kill >/dev/null 2>&1
     for _ in $(seq 30); do kill -0 "$emu_pid" 2>/dev/null || break; sleep 1; done
     kill "$emu_pid" 2>/dev/null
+    # -wipe-data rebuilds these on every boot: about 1.7 GB not to keep.
+    rm -rf "$AVD_HOME/$AVD.avd"/{userdata-qemu.img,cache.img,encryptionkey.img}* \
+      "$AVD_HOME/$AVD.avd/snapshots" "$AVD_HOME/$AVD.avd/tmpAdbCmds"
   fi
+  # The debug APK (110 MB) only served this run; Gradle's cache stays.
+  rm -f "$ROOT"/build/app/outputs/flutter-apk/app-play-debug.apk*
   docker rm -f "$NAME" >/dev/null 2>&1
   docker network rm "$NAME" >/dev/null 2>&1
+  docker rmi conductore-smoke-machine >/dev/null 2>&1
   [ -n "$ctx" ] && rm -rf "$ctx"
   log "cleaned up (exit $code)"
   exit "$code"
