@@ -49,9 +49,38 @@ void main() {
     final add = find.widgetWithText(FilledButton, 'Add machine');
     await tester.scrollUntilVisible(add, 300, scrollable: find.byType(Scrollable).first);
     await tester.tap(add);
-    for (var i = 0; i < 8; i++) {
+    await waitFor(find.text('List workspaces'));
+    await tester.tap(find.text('OK'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('List workspaces'));
+    await waitFor(find.text('Trust'));
+    await shot('hostkey');
+    await tester.tap(find.text('Trust'));
+    for (var i = 0; i < 6; i++) {
       await tester.pump(const Duration(seconds: 2));
-      await shot('after-add-$i');
+      await shot('listed-$i');
+    }
+    await tester.tap(find.text('Projects'));
+    await tester.pump(const Duration(seconds: 2));
+    await shot('projects');
+    final search = find.descendant(
+      of: find.byKey(const ValueKey('home-workspace-search')),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(search, 'nomatch');
+    await tester.pump(const Duration(seconds: 1));
+    await shot('search-none');
+    await tester.enterText(search, 'shop');
+    await tester.pump(const Duration(seconds: 1));
+    await shot('search-shop');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.tap(find.text('claude in shop').first);
+    await tester.pump(const Duration(seconds: 4));
+    await shot('agent');
+    await tester.tap(find.byTooltip('Chat. Long-press for the composer'));
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(seconds: 2));
+      await shot('chat-$i');
     }
   });
 }

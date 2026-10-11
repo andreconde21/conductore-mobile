@@ -6,7 +6,10 @@ set -eu
 su smoke -s /bin/bash -c '
   set -eu
   export PATH="$HOME/.local/bin:$PATH"
-  mkdir -p ~/projects/shop ~/work/shop
+  mkdir -p ~/projects/shop ~/work/shop ~/.config/herdr
+  # No first-run tour over the phone terminal, no update checks.
+  printf "onboarding = false\n\n[update]\nversion_check = false\nmanifest_check = false\n" \
+    >~/.config/herdr/config.toml
   setsid herdr server >/tmp/herdr-server.log 2>&1 </dev/null &
   for _ in $(seq 50); do herdr workspace list >/dev/null 2>&1 && break; sleep 0.2; done
   herdr workspace create --label shop --cwd "$HOME/projects/shop" \
