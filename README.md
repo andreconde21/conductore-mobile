@@ -36,8 +36,14 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## What's new
 
-Previews 30 to 33 (companion 1.8.1 bundled):
+Previews 30 to 34 (companion 1.8.2 bundled):
 
+- **Preview 34**: fixes found by the new phone smoke test
+  (`tools/smoke-test.sh`, see docs/release-pipeline.md). The companion no
+  longer lists every Herdr agent twice (companion 1.8.2); a terminal hint
+  no longer covers Allow / Deny in Chat View; "Could not check the
+  companion" no longer appears when a fast command's exit code arrives with
+  its reply.
 - **Preview 33**: polish from testing 32. The home search and Projects | Open
   switch share one height, the top bar starts at the left edge, the view
   bar's ⋮ sits at the right edge, and the app-lock timer is now **Ask again
@@ -458,7 +464,7 @@ Rendered from the app's own widgets with demo data by
 ## Install
 
 Builds are previews. Get them from
-[Releases](../../releases/tag/v0.1.0-conductore.33) or, for the Outsmartis
+[Releases](../../releases/tag/v0.1.0-conductore.34) or, for the Outsmartis
 team, from the store test channels. Each release lists `SHA256SUMS` files
 next to the downloads.
 
@@ -533,7 +539,7 @@ Codex, OpenCode, Gemini CLI, Cursor CLI) into a live view of every agent
 answer permission prompts. The app talks to it only through SSH exec
 commands. It opens no ports and needs no relay.
 
-Preview 33 bundles **companion 1.8.1**. What the app asks it for, by the
+Preview 34 bundles **companion 1.8.2**. What the app asks it for, by the
 version that added it (older companions keep working without the features
 they lack, and the app offers the update on the Agent hooks screen):
 
