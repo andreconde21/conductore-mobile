@@ -191,11 +191,12 @@ class _Steps {
       final found = finder.evaluate().length;
       if (absent ? found == 0 : found >= count) return;
     }
+    // RichText covers Text, SelectableText and dialogs' long messages.
     final texts = find
-        .byType(Text)
+        .byType(RichText)
         .evaluate()
-        .map((e) => (e.widget as Text).data)
-        .whereType<String>()
+        .map((e) => (e.widget as RichText).text.toPlainText())
+        .where((text) => text.trim().isNotEmpty)
         .join(' | ');
     final file = '${(++_n).toString().padLeft(2, '0')}-FAILED';
     await binding.takeScreenshot(file);
