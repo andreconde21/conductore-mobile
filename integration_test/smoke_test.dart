@@ -15,6 +15,7 @@ import 'package:integration_test/integration_test.dart';
 const _host = String.fromEnvironment('SMOKE_HOST', defaultValue: '10.0.2.2');
 const _port = String.fromEnvironment('SMOKE_PORT', defaultValue: '2222');
 const _chat = 'Chat. Long-press for the composer';
+const _agentRow = 'tab 1 · smoke';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -67,9 +68,10 @@ void main() {
     await steps.waitFor(find.text('1 agent · 1 tab'), count: 2);
     expect(find.text('shop'), findsNWidgets(2));
     await steps.done('home-open');
-    // Projects mode: one project, an agent row per workspace.
+    // Projects mode: one project, an agent row per workspace (named
+    // "claude in shop" until the companion names it after the workspace).
     await tester.tap(find.byKey(const ValueKey('home-mode-projects')));
-    await steps.waitFor(find.text('claude in shop'), count: 2);
+    await steps.waitFor(find.text(_agentRow), count: 2);
     await steps.done('home-projects');
 
     // 3. Search.
@@ -81,12 +83,12 @@ void main() {
     await steps.waitFor(find.text('No workspace matches the search.'));
     await steps.done('search-no-match');
     await tester.enterText(search, 'shop');
-    await steps.waitFor(find.text('claude in shop'), count: 2);
+    await steps.waitFor(find.text(_agentRow), count: 2);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await steps.done('search-shop');
 
     // 4. Open an agent: its Herdr workspace in a terminal tab.
-    await tester.tap(find.text('claude in shop').first);
+    await tester.tap(find.text(_agentRow).first);
     await steps.waitFor(find.byTooltip(_chat));
     await tester.pump(const Duration(seconds: 3));
     await steps.done('agent-terminal');
@@ -138,9 +140,17 @@ void main() {
     await steps.done('question-answered');
 
     // 9. Settings › Security.
-    await tester.tap(find.byTooltip('Back'));
-    await steps.waitFor(find.byTooltip('Machines'));
-    await tester.tap(find.byTooltip('Machines'));
+    for (
+      var i = 0;
+      i < 4 && find.byTooltip('Settings').evaluate().isEmpty;
+      i++
+    ) {
+      final up = find.byTooltip('Machines').evaluate().isNotEmpty
+          ? find.byTooltip('Machines')
+          : find.byTooltip('Back');
+      await tester.tap(up.first);
+      await tester.pump(const Duration(seconds: 1));
+    }
     await steps.waitFor(find.byTooltip('Settings'));
     await tester.tap(find.byTooltip('Settings'));
     await steps.waitFor(find.text('Security'));
