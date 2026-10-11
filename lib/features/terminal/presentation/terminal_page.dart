@@ -206,6 +206,10 @@ class _TerminalPageState extends State<TerminalPage>
   bool _tmuxScrollMode = false;
   bool _composeMode = false;
 
+  /// The one-off Chat button hint while it is up, so Chat View can close
+  /// it: a SnackBar stays across routes and would cover its buttons.
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _chatHint;
+
   /// The next chat line starts dictating as it opens (the Dictate button);
   /// cleared once that bar is built.
   bool _dictateOnOpen = false;
@@ -968,9 +972,12 @@ class _TerminalPageState extends State<TerminalPage>
   /// The pill's Chat button: Chat View when the session shows a Claude
   /// session the companion knows, else the inline composer. Long-press
   /// always toggles the composer.
+  ///
+  /// The hint shows only where the terminal stays on screen; after Chat
+  /// View it waits for the Terminal button (see [_showAgentTerminal]).
   void _handleChatButton(TerminalSessionController session) {
-    _maybeShowChatButtonHint();
     if (_composeMode) {
+      _maybeShowChatButtonHint();
       setState(() => _composeMode = false);
       _focusNode.requestFocus();
       return;
@@ -978,10 +985,15 @@ class _TerminalPageState extends State<TerminalPage>
     final attention = widget.agentAttention;
     final host = session.host;
     if (attention == null || host.isLocal) {
+      _maybeShowChatButtonHint();
       setState(() => _composeMode = true);
       return;
     }
-    unawaited(_openChatForSession(attention, session));
+    unawaited(
+      _openChatForSession(attention, session).then((opened) {
+        if (!opened) _maybeShowChatButtonHint();
+      }),
+    );
   }
 
   /// The Chat button on a remote session: finds the Claude session this
@@ -1131,6 +1143,7 @@ class _TerminalPageState extends State<TerminalPage>
     AgentInfo agent, {
     String draft = '',
   }) {
+    _chatHint?.close();
     unawaited(
       openChatView(
         context: context,
@@ -1149,21 +1162,32 @@ class _TerminalPageState extends State<TerminalPage>
 
   void _maybeShowChatButtonHint() {
     final themeController = widget.themeController;
-    if (!mounted || themeController.chatButtonHintSeen) {
+    // Not over another route (Chat View, a dialog): a SnackBar stays
+    // across routes and would cover theirs.
+    if (!mounted ||
+        themeController.chatButtonHintSeen ||
+        ModalRoute.of(context)?.isCurrent == false) {
       return;
     }
     unawaited(themeController.markChatButtonHintSeen());
-    // Floating well above the bottom edge: the chat bar (or Chat View's
-    // input) that just opened lives there and must stay tappable.
-    ScaffoldMessenger.of(context).showSnackBar(
+    // Floating well above the bottom edge: the chat bar that just opened
+    // lives there and must stay tappable.
+    final hint = ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
+        key: ValueKey('chat-button-hint'),
         behavior: SnackBarBehavior.floating,
         margin: EdgeInsets.fromLTRB(16, 0, 16, 112),
         content: Text(
           'Chat opens Chat View for agent sessions. Long-press it for the '
-          'composer.',
+          'chat line.',
         ),
       ),
+    );
+    _chatHint = hint;
+    unawaited(
+      hint.closed.then((_) {
+        if (identical(_chatHint, hint)) _chatHint = null;
+      }),
     );
   }
 
@@ -1803,6 +1827,7 @@ class _TerminalPageState extends State<TerminalPage>
       // (a plain tab id match misses tabs opened on a Herdr target).
       unawaited(flow.openAgent(host, agent));
       _showTerminal();
+      _maybeShowChatButtonHint();
       return;
     }
     final session = widget.workspace.sessions
@@ -1811,6 +1836,7 @@ class _TerminalPageState extends State<TerminalPage>
     if (session != null) widget.workspace.activate(session);
     unawaited(attention.focusAgent(host.id, agent));
     _showTerminal();
+    _maybeShowChatButtonHint();
   }
 
   /// A session the user picked (its tab, the session grid, a new one from

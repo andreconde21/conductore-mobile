@@ -183,7 +183,7 @@ void main() {
     final chatButton = find.byKey(const ValueKey('toolbar-chat'));
     const hint =
         'Chat opens Chat View for agent sessions. Long-press it for the '
-        'composer.';
+        'chat line.';
 
     testWidgets('a Claude session opens Chat View directly', (tester) async {
       final host = companion(buildHost('h'));
@@ -199,7 +199,37 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.byType(ChatViewPage), findsOneWidget);
+      // A SnackBar stays across routes: over Chat View it would cover the
+      // approval buttons (CON-122).
+      expect(find.text(hint), findsNothing);
+      expect(themeController.chatButtonHintSeen, isFalse);
+    });
+
+    testWidgets('after Chat View the hint waits for the terminal', (
+      tester,
+    ) async {
+      final host = companion(buildHost('h'));
+      final (controller, workspace) = await monitor(
+        tester,
+        host,
+        status([agent('a')]),
+      );
+      await pumpPage(tester, workspace, attention: controller);
+
+      await tester.tap(chatButton);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(ChatViewPage), findsOneWidget);
+      expect(find.text(hint), findsNothing);
+
+      await tester.tap(find.text('Terminal'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+
+      expect(find.byType(ChatViewPage), findsNothing);
       expect(find.text(hint), findsOneWidget);
+      expect(themeController.chatButtonHintSeen, isTrue);
+      await drainSnackBars(tester);
     });
 
     testWidgets('long-press opens the composer instead', (tester) async {
