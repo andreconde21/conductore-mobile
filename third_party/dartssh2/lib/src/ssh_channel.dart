@@ -65,6 +65,18 @@ class SSHChannelController {
   /// Handler of channel requests from the remote side.
   late var _requestHandler = _defaultRequestHandler;
 
+  /// Requests that need no reply and came before a handler was set: a fast
+  /// command's exit-status can arrive in the same read as the exec reply,
+  /// before [SSHSession] sets its handler. Replayed by [setRequestHandler].
+  List<SSH_Message_Channel_Request>? _earlyRequests = [];
+
+  void setRequestHandler(SSHChannelRequestHandler handler) {
+    _requestHandler = handler;
+    final early = _earlyRequests;
+    _earlyRequests = null;
+    early?.forEach(handler);
+  }
+
   /// An [AsyncQueue] of pending request replies from the remote side.
   final _requestReplyQueue = AsyncQueue<bool>();
 
@@ -285,6 +297,11 @@ class SSHChannelController {
   void _handleRequestMessage(SSH_Message_Channel_Request request) {
     printDebug?.call('SSHChannel._handleRequest: ${request.requestType}');
 
+    final early = _earlyRequests;
+    if (early != null && !request.wantReply) {
+      early.add(request);
+      return;
+    }
     final success = _requestHandler(request);
     if (!request.wantReply) return;
     success ? _sendRequestSuccess() : _sendRequestFailure();
@@ -435,7 +452,7 @@ class SSHChannel {
   }
 
   void setRequestHandler(SSHChannelRequestHandler handler) {
-    _controller._requestHandler = handler;
+    _controller.setRequestHandler(handler);
   }
 
   Future<bool> sendExec(String command) async {
