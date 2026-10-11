@@ -1,86 +1,216 @@
+// The phone smoke test (CON-114), run by tools/smoke-test.sh before a
+// release: the real app on an Android emulator against a throwaway machine
+// (tools/smoke/machine: sshd, Herdr, the companion and two fake agents in
+// two Herdr workspaces both labelled "shop"; one waits for a permission,
+// the other asks a question). One screenshot per step.
+//
+// Not part of `flutter test`: it needs the device and the machine.
+
 import 'package:conduit/main.dart' as app;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
-const smokeHost = String.fromEnvironment('SMOKE_HOST', defaultValue: '10.0.2.2');
-const smokePort = String.fromEnvironment('SMOKE_PORT', defaultValue: '2222');
+/// The machine as the emulator sees it: the host's loopback is 10.0.2.2.
+const _host = String.fromEnvironment('SMOKE_HOST', defaultValue: '10.0.2.2');
+const _port = String.fromEnvironment('SMOKE_PORT', defaultValue: '2222');
+const _chat = 'Chat. Long-press for the composer';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('explore', (tester) async {
+  testWidgets('main flows on a phone', (tester) async {
     app.main();
-    var n = 0;
-    Future<void> shot(String name) async {
-      await tester.pump(const Duration(milliseconds: 300));
-      await binding.takeScreenshot('${(n++).toString().padLeft(2, '0')}-$name');
-      final texts = find.byType(Text).evaluate().map((e) => (e.widget as Text).data).whereType<String>().toList();
-      debugPrint('SMOKE $name texts: $texts');
-      final tips = find.byType(Tooltip).evaluate().map((e) => (e.widget as Tooltip).message).toList();
-      debugPrint('SMOKE $name tooltips: $tips');
-    }
-
-    Future<void> waitFor(Finder f, {int seconds = 20}) async {
-      for (var i = 0; i < seconds * 5; i++) {
-        await tester.pump(const Duration(milliseconds: 200));
-        if (f.evaluate().isNotEmpty) return;
-      }
-      await shot('timeout');
-      fail('timed out waiting for $f');
-    }
+    final errors = _ErrorWatch()..install();
+    final steps = _Steps(tester, binding);
 
     await tester.pump(const Duration(seconds: 3));
+    // Screenshots on Android need the Flutter surface as an image.
     await binding.convertFlutterSurfaceToImage();
-    await waitFor(find.text('Continue without auth'));
-    await shot('lock');
+
+    // The emulator has no screen lock: the app lock offers to go on.
+    await steps.waitFor(find.text('Continue without auth'));
     await tester.tap(find.text('Continue without auth'));
-    await waitFor(find.text('Add machine'));
-    await shot('home-empty');
+    await steps.waitFor(find.text('No saved machines yet'));
+    await steps.done('home-empty');
+
+    // 1. Add the machine.
     await tester.tap(find.text('Add machine'));
-    await waitFor(find.widgetWithText(TextFormField, 'Host or IP'));
-    await tester.enterText(find.widgetWithText(TextFormField, 'Display name'), 'smoke');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Host or IP'), smokeHost);
-    await tester.enterText(find.widgetWithText(TextFormField, 'Port'), smokePort);
-    await tester.enterText(find.widgetWithText(TextFormField, 'Username'), 'smoke');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'smoke');
+    final hostField = find.widgetWithText(TextFormField, 'Host or IP');
+    await steps.waitFor(hostField);
+    Future<void> fill(String label, String text) =>
+        tester.enterText(find.widgetWithText(TextFormField, label), text);
+    await fill('Display name', 'smoke');
+    await fill('Host or IP', _host);
+    await fill('Port', _port);
+    await fill('Username', 'smoke');
+    await fill('Password', 'smoke');
     await tester.testTextInput.receiveAction(TextInputAction.done);
-    await shot('form');
+    await steps.done('add-machine-form');
     final add = find.widgetWithText(FilledButton, 'Add machine');
-    await tester.scrollUntilVisible(add, 300, scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(
+      add,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(add);
-    await waitFor(find.text('List workspaces'));
-    await tester.tap(find.text('OK'));
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.text('List workspaces'));
-    await waitFor(find.text('Trust'));
-    await shot('hostkey');
-    await tester.tap(find.text('Trust'));
-    for (var i = 0; i < 6; i++) {
-      await tester.pump(const Duration(seconds: 2));
-      await shot('listed-$i');
+    await steps.waitFor(find.text('List workspaces'));
+    if (find.text('OK').evaluate().isNotEmpty) {
+      await tester.tap(find.text('OK')); // the telemetry notice
     }
-    await tester.tap(find.text('Projects'));
-    await tester.pump(const Duration(seconds: 2));
-    await shot('projects');
+    await tester.tap(find.text('List workspaces'));
+    await steps.waitFor(find.text('Trust this host?'));
+    await steps.done('host-key');
+    await tester.tap(find.text('Trust'));
+
+    // 2. Home, Open mode: both Herdr workspaces, same label, both waiting.
+    await steps.waitFor(find.text('1 agent · 1 tab'), count: 2);
+    expect(find.text('shop'), findsNWidgets(2));
+    await steps.done('home-open');
+    // Projects mode: one project, an agent row per workspace.
+    await tester.tap(find.byKey(const ValueKey('home-mode-projects')));
+    await steps.waitFor(find.text('claude in shop'), count: 2);
+    await steps.done('home-projects');
+
+    // 3. Search.
     final search = find.descendant(
       of: find.byKey(const ValueKey('home-workspace-search')),
       matching: find.byType(TextField),
     );
     await tester.enterText(search, 'nomatch');
-    await tester.pump(const Duration(seconds: 1));
-    await shot('search-none');
+    await steps.waitFor(find.text('No workspace matches the search.'));
+    await steps.done('search-no-match');
     await tester.enterText(search, 'shop');
-    await tester.pump(const Duration(seconds: 1));
-    await shot('search-shop');
+    await steps.waitFor(find.text('claude in shop'), count: 2);
     await tester.testTextInput.receiveAction(TextInputAction.done);
+    await steps.done('search-shop');
+
+    // 4. Open an agent: its Herdr workspace in a terminal tab.
     await tester.tap(find.text('claude in shop').first);
-    await tester.pump(const Duration(seconds: 4));
-    await shot('agent');
-    await tester.tap(find.byTooltip('Chat. Long-press for the composer'));
-    for (var i = 0; i < 3; i++) {
-      await tester.pump(const Duration(seconds: 2));
-      await shot('chat-$i');
-    }
+    await steps.waitFor(find.byTooltip(_chat));
+    await tester.pump(const Duration(seconds: 3));
+    await steps.done('agent-terminal');
+
+    // 5. Chat View: the transcript and the waiting permission.
+    await tester.tap(find.byTooltip(_chat));
+    await steps.waitFor(find.text('Run the shop tests'));
+    await steps.waitFor(find.text('Allow Bash?'));
+    await steps.done('chat-view');
+
+    // 6. Approve the permission. A first-run hint covers the buttons for a
+    // few seconds, so wait until Allow takes the tap.
+    final allow = find.text('Allow').hitTestable();
+    await steps.waitFor(allow);
+    await tester.tap(allow.first);
+    await steps.waitFor(find.text('Allow Bash?'), absent: true);
+    await steps.waitFor(find.textContaining('Idle'));
+    await steps.done('permission-approved');
+
+    // 7. Switch Herdr workspace: the other "shop", from the switcher.
+    await tester.tap(find.text('Terminal'));
+    await steps.waitFor(find.byTooltip('Sessions'));
+    await tester.tap(find.byTooltip('Sessions'));
+    await steps.waitFor(find.text('OTHER WORKSPACES'));
+    await steps.done('workspace-switcher');
+    await tester.tap(find.text('smoke · 1 agent · 1 tab'));
+    await steps.waitFor(find.text('OTHER WORKSPACES'), absent: true);
+    await tester.pump(const Duration(seconds: 3));
+    await steps.done('workspace-switched');
+
+    // 8. Answer the question of the agent in that workspace.
+    await tester.tap(find.byTooltip(_chat));
+    await steps.waitFor(find.text('Claude Code asks'));
+    await steps.done('question');
+    await tester.tap(find.text('Postgres').hitTestable().first);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('Send').hitTestable().first);
+    await steps.waitFor(find.text('Claude Code asks'), absent: true);
+    await steps.done('question-answered');
+
+    // 9. Settings › Security.
+    await tester.tap(find.byTooltip('Back'));
+    await steps.waitFor(find.byTooltip('Machines'));
+    await tester.tap(find.byTooltip('Machines'));
+    await steps.waitFor(find.byTooltip('Settings'));
+    await tester.tap(find.byTooltip('Settings'));
+    await steps.waitFor(find.text('Security'));
+    await tester.tap(find.text('Security'));
+    await steps.waitFor(find.text('Security'));
+    await tester.pump(const Duration(seconds: 1));
+    await steps.done('settings-security');
+
+    errors.report();
   });
+}
+
+/// Steps with a screenshot each, and waits that fail with one.
+class _Steps {
+  _Steps(this.tester, this.binding);
+
+  final WidgetTester tester;
+  final IntegrationTestWidgetsFlutterBinding binding;
+  var _n = 0;
+
+  Future<void> done(String name) async {
+    await tester.pump(const Duration(milliseconds: 400));
+    final file = '${(++_n).toString().padLeft(2, '0')}-$name';
+    await binding.takeScreenshot(file);
+    debugPrint('SMOKE step $file: ok');
+  }
+
+  /// Pumps until [finder] finds [count] widgets or more (none: [absent]).
+  Future<void> waitFor(
+    Finder finder, {
+    int count = 1,
+    bool absent = false,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      await tester.pump(const Duration(milliseconds: 250));
+      final found = finder.evaluate().length;
+      if (absent ? found == 0 : found >= count) return;
+    }
+    final texts = find
+        .byType(Text)
+        .evaluate()
+        .map((e) => (e.widget as Text).data)
+        .whereType<String>()
+        .join(' | ');
+    final file = '${(++_n).toString().padLeft(2, '0')}-FAILED';
+    await binding.takeScreenshot(file);
+    debugPrint('SMOKE step $file: on screen: $texts');
+    fail('timed out waiting for ${absent ? 'no ' : ''}$finder');
+  }
+}
+
+/// Every Flutter error fails the test through the test framework's
+/// handler (a RenderFlex overflow included), except one known framework
+/// assertion, which is only logged.
+class _ErrorWatch {
+  var known = 0;
+
+  void install() {
+    final previous = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (_isKnown(details)) {
+        known++;
+        debugPrint('SMOKE known error (not failing): semantics geometry');
+        return;
+      }
+      previous?.call(details);
+    };
+  }
+
+  /// Flutter's semantics geometry assertion ("identical(childRenderObject,
+  /// parentRenderObject)" in computeChildGeometry), thrown in debug builds
+  /// while the terminal swaps to the read-only screen of another Herdr
+  /// workspace. Debug-only and inside the framework.
+  static bool _isKnown(FlutterErrorDetails details) =>
+      details.exceptionAsString().contains(
+        'identical(childRenderObject, parentRenderObject)',
+      ) &&
+      details.stack.toString().contains('computeChildGeometry');
+
+  void report() => debugPrint('SMOKE known errors: $known');
 }

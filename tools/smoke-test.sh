@@ -163,7 +163,7 @@ logcat_pid=
 
 docker logs "$NAME" >"$OUT/machine.log" 2>&1 || true
 docker exec -u smoke "$NAME" sh -c 'cat ~/.conductore/hostd.log 2>/dev/null' >"$OUT/hostd.log" 2>&1 || true
-grep -E 'SMOKE step|EXCEPTION|Expected|Actual|overflowed|All tests passed|Some tests failed' "$OUT/drive.log" \
+grep -E 'SMOKE (step|known)|EXCEPTION|Expected|Actual|overflowed|All tests passed|Some tests failed' "$OUT/drive.log" \
   | sed 's/^I\/flutter ([ 0-9]*): //' >"$OUT/summary.txt" || true
 cat "$OUT/summary.txt"
 
