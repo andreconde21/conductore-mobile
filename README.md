@@ -348,8 +348,9 @@ tmux.
   **Customize keys** edits the one you use.
 - Encrypted backups of settings, machines and trusted keys (same format as
   sync), and an optional device-auth app lock that locks again after a
-  time in the background you choose (Settings › Security). The longer
-  choices (1 hour, 4 hours, 8 hours, 1 day) count from the last unlock and
+  time in the background you choose (**Ask again after**, right under App
+  lock in Settings › Security; search finds it by lock, timeout or PIN).
+  The longer choices (1 hour, 4 hours, 8 hours, 1 day) count from the last unlock and
   hold across app restarts, after a warning; a reboot or a clock moved back
   asks again (iOS and desktops cannot tell a reboot). Android's own
   cloud backup and device transfer are off: machines move with these
