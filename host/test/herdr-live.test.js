@@ -184,3 +184,23 @@ test('a stop while the subscribe is pending closes the subscription it gets (no 
     assert.equal(opened, closed, 'nothing open after the last stop')
   }
 })
+
+test('a hook reporting the default socket adds no second server (CON-114)', () => {
+  // Herdr exports HERDR_SOCKET_PATH in every pane, the default socket
+  // included: listing it again under a herdr#<hash> id showed each agent
+  // twice, and Chat View on the copy failed with "unknown session".
+  const home = tempDir('hl-home-')
+  const saved = { HOME: process.env.HOME, sockets: process.env.CONDUCTORE_HERDR_SOCKETS }
+  process.env.HOME = home
+  delete process.env.CONDUCTORE_HERDR_SOCKETS
+  try {
+    const socket = path.join(home, '.config', 'herdr', 'herdr.sock')
+    assert.deepEqual(api.discover([socket, `${path.dirname(socket)}/./herdr.sock`]).map(s => s.id), ['herdr'])
+    assert.equal(api.idForSocket(socket), 'herdr')
+    const other = path.join(home, 'elsewhere.sock')
+    assert.deepEqual(api.discover([socket, other]).map(s => s.id), ['herdr', api.idForSocket(other)])
+  } finally {
+    process.env.HOME = saved.HOME
+    if (saved.sockets !== undefined) process.env.CONDUCTORE_HERDR_SOCKETS = saved.sockets
+  }
+})
