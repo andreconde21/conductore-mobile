@@ -36,8 +36,13 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## What's new
 
-Previews 30 to 34 (companion 1.8.2 bundled):
+Previews 30 to 35 (companion 1.8.3 bundled):
 
+- **Preview 35**: with **Sync with sheprd** on, agents carry sheprd's own
+  names instead of their workspace folder (no more rows all reading
+  "Projects"), recently idle agents stay in the active view as they do in
+  sheprd, and each row shows sheprd's idle age and to-do progress. Needs
+  sheprd v0.9.5-2 and companion 1.8.3.
 - **Preview 34**: fixes found by the new phone smoke test
   (`tools/smoke-test.sh`, see docs/release-pipeline.md). The companion no
   longer lists every Herdr agent twice (companion 1.8.2); a terminal hint
