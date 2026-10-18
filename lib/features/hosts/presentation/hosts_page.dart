@@ -1898,19 +1898,22 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     );
   }
 
-  /// The gear: the full-screen Settings page.
+  /// The gear: the full-screen Settings page, with the app-wide services
+  /// (the app lock's timer, Talkbawt) when the app provides them.
   Future<void> _openSettings([SettingsSection? section]) => showSettings(
     context,
     section: section,
-    services: SettingsServices(
-      theme: widget.themeController,
-      backupService: widget.backupService,
-      hostsController: widget.hostsController,
-      hostKeyVerifier: widget.hostKeyVerifier,
-      agentAttention: widget.agentAttention,
-      digest: DigestScope.maybeOf(context),
-      onLockNow: _lock,
-    ),
+    services:
+        SettingsScope.maybeOf(context)?.copyWith(onLockNow: _lock) ??
+        SettingsServices(
+          theme: widget.themeController,
+          backupService: widget.backupService,
+          hostsController: widget.hostsController,
+          hostKeyVerifier: widget.hostKeyVerifier,
+          agentAttention: widget.agentAttention,
+          digest: DigestScope.maybeOf(context),
+          onLockNow: _lock,
+        ),
   );
 
   /// Agents needing input on machines the filter hides.
