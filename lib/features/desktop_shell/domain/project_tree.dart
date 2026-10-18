@@ -519,10 +519,12 @@ class _Group {
 class AgentRowText {
   const AgentRowText({required this.title, required this.subtitle});
 
-  /// Prominent: the pane's terminal title, else the row's own name.
+  /// Prominent: sheprd's row title when synced, else the pane's terminal
+  /// title, else the row's own name.
   final String title;
 
-  /// Tab name · workspace · machine; empty parts and repeats dropped.
+  /// Tab name · workspace · machine, then sheprd's idle age and to-do
+  /// progress when synced; empty parts and repeats dropped.
   final String subtitle;
 
   /// The one-line (compact) row of [entry]'s workspace: with a single
@@ -531,14 +533,18 @@ class AgentRowText {
     ProjectEntry entry, {
     required String projectName,
     required String machine,
+    DateTime? now,
   }) {
     final node = entry.node;
     if (entry.agentRows.length == 1) {
+      final agent = entry.agentRows.single;
       return AgentRowText.of(
-        entry.agentRows.single,
+        agent,
         workspace: node.label,
         projectName: projectName,
         machine: machine,
+        sheprd: entry.sheprdOf(agent)?.row,
+        now: now,
       );
     }
     return AgentRowText(
@@ -550,18 +556,26 @@ class AgentRowText {
   /// [row] is one of [ProjectEntry.agentRows]; [workspace] is the entry's
   /// workspace row. A workspace named like its [projectName] is not
   /// repeated; a title equal to the workspace or tab name is not repeated.
+  /// [sheprd] is sheprd's row for it while synced: its title wins, the way
+  /// sheprd's own sidebar names the agent.
   factory AgentRowText.of(
     SidebarNode row, {
     required String workspace,
     required String projectName,
     required String machine,
+    SheprdRow? sheprd,
+    DateTime? now,
   }) {
     final isTab = row.kind == SidebarNodeKind.herdrTab;
     final sidebarText = isTab ? row.detail.trim() : '';
     // A tab row's own name is the tab label; a pane row's label already is
     // the pane title, so it has no tab name to show.
     final tab = isTab ? row.label.trim() : '';
-    final title = sidebarText.isNotEmpty ? sidebarText : row.label.trim();
+    final title =
+        sheprd?.title ??
+        (sidebarText.isNotEmpty ? sidebarText : row.label.trim());
+    final idleSince = sheprd?.idleSince;
+    final todo = sheprd?.todo;
     bool same(String a, String b) => a.toLowerCase() == b.toLowerCase();
     final parts = <String>[
       if (tab.isNotEmpty && !same(tab, title))
@@ -571,7 +585,20 @@ class AgentRowText {
           !same(workspace, title))
         workspace,
       if (machine.isNotEmpty) machine,
+      if (idleSince != null)
+        sheprdAge(
+          (now ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000 - idleSince,
+        ),
+      if (todo != null) '${todo.done}/${todo.total}',
     ];
     return AgentRowText(title: title, subtitle: parts.join(' · '));
   }
 }
+
+/// An idle age the way sheprd's sidebar writes it: now, 5m, 2h, 3d.
+String sheprdAge(int secs) => switch (secs) {
+  < 60 => 'now',
+  < 3600 => '${secs ~/ 60}m',
+  < 86400 => '${secs ~/ 3600}h',
+  _ => '${secs ~/ 86400}d',
+};

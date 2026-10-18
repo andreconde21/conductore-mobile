@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- feat: `sheprd-view` passes on sheprd's sidebar row for each agent (contract v3, `rows: 3`): `title`, `active`, `number`, `idle_since`, `ctx`, `todo`, checked, and only for agents that carry them. The phone then names agents the way sheprd does instead of after their herdr workspace (four rows reading "Projects"), and keeps recently idle agents in the active view like sheprd.
+
 ## 1.8.2 (2026-10-11)
 
 - fix: an agent in the default Herdr server (or a named session) is listed once, not twice (CON-121, found by the CON-114 smoke test). Herdr exports its socket path in every pane, so the default server came back as an extra `herdr#<hash>` server; servers are now also deduplicated by socket path. Herdr exports `HERDR_SOCKET_PATH` in every pane, so the hooks report the default socket as an extra one, and `discover()` added it again as `herdr#<hash>`: `agents`, the live view and the phone then showed a second copy of each agent, whose Chat View failed with "unknown session herdr#…/w1:p1". Servers are now deduped by resolved socket path as well as by id. Found by the phone smoke test.

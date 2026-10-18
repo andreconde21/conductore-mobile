@@ -188,6 +188,31 @@ const VIEW = {
   future: { anything: true }
 }
 
+test('readView: v3 rows come through checked, and only when sheprd sends them', () => {
+  const dir = path.join(tempDir('hl-sheprd-rows-'), 'sheprd')
+  fs.mkdirSync(dir)
+  fs.writeFileSync(path.join(dir, 'view.json'), JSON.stringify({
+    ...VIEW,
+    rows: 3,
+    agents: {
+      'dev/w2:p1': { presence: 'idle', state_seq: 41, title: ' Fix login\u0007 ', active: true, number: 3, idle_since: 1759612000, ctx: 581000, todo: [2, 5] },
+      'dev/w2:p2': { presence: 'working', state_seq: 1, title: '', active: false, number: -1, todo: [1, 0] },
+      'dev/w2:p3': { presence: 'idle', state_seq: 2 }
+    }
+  }))
+  const r = sheprd.readView({ dir, now: NOW })
+  assert.equal(r.view.rows, 3)
+  assert.deepEqual(r.view.agents['dev/w2:p1'], {
+    presence: 'idle', state_seq: 41, unread: false, dismissed: false, kept: false, removed: false,
+    title: 'Fix login', active: true, number: 3, idle_since: 1759612000, ctx: 581000, todo: [2, 5]
+  })
+  assert.deepEqual(r.view.agents['dev/w2:p2'], {
+    presence: 'working', state_seq: 1, unread: false, dismissed: false, kept: false, removed: false,
+    title: null, active: false, number: null, idle_since: null, ctx: null, todo: null
+  })
+  assert.equal('title' in r.view.agents['dev/w2:p3'], false, 'a pre-v3 agent gets no row keys')
+})
+
 test('readView: none, checked v1, stale, refusals', () => {
   const dir = path.join(tempDir('hl-sheprd-view-'), 'sheprd')
   assert.deepEqual(sheprd.readView({ dir, now: NOW }), { found: false })

@@ -1,4 +1,5 @@
 import 'package:conduit/features/desktop_shell/domain/project_tree.dart';
+import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -98,5 +99,41 @@ void main() {
     );
     expect(text.title, 'Projects');
     expect(text.subtitle, 'omarchy');
+  });
+
+  test("while synced, sheprd's title leads and its age and to-dos follow", () {
+    final text = AgentRowText.of(
+      _tab('1', 'Projects'),
+      workspace: 'Projects',
+      projectName: 'Other',
+      machine: 'development-central',
+      sheprd: const SheprdRow(
+        title: 'Fix the login redirect',
+        idleSince: 1000,
+        todo: (done: 2, total: 5),
+      ),
+      now: DateTime.fromMillisecondsSinceEpoch((1000 + 7200) * 1000),
+    );
+    expect(text.title, 'Fix the login redirect');
+    expect(text.subtitle, 'tab 1 · Projects · development-central · 2h · 2/5');
+  });
+
+  test('a sheprd row without a title keeps the herdr title', () {
+    final text = of(_tab('1', 'Write docs'), workspace: 'Projects').title;
+    final synced = AgentRowText.of(
+      _tab('1', 'Write docs'),
+      workspace: 'Projects',
+      projectName: 'Other',
+      machine: 'omarchy',
+      sheprd: const SheprdRow(active: true),
+    ).title;
+    expect(synced, text);
+  });
+
+  test("sheprdAge writes ages like sheprd's sidebar", () {
+    expect(sheprdAge(5), 'now');
+    expect(sheprdAge(300), '5m');
+    expect(sheprdAge(7200), '2h');
+    expect(sheprdAge(3 * 86400), '3d');
   });
 }

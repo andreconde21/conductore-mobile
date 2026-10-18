@@ -31,6 +31,77 @@ enum SheprdPresence {
   };
 }
 
+/// How sheprd's sidebar shows an agent's row (contract v3, `rows: 3`):
+/// what the app shows instead of its own guesses while synced.
+@immutable
+class SheprdRow {
+  const SheprdRow({
+    this.title,
+    this.active = false,
+    this.number,
+    this.idleSince,
+    this.ctx,
+    this.todo,
+  });
+
+  /// sheprd's row title: the terminal title (the agent's topic), else
+  /// herdr's pane title or the agent's name.
+  final String? title;
+
+  /// In sheprd's active view: busy, needing you, kept, or idle for less
+  /// than its `recent_hours`.
+  final bool active;
+
+  /// The row's number in sheprd's sidebar (prefix+alt+N).
+  final int? number;
+
+  /// Unix seconds of the agent's last state change, while idle.
+  final int? idleSince;
+
+  /// Context size in tokens, from sheprd's usage hook.
+  final int? ctx;
+
+  /// To-do progress, from sheprd's agent-insights hook.
+  final ({int done, int total})? todo;
+
+  /// Null for an agent without row keys (a sheprd before contract v3).
+  static SheprdRow? fromJson(Map<Object?, Object?> json) {
+    if (!json.containsKey('active') && !json.containsKey('title')) return null;
+    int? count(Object? raw) => raw is int && raw >= 0 ? raw : null;
+    final title = json['title'];
+    final todo = json['todo'];
+    return SheprdRow(
+      title: title is String && title.trim().isNotEmpty
+          ? title.trim()
+          : null,
+      active: json['active'] == true,
+      number: count(json['number']),
+      idleSince: count(json['idle_since']),
+      ctx: count(json['ctx']),
+      todo: switch (todo) {
+        [final int done, final int total] when total > 0 && done >= 0 => (
+          done: done,
+          total: total,
+        ),
+        _ => null,
+      },
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is SheprdRow &&
+      other.title == title &&
+      other.active == active &&
+      other.number == number &&
+      other.idleSince == idleSince &&
+      other.ctx == ctx &&
+      other.todo == todo;
+
+  @override
+  int get hashCode => Object.hash(title, active, number, idleSince, ctx, todo);
+}
+
 /// One agent in sheprd's view: its presence and the hand-set marks.
 @immutable
 class SheprdAgentView {
@@ -42,9 +113,13 @@ class SheprdAgentView {
     this.kept = false,
     this.removed = false,
     this.pending,
+    this.row,
   });
 
   final SheprdPresence presence;
+
+  /// sheprd's sidebar row for the agent, when it shares one (contract v3).
+  final SheprdRow? row;
 
   /// A mark sent from the app that sheprd has not confirmed yet (its view
   /// was not rewritten with it): shown as pending, never as applied.
@@ -64,9 +139,11 @@ class SheprdAgentView {
   /// change: hidden from "active", still listed in "all".
   final bool removed;
 
-  /// Stays in the active filter: busy, needing you, or kept, unless it was
-  /// removed from the active view.
-  bool get active => !removed && (kept || presence != SheprdPresence.idle);
+  /// Stays in the active filter: busy, needing you, kept, or (as sheprd
+  /// says) recently idle, unless it was removed from the active view.
+  bool get active =>
+      !removed &&
+      (kept || presence != SheprdPresence.idle || (row?.active ?? false));
 
   static SheprdAgentView? fromJson(Object? json) {
     if (json is! Map) return null;
@@ -80,6 +157,7 @@ class SheprdAgentView {
       dismissed: json['dismissed'] == true,
       kept: json['kept'] == true,
       removed: json['removed'] == true,
+      row: SheprdRow.fromJson(json),
     );
   }
 
@@ -104,6 +182,7 @@ class SheprdAgentView {
     kept: !removed,
     removed: removed,
     pending: pending,
+    row: row,
   );
 
   /// This view with [mark] waiting for sheprd: the marks as they are, the
@@ -116,6 +195,7 @@ class SheprdAgentView {
     kept: kept,
     removed: removed,
     pending: mark,
+    row: row,
   );
 
   /// This agent after [mark], as sheprd will apply it.
@@ -125,6 +205,7 @@ class SheprdAgentView {
       stateSeq: stateSeq,
       unread: true,
       kept: kept,
+      row: row,
     ),
     SheprdMark.read => SheprdAgentView(
       presence: presence == SheprdPresence.unread
@@ -133,6 +214,7 @@ class SheprdAgentView {
       stateSeq: stateSeq,
       dismissed: dismissed,
       kept: kept,
+      row: row,
     ),
     SheprdMark.dismiss => SheprdAgentView(
       presence: presence == SheprdPresence.working
@@ -141,6 +223,7 @@ class SheprdAgentView {
       stateSeq: stateSeq,
       dismissed: true,
       kept: kept,
+      row: row,
     ),
     SheprdMark.keep || SheprdMark.unkeep => SheprdAgentView(
       presence: presence,
@@ -148,6 +231,7 @@ class SheprdAgentView {
       unread: unread,
       dismissed: dismissed,
       kept: mark == SheprdMark.keep,
+      row: row,
     ),
   };
 
@@ -160,7 +244,8 @@ class SheprdAgentView {
       other.dismissed == dismissed &&
       other.kept == kept &&
       other.removed == removed &&
-      other.pending == pending;
+      other.pending == pending &&
+      other.row == row;
 
   @override
   int get hashCode => Object.hash(
@@ -171,6 +256,7 @@ class SheprdAgentView {
     kept,
     removed,
     pending,
+    row,
   );
 }
 

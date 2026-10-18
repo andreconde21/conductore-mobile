@@ -454,6 +454,7 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
           workspace: entry.node.label,
           projectName: project.name,
           machine: names[entry.node.machineId] ?? '',
+          sheprd: entry.sheprdOf(agent)?.row,
         );
     return [
       ProjectHeaderTile(
@@ -508,9 +509,9 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
               if (!layout.removedFromActive(entry, agent) &&
                   (!layout.activeOnly || entry.active) &&
                   (!layout.activeOnly ||
-                      (entry.dotOf(agent) != SidebarDot.idle ||
-                          (entry.sheprdOf(agent)?.kept ?? false) ||
-                          entry.node.openInApp)))
+                      entry.node.openInApp ||
+                      (entry.sheprdOf(agent)?.active ??
+                          (entry.dotOf(agent) != SidebarDot.idle))))
                 _MemberRow(
                   key: ValueKey('project-agent-${project.key}-${agent.key}'),
                   node: agent,
