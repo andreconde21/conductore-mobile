@@ -125,7 +125,8 @@ function checkView (raw) {
       unread: a.unread === true,
       dismissed: a.dismissed === true,
       kept: a.kept === true,
-      removed: a.removed === true
+      removed: a.removed === true,
+      ...rowOf(a)
     }
   }
   return {
@@ -141,7 +142,27 @@ function checkView (raw) {
     // v2 (CON-101): the highest update line version sheprd applies, and
     // the v2 lines it refused.
     updates: Number.isSafeInteger(raw.updates) && raw.updates >= 1 && raw.updates <= 99 ? raw.updates : 1,
-    rejected: rejectedOf(raw.rejected)
+    rejected: rejectedOf(raw.rejected),
+    // v3: agents carry sheprd's sidebar row.
+    rows: Number.isSafeInteger(raw.rows) && raw.rows >= 1 && raw.rows <= 99 ? raw.rows : null
+  }
+}
+
+// v3: how sheprd's sidebar shows the agent (title, active view, number,
+// idle since, context, to-dos). Nothing for a sheprd that sends no row.
+function rowOf (a) {
+  if (!('active' in a) && !('title' in a)) return {}
+  const title = typeof a.title === 'string' ? a.title.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 256) : ''
+  const todo = Array.isArray(a.todo) && a.todo.length === 2 && a.todo.every(n => seqOf(n) !== null) && a.todo[1] > 0
+    ? [a.todo[0], a.todo[1]]
+    : null
+  return {
+    title: title || null,
+    active: a.active === true,
+    number: seqOf(a.number),
+    idle_since: seqOf(a.idle_since),
+    ctx: seqOf(a.ctx),
+    todo
   }
 }
 

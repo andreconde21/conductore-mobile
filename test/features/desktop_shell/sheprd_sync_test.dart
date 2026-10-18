@@ -117,6 +117,36 @@ String _reply(
 
 void main() {
   group('SheprdView', () {
+    test('v3 rows: title, active and the rest; none from an older sheprd', () {
+      final agent = SheprdAgentView.fromJson({
+        'presence': 'idle',
+        'state_seq': 4,
+        'title': ' Fix login ',
+        'active': true,
+        'number': 3,
+        'idle_since': 1759612000,
+        'ctx': 581000,
+        'todo': [2, 5],
+      })!;
+      expect(
+        agent.row,
+        const SheprdRow(
+          title: 'Fix login',
+          active: true,
+          number: 3,
+          idleSince: 1759612000,
+          ctx: 581000,
+          todo: (done: 2, total: 5),
+        ),
+      );
+      expect(agent.active, isTrue, reason: 'recently idle is active');
+      expect(agent.after(SheprdMark.read).row, agent.row);
+      expect(agent.withActive(removed: true).active, isFalse);
+      final old = SheprdAgentView.fromJson({'presence': 'idle'})!;
+      expect(old.row, isNull);
+      expect(old.active, isFalse);
+    });
+
     test('reads a v1 reply and refuses anything else', () {
       final view = SheprdView.fromReply(
         jsonDecode(

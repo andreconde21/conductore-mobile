@@ -1,4 +1,4 @@
-# sheprd view sync (CON-077, CON-101), contracts v1 and v2
+# sheprd view sync (CON-077, CON-101), contracts v1, v2 and v3
 
 Conductore can mirror sheprd's sidebar: projects, members, hidden
 workspaces, order, and each agent's presence (unread, kept, dismissed). It
@@ -259,6 +259,37 @@ against the rules above, then appends all the lines in one write under the
 lock and returns `{ok: true, ids: [...]}`; on any bad op it appends
 nothing. The v1 form (`--op … --agent …`) is unchanged. `sheprd-view`
 passes `updates` and `rejected` on.
+
+## Contract v3: sidebar rows
+
+sheprd's sidebar names an agent and decides whether it is in the active
+view with logic the app cannot see (terminal titles, the agent-insights
+hook, its own idle clock). Before v3 the app guessed both from herdr, so
+four agents in `~/Projects` all read "Projects", and recently idle agents
+dropped out of the app's active view while sheprd still listed them.
+
+v3 adds `"rows": 3` at the top of `view.json`, and these keys to each
+entry of `agents` (still `version: 1`; v1 and v2 readers ignore them):
+
+| key | type | meaning |
+|---|---|---|
+| `title` | string | The row's title in sheprd: the terminal title, else herdr's pane title, the agent's display name, its name or kind (`agent_title()`). |
+| `active` | bool | In sheprd's active view: busy or needing you, kept, or idle for less than `recent_hours` and not removed from active. |
+| `number` | int \| null | The row's number in sheprd's sidebar (prefix+alt+N), in its navigation order; null for a stale machine. |
+| `idle_since` | int \| null | Unix seconds of the agent's last state change, while idle and known. |
+| `ctx` | int \| null | Context size in tokens (usage hook). |
+| `todo` | `[done, total]` \| null | To-do progress (agent-insights hook). |
+
+An agent sheprd does not see, listed only for its marks, gets
+`active` (= kept) and none of the others. `idle_since` is a timestamp, not
+an age, so the file does not change every second.
+
+The companion's `sheprd-view` passes these on checked (title without
+control characters, at most 256 characters; numbers non-negative) only for
+agents that carry `active` or `title`, and passes `rows`. While synced, the
+app uses `title` as the row title (falling back to herdr's when absent),
+counts `active` in its active filter, and adds the idle age (`now`, `5m`,
+`2h`, `3d`) and to-do progress to the row's subtitle.
 
 ## Conductore side
 
