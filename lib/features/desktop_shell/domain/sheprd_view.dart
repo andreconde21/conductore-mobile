@@ -71,9 +71,7 @@ class SheprdRow {
     final title = json['title'];
     final todo = json['todo'];
     return SheprdRow(
-      title: title is String && title.trim().isNotEmpty
-          ? title.trim()
-          : null,
+      title: title is String && title.trim().isNotEmpty ? title.trim() : null,
       active: json['active'] == true,
       number: count(json['number']),
       idleSince: count(json['idle_since']),
