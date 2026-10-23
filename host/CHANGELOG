@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fix: `terminal-answer` reads a question Claude Code 2.1.302 draws behind a `│` bar. In a narrow pane the question wrapped, the bar landed mid-text, and the phone's Send answers failed with "the terminal does not show this question" before typing anything.
+
 ## 1.8.3 (2026-10-18)
 
 - feat: `sheprd-view` passes on sheprd's sidebar row for each agent (contract v3, `rows: 3`): `title`, `active`, `number`, `idle_since`, `ctx`, `todo`, checked, and only for agents that carry them. The phone then names agents the way sheprd does instead of after their herdr workspace (four rows reading "Projects"), and keeps recently idle agents in the active view like sheprd.
