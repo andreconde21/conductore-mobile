@@ -59,6 +59,19 @@ test('reads ticked boxes and a narrow pane (recorded, CON-096)', () => {
   assert.deepEqual(narrow.options.map(o => o.label), ['Postgres', 'SQLite', 'MySQL', 'Type something.'])
 })
 
+test('a question wrapped behind 2.1.302\'s `│` bar still reads as one', () => {
+  // Recorded from Claude Code 2.1.302 in a 60-column tmux pane.
+  const q = {
+    question: 'Which backoffices should move to Hetzner in this wave and what happens to BB-003 after that?',
+    options: ['Leave them where they are', 'I move all 5 BOs to Hetzner and mark BB-003 superseded.'],
+    multi: false
+  }
+  const shown = form.formOf(fixture('ask-q1-gutter-narrow.txt'))
+  assert.equal(shown.kind, 'question')
+  assert.ok(shown.text.includes(q.question))
+  assert.deepEqual(shown.options.map(o => o.label), [...q.options, 'Type something.'])
+})
+
 test('no dialog: the prompt box and transcript are not forms', () => {
   assert.equal(form.formOf('❯ ask me\n  ⎿  · Which database should we use? → SQLite\n\n❯ \n'), null)
   assert.equal(form.formOf(''), null)

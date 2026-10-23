@@ -1692,6 +1692,7 @@ class _ChatViewPageState extends State<ChatViewPage>
       key: key,
       item: item,
       onPick: canType ? (number) => _pick(item, number) : null,
+      showOptions: item.answered || !askedBelow,
       onOpenTerminal: item.answered || askedBelow
           ? null
           : widget.onOpenTerminal,

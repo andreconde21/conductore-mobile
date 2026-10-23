@@ -33,6 +33,7 @@ const HEADER = /^\s*(?:←\s*)?[☐☒]\s*\S/u
 const OPTION = /^\s*(❯)?\s*(\d+)\.\s+(?:\[(.)\]\s+)?(.*?)\s*$/u
 const RULE = /^\s*[─━]{8,}\s*$/u
 const SUBMIT_ROW = /^\s*(❯)?\s*Submit\s*$/u
+const GUTTER = /^\s*│ ?/u
 
 const norm = s => String(s || '').replace(/\s+/g, ' ').trim()
 const KEY_PREFIX = 12
@@ -62,7 +63,9 @@ function optionsOf (region) {
 // { kind: 'permission', text, options }. `text`: the dialog's text on one
 // line (wrapped lines joined).
 function formOf (screen) {
-  const lines = String(screen || '').replace(/\r/g, '').split('\n').map(l => l.replace(/\s+$/, ''))
+  // 2.1.302 draws a `│ ` bar before each line of the question: without it
+  // a question wrapped by a narrow pane reads as one line again.
+  const lines = String(screen || '').replace(/\r/g, '').split('\n').map(l => l.replace(/\s+$/, '').replace(GUTTER, ''))
   let header = -1
   for (let i = lines.length - 1; i >= 0; i--) if (HEADER.test(lines[i])) { header = i; break }
   if (header !== -1) {

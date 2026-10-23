@@ -36,8 +36,14 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## What's new
 
-Previews 30 to 35 (companion 1.8.3 bundled):
+Previews 30 to 36 (companion 1.8.4 bundled):
 
+- **Preview 36**: answering Claude's questions from the phone after the
+  wait ran out works again when the machine's terminal is narrow (Claude
+  Code 2.1.302 wraps the question behind a bar; companion 1.8.4). Chat View
+  no longer shows a question's options twice, and **Open terminal** opens
+  an agent in a named Herdr session on that session, not on the default
+  server's pane with the same number.
 - **Preview 35**: with **Sync with sheprd** on, agents carry sheprd's own
   names instead of their workspace folder (no more rows all reading
   "Projects"), recently idle agents stay in the active view as they do in
