@@ -694,8 +694,13 @@ class ChatQuestionCard extends StatelessWidget {
     required this.onPick,
     this.note,
     this.onOpenTerminal,
+    this.showOptions = true,
     super.key,
   });
+
+  /// False while the request card below asks the same question: its
+  /// options are not shown twice.
+  final bool showOptions;
 
   /// "Open terminal" beside [note].
   final VoidCallback? onOpenTerminal;
@@ -728,7 +733,7 @@ class ChatQuestionCard extends StatelessWidget {
               Text(header, style: theme.textTheme.labelMedium),
             Text(question.question, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 6),
-            for (var i = 0; i < question.options.length; i++)
+            for (var i = 0; showOptions && i < question.options.length; i++)
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: OutlinedButton(

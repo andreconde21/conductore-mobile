@@ -298,6 +298,8 @@ void main() {
     expect(find.text('Allow AskUserQuestion?'), findsNothing);
     expect(find.text('Answer it below.'), findsOneWidget);
     expect(find.text('one file'), findsOneWidget);
+    // The transcript's card does not repeat the options above it.
+    expect(find.textContaining('Postgres'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('question-option-SQLite')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
