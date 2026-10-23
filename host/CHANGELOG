@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.8.4 (2026-10-23)
+
 - fix: `terminal-answer` reads a question Claude Code 2.1.302 draws behind a `│` bar. In a narrow pane the question wrapped, the bar landed mid-text, and the phone's Send answers failed with "the terminal does not show this question" before typing anything.
 
 ## 1.8.3 (2026-10-18)
