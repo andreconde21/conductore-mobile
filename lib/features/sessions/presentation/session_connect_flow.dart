@@ -95,6 +95,7 @@ class SessionConnectFlow {
     String tabId = '',
     String paneId = '',
     String label = '',
+    String herdrSession = '',
   }) async {
     host = machineOf(host);
     // Not awaited: saving the host list must not hold up the terminal.
@@ -105,6 +106,7 @@ class SessionConnectFlow {
       tabId: tabId,
       paneId: paneId,
       label: label,
+      herdrSession: herdrSession,
       open: (target) => open(host, target),
     );
   }
@@ -130,7 +132,8 @@ class SessionConnectFlow {
   /// home-screen widget): with a tmux location (the companion reports
   /// `tab` = `session:window`, `pane` = `%N`), the tab attached to that
   /// tmux session with the pane selected; with a Herdr location, the exact
-  /// workspace, tab and pane; otherwise the host's open session, if any.
+  /// workspace, tab and pane on its Herdr server (a named session's `w1` is
+  /// not the default one's); otherwise the host's open session, if any.
   /// Asks for the terminal to be shown when something was opened; with
   /// [preferredView] (a notification tap), in the session's preferred
   /// view (see [takeOpenedAgent]) rather than always its terminal.
@@ -159,6 +162,7 @@ class SessionConnectFlow {
         workspaceId: workspaceId,
         tabId: agent.tab ?? '',
         paneId: agent.pane ?? '',
+        herdrSession: herdrSessionOf(agent),
       );
     } else {
       session = workspace.sessions
@@ -173,6 +177,13 @@ class SessionConnectFlow {
       terminalRequests.value += 1;
     }
     return session;
+  }
+
+  /// The `--session` name of [agent]'s Herdr server: empty for the default
+  /// one (and when the companion did not say).
+  static String herdrSessionOf(AgentInfo agent) {
+    final server = agent.herdrServer ?? '';
+    return server.startsWith('herdr@') ? server.substring('herdr@'.length) : '';
   }
 
   void dispose() {

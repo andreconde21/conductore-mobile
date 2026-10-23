@@ -584,7 +584,9 @@ class HerdrSessionFocus implements AppInputRouter {
   }
 
   /// Opens the app at an agent's exact place on [host]: its workspace, tab
-  /// and pane in the default Herdr session.
+  /// and pane in the Herdr session [herdrSession] (empty: the default one).
+  /// Workspace ids are per server: `w1` of a named session is not the
+  /// default server's `w1`.
   ///
   /// Reuses the open Herdr session already on that workspace, reconnecting
   /// it when it dropped; otherwise opens a new one for the workspace, whose
@@ -604,9 +606,10 @@ class HerdrSessionFocus implements AppInputRouter {
     String tabId = '',
     String paneId = '',
     String label = '',
+    String herdrSession = '',
     TerminalSessionController Function(ConnectTarget target)? open,
   }) async {
-    final existing = _herdrSessionFor(host, workspaceId);
+    final existing = _herdrSessionFor(host, workspaceId, herdrSession);
     if (existing != null) {
       _notePlace(existing, tabId: tabId, paneId: paneId);
       _workspace.activate(existing);
@@ -647,6 +650,7 @@ class HerdrSessionFocus implements AppInputRouter {
         workspaceId: workspaceId,
         label: label,
         tabId: paneId.isEmpty ? tabId : '',
+        session: herdrSession,
         paneId: paneId,
       ),
     );
@@ -700,11 +704,12 @@ class HerdrSessionFocus implements AppInputRouter {
     unawaited(_checkServer(session));
   }
 
-  /// The open Herdr session on [host]'s default server that is on
-  /// [workspaceId], if any.
+  /// The open session of [host]'s Herdr server [herdrSession] (empty: the
+  /// default one) that is on [workspaceId], if any.
   TerminalSessionController? _herdrSessionFor(
     SavedHost host,
     String workspaceId,
+    String herdrSession,
   ) {
     if (workspaceId.isEmpty) return null;
     for (final session in _workspace.sessions) {
@@ -712,7 +717,7 @@ class HerdrSessionFocus implements AppInputRouter {
         continue;
       }
       final target = herdrTargetOf(session);
-      if (target == null || target.session.isNotEmpty) {
+      if (target == null || target.session != herdrSession) {
         continue;
       }
       if (workspaceOf(session) == workspaceId) {

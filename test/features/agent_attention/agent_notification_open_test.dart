@@ -4,6 +4,7 @@ import 'package:conduit/features/agent_attention/presentation/agent_notification
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/widgets.dart';
@@ -264,6 +265,48 @@ void main() {
       }
       expect(flow.herdr.workspaceOf(other!), 'w3');
       expect(repository.persisted.map((saved) => saved.id), ['h']);
+    });
+
+    // An agent in a named Herdr session (`herdr --session Remote`): its
+    // `w1` is not the default server's `w1`, whose tab is open.
+    test('an agent of a named Herdr session opens on that server', () async {
+      final defaultTab = workspace.open(
+        const ConnectTarget.herdr(workspaceId: 'w1').apply(host),
+      );
+      flow.herdr.noteWorkspace(defaultTab, 'w1');
+
+      final shown = await flow.openAgent(
+        host,
+        const AgentInfo(
+          id: 'remote-agent',
+          name: '',
+          state: AgentAttentionState.unknown,
+          workspace: 'w1',
+          tab: 'w1:t1',
+          pane: 'w1:p2',
+          herdrServer: 'herdr@Remote',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(shown, isNot(defaultTab));
+      expect(HerdrSessionFocus.herdrTargetOf(shown!)?.session, 'Remote');
+      expect(flow.herdr.workspaceOf(shown), 'w1');
+
+      // Again: the named session's tab is reused, the default one left be.
+      final again = await flow.openAgent(
+        host,
+        const AgentInfo(
+          id: 'remote-agent',
+          name: '',
+          state: AgentAttentionState.unknown,
+          workspace: 'w1',
+          pane: 'w1:p2',
+          herdrServer: 'herdr@Remote',
+        ),
+      );
+      expect(again, shown);
+      expect(workspace.sessions, hasLength(2));
     });
 
     test('without a Herdr location it activates the host\'s tab', () async {
