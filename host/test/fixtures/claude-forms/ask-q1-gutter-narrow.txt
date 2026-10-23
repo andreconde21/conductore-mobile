@@ -1,0 +1,18 @@
+────────────────────────────────────────────────────────────
+←  ☐ BOs  ☐ Start  ✔ Submit  →
+
+│ Which backoffices should move to Hetzner in this wave and
+│ what happens to BB-003 after that?
+
+❯ 1. Leave them where they are
+     No change, they stay on Bluehost for now and nothing
+     moves this wave
+  2. I move all 5 BOs to Hetzner and mark BB-003 superseded.
+     Full move of every backoffice in one go, then close the
+     old card
+  3. Type something.
+────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+
