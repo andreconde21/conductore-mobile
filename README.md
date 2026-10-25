@@ -36,8 +36,13 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## What's new
 
-Previews 30 to 36 (companion 1.8.4 bundled):
+Previews 30 to 37 (companion 1.8.4 bundled):
 
+- **Preview 37**: with **Sync with sheprd** on, the home Projects view
+  names every agent the way sheprd's sidebar does, also an agent that is
+  alone in its Herdr tab (it kept its pane title and missed sheprd's marks),
+  and it follows sheprd's moves, renames and project edits while it is open
+  instead of only when an agent changed state.
 - **Preview 36**: answering Claude's questions from the phone after the
   wait ran out works again when the machine's terminal is narrow (Claude
   Code 2.1.302 wraps the question behind a bar; companion 1.8.4). Chat View

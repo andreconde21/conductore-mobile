@@ -385,7 +385,7 @@ extension _ShellProjects on DesktopHomeState {
     final layout = _projectLayout;
     if (layout != null) unawaited(layout.refresh());
     final usage = UsageScope.maybeOf(context);
-    return ListenableBuilder(
+    final sidebar = ListenableBuilder(
       listenable: Listenable.merge([
         _projectFiles,
         widget.themeController,
@@ -435,5 +435,8 @@ extension _ShellProjects on DesktopHomeState {
         footer: _sidebarFooter(),
       ),
     );
+    return layout == null
+        ? sidebar
+        : ProjectLayoutWatch(controller: layout, child: sidebar);
   }
 }

@@ -108,11 +108,14 @@ SSH_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0))
 docker network create "$NAME" >/dev/null
 docker run -d --rm --name "$NAME" --network "$NAME" -p "127.0.0.1:$SSH_PORT:22" \
   conductore-smoke-machine >/dev/null
+# grep reads all of the log: with pipefail, grep -q stopping early can fail
+# the pipeline with SIGPIPE although the line is there.
+machine_ready() { docker logs "$NAME" 2>&1 | grep 'smoke machine ready' >/dev/null; }
 for _ in $(seq 60); do
-  docker logs "$NAME" 2>&1 | grep -q 'smoke machine ready' && break
+  machine_ready && break
   sleep 0.5
 done
-docker logs "$NAME" 2>&1 | grep -q 'smoke machine ready' || { docker logs "$NAME"; die "the smoke machine did not start"; }
+machine_ready || { docker logs "$NAME"; die "the smoke machine did not start"; }
 log "machine up on 127.0.0.1:$SSH_PORT (10.0.2.2:$SSH_PORT from the emulator)"
 
 # --- The emulator ------------------------------------------------------------

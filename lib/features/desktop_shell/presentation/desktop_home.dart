@@ -31,6 +31,7 @@ import 'package:conduit/features/desktop_shell/presentation/project_layout_contr
 import 'package:conduit/features/desktop_shell/presentation/shell_palette.dart';
 import 'package:conduit/features/desktop_shell/presentation/terminal_shell_embedding.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/layout_picker.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_layout_watch.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/project_sidebar.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_dashboard.dart';
