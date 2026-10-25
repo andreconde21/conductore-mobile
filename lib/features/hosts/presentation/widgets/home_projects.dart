@@ -10,6 +10,7 @@ import 'package:conduit/features/desktop_shell/domain/sheprd_view.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/project_layout_controller.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/project_layout_watch.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/project_view.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_state_dot.dart';
 import 'package:conduit/features/hosts/domain/home_search.dart';
@@ -131,76 +132,79 @@ class HomeProjectsList extends StatelessWidget {
   Widget build(BuildContext context) {
     unawaited(controller.refresh());
     final usage = UsageScope.maybeOf(context);
-    return ListenableBuilder(
-      listenable: Listenable.merge([controller, ?usage]),
-      builder: (context, _) {
-        final tree = _tree();
-        final projects = _groups(tree);
-        final search = this.search ?? HomeSearch.none;
-        final tokens = usage == null
-            ? const <String, int>{}
-            : controller.tokensToday(projects, usage.summary);
-        final names = {for (final node in tree) node.machineId: node.label};
-        final shown = [
-          for (final project in controller.visibleGroups(projects))
-            if (_projectRows(
-                  context,
-                  project,
-                  names,
-                  tokens[project.key],
-                  search,
-                )
-                case final rows?)
-              (project, rows),
-        ];
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Column(
-            key: const ValueKey('home-projects'),
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Its ⋮ sits at the right edge, under the section header's +
-              // (whose 48 dp button ends 6 dp from the screen edge, so its
-              // centre is 18 dp inside this list; the ⋮ glyph's centre is
-              // 10.5 dp inside the bar).
-              Padding(
-                padding: const EdgeInsets.only(right: 7.5),
-                child: ProjectViewBar(
-                  controller: controller,
-                  needsYou: ProjectLayoutController.needsYouCount(projects),
-                  onNeedsYou: () => _openFirstNeedingYou(projects),
-                  hiddenCount: projects.fold(
-                    0,
-                    (sum, project) =>
-                        sum + project.entries.where((e) => e.hidden).length,
-                  ),
-                ),
-              ),
-              if (shown.isEmpty)
+    return ProjectLayoutWatch(
+      controller: controller,
+      child: ListenableBuilder(
+        listenable: Listenable.merge([controller, ?usage]),
+        builder: (context, _) {
+          final tree = _tree();
+          final projects = _groups(tree);
+          final search = this.search ?? HomeSearch.none;
+          final tokens = usage == null
+              ? const <String, int>{}
+              : controller.tokensToday(projects, usage.summary);
+          final names = {for (final node in tree) node.machineId: node.label};
+          final shown = [
+            for (final project in controller.visibleGroups(projects))
+              if (_projectRows(
+                    context,
+                    project,
+                    names,
+                    tokens[project.key],
+                    search,
+                  )
+                  case final rows?)
+                (project, rows),
+          ];
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Column(
+              key: const ValueKey('home-projects'),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Its ⋮ sits at the right edge, under the section header's +
+                // (whose 48 dp button ends 6 dp from the screen edge, so its
+                // centre is 18 dp inside this list; the ⋮ glyph's centre is
+                // 10.5 dp inside the bar).
                 Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    key: const ValueKey('home-projects-empty'),
-                    !search.isEmpty
-                        ? 'No workspace matches the search.'
-                        : controller.activeOnly
-                        ? 'Nothing active in the last '
-                              '${controller.recentHours} h.'
-                        : 'No workspaces listed yet.',
-                    style: TextStyle(
-                      color: AppPalette.of(context).mutedForeground,
+                  padding: const EdgeInsets.only(right: 7.5),
+                  child: ProjectViewBar(
+                    controller: controller,
+                    needsYou: ProjectLayoutController.needsYouCount(projects),
+                    onNeedsYou: () => _openFirstNeedingYou(projects),
+                    hiddenCount: projects.fold(
+                      0,
+                      (sum, project) =>
+                          sum + project.entries.where((e) => e.hidden).length,
                     ),
                   ),
                 ),
-              for (final (project, rows) in shown)
-                _ProjectBox(
-                  key: ValueKey('home-project-box-${project.key}'),
-                  children: rows,
-                ),
-            ],
-          ),
-        );
-      },
+                if (shown.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      key: const ValueKey('home-projects-empty'),
+                      !search.isEmpty
+                          ? 'No workspace matches the search.'
+                          : controller.activeOnly
+                          ? 'Nothing active in the last '
+                                '${controller.recentHours} h.'
+                          : 'No workspaces listed yet.',
+                      style: TextStyle(
+                        color: AppPalette.of(context).mutedForeground,
+                      ),
+                    ),
+                  ),
+                for (final (project, rows) in shown)
+                  _ProjectBox(
+                    key: ValueKey('home-project-box-${project.key}'),
+                    children: rows,
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -369,6 +373,7 @@ class HomeProjectsList extends StatelessWidget {
     workspace: entry.node.label,
     projectName: project.name,
     machine: names[entry.node.machineId] ?? '',
+    sheprd: entry.sheprdOf(agent)?.row,
   );
 
   /// Opens [row]; with sheprd synced, an unread agent is read from then on

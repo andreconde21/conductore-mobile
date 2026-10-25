@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/desktop_shell/domain/project_layout.dart';
@@ -491,6 +492,42 @@ void main() {
     await settleShell(tester);
     expect(boxes.evaluate().length, all);
     expect(find.textContaining('Deploying images'), findsOneWidget);
+    await tearDownShell(tester);
+  });
+
+  testWidgets('Projects mode with Sync with sheprd names each agent row the '
+      "way sheprd's sidebar does", (tester) async {
+    final h = await pumpSearchHome(tester, mode: HomeMode.projects);
+    final layout = ProjectLayoutController.instance!;
+    await layout.setSheprdSync(true);
+    layout.applyViewReply(
+      workstation,
+      'noise\n${jsonEncode({
+        'ok': true,
+        'found': true,
+        'stale': false,
+        'view': {
+          'version': 1,
+          'updated': 1000,
+          'rows': 3,
+          'hub': 'workstation',
+          'self': 'local',
+          'layout': {'group': <Object>[]},
+          'agents': {
+            'local/w1:p2': {'presence': 'idle', 'state_seq': 1, 'title': 'Release checklist', 'active': true},
+            'local/w1:p1': {'presence': 'idle', 'state_seq': 1, 'title': 'Image pipeline', 'active': true},
+          },
+          'order': <String>[],
+        },
+      })}',
+    );
+    await settleShell(tester);
+    expect(layout.mirroring, isTrue);
+    // Both of Infrastructure's agents: sheprd's titles, not the pane's.
+    expect(find.textContaining('Release checklist'), findsOneWidget);
+    expect(find.textContaining('Image pipeline'), findsOneWidget);
+    expect(find.textContaining('Proofing PR 398'), findsNothing);
+    expect(h.workspace.sessions, isEmpty);
     await tearDownShell(tester);
   });
 

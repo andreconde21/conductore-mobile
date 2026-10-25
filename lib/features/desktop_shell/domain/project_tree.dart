@@ -349,6 +349,14 @@ abstract final class ProjectTreeBuilder {
   ) {
     String? paneOf(SidebarNode row) => switch (row.target) {
       AgentPaneTarget(:final pane) => pane.agent.pane ?? pane.agent.id,
+      // A tab with one agent is that agent's row (its pane has none).
+      HerdrTabTarget(:final workspace, :final tab) => switch ([
+        for (final pane in workspace.panes)
+          if (pane.agent.tab == tab.id) pane,
+      ]) {
+        [final pane] => pane.agent.pane ?? pane.agent.id,
+        _ => null,
+      },
       _ => null,
     };
     final panes = [

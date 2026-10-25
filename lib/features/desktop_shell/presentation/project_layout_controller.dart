@@ -14,6 +14,7 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/usage/domain/usage_summary.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 /// The companion capability behind `sidebar-layout`: sheprd's
 /// `~/.config/herdr/sidebar.toml`, read-only, as JSON.
@@ -1068,9 +1069,40 @@ class ProjectLayoutController extends ChangeNotifier {
     return result;
   }
 
+  /// Asks again every [syncEvery] while a project view shows ([watch]): a
+  /// rebuild alone is not enough, since a status poll that found nothing
+  /// new rebuilds nothing, and sheprd's edits (moves, names) never showed.
+  Timer? _ticker;
+  int _watchers = 0;
+
+  /// Keeps the machines' layouts and sheprd's view fresh until the returned
+  /// callback is called; only while the app is in the foreground.
+  VoidCallback watch() {
+    _watchers += 1;
+    if (!_disposed) {
+      _ticker ??= Timer.periodic(syncEvery, (_) {
+        final state = SchedulerBinding.instance.lifecycleState;
+        if (state == null || state == AppLifecycleState.resumed) {
+          unawaited(refresh());
+        }
+      });
+    }
+    var done = false;
+    return () {
+      if (done) return;
+      done = true;
+      _watchers -= 1;
+      if (_watchers > 0) return;
+      _ticker?.cancel();
+      _ticker = null;
+    };
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    _ticker?.cancel();
+    _ticker = null;
     for (final pending in _pending.values) {
       pending.timer.cancel();
     }
