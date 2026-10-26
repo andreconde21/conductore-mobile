@@ -1,11 +1,17 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:conduit/features/terminal/domain/host_key_mismatches.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:flutter/foundation.dart';
 
 class HostKeyPromptCoordinator extends ChangeNotifier implements HostKeyPrompt {
   final Queue<_PendingPrompt> _queue = Queue<_PendingPrompt>();
+
+  /// Changed keys that background work refused without asking; the home
+  /// page shows them on their machines for an explicit review. The app
+  /// hands the same store to its `SecureHostKeyVerifier`.
+  final HostKeyMismatches mismatches = HostKeyMismatches();
 
   HostKeyPromptRequest? get current =>
       _queue.isEmpty ? null : _queue.first.request;

@@ -36,8 +36,14 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## What's new
 
-Previews 30 to 37 (companion 1.8.4 bundled):
+Previews 30 to 38 (companion 1.8.4 bundled):
 
+- **Preview 38**: when a machine's host key changes, the machine now says
+  so on the home page ("Host key changed on …") with the trusted and the
+  presented fingerprint, instead of status and sync silently stopping.
+  **Review** opens the usual two-step check to replace the key or keep the
+  old one. Deleting a machine can also forget its trusted key (off by
+  default, and not while a key change is pending).
 - **Preview 37**: with **Sync with sheprd** on, the home Projects view
   names every agent the way sheprd's sidebar does, also an agent that is
   alone in its Herdr tab (it kept its pane title and missed sheprd's marks),
@@ -349,7 +355,15 @@ tmux.
 - Optional per-host SSH agent forwarding.
 - Host key trust you review and manage yourself, with SHA256
   fingerprints. A changed key is never trusted silently: you confirm the
-  new fingerprint in a second step.
+  new fingerprint in a second step. When background work (status, the
+  workspace list, sync) meets a changed key, it stops without asking and
+  the machine shows "Host key changed on …" with the trusted and the
+  presented fingerprint; Review opens that same two-step check, and only
+  Replace key pins the key you were shown. Keep old key changes nothing.
+  Deleting a machine also offers to forget its trusted key (unticked by
+  default) when no other saved machine uses that address; while the key
+  is flagged as changed it is kept, so re-adding the machine still asks
+  for the two-step review.
 - Works over Tailscale like any other network: point a host at its tailnet
   name or IP.
 - Plain connection errors: "Can't reach" (with a Tailscale hint for

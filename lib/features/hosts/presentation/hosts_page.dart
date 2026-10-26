@@ -658,6 +658,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                     widget.workspaceController,
                     widget.themeController,
                     widget.agentAttention,
+                    widget.promptCoordinator.mismatches,
                     ?boards,
                     ?ProjectLayoutController.instance,
                   ]),
@@ -743,6 +744,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               connectFlow: widget.connectFlow,
               sessionRestore: widget.sessionRestore,
               usageSummary: widget.usageSummary,
+              hostKeyMismatches: widget.promptCoordinator.mismatches,
               previewRefreshInterval: widget.previewRefreshInterval,
               terminalBuilder: (embedding) => TerminalPage(
                 workspace: widget.workspaceController,
@@ -1492,6 +1494,12 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           if (!openTmux.contains(tmux.name)) _OtherTmux(host, tmux),
       ];
       final reason = board.requestReason;
+      final keyChange = widget.promptCoordinator.mismatches.forEndpoint(
+        host.host,
+        host.port,
+      );
+      // A refused changed key needs a pin, so its machine is never a quiet
+      // never-connected one.
       final notice =
           quietWaiting &&
               reason == HomeBoardRequestReason.neverConnected &&
@@ -1501,6 +1509,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               state,
               requestReason: reason,
               hasOpenHerdrSession: hasOpenHerdrSession,
+              hostKeyChange: keyChange,
+              machine: host.name,
             );
       if (items.isEmpty && notice == null) continue;
       groups.add(_MachineGroup(host, items, notice));
@@ -1731,6 +1741,56 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         );
       case HomeBoardNoticeAction.openShell:
         unawaited(_openTarget(host, const ConnectTarget.shell()));
+      case HomeBoardNoticeAction.reviewHostKey:
+        unawaited(_reviewHostKeyChange(host));
+    }
+  }
+
+  /// Opens the changed-key review for [host]'s refused key: the same
+  /// two-step dialog a terminal shows. Only "Replace key" there pins the
+  /// key, and only the exact key the notice and the dialog showed; Reject
+  /// or Keep old key leave the pin and the notice as they are.
+  Future<void> _reviewHostKeyChange(SavedHost host) async {
+    final mismatches = widget.promptCoordinator.mismatches;
+    final change = mismatches.forEndpoint(host.host, host.port);
+    if (change == null) return;
+    final decision = await showHostKeyPromptDialog(
+      context: context,
+      request: HostKeyPromptRequest(
+        host: change.host,
+        port: change.port,
+        type: change.type,
+        fingerprint: change.fingerprint,
+        sha256Fingerprint: change.sha256Fingerprint,
+        kind: HostKeyPromptKind.mismatch,
+        existing: change.pinned,
+      ),
+    );
+    if (decision != HostKeyDecision.trust) return;
+    final replaced = await mismatches.acceptReviewed(
+      change,
+      widget.hostKeyVerifier,
+    );
+    if (!mounted) return;
+    if (!replaced) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nothing was replaced: the key or its trusted copy changed '
+            'while you were reviewing it. Check the machine again.',
+          ),
+        ),
+      );
+      return;
+    }
+    // Reconnect now instead of on the next (backed-off, maybe stopped)
+    // poll, on every machine saved with this address.
+    for (final other in widget.hostsController.hosts) {
+      if (other.host.trim() != change.host || other.port != change.port) {
+        continue;
+      }
+      final board = _boards?[other.id];
+      if (board != null) unawaited(board.refresh());
     }
   }
 
@@ -2508,28 +2568,108 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   Future<void> _confirmDelete(SavedHost host) async {
+    // The trusted host key outlives the machine unless it goes too: offer
+    // that when no other saved machine uses the same address.
+    final address = host.host.trim();
+    final shared = widget.hostsController.hosts.any(
+      (other) =>
+          other.id != host.id &&
+          other.host.trim() == address &&
+          other.port == host.port,
+    );
+    var hasPinnedKey = false;
+    if (!shared && !host.isThisComputer) {
+      try {
+        final records = await widget.hostKeyVerifier.loadTrustedKeys();
+        hasPinnedKey = records.any((r) => r.key == '$address:${host.port}');
+      } catch (_) {
+        // Unreadable key store: just delete the machine.
+      }
+    }
+    // A key that changed under this machine stays pinned: forgetting it
+    // here would turn re-adding the machine into a one-tap first trust of
+    // whatever key it presents now.
+    final keyChanged =
+        hasPinnedKey &&
+        widget.promptCoordinator.mismatches.forEndpoint(address, host.port) !=
+            null;
+    if (!mounted) return;
+    var forgetKey = false;
     final shouldDelete = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete machine?'),
-        content: Text('Conductore will forget “${host.name}”.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Delete machine?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Conductore will forget “${host.name}”.'),
+              if (keyChanged)
+                Padding(
+                  key: const ValueKey('delete-machine-key-kept'),
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Its trusted host key ($address:${host.port}) stays: '
+                    'the machine presented a different key. Review it from '
+                    "the machine's notice or in Settings › Trusted host "
+                    'keys.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              else if (hasPinnedKey)
+                CheckboxListTile(
+                  key: const ValueKey('delete-machine-forget-key'),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: forgetKey,
+                  onChanged: (value) =>
+                      setDialogState(() => forgetKey = value ?? false),
+                  title: Text(
+                    'Also forget its trusted host key '
+                    '($address:${host.port})',
+                  ),
+                ),
+            ],
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
             ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
       ),
     );
     if (shouldDelete ?? false) {
       await widget.hostsController.remove(host);
+      if (hasPinnedKey && !keyChanged && forgetKey) {
+        try {
+          await widget.hostKeyVerifier.removeTrustedKey(address, host.port);
+          if (mounted) unawaited(_loadTrustedEndpoints());
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'The machine was deleted, but its trusted host key could '
+                  'not be forgotten. Remove it in Settings › Trusted host '
+                  'keys.',
+                ),
+              ),
+            );
+          }
+        }
+      }
       final keys = _preferences.machineFilter;
       if (keys.contains(host.id) && mounted) {
         _setFilter(MachineFilter({...keys}..remove(host.id)));

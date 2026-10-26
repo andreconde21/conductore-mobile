@@ -186,6 +186,8 @@ void main() {
   final hostKeyVerifier = SecureHostKeyVerifier(
     secureStorage,
     promptCoordinator,
+    // Refused changed keys show on their machine on the home page.
+    mismatches: promptCoordinator.mismatches,
   );
   final localShellController = LocalShellController();
   // Commands, files and port forwards per machine: SSH, or the desktop
