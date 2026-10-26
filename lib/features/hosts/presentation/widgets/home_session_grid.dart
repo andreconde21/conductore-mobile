@@ -9,6 +9,7 @@ import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sessions/presentation/live_terminal_preview.dart';
 import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
+import 'package:conduit/features/terminal/domain/host_key_mismatches.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -1222,6 +1223,9 @@ enum HomeBoardNoticeAction {
 
   /// Open a plain shell.
   openShell,
+
+  /// Review a changed host key that background work refused.
+  reviewHostKey,
 }
 
 /// One compact notice about the board, with the action that resolves it.
@@ -1235,11 +1239,20 @@ class HomeBoardNotice {
     this.actionLabel,
     this.action,
     this.busy = false,
+    this.fields = const [],
+    this.warning = false,
   });
 
   final IconData icon;
   final String title;
   final String message;
+
+  /// Labelled values shown in full under the message (fingerprints).
+  final List<(String, String)> fields;
+
+  /// Something may be wrong with the connection itself: the icon is drawn
+  /// in the error colour.
+  final bool warning;
 
   /// The technical reason, shown behind "Details".
   final String? detail;
@@ -1249,16 +1262,50 @@ class HomeBoardNotice {
   /// A fetch is running (spinner instead of an icon).
   final bool busy;
 
+  /// A changed host key, refused without asking, for [machine]: both
+  /// fingerprints (SHA256 as OpenSSH prints it, MD5 when that is all
+  /// there is) and a Review action that opens the two-step replacement
+  /// dialog.
+  factory HomeBoardNotice.hostKeyChanged(
+    HostKeyMismatch change, {
+    String machine = '',
+  }) {
+    final name = machine.trim().isEmpty ? change.endpoint : machine.trim();
+    return HomeBoardNotice(
+      icon: Icons.gpp_maybe_outlined,
+      warning: true,
+      title: 'Host key changed on $name',
+      message:
+          '${change.endpoint} presented a different key than the one you '
+          'trusted, so Conductore stopped connecting to it. Tap Review to '
+          'compare the keys and decide.',
+      fields: [
+        ('Trusted', change.pinnedFingerprint),
+        ('Presented now', change.shownFingerprint),
+      ],
+      actionLabel: 'Review',
+      action: HomeBoardNoticeAction.reviewHostKey,
+    );
+  }
+
   /// The notice for a machine's [state], or null when there is nothing to
   /// say (workspaces or tmux sessions are listed, a local machine).
   ///
   /// A machine with tmux but no Herdr is a normal machine: Herdr being
   /// absent (or stopped, while tmux sessions exist) is not worth a notice.
+  ///
+  /// A [hostKeyChange] refused for the machine (named [machine]) wins over
+  /// everything else: it is why the machine stopped answering.
   static HomeBoardNotice? of(
     HomeBoardState state, {
     HomeBoardRequestReason? requestReason,
     bool hasOpenHerdrSession = false,
+    HostKeyMismatch? hostKeyChange,
+    String machine = '',
   }) {
+    if (hostKeyChange != null) {
+      return HomeBoardNotice.hostKeyChanged(hostKeyChange, machine: machine);
+    }
     switch (state.phase) {
       case HomeBoardPhase.idle:
         return null;
@@ -1440,7 +1487,9 @@ class _HomeBoardNoticeTileState extends State<HomeBoardNoticeTile> {
                 : Icon(
                     notice.icon,
                     size: 20,
-                    color: Theme.of(context).colorScheme.primary,
+                    color: notice.warning
+                        ? Theme.of(context).colorScheme.error
+                        : Theme.of(context).colorScheme.primary,
                   ),
           ),
           const SizedBox(width: 10),
@@ -1465,6 +1514,26 @@ class _HomeBoardNoticeTileState extends State<HomeBoardNoticeTile> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: muted, fontSize: 12, height: 1.25),
                 ),
+                for (final (label, value) in notice.fields) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  SelectableText(
+                    value,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 11,
+                      height: 1.25,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
                 if (detail != null) ...[
                   const SizedBox(height: 2),
                   InkWell(

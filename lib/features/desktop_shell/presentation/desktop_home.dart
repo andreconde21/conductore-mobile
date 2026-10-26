@@ -56,6 +56,7 @@ import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
 import 'package:conduit/features/settings/presentation/privacy_notice.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
+import 'package:conduit/features/terminal/domain/host_key_mismatches.dart';
 import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -144,6 +145,7 @@ class DesktopHome extends StatefulWidget {
     this.sessionRestore,
     this.usageSummary,
     this.projectLayout,
+    this.hostKeyMismatches,
     this.previewRefreshInterval = const Duration(seconds: 2),
     super.key,
   });
@@ -169,6 +171,10 @@ class DesktopHome extends StatefulWidget {
   /// ([ProjectLayoutController.instance]), and without one the Projects
   /// tab groups by what agents report, as before.
   final ProjectLayoutController? projectLayout;
+
+  /// Changed host keys refused in the background; each shows as its
+  /// machine's notice on the dashboard.
+  final HostKeyMismatches? hostKeyMismatches;
 
   /// How often the dashboard's live previews redraw while it is shown.
   final Duration previewRefreshInterval;
@@ -221,6 +227,10 @@ class DesktopHomeState extends State<DesktopHome> {
   );
 
   void _handleProjectFilesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleHostKeyMismatchesChanged() {
     if (mounted) setState(() {});
   }
 
@@ -281,6 +291,7 @@ class DesktopHomeState extends State<DesktopHome> {
     widget.workspace.addListener(_handleWorkspaceChanged);
     widget.agentAttention.addListener(_rebuildTree);
     widget.boards?.addListener(_rebuildTree);
+    widget.hostKeyMismatches?.addListener(_handleHostKeyMismatchesChanged);
     _projectLayout?.addListener(_rebuildTree);
     _controller.addListener(_handleControllerChanged);
     _controller.layout.addListener(_syncViewed);
@@ -368,6 +379,12 @@ class DesktopHomeState extends State<DesktopHome> {
       widget.boards?.addListener(_rebuildTree);
       _rebuildTree();
     }
+    if (oldWidget.hostKeyMismatches != widget.hostKeyMismatches) {
+      oldWidget.hostKeyMismatches?.removeListener(
+        _handleHostKeyMismatchesChanged,
+      );
+      widget.hostKeyMismatches?.addListener(_handleHostKeyMismatchesChanged);
+    }
     final oldLayout =
         oldWidget.projectLayout ?? ProjectLayoutController.instance;
     if (oldLayout != _projectLayout) {
@@ -387,6 +404,7 @@ class DesktopHomeState extends State<DesktopHome> {
     widget.workspace.removeListener(_handleWorkspaceChanged);
     widget.agentAttention.removeListener(_rebuildTree);
     widget.boards?.removeListener(_rebuildTree);
+    widget.hostKeyMismatches?.removeListener(_handleHostKeyMismatchesChanged);
     _projectLayout?.removeListener(_rebuildTree);
     _controller.removeListener(_handleControllerChanged);
     _controller.layout.removeListener(_syncViewed);
@@ -1629,14 +1647,21 @@ class DesktopHomeState extends State<DesktopHome> {
       HomeBoardNotice? notice;
       if (board != null) {
         final reason = board.requestReason;
+        final keyChange = widget.hostKeyMismatches?.forEndpoint(
+          host.host,
+          host.port,
+        );
         notice =
-            quietWaiting &&
+            keyChange == null &&
+                quietWaiting &&
                 reason == HomeBoardRequestReason.neverConnected &&
                 board.state.phase == HomeBoardPhase.awaitingRequest
             ? null
             : HomeBoardNotice.of(
                 board.state,
                 requestReason: reason,
+                hostKeyChange: keyChange,
+                machine: host.name,
                 hasOpenHerdrSession: machine.children.any(
                   (node) =>
                       node.openInApp &&
