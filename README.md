@@ -354,8 +354,10 @@ tmux.
   the machine shows "Host key changed on …" with the trusted and the
   presented fingerprint; Review opens that same two-step check, and only
   Replace key pins the key you were shown. Keep old key changes nothing.
-  Deleting a machine also offers to forget its trusted key, when no other
-  saved machine uses that address.
+  Deleting a machine also offers to forget its trusted key (unticked by
+  default) when no other saved machine uses that address; while the key
+  is flagged as changed it is kept, so re-adding the machine still asks
+  for the two-step review.
 - Works over Tailscale like any other network: point a host at its tailnet
   name or IP.
 - Plain connection errors: "Can't reach" (with a Tailscale hint for

@@ -227,22 +227,28 @@ void main() {
         expect(verifier.mismatches.all, isEmpty);
       });
 
-      test('the interactive path still prompts, and replacing clears', () async {
-        final prompt = CapturingPrompt(decision: HostKeyDecision.trust);
-        final verifier = await pinned(prompt);
-        await background(verifier, 'MD5:bb');
-        expect(verifier.mismatches.forEndpoint('a', 22), isNotNull);
+      test(
+        'the interactive path still prompts, and replacing clears',
+        () async {
+          final prompt = CapturingPrompt(decision: HostKeyDecision.trust);
+          final verifier = await pinned(prompt);
+          await background(verifier, 'MD5:bb');
+          expect(verifier.mismatches.forEndpoint('a', 22), isNotNull);
 
-        final ok = await withInteractiveHostKeyCheck(
-          () => background(verifier, 'MD5:bb'),
-        );
+          final ok = await withInteractiveHostKeyCheck(
+            () => background(verifier, 'MD5:bb'),
+          );
 
-        expect(ok, isTrue);
-        expect(prompt.requests.single.kind, HostKeyPromptKind.mismatch);
-        expect(prompt.requests.single.existing!.fingerprint, 'MD5:aa');
-        expect(verifier.mismatches.all, isEmpty);
-        expect((await verifier.loadTrustedKeys()).single.fingerprint, 'MD5:bb');
-      });
+          expect(ok, isTrue);
+          expect(prompt.requests.single.kind, HostKeyPromptKind.mismatch);
+          expect(prompt.requests.single.existing!.fingerprint, 'MD5:aa');
+          expect(verifier.mismatches.all, isEmpty);
+          expect(
+            (await verifier.loadTrustedKeys()).single.fingerprint,
+            'MD5:bb',
+          );
+        },
+      );
 
       test('a matching key again clears the record', () async {
         final verifier = await pinned(
@@ -300,6 +306,38 @@ void main() {
         expect(record.sha256Fingerprint, _sha256);
         expect(verifier.mismatches.all, isEmpty);
         expect(await background(verifier, _md5), isTrue);
+      });
+
+      test('a pin changed elsewhere during the review is kept', () async {
+        final verifier = await pinned(
+          StubPrompt(decision: HostKeyDecision.trust),
+        );
+        await background(verifier, 'MD5:bb');
+        final reviewed = verifier.mismatches.forEndpoint('a', 22)!;
+        // Sync or a restore pins another key while the dialog is open,
+        // bypassing saveTrustedKeys' cleanup (as a second store would).
+        final storage = InMemorySecureStorage();
+        final other = SecureHostKeyVerifier(
+          storage,
+          StubPrompt(decision: HostKeyDecision.reject),
+        );
+        await other.saveTrustedKeys([
+          HostKeyRecord(
+            host: 'a',
+            port: 22,
+            type: 'ssh-ed25519',
+            fingerprint: 'MD5:synced',
+            trustedAt: DateTime(2026),
+          ),
+        ]);
+        other.mismatches.record(reviewed);
+
+        expect(await other.mismatches.acceptReviewed(reviewed, other), isFalse);
+        expect(
+          (await other.loadTrustedKeys()).single.fingerprint,
+          'MD5:synced',
+        );
+        expect(other.mismatches.all, isEmpty);
       });
 
       test('a key that changed again after the review is not pinned', () async {

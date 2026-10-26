@@ -1651,9 +1651,10 @@ class DesktopHomeState extends State<DesktopHome> {
           host.host,
           host.port,
         );
+        // A refused changed key needs a pin, so its machine is never a
+        // quiet never-connected one.
         notice =
-            keyChange == null &&
-                quietWaiting &&
+            quietWaiting &&
                 reason == HomeBoardRequestReason.neverConnected &&
                 board.state.phase == HomeBoardPhase.awaitingRequest
             ? null

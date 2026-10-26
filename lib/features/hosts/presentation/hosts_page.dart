@@ -1498,9 +1498,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         host.host,
         host.port,
       );
+      // A refused changed key needs a pin, so its machine is never a quiet
+      // never-connected one.
       final notice =
-          keyChange == null &&
-              quietWaiting &&
+          quietWaiting &&
               reason == HomeBoardRequestReason.neverConnected &&
               state.phase == HomeBoardPhase.awaitingRequest
           ? null
@@ -2585,8 +2586,15 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         // Unreadable key store: just delete the machine.
       }
     }
+    // A key that changed under this machine stays pinned: forgetting it
+    // here would turn re-adding the machine into a one-tap first trust of
+    // whatever key it presents now.
+    final keyChanged =
+        hasPinnedKey &&
+        widget.promptCoordinator.mismatches.forEndpoint(address, host.port) !=
+            null;
     if (!mounted) return;
-    var forgetKey = true;
+    var forgetKey = false;
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -2597,7 +2605,21 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Conductore will forget “${host.name}”.'),
-              if (hasPinnedKey)
+              if (keyChanged)
+                Padding(
+                  key: const ValueKey('delete-machine-key-kept'),
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Its trusted host key ($address:${host.port}) stays: '
+                    'the machine presented a different key. Review it from '
+                    "the machine's notice or in Settings › Trusted host "
+                    'keys.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              else if (hasPinnedKey)
                 CheckboxListTile(
                   key: const ValueKey('delete-machine-forget-key'),
                   contentPadding: EdgeInsets.zero,
@@ -2630,9 +2652,23 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     );
     if (shouldDelete ?? false) {
       await widget.hostsController.remove(host);
-      if (hasPinnedKey && forgetKey) {
-        await widget.hostKeyVerifier.removeTrustedKey(address, host.port);
-        if (mounted) unawaited(_loadTrustedEndpoints());
+      if (hasPinnedKey && !keyChanged && forgetKey) {
+        try {
+          await widget.hostKeyVerifier.removeTrustedKey(address, host.port);
+          if (mounted) unawaited(_loadTrustedEndpoints());
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'The machine was deleted, but its trusted host key could '
+                  'not be forgotten. Remove it in Settings › Trusted host '
+                  'keys.',
+                ),
+              ),
+            );
+          }
+        }
       }
       final keys = _preferences.machineFilter;
       if (keys.contains(host.id) && mounted) {

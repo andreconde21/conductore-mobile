@@ -740,7 +740,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('forgets the key too, by default', (tester) async {
+    testWidgets('keeps the key by default', (tester) async {
       final verifier = await pinnedVerifier();
       await pumpHome(tester, hosts: [host('a')], hostKeyVerifier: verifier);
       await openDelete(tester, 'a');
@@ -749,17 +749,67 @@ void main() {
         findsOneWidget,
       );
       await confirm(tester);
-      expect(await verifier.loadTrustedKeys(), isEmpty);
+      expect(await verifier.loadTrustedKeys(), hasLength(1));
     });
 
-    testWidgets('keeps the key when unticked', (tester) async {
+    testWidgets('forgets the key only when ticked', (tester) async {
       final verifier = await pinnedVerifier();
       await pumpHome(tester, hosts: [host('a')], hostKeyVerifier: verifier);
       await openDelete(tester, 'a');
       await tester.tap(find.byKey(const ValueKey('delete-machine-forget-key')));
       await tester.pumpAndSettle();
       await confirm(tester);
-      expect(await verifier.loadTrustedKeys(), hasLength(1));
+      expect(await verifier.loadTrustedKeys(), isEmpty);
+    });
+
+    testWidgets('a changed key is kept, with no box to forget it', (
+      tester,
+    ) async {
+      final coordinator = HostKeyPromptCoordinator();
+      final verifier = SecureHostKeyVerifier(
+        InMemorySecureStorage(),
+        coordinator,
+        mismatches: coordinator.mismatches,
+      );
+      await verifier.saveTrustedKeys(
+        await (await pinnedVerifier()).loadTrustedKeys(),
+      );
+      await verifier.verify(
+        host: '192.168.1.1',
+        port: 22,
+        type: 'ssh-ed25519',
+        fingerprint: 'MD5:mitm',
+      );
+      await pumpHome(
+        tester,
+        hosts: [host('a')],
+        hostKeyVerifier: verifier,
+        promptCoordinator: coordinator,
+      );
+      await openDelete(tester, 'a');
+      expect(
+        find.byKey(const ValueKey('delete-machine-forget-key')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('delete-machine-key-kept')),
+        findsOneWidget,
+      );
+      await confirm(tester);
+      expect((await verifier.loadTrustedKeys()).single.fingerprint, 'MD5:aa');
+    });
+
+    testWidgets('a key that cannot be forgotten still deletes the machine', (
+      tester,
+    ) async {
+      final verifier = _FailingRemoveVerifier('192.168.1.1', 22);
+      await pumpHome(tester, hosts: [host('a')], hostKeyVerifier: verifier);
+      await openDelete(tester, 'a');
+      await tester.tap(find.byKey(const ValueKey('delete-machine-forget-key')));
+      await tester.pumpAndSettle();
+      await confirm(tester);
+      expect(find.textContaining('could not be forgotten'), findsOneWidget);
+      expect(find.text('Host a'), findsNothing);
     });
 
     testWidgets('does not offer it while another machine uses the address', (
@@ -1099,4 +1149,12 @@ class _TrustedVerifier extends NoopVerifier {
       trustedAt: DateTime.utc(2026),
     ),
   ];
+}
+
+class _FailingRemoveVerifier extends _TrustedVerifier {
+  _FailingRemoveVerifier(super.host, super.port);
+
+  @override
+  Future<void> removeTrustedKey(String host, int port) async =>
+      throw StateError('storage locked');
 }
