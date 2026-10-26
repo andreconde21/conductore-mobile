@@ -36,8 +36,14 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## What's new
 
-Previews 30 to 37 (companion 1.8.4 bundled):
+Previews 30 to 38 (companion 1.8.4 bundled):
 
+- **Preview 38**: when a machine's host key changes, the machine now says
+  so on the home page ("Host key changed on …") with the trusted and the
+  presented fingerprint, instead of status and sync silently stopping.
+  **Review** opens the usual two-step check to replace the key or keep the
+  old one. Deleting a machine can also forget its trusted key (off by
+  default, and not while a key change is pending).
 - **Preview 37**: with **Sync with sheprd** on, the home Projects view
   names every agent the way sheprd's sidebar does, also an agent that is
   alone in its Herdr tab (it kept its pane title and missed sheprd's marks),
