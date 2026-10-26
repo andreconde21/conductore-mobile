@@ -14,6 +14,8 @@ import 'package:conduit/features/local_shell/presentation/local_shell_controller
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/terminal/data/secure_host_key_verifier.dart';
+import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
@@ -45,6 +47,7 @@ void main() {
     List<SavedHost> hosts = const [],
     bool withConnectFlow = false,
     HostKeyVerifier? hostKeyVerifier,
+    HostKeyPromptCoordinator? promptCoordinator,
     Map<String, HerdrFakeRunner> runners = const {},
   }) async {
     tester.view.physicalSize = const Size(1080, 2400);
@@ -93,7 +96,7 @@ void main() {
           localShellController: LocalShellController(),
           themeController: themeController,
           hostKeyVerifier: verifier,
-          promptCoordinator: HostKeyPromptCoordinator(),
+          promptCoordinator: promptCoordinator ?? HostKeyPromptCoordinator(),
           sftpRepository: NoNetworkSftpRepository(),
           sftpBookmarksRepository: InMemorySftpBookmarks(),
           agentAttention: agentAttention,
@@ -595,6 +598,187 @@ void main() {
     await tester.pump();
     expect(find.byType(HomeBoardNoticeTile), findsNothing);
     expect(dormant('w1'), findsOneWidget);
+  });
+
+  group('a changed host key refused in the background (CON-124)', () {
+    const oldSha = 'SHA256:oldOldOldOldOldOldOldOldOldOldOldOldOldOld';
+    late HostKeyPromptCoordinator coordinator;
+    late SecureHostKeyVerifier verifier;
+
+    Future<void> refuseChangedKey() async {
+      coordinator = HostKeyPromptCoordinator();
+      verifier = SecureHostKeyVerifier(
+        InMemorySecureStorage(),
+        coordinator,
+        mismatches: coordinator.mismatches,
+      );
+      await verifier.saveTrustedKeys([
+        HostKeyRecord(
+          host: '192.168.1.1',
+          port: 22,
+          type: 'ssh-ed25519',
+          fingerprint: 'MD5:aa',
+          sha256Fingerprint: oldSha,
+          trustedAt: DateTime.utc(2026),
+        ),
+      ]);
+      // A status poll meets the new key: refused, no prompt.
+      expect(
+        await verifier.verify(
+          host: '192.168.1.1',
+          port: 22,
+          type: 'ssh-ed25519',
+          fingerprint: 'MD5:bb',
+        ),
+        isFalse,
+      );
+      expect(coordinator.current, isNull);
+      runner.error = const ConnectionFailure(
+        'Hostkey verification failed.',
+        'SSHHostkeyError: Hostkey verification failed',
+        kind: ConnectionProblemKind.hostKey,
+      );
+    }
+
+    Future<void> openReview(WidgetTester tester) async {
+      await pumpHome(
+        tester,
+        hosts: [host('a')],
+        hostKeyVerifier: verifier,
+        promptCoordinator: coordinator,
+      );
+      expect(find.text('Host key changed on Host a'), findsOneWidget);
+      // Both keys, in full: the pinned SHA256, the new key's MD5 (its
+      // SHA256 was not captured here).
+      expect(find.text(oldSha), findsOneWidget);
+      expect(find.text('MD5:bb'), findsOneWidget);
+      expect(find.text('Sign-in to Host a failed'), findsNothing);
+
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Host key changed'), findsOneWidget);
+    }
+
+    Future<String> pinned() async =>
+        (await verifier.loadTrustedKeys()).single.fingerprint;
+
+    testWidgets('Replace key pins the reviewed key and lists again', (
+      tester,
+    ) async {
+      await refuseChangedKey();
+      await openReview(tester);
+
+      await tester.tap(find.text('Review replacement…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('host-key-confirm-checked')));
+      await tester.pumpAndSettle();
+      runner.error = null;
+      await tester.tap(find.text('Replace key'));
+      await tester.pumpAndSettle();
+
+      expect(await pinned(), 'MD5:bb');
+      expect(coordinator.mismatches.all, isEmpty);
+      expect(find.text('Host key changed on Host a'), findsNothing);
+      expect(dormant('w1'), findsOneWidget);
+    });
+
+    testWidgets('Keep old key leaves the pin and the notice', (tester) async {
+      await refuseChangedKey();
+      await openReview(tester);
+
+      await tester.tap(find.text('Review replacement…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep old key'));
+      await tester.pumpAndSettle();
+
+      expect(await pinned(), 'MD5:aa');
+      expect(find.text('Host key changed on Host a'), findsOneWidget);
+
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reject'));
+      await tester.pumpAndSettle();
+      expect(await pinned(), 'MD5:aa');
+    });
+  });
+
+  group('deleting a machine with a trusted host key', () {
+    Future<SecureHostKeyVerifier> pinnedVerifier() async {
+      final verifier = SecureHostKeyVerifier(
+        InMemorySecureStorage(),
+        StubPrompt(decision: HostKeyDecision.reject),
+      );
+      await verifier.saveTrustedKeys([
+        HostKeyRecord(
+          host: '192.168.1.1',
+          port: 22,
+          type: 'ssh-ed25519',
+          fingerprint: 'MD5:aa',
+          trustedAt: DateTime.utc(2026),
+        ),
+      ]);
+      return verifier;
+    }
+
+    Future<void> openDelete(WidgetTester tester, String id) async {
+      await tester.tap(find.byKey(const ValueKey('machine-chip')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey('machine-menu-$id')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete machine?'), findsOneWidget);
+    }
+
+    Future<void> confirm(WidgetTester tester) async {
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Delete'),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('forgets the key too, by default', (tester) async {
+      final verifier = await pinnedVerifier();
+      await pumpHome(tester, hosts: [host('a')], hostKeyVerifier: verifier);
+      await openDelete(tester, 'a');
+      expect(
+        find.byKey(const ValueKey('delete-machine-forget-key')),
+        findsOneWidget,
+      );
+      await confirm(tester);
+      expect(await verifier.loadTrustedKeys(), isEmpty);
+    });
+
+    testWidgets('keeps the key when unticked', (tester) async {
+      final verifier = await pinnedVerifier();
+      await pumpHome(tester, hosts: [host('a')], hostKeyVerifier: verifier);
+      await openDelete(tester, 'a');
+      await tester.tap(find.byKey(const ValueKey('delete-machine-forget-key')));
+      await tester.pumpAndSettle();
+      await confirm(tester);
+      expect(await verifier.loadTrustedKeys(), hasLength(1));
+    });
+
+    testWidgets('does not offer it while another machine uses the address', (
+      tester,
+    ) async {
+      final verifier = await pinnedVerifier();
+      await pumpHome(
+        tester,
+        hosts: [host('a'), host('b')],
+        hostKeyVerifier: verifier,
+      );
+      await openDelete(tester, 'a');
+      expect(
+        find.byKey(const ValueKey('delete-machine-forget-key')),
+        findsNothing,
+      );
+      await confirm(tester);
+      expect(await verifier.loadTrustedKeys(), hasLength(1));
+    });
   });
 
   testWidgets('each machine row in the sheet has the machine menu', (
