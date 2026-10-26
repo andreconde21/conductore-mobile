@@ -174,6 +174,155 @@ void main() {
       expect(prompt.requests.single.sha256Fingerprint, _sha256);
     });
 
+    group('refused changed keys (CON-124)', () {
+      Future<bool> background(
+        SecureHostKeyVerifier verifier,
+        String md5, {
+        String host = 'a',
+      }) => verifier.verify(
+        host: host,
+        port: 22,
+        type: 'ssh-ed25519',
+        fingerprint: md5,
+      );
+
+      test('background refusal records the old and new keys', () async {
+        HostKeyCapture().add(_serverHandshake());
+        final prompt = StubPrompt(decision: HostKeyDecision.trust);
+        final verifier = await pinned(prompt, sha256: 'SHA256:old');
+        var notified = 0;
+        verifier.mismatches.addListener(() => notified++);
+
+        expect(await background(verifier, _md5), isFalse);
+
+        expect(prompt.calls, 0);
+        final mismatch = verifier.mismatches.forEndpoint('a', 22)!;
+        expect(mismatch.fingerprint, _md5);
+        expect(mismatch.sha256Fingerprint, _sha256);
+        expect(mismatch.type, 'ssh-ed25519');
+        expect(mismatch.pinned.fingerprint, 'MD5:aa');
+        expect(mismatch.pinned.sha256Fingerprint, 'SHA256:old');
+        expect(mismatch.shownFingerprint, _sha256);
+        expect(mismatch.pinnedFingerprint, 'SHA256:old');
+        // The pin is untouched.
+        expect((await verifier.loadTrustedKeys()).single.fingerprint, 'MD5:aa');
+
+        // The same key again changes nothing; another key replaces it.
+        expect(await background(verifier, _md5), isFalse);
+        expect(notified, 1);
+        expect(await background(verifier, 'MD5:zz'), isFalse);
+        expect(notified, 2);
+        final latest = verifier.mismatches.forEndpoint('a', 22)!;
+        expect(latest.fingerprint, 'MD5:zz');
+        expect(latest.sha256Fingerprint, isNull);
+        expect(latest.shownFingerprint, 'MD5:zz');
+      });
+
+      test('a first key in background is not a mismatch', () async {
+        final verifier = SecureHostKeyVerifier(
+          InMemorySecureStorage(),
+          StubPrompt(decision: HostKeyDecision.reject),
+        );
+        expect(await background(verifier, 'MD5:cc', host: 'new'), isFalse);
+        expect(verifier.mismatches.all, isEmpty);
+      });
+
+      test('the interactive path still prompts, and replacing clears', () async {
+        final prompt = CapturingPrompt(decision: HostKeyDecision.trust);
+        final verifier = await pinned(prompt);
+        await background(verifier, 'MD5:bb');
+        expect(verifier.mismatches.forEndpoint('a', 22), isNotNull);
+
+        final ok = await withInteractiveHostKeyCheck(
+          () => background(verifier, 'MD5:bb'),
+        );
+
+        expect(ok, isTrue);
+        expect(prompt.requests.single.kind, HostKeyPromptKind.mismatch);
+        expect(prompt.requests.single.existing!.fingerprint, 'MD5:aa');
+        expect(verifier.mismatches.all, isEmpty);
+        expect((await verifier.loadTrustedKeys()).single.fingerprint, 'MD5:bb');
+      });
+
+      test('a matching key again clears the record', () async {
+        final verifier = await pinned(
+          StubPrompt(decision: HostKeyDecision.reject),
+        );
+        await background(verifier, 'MD5:bb');
+        expect(await background(verifier, 'MD5:aa'), isTrue);
+        expect(verifier.mismatches.all, isEmpty);
+      });
+
+      test('forgetting the pin clears the record', () async {
+        final verifier = await pinned(
+          StubPrompt(decision: HostKeyDecision.reject),
+        );
+        await background(verifier, 'MD5:bb');
+        await verifier.removeTrustedKey('a', 22);
+        expect(verifier.mismatches.all, isEmpty);
+      });
+
+      test('a pin replaced by a restore or sync clears the record', () async {
+        final verifier = await pinned(
+          StubPrompt(decision: HostKeyDecision.reject),
+        );
+        await background(verifier, 'MD5:bb');
+        // Saving the same pin keeps it.
+        await verifier.saveTrustedKeys(await verifier.loadTrustedKeys());
+        expect(verifier.mismatches.all, hasLength(1));
+        await verifier.saveTrustedKeys([
+          HostKeyRecord(
+            host: 'a',
+            port: 22,
+            type: 'ssh-ed25519',
+            fingerprint: 'MD5:restored',
+            trustedAt: DateTime(2026),
+          ),
+        ]);
+        expect(verifier.mismatches.all, isEmpty);
+      });
+
+      test('accepting the reviewed record pins exactly that key', () async {
+        HostKeyCapture().add(_serverHandshake());
+        final verifier = await pinned(
+          StubPrompt(decision: HostKeyDecision.trust),
+        );
+        await background(verifier, _md5);
+        final reviewed = verifier.mismatches.forEndpoint('a', 22)!;
+
+        expect(
+          await verifier.mismatches.acceptReviewed(reviewed, verifier),
+          isTrue,
+        );
+
+        final record = (await verifier.loadTrustedKeys()).single;
+        expect(record.fingerprint, _md5);
+        expect(record.sha256Fingerprint, _sha256);
+        expect(verifier.mismatches.all, isEmpty);
+        expect(await background(verifier, _md5), isTrue);
+      });
+
+      test('a key that changed again after the review is not pinned', () async {
+        final verifier = await pinned(
+          StubPrompt(decision: HostKeyDecision.trust),
+        );
+        await background(verifier, 'MD5:bb');
+        final reviewed = verifier.mismatches.forEndpoint('a', 22)!;
+        // An attacker shows a different key while the dialog is open.
+        await background(verifier, 'MD5:evil');
+
+        expect(
+          await verifier.mismatches.acceptReviewed(reviewed, verifier),
+          isFalse,
+        );
+        expect((await verifier.loadTrustedKeys()).single.fingerprint, 'MD5:aa');
+        expect(
+          verifier.mismatches.forEndpoint('a', 22)!.fingerprint,
+          'MD5:evil',
+        );
+      });
+    });
+
     test('a pinned SHA256 must match too', () async {
       HostKeyCapture().add(_serverHandshake());
       final prompt = StubPrompt(decision: HostKeyDecision.trust);

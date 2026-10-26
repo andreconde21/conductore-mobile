@@ -1,18 +1,27 @@
 import 'dart:convert';
 
 import 'package:conduit/features/terminal/data/host_key_capture.dart';
+import 'package:conduit/features/terminal/domain/host_key_mismatches.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SecureHostKeyVerifier implements HostKeyVerifier {
-  SecureHostKeyVerifier(this._storage, this._prompt);
+  SecureHostKeyVerifier(
+    this._storage,
+    this._prompt, {
+    HostKeyMismatches? mismatches,
+  }) : mismatches = mismatches ?? HostKeyMismatches();
 
   static const _trustedKeysKey = 'conduit.trusted_host_keys.v1';
   static const _sha256AsciiHexFingerprintPrefix = 'MD5:53:48:41:32:35:36:3a';
 
   final FlutterSecureStorage _storage;
   final HostKeyPrompt _prompt;
+
+  /// Changed keys that were refused, for the home page to show; see
+  /// [verify].
+  final HostKeyMismatches mismatches;
 
   /// Checks the key [fingerprint] (`MD5:…`, from the SSH library) of
   /// [host]:[port] against the pinned one.
@@ -21,6 +30,11 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
   /// prompt unless the connection runs in [withInteractiveHostKeyCheck]
   /// (a terminal or file browser the user opened); there the prompt warns
   /// and asks twice before the new key replaces the old one.
+  ///
+  /// A refused changed key is recorded in [mismatches] (exactly the key
+  /// presented, against the pin it failed), so the user can see why the
+  /// machine stopped answering and review it from there; the record goes
+  /// once the key matches again or the pin is replaced or forgotten.
   ///
   /// The SHA256 fingerprint comes from the key exchange
   /// ([HostKeyFingerprints]); it is shown first and pinned alongside the
@@ -50,11 +64,14 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
         );
         await _save(records);
       }
+      mismatches.clear(host, port);
       return true;
     }
 
     if (existing != null && !isInteractiveHostKeyCheck) {
-      // Background work never offers to trust a changed key.
+      // Background work never offers to trust a changed key: it only
+      // notes what it saw, for the user to review.
+      _recordMismatch(existing, host, port, type, fingerprint, sha256);
       return false;
     }
 
@@ -73,6 +90,9 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
     );
 
     if (decision == HostKeyDecision.reject) {
+      if (existing != null) {
+        _recordMismatch(existing, host, port, type, fingerprint, sha256);
+      }
       return false;
     }
 
@@ -90,7 +110,28 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
       records[existingIndex] = record;
     }
     await _save(records);
+    mismatches.clear(host, port);
     return true;
+  }
+
+  void _recordMismatch(
+    HostKeyRecord existing,
+    String host,
+    int port,
+    String type,
+    String fingerprint,
+    String? sha256,
+  ) {
+    mismatches.record(
+      HostKeyMismatch(
+        host: host,
+        port: port,
+        type: type,
+        fingerprint: fingerprint,
+        sha256Fingerprint: sha256,
+        pinned: existing,
+      ),
+    );
   }
 
   /// The same key: type and MD5, and SHA256 too when both sides have it.
@@ -138,7 +179,9 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
         byKey[record.key] = record;
       }
     }
-    return _save(byKey.values.toList(growable: false));
+    final saved = byKey.values.toList(growable: false);
+    mismatches.retainPinned(saved);
+    return _save(saved);
   }
 
   @override
@@ -147,6 +190,7 @@ class SecureHostKeyVerifier implements HostKeyVerifier {
     final records = await loadTrustedKeys();
     records.removeWhere((record) => record.key == key);
     await _save(records);
+    mismatches.clear(host, port);
   }
 
   /// The stored list, one read shared by callers that ask at the same time
