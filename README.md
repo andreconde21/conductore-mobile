@@ -349,7 +349,13 @@ tmux.
 - Optional per-host SSH agent forwarding.
 - Host key trust you review and manage yourself, with SHA256
   fingerprints. A changed key is never trusted silently: you confirm the
-  new fingerprint in a second step.
+  new fingerprint in a second step. When background work (status, the
+  workspace list, sync) meets a changed key, it stops without asking and
+  the machine shows "Host key changed on …" with the trusted and the
+  presented fingerprint; Review opens that same two-step check, and only
+  Replace key pins the key you were shown. Keep old key changes nothing.
+  Deleting a machine also offers to forget its trusted key, when no other
+  saved machine uses that address.
 - Works over Tailscale like any other network: point a host at its tailnet
   name or IP.
 - Plain connection errors: "Can't reach" (with a Tailscale hint for
